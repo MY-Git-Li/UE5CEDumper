@@ -1000,6 +1000,24 @@
     <sys:String x:Key="str.Tip.TP.MsRefresh">Re-read the live MaxWalkSpeed and override state from the current pawn's CharacterMovement.</sys:String>
     <sys:String x:Key="str.Tip.TP.MsLocate">Find the MaxWalkSpeed float in GWorld and select it in the Live Walker — to freeze or inspect it directly.</sys:String>
 
+    <!-- Time dilation (Hemmung) — global slow-mo / freeze / speed-up -->
+    <sys:String x:Key="str.TP.TdHeader">Time Dilation</sys:String>
+    <sys:String x:Key="str.TP.TdState">State:</sys:String>
+    <sys:String x:Key="str.TP.TdHint">Slows, freezes, or speeds up game time by forcing a reflected dilation float. "Whole world" writes AWorldSettings.TimeDilation (everything — enemies, projectiles, physics); "Player only" writes the pawn's AActor.CustomTimeDilation. The DLL captures the natural value on first Apply and re-asserts the target every ~250 ms, so a slow-mo ability or Sequencer time-track can't revert it. 1× = normal, 0.5× = half speed, 0 = frozen (a literal 0 can destabilise physics on some games — use a small value like 0.05×). A paused world can't be stepped this way. Single-player only.</sys:String>
+    <sys:String x:Key="str.TP.TdPawnToggle">Player only (CustomTimeDilation)</sys:String>
+    <sys:String x:Key="str.TP.TdApply">Apply</sys:String>
+    <sys:String x:Key="str.TP.TdReset">Reset</sys:String>
+    <sys:String x:Key="str.TP.TdRefresh">↻</sys:String>
+    <sys:String x:Key="str.TP.TdFreeze">Freeze</sys:String>
+    <sys:String x:Key="str.TP.TdQuarter">¼×</sys:String>
+    <sys:String x:Key="str.TP.TdHalf">½×</sys:String>
+    <sys:String x:Key="str.TP.TdNormal">1×</sys:String>
+    <sys:String x:Key="str.TP.TdDouble">2×</sys:String>
+    <sys:String x:Key="str.Tip.TP.TdApply">Hold the selected lever (whole world or player) at the slider's absolute dilation and re-assert it on a timer so the game can't revert it.</sys:String>
+    <sys:String x:Key="str.Tip.TP.TdReset">Restore the selected lever to its captured natural value and stop holding it. Resets the slider to 1×.</sys:String>
+    <sys:String x:Key="str.Tip.TP.TdRefresh">Re-read the live dilation value and override state for the selected lever.</sys:String>
+    <sys:String x:Key="str.Tip.TP.TdPawnToggle">Off = whole world (AWorldSettings.TimeDilation); On = the player pawn only (AActor.CustomTimeDilation).</sys:String>
+
     <!-- Gravity multiplier (Laufen — force UCharacterMovementComponent.GravityScale) -->
     <sys:String x:Key="str.TP.GrHeader">Gravity</sys:String>
     <sys:String x:Key="str.TP.GrState">State:</sys:String>

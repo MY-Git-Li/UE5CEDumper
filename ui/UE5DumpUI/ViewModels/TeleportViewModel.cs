@@ -405,6 +405,38 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// <summary>Slider position as a percentage string (e.g. "250%").</summary>
     public string MoveSpeedPercentText => $"{Math.Round(MoveSpeedMultiplier * 100.0)}%";
 
+    // ── Time dilation (Hemmung via set_time_dilation) ──────────────────
+    /// <summary>Target lever: false = global world speed
+    /// (AWorldSettings::TimeDilation), true = player-only
+    /// (AActor::CustomTimeDilation). Switching refreshes the readout.</summary>
+    [ObservableProperty] private bool _timeTargetIsPawn;
+
+    /// <summary>Absolute dilation the slider represents: 1.0 = normal, 0.5 = half,
+    /// 0 = frozen, 3 = triple. Linear slider (0…3).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TimeDilationPercentText))]
+    private double _timeDilation = 1.0;
+
+    /// <summary>Tri-state badge: "ON" (held) / "OFF" / "Unavailable".</summary>
+    [ObservableProperty] private string _timeDilationState = "Unknown";
+    [ObservableProperty] private string _timeDilationBadgeColor = "#888888";
+
+    /// <summary>Live "Current: 0.5× (held; natural 1×)" readout for the target.</summary>
+    [ObservableProperty] private string _timeDilationCurrentText = "—";
+
+    /// <summary>Pipe target key for the selected lever.</summary>
+    public string TimeTargetKey => TimeTargetIsPawn ? "pawn" : "global";
+
+    /// <summary>Slider position as a percentage string (e.g. "50%").</summary>
+    public string TimeDilationPercentText => $"{Math.Round(TimeDilation * 100.0)}%";
+
+    partial void OnTimeTargetIsPawnChanged(bool value)
+    {
+        // Refresh the readout for the newly-selected lever (fire-and-forget; guarded
+        // by IsConnected inside).
+        _ = RefreshTimeStateAsync();
+    }
+
     // ── Gravity multiplier (Laufen via "gravity" knob = GravityScale) ──
     /// <summary>Tri-state badge: "ON" (held) / "OFF" / "Unavailable".</summary>
     [ObservableProperty] private string _gravityState = "Unknown";
@@ -1725,6 +1757,135 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             _log.Error("Teleport LocateMoveSpeed failed", ex);
         }
         finally { IsBusy = false; }
+    }
+
+    // ── Time dilation (force TimeDilation / CustomTimeDilation, Hemmung) ─
+
+    /// <summary>Map the override state (1 = held, 0 = off, &lt;0 = no owner) onto
+    /// the badge.</summary>
+    private void ApplyTimeDilationState(int state)
+    {
+        (TimeDilationState, TimeDilationBadgeColor) = state switch
+        {
+            1 => ("ON",          "#4EC9B0"),   // green — override held
+            0 => ("OFF",         "#999999"),   // grey — natural value restored
+            _ => ("Unavailable", "#C9A04E"),   // amber — no WorldSettings / no pawn
+        };
+    }
+
+    /// <summary>Format the live "Current: X× (held; natural Y×)" readout for the
+    /// currently-selected lever.</summary>
+    private void ApplyTimeDilationReadout(TimeState ts)
+    {
+        var k = TimeTargetIsPawn ? ts.Pawn : ts.Global;
+        if (!k.Resolved)
+        {
+            TimeDilationCurrentText = TimeTargetIsPawn
+                ? "Current: unavailable (no player pawn — enter gameplay first)."
+                : "Current: unavailable (no WorldSettings — enter a level first).";
+            ApplyTimeDilationState(-1);
+            return;
+        }
+        TimeDilationCurrentText = k.Active
+            ? string.Format(CultureInfo.InvariantCulture,
+                "Current: {0:0.###}×  (held; natural {1:0.###}×)", k.Current, k.Base)
+            : string.Format(CultureInfo.InvariantCulture, "Current: {0:0.###}×", k.Current);
+        ApplyTimeDilationState(k.Active ? 1 : 0);
+    }
+
+    /// <summary>↻ — re-read the live dilation value + override state.</summary>
+    [RelayCommand]
+    private async Task RefreshTimeStateAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var ts = await _dump.GetTimeStateAsync();
+            ApplyTimeDilationReadout(ts);
+            StatusText = "Read time dilation.";
+        }
+        catch (Exception ex)
+        {
+            ApplyTimeDilationState(-1);
+            SetError(ex);
+            _log.Error("Teleport RefreshTimeState failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Hold the selected lever at the slider's absolute value via the DLL
+    /// re-assert worker (the natural value is captured DLL-side, so Reset restores
+    /// the true original even if the game changed dilation meanwhile).</summary>
+    [RelayCommand]
+    private async Task ApplyTimeDilationAsync()
+    {
+        if (!IsConnected) return;
+        double value = TimeDilation;
+        bool pawn = TimeTargetIsPawn;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var r = await _dump.SetTimeDilationAsync(TimeTargetKey, value);
+            var ts = await _dump.GetTimeStateAsync();
+            ApplyTimeDilationReadout(ts);
+            string scope = pawn ? "Player" : "World";
+            StatusText = r.State switch
+            {
+                1   => string.Format(CultureInfo.InvariantCulture,
+                         "✓ {0} time held at {1:0.###}× ({2:0}%). Drag + Apply to change; Reset to restore.",
+                         scope, value, value * 100.0),
+                < 0 => pawn
+                         ? "No player pawn — enter gameplay first; the override applies once a pawn exists."
+                         : "No WorldSettings — enter a level first; the override applies once a world is loaded.",
+                _   => $"{scope} time override is off.",
+            };
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            StatusText = $"Apply time dilation failed: {ex.Message}";
+            _log.Error("Teleport ApplyTimeDilation failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Restore the selected lever to its captured natural value and stop
+    /// holding it.</summary>
+    [RelayCommand]
+    private async Task ResetTimeDilationAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            await _dump.ResetTimeDilationAsync(TimeTargetKey);
+            TimeDilation = 1.0;   // slider back to normal speed
+            var ts = await _dump.GetTimeStateAsync();
+            ApplyTimeDilationReadout(ts);
+            StatusText = (TimeTargetIsPawn ? "Player" : "World") + " time restored to normal.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport ResetTimeDilation failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Preset buttons (Freeze / ½× / Normal / 2× …): set the slider to the
+    /// parameter value, then Apply. The parameter is an invariant-culture double
+    /// string (e.g. "0.5").</summary>
+    [RelayCommand]
+    private async Task ApplyTimePresetAsync(string value)
+    {
+        if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+            return;
+        TimeDilation = Math.Clamp(v, 0.0, 3.0);
+        await ApplyTimeDilationAsync();
     }
 
     // ── Gravity multiplier (force GravityScale, Laufen) ────────────────

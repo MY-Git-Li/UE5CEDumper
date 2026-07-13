@@ -48,13 +48,18 @@ Time/Timer feature (eval: memory `project-timer-feature-eval`, todo.md "Time / T
   roster flipped 🟢. Value clamped DLL-side to [0.0, 100.0]. Direct write bypasses SetGlobalTimeDilation's
   clamp; a paused world can't be stepped and an active Sequencer track flickers ≤1 tick (documented).
 
-**REMAINING for full L1 (Part C, UI Time card — not yet built):** a "Time" card in the Teleport panel
-(slider for global dilation + per-pawn CustomTimeDilation + reset) wired to the new pipe commands, CE Lua/.CT
-generation via `CMD_TIME`, and persistence. Today the Hemmung capability is reachable only via raw pipe JSON
-or a hand-written CE mailbox write. Also unbuilt: L2 (GAS cooldowns) / L3 (live FTimerManager) — deferred by
-design. **NEEDS in-game verify** (like Laufen/Solitar, Hemmung has no unit test — reflection needs a live game):
-attach to a UE title, `set_time_dilation {target:"global", value:0.3}` → world runs at 30% speed and holds
-against slow-mo; reset restores.
+**Part C UI Time card — SHIPPED (build 2149).** A **"Time Dilation" card** in the Teleport panel
+([TeleportPanel.axaml](../ui/UE5DumpUI/Views/TeleportPanel.axaml)) beside Move Speed/Gravity: a "Player only"
+toggle (whole-world `TimeDilation` vs per-pawn `CustomTimeDilation`), a linear 0–3× slider + % readout,
+preset buttons (Freeze / ¼× / ½× / 1× / 2×), Apply/Reset/↻, and an ON/OFF/Unavailable badge + live "Current:
+X× (held; natural Y×)" readout. Wired via new `IDumpService`/`DumpService`
+`GetTimeStateAsync`/`SetTimeDilationAsync`/`ResetTimeDilationAsync` (models `TimeDilationKnob`/
+`TimeDilationSetResult`/`TimeState`) and `TeleportViewModel` commands; en.axaml strings; 6 new VM tests
+(2459 C# green). **REMAINING:** CE Lua/.CT generation via `CMD_TIME` (a `TimeDilationScriptGenerator` mirroring
+`MovementScriptGenerator`) + persistence; a dedicated opt-in function-side `FunctionCategory.Timing` bucket;
+and L2 (GAS cooldowns) / L3 (live FTimerManager), deferred by design. **NEEDS in-game verify** (Hemmung has no
+unit test — reflection needs a live game): attach, drag the slider / hit ½×, Apply → world runs at half speed
+and holds against slow-mo; Reset restores.
 
 -----
 

@@ -548,16 +548,19 @@ native-RE parts are exactly the reflection-invisible ones — cut them from v1.*
   FrameTime/Timecode) + `SeedQueries` timer terms + `ClassLocationScorer` GameplayEffect/GameplayAbility/
   WorldSettings +2 + function-side `UtilityKeywords` widen (Cooldown/Dilation/Delay/Interval/Elapsed/
   Recharge). Dev-log 2026-07-13; memory `project-timer-feature-eval`.
-  **REMAINING (Part C — the user-facing surface; the capability is currently reachable only via raw
-  pipe JSON / a hand-written CE mailbox write):** a **"Time" card** in the Teleport panel beside
-  GodMode/Move-Speed — a global-dilation slider (e.g. 0=freeze … 1=normal … Nx) + per-pawn
-  CustomTimeDilation + a reset, wired to the new `set/reset_time_dilation` pipe commands via a
-  `PipeClient` async method + VM; **CE Lua/.CT generation** via the `CMD_TIME=15` mailbox (follow the
-  `CeLuaHygiene` MUST-rule); persistence. Plus **in-game verify** (Hemmung has NO unit test — reflection
-  needs a live game, like Laufen/Solitar): `set_time_dilation {target:"global", value:0.3}` → world runs
-  at 30% and holds against slow-mo; reset restores. Also NOT built (deferred): `SetGlobalTimeDilation`/
-  `GetTimeSeconds` invoke wrappers, and a dedicated opt-in function-side `FunctionCategory.Timing` bucket
-  (timer methods currently land in Utility at weight 3 — below threshold without a class bonus / Show-All).
+  **Part C UI Time card — DONE (build 2149).** A "Time Dilation" card in the Teleport panel beside
+  Move-Speed/Gravity: "Player only" toggle (global `TimeDilation` vs pawn `CustomTimeDilation`), 0–3×
+  slider + % + presets (Freeze/¼×/½×/1×/2×) + Apply/Reset/↻ + badge/readout; new `IDumpService`
+  `Get/Set/ResetTimeDilation` (+ `TimeDilationKnob`/`TimeDilationSetResult`/`TimeState` models) + VM
+  commands + en.axaml strings + 6 VM tests (2459 C# green).
+  **REMAINING for L1:** (1) **CE Lua/.CT generation** via the `CMD_TIME=15` mailbox (a
+  `TimeDilationScriptGenerator` mirroring `MovementScriptGenerator`; follow the `CeLuaHygiene` MUST-rule) —
+  so the dilation lock is usable from a standalone CE table without the UI; (2) **persistence**; (3)
+  **in-game verify** (Hemmung has NO unit test — reflection needs a live game): drag slider / ½× / Apply →
+  world runs at half speed + holds against slow-mo; Reset restores. Also NOT built (deferred):
+  `SetGlobalTimeDilation`/`GetTimeSeconds` invoke wrappers, and a dedicated opt-in function-side
+  `FunctionCategory.Timing` bucket (timer methods currently land in Utility at weight 3 — below threshold
+  without a class bonus / Show-All).
   **DON'T over-promise (adversarial corrections):** (a) locating the ACTIVE WorldSettings is
   NOT one line — `Aura::FindInstancesByClass` matches immediate class FName only (no `IsA`,
   `Aura.cpp:1365`), misses BP subclasses + can't disambiguate streaming/PIE sub-worlds →

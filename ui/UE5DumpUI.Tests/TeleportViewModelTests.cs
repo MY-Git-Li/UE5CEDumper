@@ -70,6 +70,23 @@ public class TeleportViewModelTests
         public override Task<MovementSetResult> ResetMovementAsync(string knob, CancellationToken ct = default)
         { ResetMovementCalls++; LastMovementKnob = knob; return Task.FromResult(new MovementSetResult { State = 0 }); }
 
+        // ── Time dilation (Hemmung) ──
+        public TimeState NextTimeState { get; set; } = new();
+        public TimeDilationSetResult NextTimeSet { get; set; } = new() { State = 1 };
+        public int SetTimeCalls { get; private set; }
+        public int ResetTimeCalls { get; private set; }
+        public string? LastTimeTarget { get; private set; }
+        public double LastTimeValue { get; private set; }
+
+        public override Task<TimeState> GetTimeStateAsync(CancellationToken ct = default)
+            => Task.FromResult(NextTimeState);
+
+        public override Task<TimeDilationSetResult> SetTimeDilationAsync(string target, double value, CancellationToken ct = default)
+        { SetTimeCalls++; LastTimeTarget = target; LastTimeValue = value; return Task.FromResult(NextTimeSet); }
+
+        public override Task<TimeDilationSetResult> ResetTimeDilationAsync(string target, CancellationToken ct = default)
+        { ResetTimeCalls++; LastTimeTarget = target; return Task.FromResult(new TimeDilationSetResult { State = 0 }); }
+
         public MovementVectorResult NextGravDir { get; set; } = new() { State = 1 };
         public int SetGravDirCalls { get; private set; }
         public int ResetGravDirCalls { get; private set; }
@@ -340,6 +357,92 @@ public class TeleportViewModelTests
 
         Assert.Equal("—", vm.PoseX);
         Assert.Contains("pawn", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ── Time dilation (Hemmung) ──
+
+    [Fact]
+    public async Task ApplyTimeDilation_global_sends_global_target_and_slider_value()
+    {
+        var fake = new FakeDumpService
+        {
+            NextTimeSet   = new() { State = 1 },
+            NextTimeState = new() { Global = new() { Resolved = true, Active = true, Current = 0.5, Base = 1.0 } },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        vm.TimeDilation = 0.5;
+
+        await vm.ApplyTimeDilationCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SetTimeCalls);
+        Assert.Equal("global", fake.LastTimeTarget);
+        Assert.Equal(0.5, fake.LastTimeValue);
+        Assert.Equal("ON", vm.TimeDilationState);
+    }
+
+    [Fact]
+    public async Task ApplyTimeDilation_pawn_toggle_switches_target_key()
+    {
+        var fake = new FakeDumpService { NextTimeSet = new() { State = 1 } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        vm.TimeTargetIsPawn = true;
+        Assert.Equal("pawn", vm.TimeTargetKey);
+
+        await vm.ApplyTimeDilationCommand.ExecuteAsync(null);
+
+        Assert.Equal("pawn", fake.LastTimeTarget);
+    }
+
+    [Fact]
+    public async Task ApplyTimeDilation_negative_state_shows_no_owner_hint()
+    {
+        var fake = new FakeDumpService { NextTimeSet = new() { State = -6 } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.ApplyTimeDilationCommand.ExecuteAsync(null);
+
+        Assert.Equal("Unavailable", vm.TimeDilationState);
+        Assert.Contains("WorldSettings", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task ResetTimeDilation_restores_slider_to_normal()
+    {
+        var fake = new FakeDumpService();
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        vm.TimeDilation = 0.2;
+
+        await vm.ResetTimeDilationCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.ResetTimeCalls);
+        Assert.Equal("global", fake.LastTimeTarget);
+        Assert.Equal(1.0, vm.TimeDilation);
+    }
+
+    [Fact]
+    public async Task ApplyTimePreset_sets_slider_then_applies()
+    {
+        var fake = new FakeDumpService { NextTimeSet = new() { State = 1 } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.ApplyTimePresetCommand.ExecuteAsync("0.25");
+
+        Assert.Equal(0.25, vm.TimeDilation);
+        Assert.Equal(1, fake.SetTimeCalls);
+        Assert.Equal(0.25, fake.LastTimeValue);
+    }
+
+    [Fact]
+    public void TimeDilationPercentText_reflects_slider()
+    {
+        var vm = CreateVm(new FakeDumpService(), out _);
+        vm.TimeDilation = 0.5;
+        Assert.Equal("50%", vm.TimeDilationPercentText);
     }
 
     [Fact]

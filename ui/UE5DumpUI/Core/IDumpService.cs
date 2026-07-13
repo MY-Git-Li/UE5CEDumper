@@ -490,6 +490,31 @@ public interface IDumpService
     /// <summary>Restore gravity direction to its captured default.</summary>
     Task<MovementVectorResult> ResetGravityDirectionAsync(CancellationToken ct = default);
 
+    // === Time dilation (Hemmung: global slow-mo / freeze / speed-up) ===
+
+    /// <summary>
+    /// Read both time-dilation levers (Hemmung): global
+    /// <c>AWorldSettings::TimeDilation</c> (whole-world speed) and per-pawn
+    /// <c>AActor::CustomTimeDilation</c> — live value, captured natural base, held
+    /// value, active state, and each owner+offset for the "Locate in GWorld" handoff.
+    /// </summary>
+    Task<TimeState> GetTimeStateAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Hold a dilation lever (<paramref name="target"/> = "global" | "pawn") at the
+    /// absolute <paramref name="value"/> (1.0 = normal, 0.5 = half, 0 = frozen; clamped
+    /// DLL-side to [0,100]) with a re-assert worker that fights the game's per-tick
+    /// overwrites. Returns the observed result (State 1 = active, negative = no
+    /// WorldSettings / no pawn / not reflected).
+    /// </summary>
+    Task<TimeDilationSetResult> SetTimeDilationAsync(string target, double value, CancellationToken ct = default);
+
+    /// <summary>
+    /// Disable a dilation lever — restore its captured natural value and stop
+    /// holding it. Returns the post-reset snapshot of that lever.
+    /// </summary>
+    Task<TimeDilationSetResult> ResetTimeDilationAsync(string target, CancellationToken ct = default);
+
     // === Fly (Dunste: no-gravity keyboard-driven 3D flight) ===
 
     /// <summary>Apply whichever of {enable, speed, preset, noclip} are non-null and
