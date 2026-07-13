@@ -3138,6 +3138,9 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 item["first_seq"]  = snap[i].firstSeq;        // call-stream position of first fire
                 item["function_flags"] = fi.functionFlags;   // let the UI tag Event/Delegate/Callable
                 item["is_widget"]  = Aura::ClassDerivesFromAny(classAddr, kWidgetBases);
+                item["mean_period_ms"] = snap[i].meanPeriodMs;   // cadence (Phase E): inter-arrival mean
+                item["cv"]             = snap[i].cv;             //   + coefficient of variation (regularity)
+                item["gap_samples"]    = snap[i].gapSamples;     //   + how many gaps measured
                 functions.push_back(item);
                 ++emitted;
             }

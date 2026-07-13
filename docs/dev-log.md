@@ -18,6 +18,31 @@ builds ≤696 in
 
 -----
 
+## 2026-07-13 — Timer control Phase E: Linie cadence flag — periodic timer-callback discovery (build 2156; dev, DLL needs re-inject)
+
+**SHIPPED (DLL + UI; full build + 2479 C# tests + C++ self-tests green).** The behavioural complement to the
+static `Timing` discovery (memory `project-timer-feature-eval`, layer E): make the Live Funcs profiler flag
+*which UFunction* fires at a regular **timer cadence** — the callback that actually drives a cooldown / respawn
+/ damage-over-tick, which name-scoring can't find.
+
+- **DLL ([Linie](../dll/src/Linie.cpp)):** `Stat` gains a Welford running mean/variance of the wall-clock
+  **inter-arrival gaps** between a function's fires; `RecordCall(ufunc, nowMs)` is fed the timestamp
+  [Stark.cpp:143](../dll/src/Stark.cpp) *already* stamps for the responsiveness check — **zero extra clock
+  reads on the PE hot path**. `Snapshot` emits `meanPeriodMs` + `cv` (stddev/mean = regularity) + `gapSamples`;
+  `pe_profile_get` ships them per row.
+- **UI:** `PeProfileEntry` gains `MeanPeriodMs`/`Cv`/`GapSamples` + an `IsPeriodic` classifier (≥3 gaps, CV≤0.25,
+  period outside the per-frame Tick band ~5-40 ms and within a plausible ~50 ms-30 s gameplay-timer window) →
+  a **"Timer"** Kind badge + a **Period** column; a **"Periodic only"** filter in `LiveFuncsViewModel`. The
+  workflow is the *inverse* of the shipped action-diff: record while **IDLE** ~15-20 s, then Periodic-only
+  leaves the steady callbacks.
+- **Honest limit (stated in the tooltip):** native C++/lambda timers (`SetTimer(this, &UClass::Method)`) call
+  the delegate directly and **bypass ProcessEvent** — only UFUNCTION-bound (BP timer event /
+  `SetTimerByFunctionName`) timers are visible. +12 tests (classification + VM filter). **NEEDS in-game
+  verify** (idle-window recording on a title with a periodic BP timer). *Extends Linie/LivePEProfiler
+  (build 2109); completes the timer eval's layer E.*
+
+-----
+
 ## 2026-07-13 — Time/Timer control L1: Hemmung module + Timing discovery category (build 2148; dev, DLL needs re-inject)
 
 **SHIPPED (DLL + UI; builds + all 2453 C# tests + C++ self-tests green).** First slice of the layered

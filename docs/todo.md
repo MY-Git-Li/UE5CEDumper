@@ -601,14 +601,13 @@ native-RE parts are exactly the reflection-invisible ones — cut them from v1.*
   Avowed-packed-FUObjectItem-tier. A reflected BP `FTimerHandle` var is opaque (just an index)
   → does NOT yield remaining time. Recommend NOT in v1. *Parent: this eval.*
 
-- **E — Linie cadence flag (optional complement)** — Effort: **M** · Risk: low. `Linie` (Live
-  PE Profiler) already surfaces UFUNCTION-bound timer callbacks (BP timer events /
-  `SetTimerByFunctionName`) but stores only count+firstSeq. Add an inter-arrival mean+CV stat
-  (Welford); the timestamp is ALREADY read at `Stark.cpp:143` one line before `RecordCall` →
-  zero hot-path cost. Flag `is_periodic` (count≥4, CV<0.25, period outside frame band ~5-40ms,
-  inside ~50ms-30s) + a "Periodic only" idle-window mode (the shipped diff mode HIDES steady
-  timers as "unchanged"). Native lambda/member-ptr timers bypass ProcessEvent → invisible
-  (state honestly). *Parent: this eval; extends Linie/LivePEProfiler build 2109.*
+- **E — Linie cadence flag — DONE (build 2156).** `Linie::Stat` gained a Welford inter-arrival
+  mean/variance fed by the timestamp `Stark.cpp:143` already reads (zero hot-path cost); `pe_profile_get`
+  emits `mean_period_ms`/`cv`/`gap_samples`; UI `PeProfileEntry.IsPeriodic` (≥3 gaps, CV≤0.25, period
+  outside the ~5-40 ms frame band, within ~50 ms-30 s) → "Timer" badge + Period column + a "Periodic only"
+  filter (idle-window workflow). Native lambda/member-ptr timers bypass ProcessEvent → invisible (stated in
+  the tooltip). +12 tests. **REMAINING: in-game verify** (idle-window recording on a title with a periodic
+  BP timer). *Parent: this eval; extended Linie/LivePEProfiler build 2109.*
 
 -----
 

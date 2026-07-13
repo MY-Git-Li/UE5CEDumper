@@ -2444,6 +2444,9 @@ public sealed class DumpService : IDumpService
                     FirstSeq  = obj["first_seq"]?.GetValue<long>() ?? 0L,
                     FunctionFlags = (uint)(obj["function_flags"]?.GetValue<long>() ?? 0L),
                     IsWidget  = obj["is_widget"]?.GetValue<bool>() ?? false,
+                    MeanPeriodMs = obj["mean_period_ms"]?.GetValue<double>() ?? 0.0,
+                    Cv           = obj["cv"]?.GetValue<double>() ?? 0.0,
+                    GapSamples   = obj["gap_samples"]?.GetValue<long>() ?? 0L,
                 });
             }
         }
