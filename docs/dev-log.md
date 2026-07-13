@@ -37,9 +37,14 @@ static `Timing` discovery (memory `project-timer-feature-eval`, layer E): make t
   leaves the steady callbacks.
 - **Honest limit (stated in the tooltip):** native C++/lambda timers (`SetTimer(this, &UClass::Method)`) call
   the delegate directly and **bypass ProcessEvent** — only UFUNCTION-bound (BP timer event /
-  `SetTimerByFunctionName`) timers are visible. +12 tests (classification + VM filter). **NEEDS in-game
-  verify** (idle-window recording on a title with a periodic BP timer). *Extends Linie/LivePEProfiler
-  (build 2109); completes the timer eval's layer E.*
+  `SetTimerByFunctionName`) timers are visible. +12 tests (classification + VM filter). A cadence diagnostic
+  (build 2158) appends the periodic candidates to `pe_profile_get`'s log line so an idle-window recording is
+  verifiable from the log, not just the UI. **LIVE-VERIFIED on The Adventures of Elliot (UE4.27):** an
+  idle-window recording flagged **3 periodic funcs out of ~90** (the rest per-frame Tick, correctly excluded)
+  — `BP_SupportFairy_C::TryAttackEnable` + its `ExecuteUbergraph` at the same **~325 ms** cadence (cv 0.02) =
+  a real ~3 Hz BP timer, plus `EQC_PlayerContext_C::ProvideSingleActor ~108 ms` (cv 0.08); stable across two
+  windows (~10 s → 8-27 gaps, ~20 s → 27-83 gaps). No false positives, no tuning needed. *Extends
+  Linie/LivePEProfiler (build 2109); completes the timer eval's layer E.*
 
 -----
 

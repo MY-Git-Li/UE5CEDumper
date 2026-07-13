@@ -601,13 +601,15 @@ native-RE parts are exactly the reflection-invisible ones — cut them from v1.*
   Avowed-packed-FUObjectItem-tier. A reflected BP `FTimerHandle` var is opaque (just an index)
   → does NOT yield remaining time. Recommend NOT in v1. *Parent: this eval.*
 
-- **E — Linie cadence flag — DONE (build 2156).** `Linie::Stat` gained a Welford inter-arrival
-  mean/variance fed by the timestamp `Stark.cpp:143` already reads (zero hot-path cost); `pe_profile_get`
-  emits `mean_period_ms`/`cv`/`gap_samples`; UI `PeProfileEntry.IsPeriodic` (≥3 gaps, CV≤0.25, period
-  outside the ~5-40 ms frame band, within ~50 ms-30 s) → "Timer" badge + Period column + a "Periodic only"
-  filter (idle-window workflow). Native lambda/member-ptr timers bypass ProcessEvent → invisible (stated in
-  the tooltip). +12 tests. **REMAINING: in-game verify** (idle-window recording on a title with a periodic
-  BP timer). *Parent: this eval; extended Linie/LivePEProfiler build 2109.*
+- **E — Linie cadence flag — DONE + LIVE-VERIFIED on Elliot (UE4.27, build 2158).** `Linie::Stat` Welford
+  inter-arrival mean/variance (fed the timestamp `Stark.cpp:143` already reads, zero hot-path cost);
+  `pe_profile_get` emits `mean_period_ms`/`cv`/`gap_samples` + logs the periodic candidates; UI
+  `PeProfileEntry.IsPeriodic` (≥3 gaps, CV≤0.25, period out of the ~40 ms frame band, ≤30 s) → "Timer" badge +
+  Period column + "Periodic only" filter (idle-window workflow). +12 tests. **Verified:** an idle recording
+  flagged 3 periodic funcs out of ~90 (`BP_SupportFairy_C::TryAttackEnable`+`ExecuteUbergraph` @ ~325 ms
+  cv 0.02 = a real ~3 Hz BP timer; `ProvideSingleActor` ~108 ms), Tick correctly excluded, stable across two
+  windows. Native lambda/member-ptr timers bypass ProcessEvent (documented). *Parent: this eval; extended
+  Linie/LivePEProfiler build 2109.*
 
 -----
 
