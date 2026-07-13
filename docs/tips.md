@@ -259,6 +259,66 @@ momentary records instead.
 
 -----
 
+## Slowing, freezing, or speeding up game time (time dilation)
+
+Goal: global slow-mo / bullet-time / freeze / fast-forward — or slow **just the
+player** while the world runs normally. Use the **Teleport tab → Time Dilation
+card**. It forces Unreal's reflected dilation floats and re-asserts the value
+every ~250 ms, so a game's own slow-mo ability or a cutscene time track can't
+revert it.
+
+### Do it
+
+1. Enter actual gameplay (a live world / pawn), open the **Teleport** tab.
+2. **Whole world vs Player only.** Leave **Player only** *off* to write
+   `AWorldSettings.TimeDilation` — **everything** slows (enemies, projectiles,
+   physics). Tick it to write only the player pawn's `AActor.CustomTimeDilation`
+   (you move at a different speed from the world — bullet-time dodging).
+3. Drag the slider (**0 – 3×**) or hit a preset (**Freeze / ¼× / ½× / 1× / 2×**)
+   → **Apply**. `1×` = normal, `0.5×` = half speed, `0` = frozen. **Reset**
+   restores the game's natural value and snaps back to 1×; **↻** re-reads the live
+   value + shows whether an override is engaged.
+
+The held value lives in the DLL, so it **survives a UI reconnect** (reconnect and
+the card shows what's engaged), and your last slider value + target are remembered
+across UI restarts.
+
+### No UI? Export it to Cheat Engine
+
+The card's **Add to CE** (AOBMaker) / **Save .CT…** ship two on/off records —
+**Time: World** and **Time: Player** — baked at the current dilation. Ticking a
+record holds the value; unticking resets it to the game's natural value. Runs from
+a standalone CE table with just `UE5Dumper.dll` injected, no UI open.
+
+### Caveats
+
+- A literal `0` can destabilise physics on some games — use `0.05×` for a
+  near-freeze instead.
+- You can't "step" a **paused** world (the game's own pause menu) via dilation.
+- During a **Sequencer / cutscene** time track the value flickers briefly as the
+  override fights the game.
+- Single-player only.
+- A few games drive speed from a **bespoke, non-`WorldSettings`** multiplier —
+  those won't respond to dilation at all.
+
+### Follow-up: find the cooldown / timer behind an effect
+
+Slowing time is often step one; step two is finding the **value** (a cooldown /
+countdown float) or the **function** (the timer callback) driving an effect:
+
+- **The countdown value** — [Value Search] → begin a scan → let it tick → refine
+  with **Decreased** repeatedly; a ticking timer survives every pass (a count-up
+  "Elapsed" uses *Increased*; a value held by `TimeDilation = 0` reads
+  *Unchanged*). A new **Timing** category chip in **Interesting Properties** also
+  surfaces `Cooldown` / `RemainingTime` / `Duration` / `TimeDilation`-named fields.
+- **The timer callback** (which UFunction drives it) — **Live Funcs → Start →
+  stand idle ~15-20 s → Stop → tick "Periodic only"**. Functions firing at a
+  steady cadence outside the per-frame Tick band are tagged **Timer** with their
+  measured **Period**. Only UFUNCTION-bound (Blueprint / `SetTimerByFunctionName`)
+  timers appear — native C++ `SetTimer` callbacks bypass the ProcessEvent hook.
+
+-----
+
 ## Flattening save-data records into a clean Cheat Engine table
 
 A struct-heavy object — a save slot, a stats block, a `TMap` of mission records —
