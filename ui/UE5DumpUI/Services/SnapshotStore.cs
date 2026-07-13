@@ -764,6 +764,48 @@ public sealed class SnapshotStore : ISnapshotStore
         return dropIds.Count;
     }
 
+    public async Task<int> EnforceCountAsync(int keepNewest, CancellationToken ct = default)
+    {
+        // Count-based FIFO retention for the auto-snapshot loop's "keep newest N" mode.
+        // Sibling of EnforceQuotaAsync (byte-based) — same WAL-fold-first / ORDER BY id
+        // DESC / keep-newest / four-table-delete / reclaim shape, but the drop set is
+        // decided by COUNT, not size. Runs off the UI thread (caller wraps in Task.Run).
+        await using var conn = await OpenAsync(ct);
+        await ExecAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);", ct);   // fold WAL (see EnforceQuotaAsync)
+
+        if (keepNewest <= 0) return 0;   // 0/negative = unlimited (WAL already folded above)
+
+        // Newest-first; the first keepNewest survive, the rest drop.
+        var ids = new List<long>();
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT id FROM snapshots ORDER BY id DESC;";
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct)) ids.Add(r.GetInt64(0));
+        }
+        if (ids.Count <= keepNewest) return 0;   // already within the count (also keeps ≥1)
+
+        var dropIds = ids.GetRange(keepNewest, ids.Count - keepNewest);
+        {
+            await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+            await using var del = conn.CreateCommand();
+            del.Transaction = tx;
+            del.CommandText =
+                "DELETE FROM fields WHERE snapshot_id=$id; " +
+                "DELETE FROM class_counts WHERE snapshot_id=$id; " +
+                "DELETE FROM pivot_index_built WHERE snapshot_id=$id; " +
+                "DELETE FROM snapshots WHERE id=$id;";
+            var p = del.Parameters.Add("$id", SqliteType.Integer);
+            foreach (var id in dropIds) { p.Value = id; await del.ExecuteNonQueryAsync(ct); }
+            await tx.CommitAsync(ct);
+        }
+        await ReclaimDiskAsync(conn, ct);   // shrink the file (see EnforceQuotaAsync)
+
+        _log?.Info(Constants.LogCatView,
+            $"SnapshotStore: count retention dropped {dropIds.Count} oldest snapshot(s), kept newest {keepNewest}");
+        return dropIds.Count;
+    }
+
     private static long FileSizeOf(string path)
     {
         try { var fi = new FileInfo(path); return fi.Exists ? fi.Length : 0; }

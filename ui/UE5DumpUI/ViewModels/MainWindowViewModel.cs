@@ -125,7 +125,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _previewLimit = Constants.DefaultPreviewLimit; // Struct preview sub-field count (0-6)
     [ObservableProperty] private int _deepScanElemCapExponent = 8; // 2^8 = 256 (find_by_address deep scan per-container cap)
     [ObservableProperty] private int _ceStringLengthExponent = 8; // 2^8 = 256 (CE String leaf <Length>; floored at 2^4 = 16)
-    [ObservableProperty] private int _fabricateArrayCountExponent; // 0 = off; 2^N = Copy CE Field array fabricate count
+    [ObservableProperty] private int _fabricateArrayCountExponent = 2; // 2^2 = 4 rows (default); 0 = off, 2^N = Copy CE Field array fabricate count
 
     // Always-visible top-toolbar AOBMaker status (mirrors the per-tab indicators).
     [ObservableProperty] private bool _isAobMakerAvailable;
@@ -2184,6 +2184,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         nameof(SnapshotViewModel.SelectedFamily), nameof(SnapshotViewModel.SelectedMaxDataset),
         nameof(SnapshotViewModel.ShowUsageBar), nameof(SnapshotViewModel.GroupDeep),
         nameof(SnapshotViewModel.SelectedRoundingMode),
+        // Auto snapshot settings (the running toggle is session-only — not persisted).
+        nameof(SnapshotViewModel.AutoSnapshotIntervalSec), nameof(SnapshotViewModel.RetentionMode),
+        nameof(SnapshotViewModel.AutoSnapshotCount), nameof(SnapshotViewModel.AutoSnapshotAdjustQuota),
+        nameof(SnapshotViewModel.SnapshotMinFreePercent), nameof(SnapshotViewModel.SnapshotMinFreeGb),
     };
     private static readonly HashSet<string> InstanceFinderPersist = new()
     {
@@ -2306,6 +2310,12 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             Snapshot.ShowUsageBar = sn.ShowUsageBar;
             Snapshot.GroupDeep = sn.GroupDeep;
             Snapshot.SelectedRoundingMode = sn.RoundingMode;
+            Snapshot.AutoSnapshotIntervalSec = sn.AutoSnapshotIntervalSec;
+            Snapshot.RetentionMode = sn.RetentionMode;
+            Snapshot.AutoSnapshotCount = sn.AutoSnapshotCount;
+            Snapshot.AutoSnapshotAdjustQuota = sn.AutoSnapshotAdjustQuota;
+            Snapshot.SnapshotMinFreePercent = sn.SnapshotMinFreePercent;
+            Snapshot.SnapshotMinFreeGb = sn.SnapshotMinFreeGb;
         }
         if (Spc != null)
         {
@@ -2441,6 +2451,12 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             o.Snapshot.ShowUsageBar = Snapshot.ShowUsageBar;
             o.Snapshot.GroupDeep = Snapshot.GroupDeep;
             o.Snapshot.RoundingMode = Snapshot.SelectedRoundingMode;
+            o.Snapshot.AutoSnapshotIntervalSec = Snapshot.AutoSnapshotIntervalSec;
+            o.Snapshot.RetentionMode = Snapshot.RetentionMode;
+            o.Snapshot.AutoSnapshotCount = Snapshot.AutoSnapshotCount;
+            o.Snapshot.AutoSnapshotAdjustQuota = Snapshot.AutoSnapshotAdjustQuota;
+            o.Snapshot.SnapshotMinFreePercent = Snapshot.SnapshotMinFreePercent;
+            o.Snapshot.SnapshotMinFreeGb = Snapshot.SnapshotMinFreeGb;
         }
         if (Spc != null)
         {

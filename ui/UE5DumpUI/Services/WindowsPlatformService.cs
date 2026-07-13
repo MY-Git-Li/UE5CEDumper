@@ -282,6 +282,35 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
         return list;
     }
 
+    // --- Free-space query for the snapshot disk guard --------------------
+    // Pure managed BCL (DriveInfo), AOT-safe. Resolves the drive from the DB path's
+    // root; defensive (an unreadable / unrooted path returns the safe sentinel so the
+    // guard never blocks on a measurement failure — same idiom as GetLogicalDrives).
+
+    public long GetFreeDiskSpaceBytes(string path)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(path);
+            if (string.IsNullOrEmpty(root)) return long.MaxValue;
+            var di = new DriveInfo(root);
+            return di.IsReady ? di.AvailableFreeSpace : long.MaxValue;
+        }
+        catch { return long.MaxValue; }   // unknown → don't block
+    }
+
+    public long GetTotalDiskSpaceBytes(string path)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(path);
+            if (string.IsNullOrEmpty(root)) return 0;
+            var di = new DriveInfo(root);
+            return di.IsReady ? di.TotalSize : 0;
+        }
+        catch { return 0; }   // unknown → percentage term collapses to 0
+    }
+
     /// <summary>
     /// Map a drive letter to the physical disk number backing it via
     /// DeviceIoControl(IOCTL_STORAGE_GET_DEVICE_NUMBER). Returns null when it

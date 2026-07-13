@@ -18,6 +18,38 @@ builds ≤696 in
 
 -----
 
+## 2026-07-13 — Auto Snapshot (periodic capture) + free-disk-space guard (build 2166; UI-only, no DLL/pipe change)
+
+**SHIPPED (UI-only; full UI build + 2509 C# tests + C++ self-tests green).** Two additions to the
+experimental Snapshot tab — an unattended periodic-capture loop and a hard disk-full safety net. No
+DLL, pipe-protocol, or thread-priority change.
+
+- **Free-disk-space guard** ([SnapshotDiskGuard.cs](../ui/UE5DumpUI/Services/SnapshotDiskGuard.cs)):
+  before ANY capture (manual + auto), the drive holding the snapshot DB must have at least
+  `min(percent% of drive, GB)` free, else the write is refused. Defaults **10% / 50 GB** (whichever is
+  smaller — 1 TB → 50 GB, 200 GB → 20 GB). A **0** on either term disables that term (percent 0 → GB
+  floor alone), both 0 → guard off. Enforced pre-capture (primary) and mid-capture (reuses the
+  max-dataset-cap graceful-stop path — KEEPS the partial, since deleting on a near-full disk is unsafe).
+  New `IPlatformService.GetFree/GetTotalDiskSpaceBytes` (default sentinels: free `long.MaxValue`, total
+  0 → never blocks on a measurement it can't take) via `System.IO.DriveInfo` in `WindowsPlatformService`.
+- **Auto Snapshot loop** ([SnapshotViewModel.cs](../ui/UE5DumpUI/ViewModels/SnapshotViewModel.cs) +
+  [AutoSnapshotPlanner.cs](../ui/UE5DumpUI/Services/AutoSnapshotPlanner.cs)): a **manual Start/Stop toggle,
+  session-only** (never auto-starts on connect / auto-resumes on launch; only the settings persist).
+  Gap after each capture = `max(interval − captureDuration, 60 s)` — one formula that auto-extends the
+  effective interval past a long capture AND guarantees the ≥60 s idle breather. **The idle gap is the
+  only game-impact lever — no thread-priority drop** (that Phase-0 experiment was reverted for starving
+  scans ~20× when the game is busy; see multipipe-eval §8.2). Retention: **KeepRecent N** (roll forever,
+  new `ISnapshotStore.EnforceCountAsync` count-FIFO) or **FixedCount N** (stop after N). **Auto-adjust
+  quota** (default off): off → bound by quota, stop if it can only hold one snapshot; on → bump the
+  quota up a preset (…→5 GB→Unlimited) to fit. Cancel during auto stops the whole loop; capture survives
+  tab-switch, stopped on window close.
+- The capture engine was extracted into `CaptureCoreAsync(bool isAuto, CancellationToken)` returning a
+  `CaptureOutcome`, shared by the manual button and the loop; the loop links each capture's CTS to the
+  auto token so Cancel/Stop abort it. Intricate pacing/retention/quota-grow rules live in the pure
+  `AutoSnapshotPlanner` (unit-tested without timers). New settings persist via `SnapshotUiOptions`.
+- Tests: `SnapshotDiskGuardTests`, `AutoSnapshotPlannerTests`, `SnapshotStoreTests.EnforceCount_*`, and
+  VM guard-block/allow tests (configurable `DiskStubPlatformService`).
+
 ## 2026-07-13 — Timer control Phase E: Linie cadence flag — periodic timer-callback discovery (build 2156; dev, DLL needs re-inject)
 
 **SHIPPED (DLL + UI; full build + 2479 C# tests + C++ self-tests green).** The behavioural complement to the

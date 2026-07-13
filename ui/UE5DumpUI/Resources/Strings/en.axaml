@@ -475,6 +475,21 @@
     <sys:String x:Key="str.Snapshot.Quota">Per-game quota:</sys:String>
     <sys:String x:Key="str.Snapshot.QuotaHint">When a capture exceeds the quota, the oldest snapshots of this game are dropped automatically.</sys:String>
     <sys:String x:Key="str.Snapshot.Usage">Used:</sys:String>
+    <!-- Free-disk-space guard (blocks ALL captures) -->
+    <sys:String x:Key="str.Snapshot.MinFreeDisk">Min free disk:</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.MinFreeDisk">Free-space safety net. Before ANY snapshot capture (manual or auto), the drive holding the snapshot database must have at least this much free space, otherwise the capture is refused. The requirement is the SMALLER of the two: a percentage of the whole drive OR an absolute floor in GB (e.g. a 1 TB drive at 10% / 50 GB → needs 50 GB free; a 200 GB drive → needs 20 GB). Set the percent to 0 to rely on the GB floor alone.</sys:String>
+    <!-- Auto snapshot (periodic capture) -->
+    <sys:String x:Key="str.Snapshot.Auto.Header">Auto snapshot</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.On">On</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.Off">Off</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.Interval">Interval (sec):</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Auto.Interval">Target time between the START of one auto snapshot and the next (default 900 s = 15 min, minimum 60 s). If a capture runs longer than the interval, the interval auto-extends — there is always at least a 60 s idle gap between the end of one snapshot and the start of the next, which also gives the game a breather (auto snapshot deliberately avoids lowering scan thread priority, which would starve the capture when the game is busy).</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.Retention">Retention:</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Auto.Retention">KeepRecent — capture forever, keeping only the newest N snapshots (older ones are dropped). FixedCount — capture exactly N times this session, then stop (all N are kept, still subject to the quota).</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.Count">Count (N):</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.AdjustQuota">Auto-adjust quota</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Auto.AdjustQuota">Off (default): total usage stays bound by the per-game quota; if the quota can only hold one snapshot while you want to keep more, auto snapshot stops. On: when the quota can't hold the wanted number of snapshots, it is raised to the next preset that fits (up to Unlimited). The free-disk-space guard is always the real ceiling regardless.</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.Hint">Periodically capture snapshots unattended. This is a manual switch — it never auto-starts on connect or auto-resumes on the next launch; only the settings are remembered. Use Cancel to stop a running auto snapshot.</sys:String>
     <sys:String x:Key="str.Snapshot.Saved">Saved snapshots</sys:String>
     <sys:String x:Key="str.Snapshot.Col.Size">Est. Size</sys:String>
     <sys:String x:Key="str.Snapshot.Col.Label">Label</sys:String>

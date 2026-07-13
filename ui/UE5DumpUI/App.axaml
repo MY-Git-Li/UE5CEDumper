@@ -11,6 +11,19 @@
     <Application.Styles>
         <FluentTheme />
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
+
+        <!-- Global density: the Fluent Expander header defaults to a tall 48px bar that
+             wastes vertical space above every collapsible panel (Snapshot / SPC / Pivot /
+             Value Search / Teleport …). The header ToggleButton TemplateBinds its MinHeight
+             to the Expander's own MinHeight (default resource ExpanderMinHeight = 48), so an
+             app-level Expander style overrides the Fluent control-theme setter and compacts
+             ALL expander headers consistently. Also trim the header's left padding (16 → 10). -->
+        <Style Selector="Expander">
+            <Setter Property="MinHeight" Value="30"/>
+        </Style>
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader">
+            <Setter Property="Padding" Value="10,0,0,0"/>
+        </Style>
     </Application.Styles>
 
     <Application.Resources>

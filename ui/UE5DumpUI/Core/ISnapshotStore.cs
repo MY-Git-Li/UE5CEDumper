@@ -216,6 +216,16 @@ public interface ISnapshotStore
     /// number of snapshots dropped.</summary>
     Task<int> EnforceQuotaAsync(long quotaBytes, CancellationToken ct = default);
 
+    /// <summary>Drop oldest snapshots (FIFO) from the active game's DB until only
+    /// <paramref name="keepNewest"/> remain, then VACUUM to reclaim the space — the
+    /// count-based sibling of <see cref="EnforceQuotaAsync"/>, used by the
+    /// auto-snapshot loop's "keep newest N" retention. <paramref name="keepNewest"/>
+    /// &lt;= 0 means unlimited (no-op). Returns the number of snapshots dropped.
+    /// Default no-op (returns 0) so lightweight test doubles need not implement it;
+    /// the real <see cref="Services.SnapshotStore"/> overrides it.</summary>
+    Task<int> EnforceCountAsync(int keepNewest, CancellationToken ct = default)
+        => Task.FromResult(0);
+
     // --- N1: per-game, per-tab class denylists (noise picker) ---
 
     /// <summary>Read the active game's class denylist for one tab
