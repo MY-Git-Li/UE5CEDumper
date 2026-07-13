@@ -394,3 +394,57 @@ folders to expand, every `Score` directly editable.
   struct / pointer holding one keeps its group.
 - Flattening removes the object / element **boundary**, not the data. If you
   prefer the folders for orientation, just leave the toggles off.
+
+-----
+
+## Capturing snapshots automatically over time (Auto Snapshot)
+
+Use this when you want a series of snapshots taken hands-free — e.g. to diff a
+value across a fight, a level transition, or a long resource tick — instead of
+clicking **Capture Snapshot** each time. It lives on the **Snapshot** tab's
+Capture panel (experimental tabs must be enabled first).
+
+### Setup
+
+1. Connect to the game and open **Snapshot**.
+2. In the **Auto snapshot** box set:
+   - **Interval (sec)** — target time between the *start* of one snapshot and the
+     next (default 900 s = 15 min, min 60 s). If a capture runs longer than the
+     interval, the interval auto-extends; there is always at least a 60 s idle gap
+     between snapshots.
+   - **Retention** — `KeepRecent` (capture forever, keep only the newest **N**) or
+     `FixedCount` (capture exactly **N** times, then stop).
+   - **Count (N)** — the N for whichever retention mode.
+   - **Auto-adjust quota** (optional) — see below.
+3. Flip the **Auto snapshot** toggle **On**. The status line shows a live
+   countdown to the next capture and the running count.
+
+To stop: flip the toggle **Off**, or press **Cancel** during a capture (Cancel
+stops the whole loop, not just the current capture). Auto snapshot is
+**session-only** — it never starts by itself on connect and never resumes on the
+next launch; only the settings are remembered.
+
+### Quota interaction
+
+- Snapshots still obey the per-game **quota**. With `KeepRecent`, the newest N are
+  kept *and* the byte quota is enforced — whichever drops more wins.
+- **Auto-adjust quota off** (default): if the quota can only hold **one** snapshot
+  while you asked to keep more, auto snapshot stops with a message. Raise the quota
+  or turn auto-adjust on.
+- **Auto-adjust quota on**: when the quota can't hold the wanted number of
+  snapshots it is raised to the next preset that fits (up to Unlimited).
+
+### Disk-space safety net (applies to *all* captures)
+
+Next to **Used:** is **Min free disk: [ % ] / [ GB ]**. Before *any* capture
+(manual or auto), the drive holding the snapshot database must have at least
+`min(percent, GB)` free — default **10% / 50 GB**, whichever is smaller. Below
+that, the capture is refused (a multi-GB snapshot can't fill your system drive).
+Set the **%** to 0 to rely on the GB floor alone (or the GB to 0 for the % alone).
+
+### Reducing impact on the game
+
+Auto snapshot deliberately does **not** lower the scan thread priority — that was
+tried and reverted because it starves the capture ~20× when the game is busy. The
+lever is the **idle gap** between snapshots: a longer interval leaves the game more
+breathing room. The capture itself already caps its worker threads at `cores − 2`.

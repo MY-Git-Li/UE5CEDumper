@@ -100,4 +100,22 @@ public interface IPlatformService
     /// </summary>
     InjectResult InjectDllElevated(int pid, string dllPath) =>
         InjectResult.Failure("Elevated injection is only supported on Windows.");
+
+    /// <summary>
+    /// Free bytes available on the drive that contains <paramref name="path"/> (the
+    /// caller-quota-aware figure, <c>DriveInfo.AvailableFreeSpace</c>). Powers the
+    /// snapshot free-space guard. Default <see cref="long.MaxValue"/> so a test
+    /// double / non-Windows impl reads as "unlimited" and never blocks a capture;
+    /// the real Windows service overrides it. Never throws — an unreadable drive
+    /// returns the safe default.
+    /// </summary>
+    long GetFreeDiskSpaceBytes(string path) => long.MaxValue;
+
+    /// <summary>
+    /// Total size in bytes of the drive that contains <paramref name="path"/>
+    /// (<c>DriveInfo.TotalSize</c>). Default 0 so the percentage term of the
+    /// free-space guard collapses (→ never blocks) when the drive can't be measured;
+    /// the real Windows service overrides it. Never throws.
+    /// </summary>
+    long GetTotalDiskSpaceBytes(string path) => 0;
 }

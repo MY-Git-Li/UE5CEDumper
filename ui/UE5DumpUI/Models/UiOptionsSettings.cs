@@ -56,7 +56,7 @@ public sealed class MainUiOptions
     public int PreviewLimit { get; set; } = 2;
     public int DeepScanElemCapExponent { get; set; } = 8;
     public int CeStringLengthExponent { get; set; } = 8;   // 2^8 = 256 (CE String leaf <Length>)
-    public int FabricateArrayCountExponent { get; set; }   // 0 = off; 2^N = Copy CE Field array fabricate count
+    public int FabricateArrayCountExponent { get; set; } = 2;   // 2^2 = 4 rows (default); 0 = off, 2^N = Copy CE Field array fabricate count
 }
 
 public sealed class LiveWalkerUiOptions
@@ -108,6 +108,16 @@ public sealed class SnapshotUiOptions
     public bool ShowUsageBar { get; set; } = true;
     public bool GroupDeep { get; set; }
     public FloatRoundMode RoundingMode { get; set; } = FloatRoundMode.Round;
+
+    // Auto snapshot SETTINGS (defaults MUST match SnapshotViewModel's [ObservableProperty]
+    // initializers). The running toggle (AutoSnapshotEnabled) is deliberately NOT here —
+    // it is session-only and never auto-resumes.
+    public int AutoSnapshotIntervalSec { get; set; } = 900;
+    public AutoSnapshotRetentionMode RetentionMode { get; set; } = AutoSnapshotRetentionMode.KeepRecent;
+    public int AutoSnapshotCount { get; set; } = 10;
+    public bool AutoSnapshotAdjustQuota { get; set; }
+    public int SnapshotMinFreePercent { get; set; } = 10;
+    public int SnapshotMinFreeGb { get; set; } = 50;
 }
 
 public sealed class InstanceFinderUiOptions

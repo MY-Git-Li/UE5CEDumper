@@ -401,6 +401,44 @@ public class SnapshotStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task EnforceCount_DropsOldestKeepsNewestN()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await SeedSnapshotAsync("a", 1, ct);
+        await SeedSnapshotAsync("b", 2, ct);
+        await SeedSnapshotAsync("c", 3, ct);
+
+        // Keep the newest 2 → drop the oldest ("a").
+        int dropped = await _store.EnforceCountAsync(2, ct);
+        Assert.Equal(1, dropped);
+        var kept = await _store.ListSnapshotsAsync(ct);
+        Assert.Equal(new[] { "c", "b" }, kept.Select(s => s.Label).ToArray());   // newest first
+    }
+
+    [Fact]
+    public async Task EnforceCount_KeepOneDropsAllButNewest()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await SeedSnapshotAsync("a", 1, ct);
+        await SeedSnapshotAsync("b", 2, ct);
+        await SeedSnapshotAsync("c", 3, ct);
+        Assert.Equal(2, await _store.EnforceCountAsync(1, ct));
+        Assert.Equal("c", Assert.Single(await _store.ListSnapshotsAsync(ct)).Label);
+    }
+
+    [Fact]
+    public async Task EnforceCount_NoOpWhenWithinLimitOrUnlimited()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await SeedSnapshotAsync("a", 1, ct);
+        await SeedSnapshotAsync("b", 2, ct);
+        Assert.Equal(0, await _store.EnforceCountAsync(5, ct));    // already within N
+        Assert.Equal(0, await _store.EnforceCountAsync(0, ct));    // 0 = unlimited
+        Assert.Equal(0, await _store.EnforceCountAsync(-1, ct));   // negative = unlimited
+        Assert.Equal(2, (await _store.ListSnapshotsAsync(ct)).Count);
+    }
+
+    [Fact]
     public async Task GetUsage_ReportsSizeAndCount()
     {
         var ct = TestContext.Current.CancellationToken;

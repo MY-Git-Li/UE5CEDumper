@@ -97,6 +97,60 @@ public partial class SnapshotViewModel : ViewModelBase
     [ObservableProperty] private double _usageRatio;        // 0..1 for the bar
     [ObservableProperty] private bool   _showUsageBar = true;
 
+    // --- Auto snapshot (periodic capture) ---
+    // Persisted SETTINGS (defaults mirror SnapshotUiOptions). The interval, retention
+    // policy, quota-auto-grow toggle and the free-disk-space guard thresholds.
+    [ObservableProperty] private int    _autoSnapshotIntervalSec = 900;
+    [ObservableProperty] private AutoSnapshotRetentionMode _retentionMode = AutoSnapshotRetentionMode.KeepRecent;
+    [ObservableProperty] private int    _autoSnapshotCount = 10;
+    [ObservableProperty] private bool   _autoSnapshotAdjustQuota;
+    // Free-disk-space guard (blocks ALL captures — manual + auto): needs at least
+    // min(percent% of drive, GB) free. Defaults 10% / 50 GB (whichever is smaller).
+    [ObservableProperty] private int    _snapshotMinFreePercent = SnapshotDiskGuard.DefaultMinPercent;
+    [ObservableProperty] private int    _snapshotMinFreeGb = SnapshotDiskGuard.DefaultMinGb;
+
+    // Session-only running state (NOT persisted — a manual toggle that never
+    // auto-resumes on the next launch, per the feature decision).
+    [ObservableProperty] private bool   _autoSnapshotEnabled;
+    [ObservableProperty] private string _autoStatusText = "";
+
+    /// <summary>Minimum idle gap between the end of one snapshot and the start of
+    /// the next (the game-impact breather + the interval floor).</summary>
+    private const int AutoSnapshotMinIntervalSec = 60;
+
+    private CancellationTokenSource? _autoCts;   // auto-loop lifetime
+    private Task? _autoLoopTask;
+
+    public IReadOnlyList<AutoSnapshotRetentionMode> RetentionModeOptions { get; } =
+        new[] { AutoSnapshotRetentionMode.KeepRecent, AutoSnapshotRetentionMode.FixedCount };
+
+    /// <summary>Auto interval / retention / guard inputs are editable only when the
+    /// loop is stopped and no capture is running.</summary>
+    public bool CanEditAutoSettings => !AutoSnapshotEnabled && !IsCapturing;
+
+    /// <summary>The Start/Stop toggle is enabled when connected (to start) or when
+    /// already running (to stop).</summary>
+    public bool CanToggleAuto => AutoSnapshotEnabled || _engineState != null;
+
+    partial void OnAutoSnapshotIntervalSecChanged(int value)
+    {
+        if (value < AutoSnapshotMinIntervalSec) AutoSnapshotIntervalSec = AutoSnapshotMinIntervalSec;
+    }
+
+    partial void OnAutoSnapshotCountChanged(int value)
+    {
+        if (value < 1) AutoSnapshotCount = 1;
+    }
+
+    partial void OnAutoSnapshotEnabledChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanEditAutoSettings));
+        OnPropertyChanged(nameof(CanToggleAuto));
+        OnPropertyChanged(nameof(CanManualCapture));
+        if (value) StartAutoSnapshot();
+        else       StopAutoSnapshot();
+    }
+
     // Collapsible sections (E): the capture + compare regions fold away to give
     // the diff grid more room. Capture is force-opened while capturing.
     [ObservableProperty] private bool _captureSectionOpen = true;
@@ -205,6 +259,7 @@ public partial class SnapshotViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(CanRunDiff));
         OnPropertyChanged(nameof(CanCapture));
+        OnPropertyChanged(nameof(CanManualCapture));
         OnPropertyChanged(nameof(CanEditSettings));
     }
 
@@ -341,8 +396,12 @@ public partial class SnapshotViewModel : ViewModelBase
     public ObservableCollection<SnapshotMeta> Snapshots { get; } = new();
 
     /// <summary>True once connected (engine state available) and not mid-capture,
-    /// mid-diff, or mid-estimate.</summary>
+    /// mid-diff, or mid-estimate. Also gates the auto loop's own capture attempts.</summary>
     public bool CanCapture => _engineState != null && !IsCapturing && !IsDiffing && !IsEstimating;
+
+    /// <summary>Gates the MANUAL Capture / Estimate buttons: capturable and the auto
+    /// loop isn't running (which owns capturing while enabled).</summary>
+    public bool CanManualCapture => CanCapture && !AutoSnapshotEnabled;
 
     private int QuotaMb => _gate?.SnapshotQuotaMb ?? LabelToMb(SelectedQuotaLabel);
     private long QuotaBytes => QuotaMb <= 0 ? 0 : (long)QuotaMb * 1024 * 1024;
@@ -389,6 +448,9 @@ public partial class SnapshotViewModel : ViewModelBase
 
     public void SetEngineState(EngineState state)
     {
+        // A (re)connect resets auto snapshot — the running toggle is session-only and
+        // the DB just re-scoped to this game; the user re-arms explicitly.
+        StopAutoSnapshot();
         _engineState = state;
         IsGWorldAvailable = state.HasGWorld;   // enable the per-row 🌍 button
         _currentSessionId = state.GameSessionId;   // PeHash-CreationTime; matches capture-time GameSessionId
@@ -397,6 +459,8 @@ public partial class SnapshotViewModel : ViewModelBase
         _store.SetActiveGame(state.PeHash);
         LoadDenylistFromStore();
         OnPropertyChanged(nameof(CanCapture));
+        OnPropertyChanged(nameof(CanManualCapture));
+        OnPropertyChanged(nameof(CanToggleAuto));
         _ = RefreshAsync();
     }
 
@@ -414,11 +478,14 @@ public partial class SnapshotViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanEditSettings));  // lock Scope/GameOnly/Quota/Label during capture
         OnPropertyChanged(nameof(CanRunDiff));        // and the Run Diff button
         OnPropertyChanged(nameof(IsBusy));            // swap Capture/Estimate <-> Cancel
+        OnPropertyChanged(nameof(CanEditAutoSettings));
+        OnPropertyChanged(nameof(CanManualCapture));
     }
 
     partial void OnIsEstimatingChanged(bool value)
     {
         OnPropertyChanged(nameof(CanCapture));       // Capture + Estimate buttons gate on this
+        OnPropertyChanged(nameof(CanManualCapture));
         OnPropertyChanged(nameof(CanEditSettings));  // lock pickers while sampling
         OnPropertyChanged(nameof(IsBusy));            // show Cancel so a long estimate is cancellable
     }
@@ -489,10 +556,32 @@ public partial class SnapshotViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private async Task CaptureAsync()
+    private async Task CaptureAsync() => await CaptureCoreAsync(isAuto: false);
+
+    /// <summary>
+    /// The capture engine shared by the manual Capture button and the auto-snapshot
+    /// loop. Enforces the free-disk-space guard first (blocks ALL captures), streams
+    /// the snapshot into SQLite, and returns a <see cref="CaptureOutcome"/> so the auto
+    /// loop can react. <paramref name="externalCt"/> (the auto loop's token) is linked
+    /// into <c>_cts</c> so both the Cancel button and the Stop toggle abort the capture.
+    /// The byte-quota eviction is applied inline ONLY for a manual capture; the auto
+    /// loop owns retention + quota-grow, so it passes <paramref name="isAuto"/> true to
+    /// skip the inline eviction and enforce its own policy afterward.
+    /// </summary>
+    private async Task<CaptureOutcome> CaptureCoreAsync(bool isAuto, CancellationToken externalCt = default)
     {
-        if (!CanCapture) return;
+        if (!CanCapture) return CaptureOutcome.NotReady;
         ClearError();
+
+        // Free-disk-space guard — refuse ALL captures (manual + auto) when the DB
+        // drive is below the required free space, so a multi-GB capture can't fill it.
+        if (!DiskGuardPasses())
+        {
+            var msg = DiskGuardMessage();
+            StatusText = msg;
+            _log.Warn(Constants.LogCatView, "Snapshot: " + msg);
+            return CaptureOutcome.DiskLow;
+        }
 
         var engine = _engineState!;
         var dataType = SelectedScope;
@@ -505,12 +594,22 @@ public partial class SnapshotViewModel : ViewModelBase
         bool includeNative  = IncludeNativeFields;
         string numericFamily = FamilyWire;     // "Any" / "IntegersOnly" / "FloatsOnly"
         long maxBytes        = MaxDatasetBytes; // 0 = no in-capture cap
+        // Free-disk guard thresholds captured for the mid-capture poll (protects against
+        // a single huge capture that passed the pre-check but fills the drive as it runs).
+        int  guardPct    = SnapshotMinFreePercent;
+        int  guardGb     = SnapshotMinFreeGb;
+        bool guardActive = _platform != null;
+        string dbPath    = _store.DatabasePath;
         // Max-dataset cap ("提前止血"): the consumer sets capReached=1 when the live
         // db+WAL size crosses maxBytes; the producer then stops gracefully and the
         // PARTIAL snapshot is kept + finalised (NOT deleted like a user-cancel).
         int  capReached      = 0;
         long cappedAtBytes   = 0;
-        _cts = new CancellationTokenSource();
+        // Mid-capture low-disk stop shares the capReached graceful-stop path (KEEPS the
+        // partial — deleting on a nearly-full disk is unsafe, VACUUM needs scratch space).
+        int  diskLowReached  = 0;
+        long diskLowAtBytes  = 0;
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
         var ct = _cts.Token;
         IsCapturing = true;
         CaptureSectionOpen = true;   // force the capture region visible while capturing
@@ -523,6 +622,7 @@ public partial class SnapshotViewModel : ViewModelBase
         _capReadMs = _capRxLogMs = _capParseMs = _capBuildMs = 0;
         _heartbeatPhase = 0;
 
+        CaptureOutcome outcome = CaptureOutcome.Failed;
         long snapshotId = 0;
         try
         {
@@ -649,13 +749,26 @@ public partial class SnapshotViewModel : ViewModelBase
                             // ceiling, signal the producer to stop. We KEEP what's written
                             // (a partial snapshot of the first-N objects), so this finalises
                             // normally below — distinct from the user-cancel delete path.
-                            if (maxBytes > 0 && Volatile.Read(ref capReached) == 0)
+                            // The free-disk guard shares this graceful-stop path: if the
+                            // drive drops below the required free space mid-capture, stop
+                            // and keep the partial too.
+                            if (Volatile.Read(ref capReached) == 0)
                             {
                                 long live = session.CurrentSizeBytes();
-                                if (live >= maxBytes)
+                                if (maxBytes > 0 && live >= maxBytes)
                                 {
                                     cappedAtBytes = live;
                                     Volatile.Write(ref capReached, 1);
+                                }
+                                else if (guardActive &&
+                                         !SnapshotDiskGuard.HasEnoughFree(
+                                             _platform!.GetFreeDiskSpaceBytes(dbPath),
+                                             _platform!.GetTotalDiskSpaceBytes(dbPath),
+                                             guardPct, guardGb))
+                                {
+                                    diskLowAtBytes = live;
+                                    Volatile.Write(ref diskLowReached, 1);
+                                    Volatile.Write(ref capReached, 1);   // graceful stop, keep partial
                                 }
                             }
                         }
@@ -673,14 +786,22 @@ public partial class SnapshotViewModel : ViewModelBase
                 await session.CompleteSnapshotAsync(snapshotId, objectCount, fieldCount, !driftDetected, ct);
             }
 
-            // FIFO eviction: drop oldest snapshots of this game until the DB
-            // fits the quota (the just-captured one is always kept). EnforceQuotaAsync now
-            // skips the checkpoint + VACUUM entirely when the capture stays under quota.
-            bool wasCapped = Volatile.Read(ref capReached) != 0;
-            int dropped = await Task.Run(() => _store.EnforceQuotaAsync(QuotaBytes, ct), ct);
-            var evicted = dropped > 0 ? $" — dropped {dropped} oldest (quota)" : "";
+            // FIFO eviction: drop oldest snapshots of this game until the DB fits the
+            // quota (the just-captured one is always kept). For an AUTO capture the loop
+            // owns retention + quota-grow, so the inline eviction is skipped here.
+            bool wasDiskLow = Volatile.Read(ref diskLowReached) != 0;
+            bool wasCapped  = Volatile.Read(ref capReached) != 0 && !wasDiskLow;
+            string evicted = "";
+            if (!isAuto)
+            {
+                int dropped = await Task.Run(() => _store.EnforceQuotaAsync(QuotaBytes, ct), ct);
+                evicted = dropped > 0 ? $" — dropped {dropped} oldest (quota)" : "";
+            }
             var cappedNote = wasCapped
                 ? $" — stopped at {SnapshotFormat.Bytes(cappedAtBytes)} cap (partial: first {_capOffset:N0} of {total:N0} objects)"
+                : "";
+            var diskLowNote = wasDiskLow
+                ? $" — ⚠ low disk space at {SnapshotFormat.Bytes(diskLowAtBytes)}; kept partial (first {_capOffset:N0} of {total:N0} objects)"
                 : "";
             // Phase-0 telemetry: one summary line with the full cost breakdown for
             // before/after comparison. parse+pipe is now split into pipe-read / RX-log /
@@ -715,12 +836,14 @@ public partial class SnapshotViewModel : ViewModelBase
             var driftNote = driftDetected
                 ? $" — ⚠ GObjects changed mid-capture ({total:N0}→{maxTotal:N0}); marked UNUSABLE (excluded from SPC/Pivot, auto-removed before next capture)"
                 : "";
-            StatusText = $"Captured {objectCount:N0} objects, {fieldCount:N0} fields{driftNote}{cappedNote}{evicted}";
+            outcome = (wasCapped || wasDiskLow) ? CaptureOutcome.Partial : CaptureOutcome.Success;
+            StatusText = $"Captured {objectCount:N0} objects, {fieldCount:N0} fields{driftNote}{cappedNote}{diskLowNote}{evicted}";
             Label = "";
             await RefreshAsync();
         }
         catch (OperationCanceledException)
         {
+            outcome = CaptureOutcome.Cancelled;
             StopCaptureHeartbeat();
             if (snapshotId > 0)
             {
@@ -743,6 +866,7 @@ public partial class SnapshotViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            outcome = CaptureOutcome.Failed;
             StopCaptureHeartbeat();
             _log.Error(Constants.LogCatView, "Snapshot: capture failed", ex);
             SetError(ex);
@@ -756,6 +880,7 @@ public partial class SnapshotViewModel : ViewModelBase
             _cts?.Dispose();
             _cts = null;
         }
+        return outcome;
     }
 
     /// <summary>
@@ -838,6 +963,182 @@ public partial class SnapshotViewModel : ViewModelBase
     {
         _cts?.Cancel();
         _estimateCts?.Cancel();
+        // Cancelling during an auto snapshot stops the whole loop (spec: "Auto
+        // snapshot 進行時一樣可取消"), not just the in-flight capture.
+        if (_autoCts != null) StopAutoSnapshot();
+    }
+
+    // ----------------------------------------------------------------------
+    // Auto snapshot (periodic capture) loop + free-disk-space guard
+    // ----------------------------------------------------------------------
+
+    /// <summary>Does the DB drive currently have enough free space to allow a write?
+    /// True when no platform service is available (tests / non-Windows) so the guard
+    /// never blocks on a measurement it can't take.</summary>
+    private bool DiskGuardPasses()
+    {
+        if (_platform == null) return true;
+        long free  = _platform.GetFreeDiskSpaceBytes(_store.DatabasePath);
+        long total = _platform.GetTotalDiskSpaceBytes(_store.DatabasePath);
+        return SnapshotDiskGuard.HasEnoughFree(free, total, SnapshotMinFreePercent, SnapshotMinFreeGb);
+    }
+
+    /// <summary>Human message for a blocked capture: drive, free, and required free.</summary>
+    private string DiskGuardMessage()
+    {
+        long free  = _platform?.GetFreeDiskSpaceBytes(_store.DatabasePath) ?? 0;
+        long total = _platform?.GetTotalDiskSpaceBytes(_store.DatabasePath) ?? 0;
+        long need  = SnapshotDiskGuard.RequiredFreeBytes(total, SnapshotMinFreePercent, SnapshotMinFreeGb);
+        var root   = System.IO.Path.GetPathRoot(_store.DatabasePath) ?? "?";
+        return $"Low disk space on {root}: {SnapshotFormat.Bytes(free)} free, needs ≥ {SnapshotFormat.Bytes(need)}. Capture skipped.";
+    }
+
+    /// <summary>Estimated on-disk size of the newest snapshot (for quota-grow math).</summary>
+    private long NewestSnapshotBytes()
+        => Snapshots.Count > 0 ? Snapshots[0].EstBytes : 0;
+
+    /// <summary>Raise (never lower) the byte quota so it can retain the desired count,
+    /// bumping through presets or to Unlimited. No-op when there's no gate.</summary>
+    private void ApplyAutoQuota(long? bytes)
+    {
+        if (_gate == null) return;
+        if (bytes == null)                        // exceeds every preset → Unlimited
+        {
+            if (_gate.SnapshotQuotaMb != 0) SelectedQuotaLabel = MbToLabel(0);
+            return;
+        }
+        int mb = (int)(bytes.Value / (1024L * 1024));
+        if (mb == _gate.SnapshotQuotaMb) return;  // no change
+        // Setting the label routes through OnSelectedQuotaLabelChanged → gate + usage.
+        SelectedQuotaLabel = MbToLabel(mb);
+    }
+
+    private void StartAutoSnapshot()
+    {
+        if (_autoCts != null) return;             // already running
+        if (_engineState == null)
+        {
+            AutoStatusText = "Connect to a game before starting auto snapshot.";
+            AutoSnapshotEnabled = false;
+            return;
+        }
+        _autoCts = new CancellationTokenSource();
+        AutoStatusText = "Auto snapshot started.";
+        _autoLoopTask = RunAutoLoopAsync(_autoCts.Token);
+    }
+
+    /// <summary>Stop the auto-snapshot loop (idempotent). Cancels the loop token — which
+    /// also cancels any in-flight capture (its CTS is linked to this one) — and clears
+    /// the toggle. Safe to call from the loop itself, on disconnect, and on shutdown.</summary>
+    public void StopAutoSnapshot()
+    {
+        var cts = _autoCts;
+        _autoCts = null;
+        if (cts != null)
+        {
+            try { cts.Cancel(); } catch { /* already disposed */ }
+            cts.Dispose();
+        }
+        if (AutoSnapshotEnabled) AutoSnapshotEnabled = false;   // reflect in UI (idempotent)
+    }
+
+    /// <summary>The periodic-capture loop. Runs on the UI sync-context (started from a
+    /// property setter), so ObservableProperty writes here are UI-thread safe; heavy
+    /// store ops go through Task.Run. Retention + quota-grow live here (not in the
+    /// capture engine). Stops itself on completion, low disk, or capture failure.</summary>
+    private async Task RunAutoLoopAsync(CancellationToken ct)
+    {
+        int captured = 0;
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                // Wait until capturable — a manual diff / estimate may be running.
+                while (!ct.IsCancellationRequested && !CanCapture)
+                {
+                    AutoStatusText = "Auto: waiting (busy)…";
+                    await Task.Delay(1000, ct);
+                }
+                if (ct.IsCancellationRequested) break;
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var outcome = await CaptureCoreAsync(isAuto: true, ct);
+                sw.Stop();
+                if (ct.IsCancellationRequested) break;
+
+                switch (outcome)
+                {
+                    case CaptureOutcome.DiskLow:
+                        AutoStatusText = "Auto stopped: low disk space.";
+                        StopAutoSnapshot();
+                        return;
+                    case CaptureOutcome.Failed:
+                    case CaptureOutcome.NotReady:
+                        AutoStatusText = "Auto stopped: capture failed (disconnected?).";
+                        StopAutoSnapshot();
+                        return;
+                    case CaptureOutcome.Cancelled:
+                        return;   // user cancelled the in-flight capture → stop the loop
+                }
+
+                // Success / Partial — a snapshot was written.
+                captured++;
+                long lastBytes = NewestSnapshotBytes();
+
+                // Auto-grow the quota FIRST (so the byte eviction below won't drop
+                // below the desired retention), then enforce byte quota, then count.
+                if (AutoSnapshotAdjustQuota && QuotaBytes > 0 && _gate != null)
+                    ApplyAutoQuota(AutoSnapshotPlanner.RaiseQuotaBytes(QuotaBytes, AutoSnapshotCount, lastBytes));
+                await Task.Run(() => _store.EnforceQuotaAsync(QuotaBytes, ct), ct);
+                if (RetentionMode == AutoSnapshotRetentionMode.KeepRecent)
+                    await Task.Run(() => _store.EnforceCountAsync(AutoSnapshotCount, ct), ct);
+                await RefreshAsync();
+                await UpdateUsageAsync();
+
+                // Stop conditions: reached the fixed count, or the quota can only hold
+                // one snapshot while more are wanted (adjust off).
+                var stop = AutoSnapshotPlanner.EvaluatePostCapture(
+                    RetentionMode, AutoSnapshotCount, captured, lastBytes, QuotaBytes, AutoSnapshotAdjustQuota);
+                if (stop == AutoStopReason.ReachedCount)
+                {
+                    AutoStatusText = $"Auto done: captured {captured} snapshot(s).";
+                    StopAutoSnapshot();
+                    return;
+                }
+                if (stop == AutoStopReason.QuotaHoldsOne)
+                {
+                    AutoStatusText = "Auto stopped: quota only holds one snapshot — raise the quota or enable Auto-adjust.";
+                    StopAutoSnapshot();
+                    return;
+                }
+
+                // The capture may have consumed the remaining headroom — re-check disk
+                // before committing to a long wait.
+                if (!DiskGuardPasses())
+                {
+                    AutoStatusText = "Auto stopped: low disk space.";
+                    StopAutoSnapshot();
+                    return;
+                }
+
+                // Wait the computed gap (auto-extends past a long capture; ≥ 60 s idle)
+                // with a 1 s countdown so the status line stays alive.
+                int gap = AutoSnapshotPlanner.NextGapSeconds(
+                    AutoSnapshotIntervalSec, sw.Elapsed.TotalSeconds, AutoSnapshotMinIntervalSec);
+                for (int rem = gap; rem > 0 && !ct.IsCancellationRequested; rem--)
+                {
+                    AutoStatusText = $"Auto: next snapshot in {rem}s  ·  captured {captured}";
+                    await Task.Delay(1000, ct);
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* stopped */ }
+        catch (Exception ex)
+        {
+            _log.Error(Constants.LogCatView, "Snapshot: auto loop error", ex);
+            AutoStatusText = "Auto stopped: error.";
+            StopAutoSnapshot();
+        }
     }
 
     private CancellationTokenSource? _estimateCts;

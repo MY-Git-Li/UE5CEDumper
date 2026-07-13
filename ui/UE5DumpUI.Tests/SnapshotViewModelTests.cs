@@ -706,4 +706,76 @@ public class SnapshotViewModelTests : IDisposable
         Assert.True(raised);                          // OnGroupSnapshotChanged re-raises it
         Assert.False(vm.IsGroupCompareMode);
     }
+
+    [Fact]
+    public async Task Capture_BlockedWhenDiskBelowGuard()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dump = new CaptureStub();
+        // 1 GB free on a 1 TB drive → the 10% / 50 GB guard needs 50 GB → refuse.
+        var platform = new DiskStubPlatformService(_tempDir)
+        {
+            FreeBytes  = 1L * 1024 * 1024 * 1024,
+            TotalBytes = 1024L * 1024 * 1024 * 1024,
+        };
+        var vm = new SnapshotViewModel(dump, _store, new MockLoggingService(), gate: null, platform: platform)
+        {
+            SelectedScope = "NumericNoByte",
+        };
+        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "01D9ABCDEF012345" });
+
+        await vm.CaptureCommand.ExecuteAsync(null);
+
+        Assert.False(vm.IsCapturing);
+        Assert.Empty(await _store.ListSnapshotsAsync(ct));   // guard refused before any write
+        Assert.Null(dump.LastDataType);                      // BeginSnapshot never reached
+        Assert.Contains("disk", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Capture_AllowedWhenDiskAboveGuard()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dump = new CaptureStub();
+        // Plenty of free space → the guard passes and the capture proceeds normally.
+        var platform = new DiskStubPlatformService(_tempDir)
+        {
+            FreeBytes  = 500L * 1024 * 1024 * 1024,
+            TotalBytes = 1024L * 1024 * 1024 * 1024,
+        };
+        var vm = new SnapshotViewModel(dump, _store, new MockLoggingService(), gate: null, platform: platform)
+        {
+            SelectedScope = "NumericNoByte", Label = "ok",
+        };
+        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "01D9ABCDEF012345" });
+
+        await vm.CaptureCommand.ExecuteAsync(null);
+
+        Assert.Equal("NumericNoByte", dump.LastDataType);    // BeginSnapshot reached
+        Assert.Single(await _store.ListSnapshotsAsync(ct));  // snapshot persisted
+    }
+
+    // Platform double whose free/total disk space is configurable, for the free-disk-space
+    // guard tests. Only the disk methods matter here; the rest are minimal no-ops.
+    private sealed class DiskStubPlatformService : IPlatformService
+    {
+        private readonly string _appData;
+        public long FreeBytes { get; set; } = long.MaxValue;
+        public long TotalBytes { get; set; }
+        public DiskStubPlatformService(string appData) => _appData = appData;
+
+        public long GetFreeDiskSpaceBytes(string path) => FreeBytes;
+        public long GetTotalDiskSpaceBytes(string path) => TotalBytes;
+
+        public bool TryAcquireSingleInstance() => true;
+        public void ReleaseSingleInstance() { }
+        public string GetAppDataPath() => _appData;
+        public string GetLogDirectoryPath() => Path.Combine(_appData, "Logs");
+        public Task CopyToClipboardAsync(string text) => Task.CompletedTask;
+        public Task RevealInExplorerAsync(string path) => Task.CompletedTask;
+        public string GetMachineName() => "TEST-MACHINE";
+        public void CloseImeForWindow(IntPtr windowHandle) { }
+        public Task<string?> ShowSaveFileDialogAsync(string defaultFileName, string filterName, string filterExtension)
+            => Task.FromResult<string?>(null);
+    }
 }

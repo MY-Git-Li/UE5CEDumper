@@ -364,6 +364,9 @@ public partial class MainWindow : Window
         {
             vm.Spc?.CancelPendingWork();
             vm.Snapshot?.CancelPendingWork();
+            // Auto snapshot survives tab-switch (CancelPendingWork doesn't touch it),
+            // so stop it explicitly on window close.
+            vm.Snapshot?.StopAutoSnapshot();
             vm.Pivot?.CancelPendingWork();
         }
         if (DataContext is IDisposable d) d.Dispose();
