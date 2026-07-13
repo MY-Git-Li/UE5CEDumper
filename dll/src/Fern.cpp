@@ -3123,13 +3123,19 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
 
             json functions = json::array();
             int emitted = 0;
+            // Cadence diagnostic (Phase E): count + list the periodic-looking candidates
+            // (same band the UI's PeProfileEntry.IsPeriodic uses) so an idle-window
+            // recording is verifiable from the log, not just the UI.
+            int periodicCount = 0, periodicLogged = 0;
+            std::string periodicSummary;
             for (size_t i = 0; i < snap.size() && emitted < limit; ++i) {
                 if ((i & 0xFFF) == 0 && Tot::Requested()) break;  // cooperative abort
                 FunctionInfo fi{};
                 if (!Ubel::ResolveFunctionInfo(snap[i].func, fi)) continue;  // drop stale/recycled
                 uintptr_t classAddr = Ubel::GetOuter(snap[i].func);  // UFunction's Outer == its UClass
+                std::string cls = Ubel::GetName(classAddr);
                 json item;
-                item["class_name"] = Ubel::GetName(classAddr);
+                item["class_name"] = cls;
                 item["func_name"]  = fi.name;
                 item["func_addr"]  = Renge::AddrToStr(snap[i].func);
                 item["num_parms"]  = fi.numParms;
@@ -3143,11 +3149,28 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 item["gap_samples"]    = snap[i].gapSamples;     //   + how many gaps measured
                 functions.push_back(item);
                 ++emitted;
+                // Periodic candidate: enough gaps, regular (low cv), out of the per-frame
+                // (Tick) band, within a plausible gameplay-timer window.
+                if (snap[i].gapSamples >= 3 && snap[i].cv <= 0.25 &&
+                    snap[i].meanPeriodMs > 40.0 && snap[i].meanPeriodMs <= 30000.0) {
+                    ++periodicCount;
+                    if (periodicLogged < 12) {
+                        char buf[192];
+                        snprintf(buf, sizeof(buf), "%s%s::%s ~%.0fms cv=%.2f x%llu",
+                                 periodicLogged ? ", " : "", cls.c_str(), fi.name.c_str(),
+                                 snap[i].meanPeriodMs, snap[i].cv,
+                                 (unsigned long long)snap[i].gapSamples);
+                        periodicSummary += buf;
+                        ++periodicLogged;
+                    }
+                }
             }
 
             Sein::Info("PIPE:profile",
-                       "pe_profile_get: %d distinct funcs, %llu total calls, %d emitted (limit %d)",
-                       static_cast<int>(snap.size()), (unsigned long long)totalCalls, emitted, limit);
+                       "pe_profile_get: %d distinct funcs, %llu total calls, %d emitted (limit %d); "
+                       "%d periodic-looking [%s]",
+                       static_cast<int>(snap.size()), (unsigned long long)totalCalls, emitted, limit,
+                       periodicCount, periodicSummary.c_str());
 
             json data;
             data["recording"]      = Linie::IsActive();
