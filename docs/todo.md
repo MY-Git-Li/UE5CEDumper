@@ -563,10 +563,10 @@ native-RE parts are exactly the reflection-invisible ones — cut them from v1.*
   resets the badge — the "state lives in the DLL, survives a UI reconnect" markers model. (2) disk preference:
   `TeleportUiOptions.TimeDilation`/`TimeTargetIsPawn` in `ui-options.json` pre-fill the last value+target
   across UI restarts (NOT auto-applied; live read-back wins). +2 VM tests + options round-trip.
-  **L1 is feature-complete** (discovery + DLL + UI card + CE export + persistence). **REMAINING:** only
-  **in-game verify** (Hemmung has NO unit test — reflection needs a live game): drag slider / ½× / Apply →
-  world runs at half speed + holds against slow-mo; Reset restores; reconnect shows the still-held value. Also
-  NOT built (deferred):
+  **L1 COMPLETE + LIVE-VERIFIED on Elliot (UE4.27, build 2151)** — log confirms `set_time_dilation target=pawn
+  value=0.5` → `hold 0.5000 (rc=0)`, held 0.5/1.0/2.0/1.4688×, reset clean, `get_time_state` polled on connect.
+  Per-pawn `CustomTimeDilation` exercised; global `WorldSettings::TimeDilation` wired+unit-covered but not yet
+  live-exercised (verify opportunistically). Also NOT built (deferred):
   `SetGlobalTimeDilation`/`GetTimeSeconds` invoke wrappers, and a dedicated opt-in function-side
   `FunctionCategory.Timing` bucket (timer methods currently land in Utility at weight 3 — below threshold
   without a class bonus / Show-All).

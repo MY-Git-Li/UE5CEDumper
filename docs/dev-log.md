@@ -69,8 +69,12 @@ model as teleport markers (`RefreshHeldTimeStateAsync`); disconnect resets the b
 `TeleportUiOptions.TimeDilation`/`TimeTargetIsPawn` (in the global `ui-options.json`, mapped in
 `MainWindowViewModel` Apply/Capture) pre-fill the card's last-used value+target across UI restarts (NOT
 auto-applied; the live read-back wins when a dilation is held). +2 VM tests + options round-trip/defaults
-coverage (2467 C# green). **L1 is now feature-complete** (discovery + DLL + UI card + CE export + persistence);
-only **in-game verification** remains (Hemmung has no unit test — reflection needs a live game). **REMAINING
+coverage (2467 C# green). **L1 COMPLETE + LIVE-VERIFIED on The Adventures of Elliot (UE4.27, build 2151).**
+Log (`Elliot-Win64-Shipping`): `set_time_dilation target=pawn value=0.5` → `Time: target 1
+('CustomTimeDilation') base=1.0000 -> hold 0.5000 (rc=0)` → re-assert worker started; held at 0.5/1.0/2.0/1.4688×
+and reset cleanly (`Time: reset target 1 (any active left=0)`, worker stopped); `get_time_state` polled on
+connect (the read-back). `rc=0` throughout — the per-pawn `CustomTimeDilation` lever resolved + held. (Global
+`WorldSettings::TimeDilation` lever wired + unit-covered, not exercised in this session's log.) **REMAINING
 (deferred by design):** a dedicated opt-in function-side `FunctionCategory.Timing` bucket; L2 (GAS cooldowns) /
 L3 (live FTimerManager). **NEEDS in-game verify** (Hemmung has no
 unit test — reflection needs a live game): attach, drag the slider / hit ½×, Apply → world runs at half speed
