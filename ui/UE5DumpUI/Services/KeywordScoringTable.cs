@@ -143,6 +143,11 @@ public static class KeywordScoringTable
         "Timer", "Time", "Clock", "Countdown",
         // Time/Clock restored -- "Time" only fires on actual timing
         // tokens now (TimeRemaining, ClockTick) not on "Lifetime" etc.
+        // L1 timer methods: cooldown/dilation getters+setters that the
+        // "Timer"/"Time" tokens above miss (GetCooldownRemaining,
+        // SetGlobalTimeDilation, ResetRecharge, DelayedCall). Whole-token,
+        // so "Dilation" only fires standalone; all additive to Utility.
+        "Cooldown", "Dilation", "Delay", "Interval", "Elapsed", "Recharge",
         "Cheat", "Debug", "Console", "Toggle",
     };
 

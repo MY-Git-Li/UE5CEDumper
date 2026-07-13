@@ -18,6 +18,46 @@ builds ≤696 in
 
 -----
 
+## 2026-07-13 — Time/Timer control L1: Hemmung module + Timing discovery category (build 2148; dev, DLL needs re-inject)
+
+**SHIPPED (DLL + UI; builds + all 2453 C# tests + C++ self-tests green).** First slice of the layered
+Time/Timer feature (eval: memory `project-timer-feature-eval`, todo.md "Time / Timer control"). Two halves:
+
+- **Timing discovery category (UI, no DLL/pipe change).** New `PropertyCategory.Timing` in
+  [PropertyScoringTable.cs](../ui/UE5DumpUI/Services/PropertyScoringTable.cs) — always-on `TimingKeywords`
+  (Cooldown/CoolDown/Countdown/Delay/Interval/Timer/Elapsed/Remaining/LifeSpan/Lifetime/Recharge/TickRate/
+  TimeDilation/Time…), a `TimeStructTypes` set (Timespan/DateTime/QualifiedFrameTime/FrameTime/Timecode)
+  mirroring the GAS-struct branch (default-to-Timing when the name misses a keyword), timer terms added to
+  `SeedQueries[]` (so round-1 `search_properties` actually fetches them), and a teal chip in the Interesting
+  Properties tab. The Timing check is appended **last** so an ambiguous name that also hits an earlier bucket
+  keeps it (locked `BuffDuration → Combat` test still passes). [ClassLocationScorer.cs](../ui/UE5DumpUI/Services/ClassLocationScorer.cs)
+  gained GameplayEffect/GameplayAbility/WorldSettings +2. Function side: [KeywordScoringTable.cs](../ui/UE5DumpUI/Services/KeywordScoringTable.cs)
+  `UtilityKeywords` widened with Cooldown/Dilation/Delay/Interval/Elapsed/Recharge (catches cooldown/dilation
+  getters that scored 0 before). One sentinel test renamed (`ComponentTickInterval` → `MeshSectionIndex`,
+  now that `Interval` is a keyword) + new Timing/time-struct/class-rule tests.
+- **Hemmung module (DLL) — global slow-mo / freeze-time / speed-up.** New Frieren module
+  [Hemmung.cpp/.h](../dll/src/Hemmung.cpp) (ヘムング "inhibition"): the **absolute-value sibling of Laufen** —
+  holds reflected dilation floats at a pinned value via a write-on-drift re-assert worker (same s_mutex/
+  s_workerMutex discipline, LWC-width-aware read/write, owner-change re-capture). Two levers: `DIL_GLOBAL`
+  (`AWorldSettings::TimeDilation`, whole-world; resolved via GWorld→PersistentLevel→WorldSettings reflected
+  chain + `Aura::FindInstancesByClass("WorldSettings")` fallback) and `DIL_PAWN` (local pawn
+  `AActor::CustomTimeDilation`, reusing Laufen/Solitar's pawn chain). Exports `UE5_SetTimeDilation(target,
+  value)` / `UE5_ResetTimeDilation(target)`; **Mimic `CMD_TIME=15`** mailbox (`TimeOp` SET/RESET) for CE
+  Lua/.CT; pipe `set_time_dilation` / `reset_time_dilation` / `get_time_state` (each surfaces
+  owner_addr/field_offset for the Locate-in-GWorld handoff). `Hemmung::StopWorker()` joined on shutdown;
+  roster flipped 🟢. Value clamped DLL-side to [0.0, 100.0]. Direct write bypasses SetGlobalTimeDilation's
+  clamp; a paused world can't be stepped and an active Sequencer track flickers ≤1 tick (documented).
+
+**REMAINING for full L1 (Part C, UI Time card — not yet built):** a "Time" card in the Teleport panel
+(slider for global dilation + per-pawn CustomTimeDilation + reset) wired to the new pipe commands, CE Lua/.CT
+generation via `CMD_TIME`, and persistence. Today the Hemmung capability is reachable only via raw pipe JSON
+or a hand-written CE mailbox write. Also unbuilt: L2 (GAS cooldowns) / L3 (live FTimerManager) — deferred by
+design. **NEEDS in-game verify** (like Laufen/Solitar, Hemmung has no unit test — reflection needs a live game):
+attach to a UE title, `set_time_dilation {target:"global", value:0.3}` → world runs at 30% speed and holds
+against slow-mo; reset restores.
+
+-----
+
 ## 2026-07-11 — LKG Phase 2: DLL-attributed confirmed-working proxy (build 2142; dev, needs re-inject)
 
 **SHIPPED (DLL + UI; re-inject required).** Upgrades the Proxy Deploy suggestion from "you deployed /

@@ -217,6 +217,11 @@ constexpr int    MOVE_REASSERT_MS         = 250;     // re-assert worker tick (w
 constexpr double MOVE_MULT_MIN            = 0.1;     // 10%  — UI slider floor
 constexpr double MOVE_MULT_MAX            = 10.0;    // 1000% — UI slider ceiling
 
+// --- Time dilation (Hemmung) — global slow-mo / freeze-time / speed-up ---
+constexpr int    TIME_REASSERT_MS         = 250;     // re-assert worker tick (write-on-drift)
+constexpr double TIME_DILATION_MIN        = 0.0;     // 0 = frozen (near-freeze if the game NaNs on exact 0)
+constexpr double TIME_DILATION_MAX        = 100.0;   // 100x fast-forward — UI slider ceiling
+
 // --- Fly (Dunste) — no-gravity 3D flight ---
 constexpr int     FLY_TICK_MS            = 16;       // fly worker tick (~60 Hz)
 constexpr double  FLY_SPEED_MIN          = 50.0;     // uu/s — UI slider floor

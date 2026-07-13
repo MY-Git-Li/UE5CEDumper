@@ -517,6 +517,89 @@ direction, both shipped (dev-log builds 838-872).
 
 -----
 
+## Time / Timer control (Hemmung) — feasibility evaluated (2026-07-13), not yet built
+
+Eval memo: memory `project-timer-feature-eval`. Multi-agent + adversarially verified.
+User ask = auto/manual-assisted discovery of game **time/timer components**, list the
+**methods** handling them, real-time **lock/reset/adjust + multi-select**, and a
+**cross-session persistence** path (Copy-CE-Field-like). Confirmed the DLL has ZERO
+`TimeDilation`/`WorldSettings`/`TimerManager`/`CustomTimeDilation` refs today — new
+capability, but every building block already ships. **Verdict: build in layers; the L2/L3
+native-RE parts are exactly the reflection-invisible ones — cut them from v1.** Order below.
+
+- **L0 — timer discovery docs recipe (ships today, ~0 code)** — Effort: **S** · Risk: low.
+  BP-authored `Cooldown`/`RemainingTime`/`RespawnTime`/`Duration` floats are reflected
+  UPROPERTYs → already found by Property Search (by name) + Value Search (by value; a
+  ticking countdown survives repeated **Decreased** refines, count-up via Increased, paused
+  via Unchanged). Lock via class-wide **Freeze** (`FreezeScriptGenerator`+`ue5_freeze_helper.lua`,
+  restart+respawn-safe by class+offset re-enum); multi-select via **CheatTableBuilder** (a
+  `List<CtPropertyRow>`, no builder change). Deliverable = a `docs/tips.md` recipe + a Group
+  Scan example ({Elapsed↑, Remaining↓} in one object). *Parent: this eval.*
+
+- **L1 — global game-speed control + Timing discovery category — DISCOVERY + DLL SHIPPED (build 2148); UI Time card (Part C) REMAINING** —
+  Effort remaining: **M** · Risk: low. **DONE (build 2148, dev):** the `Hemmung` DLL module +
+  `PropertyCategory.Timing` discovery category shipped and green (all 2453 C# tests + C++ self-tests).
+  `Hemmung.cpp/.h` (roster 🟢) = absolute-value `Laufen` sibling: DIL_GLOBAL `AWorldSettings::TimeDilation`
+  (GWorld→PersistentLevel→WorldSettings reflected chain + `Aura::FindInstancesByClass("WorldSettings")`
+  fallback) + DIL_PAWN pawn `AActor::CustomTimeDilation`, write-on-drift re-assert worker, clamp
+  [0.0,100.0]; exports `UE5_Set/ResetTimeDilation`, Mimic `CMD_TIME=15` (`TimeOp` SET/RESET, ufuncAddr =
+  target), pipe `set/reset_time_dilation` + `get_time_state`. Discovery: `PropertyScoringTable.Timing`
+  (append LAST → BuffDuration stays Combat) + `TimeStructTypes` (Timespan/DateTime/QualifiedFrameTime/
+  FrameTime/Timecode) + `SeedQueries` timer terms + `ClassLocationScorer` GameplayEffect/GameplayAbility/
+  WorldSettings +2 + function-side `UtilityKeywords` widen (Cooldown/Dilation/Delay/Interval/Elapsed/
+  Recharge). Dev-log 2026-07-13; memory `project-timer-feature-eval`.
+  **REMAINING (Part C — the user-facing surface; the capability is currently reachable only via raw
+  pipe JSON / a hand-written CE mailbox write):** a **"Time" card** in the Teleport panel beside
+  GodMode/Move-Speed — a global-dilation slider (e.g. 0=freeze … 1=normal … Nx) + per-pawn
+  CustomTimeDilation + a reset, wired to the new `set/reset_time_dilation` pipe commands via a
+  `PipeClient` async method + VM; **CE Lua/.CT generation** via the `CMD_TIME=15` mailbox (follow the
+  `CeLuaHygiene` MUST-rule); persistence. Plus **in-game verify** (Hemmung has NO unit test — reflection
+  needs a live game, like Laufen/Solitar): `set_time_dilation {target:"global", value:0.3}` → world runs
+  at 30% and holds against slow-mo; reset restores. Also NOT built (deferred): `SetGlobalTimeDilation`/
+  `GetTimeSeconds` invoke wrappers, and a dedicated opt-in function-side `FunctionCategory.Timing` bucket
+  (timer methods currently land in Utility at weight 3 — below threshold without a class bonus / Show-All).
+  **DON'T over-promise (adversarial corrections):** (a) locating the ACTIVE WorldSettings is
+  NOT one line — `Aura::FindInstancesByClass` matches immediate class FName only (no `IsA`,
+  `Aura.cpp:1365`), misses BP subclasses + can't disambiguate streaming/PIE sub-worlds →
+  prefer INVOKING `SetGlobalTimeDilation` (calls `GetWorldSettings()` internally, price = its
+  `[Min,Max]` clamp; a direct write bypasses the clamp but needs the right instance);
+  (b) `Ubel` only READS today — a generic "write reflected float by name on object" surface is
+  new; (c) paused worlds can't be stepped via dilation + active Sequencer flickers within the
+  250ms drift window; (d) cross-game parity is CONDITIONAL — L1 inherits the tool's GObjects
+  baseline burden on hard-cooked/SE-fork/encrypted titles, and bespoke non-UE time multipliers
+  won't respond at all. Persistence (Copy-CE-Field-like), best→worst: class-wide **Freeze** >
+  **GWorld-anchored AA Script** (`CeXmlExportService.GenerateGWorldWalkedSymbolXml`, `useAob`;
+  registers a SYMBOL only → add a CE freeze or route TimeDilation through FreezeScriptGenerator
+  with className=WorldSettings) > **StandaloneTrainer**; NONE survive a game PATCH; multi-select
+  → CheatTableBuilder verbatim. *Parent: this eval; reuses movement-tuning-laufen + godmode-spec
+  + autodetect-stats + standalone-trainer + aa-script-gworld-walk.*
+
+- **L2 — GAS effect cooldowns (DEFER; feasible-with-caveats)** — Effort: **L** · Risk: high.
+  Deep `UAbilitySystemComponent::ActiveGameplayEffects` walk: partly non-UPROPERTY
+  (FastArraySerializer), remaining time is COMPUTED (`Duration-(Now-StartWorldTime)`, needs
+  world time), version-fragile. Current ASC folding (P4 cross-object) reaches
+  SpawnedAttributes/AttributeSets VALUES, NOT ActiveGameplayEffects. Only if a GAS title
+  motivates it. *Parent: this eval.*
+
+- **L3 — live `FTimerManager` timer enumeration (DEFER; research-grade native RE)** —
+  Effort: **XL** · Risk: high. `FTimerManager` is NOT a UObject (FNoncopyable via native
+  `UWorld::GetTimerManager()`); its `FTimerData` timers live in a TSparseArray+heap with
+  handle indirection, none reflected. Per-version native layout (ExpireTime widened float→double
+  in UE5; internals refactored across 4.x) + often-unresolvable C++/lambda callbacks =
+  Avowed-packed-FUObjectItem-tier. A reflected BP `FTimerHandle` var is opaque (just an index)
+  → does NOT yield remaining time. Recommend NOT in v1. *Parent: this eval.*
+
+- **E — Linie cadence flag (optional complement)** — Effort: **M** · Risk: low. `Linie` (Live
+  PE Profiler) already surfaces UFUNCTION-bound timer callbacks (BP timer events /
+  `SetTimerByFunctionName`) but stores only count+firstSeq. Add an inter-arrival mean+CV stat
+  (Welford); the timestamp is ALREADY read at `Stark.cpp:143` one line before `RecordCall` →
+  zero hot-path cost. Flag `is_periodic` (count≥4, CV<0.25, period outside frame band ~5-40ms,
+  inside ~50ms-30s) + a "Periodic only" idle-window mode (the shipped diff mode HIDES steady
+  timers as "unchanged"). Native lambda/member-ptr timers bypass ProcessEvent → invisible
+  (state honestly). *Parent: this eval; extends Linie/LivePEProfiler build 2109.*
+
+-----
+
 ## Property scoring / discovery
 
 - **Class Family Browser (Proposal C)** — Effort: **L** · Risk: **med**. New "Class

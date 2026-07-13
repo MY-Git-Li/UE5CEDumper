@@ -57,6 +57,15 @@ public class PropertyScoringTableTests
     [InlineData("BuffDuration",  "BP_Effect_C",      PropertyCategory.Combat)]
     [InlineData("ItemCount",     "InventoryComponent", PropertyCategory.Resources)]
     [InlineData("ItemList",      "BP_Container_C",   PropertyCategory.Resources)]
+    // === L1 — Timing category (2026-07-13). BuffDuration above is the
+    // regression guard that the Timing-last tie-break keeps "Duration" in
+    // Combat; these confirm pure-timer names land in Timing. ===
+    [InlineData("Cooldown",         "BP_Ability_C", PropertyCategory.Timing)]
+    [InlineData("RemainingTime",    "BP_Spell_C",   PropertyCategory.Timing)]
+    [InlineData("RespawnDelay",     "MyGameMode",   PropertyCategory.Timing)]
+    [InlineData("CastTime",         "BP_Ability_C", PropertyCategory.Timing)]
+    [InlineData("CustomTimeDilation","AActor",      PropertyCategory.Timing)]
+    [InlineData("TickInterval",     "BP_Spawner_C", PropertyCategory.Timing)]
     public void Score_KeywordHits_AssignsExpectedCategory(
         string propName, string className, PropertyCategory expected)
     {
@@ -68,7 +77,10 @@ public class PropertyScoringTableTests
     [Fact]
     public void Score_NoKeywordHits_ReturnsOther()
     {
-        var match = Make("ComponentTickInterval", "FrobnicatorComponent");
+        // Sentinel must contain NO keyword token. (Was "ComponentTickInterval"
+        // pre-L1; "Interval" is now a Timing keyword, so a genuinely
+        // keyword-free name is used instead.)
+        var match = Make("MeshSectionIndex", "FrobnicatorComponent");
         var result = PropertyScoringTable.Score(match);
         Assert.Equal(PropertyCategory.Other, result.Category);
     }
@@ -100,6 +112,12 @@ public class PropertyScoringTableTests
     [InlineData("BP_HealthComponent_C",  false, 2)]  // Health class
     [InlineData("UDamageDealer",         false, 2)]  // Damage class
     [InlineData("GrimAttributeSetHealth",false, 5)]  // AttributeSet(+3) + Health(+2) stack
+    // === L1 timer-home classes (2026-07-13): GameplayEffect / GameplayAbility
+    // / WorldSettings +2. Clean tokens — verified none appear in the class
+    // names of the locked rows above, so they add no new bonus there. ===
+    [InlineData("BP_GameplayEffect_C",   false, 2)]  // GameplayEffect
+    [InlineData("MyGameplayAbility",     false, 2)]  // GameplayAbility
+    [InlineData("AWorldSettings",        false, 2)]  // WorldSettings — TimeDilation home
     public void PropertyBonus_ClassLocation(
         string className, bool expectedUnusual, int expectedBonus)
     {
@@ -315,6 +333,30 @@ public class PropertyScoringTableTests
         Assert.Equal(PropertyCategory.Stats, r.Category);
         Assert.Equal(PropertyScoringTable.GasAttributeBonus, r.StructuralBonus);
         Assert.True(r.FinalScore >= PropertyScoringTable.InterestingThreshold);
+    }
+
+    [Fact]
+    public void Score_TimeStruct_DefaultsToTimingByStructType()
+    {
+        // An FTimespan whose NAME misses every keyword still surfaces as a
+        // Timing field purely from its struct type (mirrors the GAS branch).
+        var r = PropertyScoringTable.Score(
+            MakeEx("Foobar", "BP_Widget_C", "StructProperty", "Timespan"));
+
+        Assert.Equal(PropertyCategory.Timing, r.Category);
+        Assert.Equal(PropertyScoringTable.TimeStructBonus, r.StructuralBonus);
+        Assert.True(r.FinalScore >= PropertyScoringTable.InterestingThreshold);
+    }
+
+    [Fact]
+    public void Score_GasStruct_NotMisclassifiedAsTimeStruct()
+    {
+        // Regression guard: the GAS branch runs first, so a GameplayAttributeData
+        // stays Stats and gets the GAS bonus, never the time-struct path.
+        var r = PropertyScoringTable.Score(
+            MakeEx("Toughness", "MyAttributeSet", "StructProperty", "GameplayAttributeData"));
+        Assert.Equal(PropertyCategory.Stats, r.Category);
+        Assert.Equal(PropertyScoringTable.GasAttributeBonus, r.StructuralBonus);
     }
 
     [Fact]

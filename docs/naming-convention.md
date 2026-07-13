@@ -274,7 +274,7 @@ German spelling.
 | Linie | リーニエ | Linie | Reads opponent mana ("line") | 🟢 LivePEProfiler | Live ProcessEvent call profiler — opt-in per-UFunction* fire-count table recorded from Stark's PE hook during a Start/Stop window (`Linie.cpp`, build 2103) |
 | Draht | ドラート | Draht | Lügner's assistant ("wire") | ⬜ | Wiring / binding / IPC plumbing |
 | Revolte | レヴォルテ | Revolte | Four-handed general, four swords | ⬜ | Parallelism / multi-threaded dispatch |
-| Hemmung | ヘムング | Hemmung | Mist→energy ("inhibition") | ⬜ | Throttle / rate-limit / backpressure |
+| Hemmung | ヘムング | Hemmung | Mist→energy ("inhibition") | 🟢 TimeDilation | Hold the game's reflected time-dilation floats — global `AWorldSettings::TimeDilation` (whole-world slow-mo / freeze / fast-forward) + per-pawn `AActor::CustomTimeDilation` — at an absolute value via a write-on-drift re-assert worker (the absolute-value sibling of Laufen); *inhibits* the game clock against slow-mo abilities / Sequencer tracks. CE `CMD_TIME=15` (`Hemmung.cpp/.h`, build 2147) |
 | Solide | ゾリーデ | Solide | Blindfold swordsman ("solid") | ⬜ | Robust read validation |
 | Jung | ユング | Jung | Curious demon child ("young") | ⬜ | Experimental / sandbox features |
 | Zart | ツァルト | Zart | "Lingering Shadow", spatial transference | ⬜ | Memory remap/relocate (note: Wirbel owns teleport) |

@@ -19,6 +19,7 @@
 #include "Tot.h"
 #include "Wirbel.h"
 #include "Laufen.h"
+#include "Hemmung.h"  // Hemmung::SetDilation/ResetDilation/GetSnapshot for time_* commands
 #include "Dunste.h"    // Dunste::SetEnabled/SetSpeed/SetPreset/GetStatus for fly_*
 #include "Schlacht.h"  // Schlacht::SetEnabled/GetStatus for seethrough_*
 #include "Solitar.h"   // Solitar::ResolveProtectBits for get_trainer_offsets
@@ -4474,6 +4475,75 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             data["active"]     = info.active;
             data["resolved"]   = info.resolved;
             return Renge::MakeResponse(id, data).dump();
+        }
+
+        // ── set_time_dilation / reset_time_dilation / get_time_state (Hemmung) ──
+        // Hold a reflected dilation float (global AWorldSettings::TimeDilation or
+        // per-pawn AActor::CustomTimeDilation) at an absolute value against per-tick
+        // game/Sequencer overwrites, via a re-assert worker. Each target surfaces
+        // (owner_addr,field_offset) for the same "Locate in GWorld" handoff the
+        // movement knobs use.
+        {
+            auto timeTargetId = [](const std::string& t) -> int32_t {
+                return (t == "global") ? Hemmung::DIL_GLOBAL
+                     : (t == "pawn")   ? Hemmung::DIL_PAWN : -1;
+            };
+            auto dilJson = [](const Hemmung::DilationInfo& d) {
+                json j;
+                j["resolved"] = d.resolved;
+                j["current"]  = d.current;
+                j["base"]     = d.base;
+                j["value"]    = d.value;
+                j["active"]   = d.active;
+                if (d.resolved && d.ownerAddr && d.fieldOffset >= 0) {
+                    j["owner_addr"]   = Renge::AddrToStr(d.ownerAddr);
+                    j["field_offset"] = d.fieldOffset;
+                    j["field_name"]   = d.fieldName;
+                }
+                return j;
+            };
+            if (cmd == Renge::CMD_SET_TIME_DILATION) {
+                std::string target = request.value("target", std::string("global"));
+                double value = request.value("value", 1.0);
+                int32_t tid = timeTargetId(target);
+                if (tid < 0) return Renge::MakeError(id, "Unknown time target: " + target).dump();
+                Sein::Info("PIPE:cmd", "set_time_dilation: target=%s value=%.4f",
+                           target.c_str(), value);
+                int32_t state = Hemmung::SetDilation(tid, value);
+                Hemmung::DilationInfo info{};
+                Hemmung::GetDilation(tid, info);
+                json data;
+                data["state"]  = state;                    // 1 active / negative TimeResult
+                data["code"]   = (state < 0) ? state : 0;
+                data["target"] = target;
+                data["dilation"] = dilJson(info);
+                return Renge::MakeResponse(id, data).dump();
+            }
+            if (cmd == Renge::CMD_RESET_TIME_DILATION) {
+                std::string target = request.value("target", std::string("global"));
+                int32_t tid = timeTargetId(target);
+                if (tid < 0) return Renge::MakeError(id, "Unknown time target: " + target).dump();
+                Sein::Info("PIPE:cmd", "reset_time_dilation: target=%s", target.c_str());
+                int32_t code = Hemmung::ResetDilation(tid);
+                Hemmung::DilationInfo info{};
+                Hemmung::GetDilation(tid, info);
+                json data;
+                data["code"]     = code;
+                data["target"]   = target;
+                data["dilation"] = dilJson(info);
+                return Renge::MakeResponse(id, data).dump();
+            }
+            if (cmd == Renge::CMD_GET_TIME_STATE) {
+                Hemmung::Snapshot snap{};
+                int32_t code = Hemmung::GetSnapshot(snap);
+                json data;
+                data["code"] = code;                       // 0 ok; negative TimeResult
+                json dils;
+                dils["global"] = dilJson(snap.dils[Hemmung::DIL_GLOBAL]);
+                dils["pawn"]   = dilJson(snap.dils[Hemmung::DIL_PAWN]);
+                data["dilation"] = dils;
+                return Renge::MakeResponse(id, data).dump();
+            }
         }
 
         // ── fly_set / fly_get_state (Dunste) — no-gravity 3D flight ──
