@@ -3066,6 +3066,19 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             string gdScript = MovementScriptGenerator.GenerateGravityDirection(GravDirX, GravDirY, GravDirZ);
             if (await _aobMaker!.CreateAAScriptAsync(gdDesc, gdScript, autoActivate: false, group: CeGroupDll))
                 ok++;
+            // Time dilation (Hemmung) — one record per lever baked at the current
+            // slider value; stateful (tick = hold value, untick = RESET to natural).
+            var timeSpecs = new (string Desc, TimeDilationScriptGenerator.Target Target)[]
+            {
+                ($"Time: World ({TimeDilation:0.0##}x)",  TimeDilationScriptGenerator.Target.Global),
+                ($"Time: Player ({TimeDilation:0.0##}x)", TimeDilationScriptGenerator.Target.Pawn),
+            };
+            foreach (var s in timeSpecs)
+            {
+                string script = TimeDilationScriptGenerator.Generate(s.Target, TimeDilation);
+                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false, group: CeGroupDll))
+                    ok++;
+            }
             // Fly (Dunste) — one row per key preset (WASD often collides with the game's
             // own movement) + a Noclip toggle. DLL-driven; stateful on/off.
             var flySpecs = new List<(string Desc, string Script)>();
@@ -3079,10 +3092,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 if (await _aobMaker!.CreateAAScriptAsync(s.Desc, s.Script, autoActivate: false, group: CeGroupDll))
                     ok++;
             }
-            int total = specs.Length + moveSpecs.Length + 1 + flySpecs.Count;
-            StatusText = $"Added {ok}/{total} Teleport + Movement + Fly records to CE " +
-                         "(teleport = momentary; movement/fly = on/off toggle; bind CE hotkeys as you like).";
-            _log.Info($"Teleport + Movement + Fly actions -> CE via AOBMaker ({ok}/{total})");
+            int total = specs.Length + moveSpecs.Length + 1 + timeSpecs.Length + flySpecs.Count;
+            StatusText = $"Added {ok}/{total} Teleport + Movement + Time + Fly records to CE " +
+                         "(teleport = momentary; movement/time/fly = on/off toggle; bind CE hotkeys as you like).";
+            _log.Info($"Teleport + Movement + Time + Fly actions -> CE via AOBMaker ({ok}/{total})");
         }
         catch (Exception ex)
         {
@@ -3106,6 +3119,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 MoveSpeedMultiplier * 100, GravityMultiplier * 100,
                 SuperJumpHeightMultiplier * 100,
                 GravDirX, GravDirY, GravDirZ));
+            // Time dilation (Hemmung) — World + Player levers baked at the current slider.
+            rows.AddRange(TimeDilationScriptGenerator.BuildBatchRows(TimeDilation));
             // Fly (Dunste) — DLL-driven no-gravity flight on/off + noclip on/off.
             rows.AddRange(FlyScriptGenerator.BuildBatchRows());
             string ct = CheatTableBuilder.Build("Teleport — UE5CEDumper", rows);

@@ -55,9 +55,15 @@ preset buttons (Freeze / ¼× / ½× / 1× / 2×), Apply/Reset/↻, and an ON/OF
 X× (held; natural Y×)" readout. Wired via new `IDumpService`/`DumpService`
 `GetTimeStateAsync`/`SetTimeDilationAsync`/`ResetTimeDilationAsync` (models `TimeDilationKnob`/
 `TimeDilationSetResult`/`TimeState`) and `TeleportViewModel` commands; en.axaml strings; 6 new VM tests
-(2459 C# green). **REMAINING:** CE Lua/.CT generation via `CMD_TIME` (a `TimeDilationScriptGenerator` mirroring
-`MovementScriptGenerator`) + persistence; a dedicated opt-in function-side `FunctionCategory.Timing` bucket;
-and L2 (GAS cooldowns) / L3 (live FTimerManager), deferred by design. **NEEDS in-game verify** (Hemmung has no
+(2459 C# green). **CE Lua/.CT generation — SHIPPED (build 2150).**
+[TimeDilationScriptGenerator.cs](../ui/UE5DumpUI/Services/TimeDilationScriptGenerator.cs) mirrors
+`MovementScriptGenerator`: stateful `[ENABLE]`/`[DISABLE]` records poking the `CMD_TIME=15` mailbox — op `SET`
+(baked value) on tick, op `RESET` on untick (instanceAddr=op, ufuncAddr=target 0 global/1 pawn, paramsData
+double value); `CeMailboxLayout.CmdTime`+`TimeOpSet/Reset` added; `CeLuaHygiene`-compliant (DEBUG-gated `dbg`,
+errors surface, auto-close on clean success). Wired into the Teleport panel's "Add to CE" (AOBMaker push, 2
+records) + "Save .CT" batch (`BuildBatchRows` → World + Player rows); 6 new generator tests (2465 C# green).
+**REMAINING:** persistence; a dedicated opt-in function-side `FunctionCategory.Timing` bucket; and L2 (GAS
+cooldowns) / L3 (live FTimerManager), deferred by design. **NEEDS in-game verify** (Hemmung has no
 unit test — reflection needs a live game): attach, drag the slider / hit ½×, Apply → world runs at half speed
 and holds against slow-mo; Reset restores.
 

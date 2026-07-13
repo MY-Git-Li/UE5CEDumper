@@ -33,6 +33,12 @@ internal static class CeMailboxLayout
     public const int CmdForeground     = 12;  // CMD_FOREGROUND (Grausam — keep-foreground lock)
     public const int CmdQueryPtr       = 13;  // CMD_QUERY_PTR (resolve GWorld / GameEngine address)
     public const int CmdSeeThrough     = 14;  // CMD_SEETHROUGH (Schlacht — see-through occluders toggle)
+    public const int CmdTime           = 15;  // CMD_TIME      (Hemmung — time dilation hold)
+
+    // CMD_TIME op codes (Mimic.h TimeOp): instanceAddr = op, ufuncAddr = target
+    // (0 global / 1 pawn), paramsData[0..7] = double value (SET only).
+    public const int TimeOpSet   = 0;
+    public const int TimeOpReset = 1;
 
     // Shared mailbox poll timeout (ms) — the upper bound of the `while status ~= 1`
     // busy-wait loop in every emitted mailbox round-trip.

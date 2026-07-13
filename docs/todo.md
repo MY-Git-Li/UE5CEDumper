@@ -553,11 +553,15 @@ native-RE parts are exactly the reflection-invisible ones — cut them from v1.*
   slider + % + presets (Freeze/¼×/½×/1×/2×) + Apply/Reset/↻ + badge/readout; new `IDumpService`
   `Get/Set/ResetTimeDilation` (+ `TimeDilationKnob`/`TimeDilationSetResult`/`TimeState` models) + VM
   commands + en.axaml strings + 6 VM tests (2459 C# green).
-  **REMAINING for L1:** (1) **CE Lua/.CT generation** via the `CMD_TIME=15` mailbox (a
-  `TimeDilationScriptGenerator` mirroring `MovementScriptGenerator`; follow the `CeLuaHygiene` MUST-rule) —
-  so the dilation lock is usable from a standalone CE table without the UI; (2) **persistence**; (3)
-  **in-game verify** (Hemmung has NO unit test — reflection needs a live game): drag slider / ½× / Apply →
-  world runs at half speed + holds against slow-mo; Reset restores. Also NOT built (deferred):
+  **CE Lua/.CT generation — DONE (build 2150).** `TimeDilationScriptGenerator` (mirrors
+  `MovementScriptGenerator`): stateful `[ENABLE]`/`[DISABLE]` records poking `CMD_TIME=15` (op SET on tick, op
+  RESET on untick); `CeLuaHygiene`-compliant; wired into the Teleport panel's "Add to CE" (2 records: World +
+  Player) + "Save .CT" batch; 6 generator tests. So the dilation lock now works from a standalone CE table
+  without the UI.
+  **REMAINING for L1:** (1) **persistence** (re-apply the held dilation on reconnect / remember the last
+  value+target per game); (2) **in-game verify** (Hemmung has NO unit test — reflection needs a live game):
+  drag slider / ½× / Apply → world runs at half speed + holds against slow-mo; Reset restores. Also NOT built
+  (deferred):
   `SetGlobalTimeDilation`/`GetTimeSeconds` invoke wrappers, and a dedicated opt-in function-side
   `FunctionCategory.Timing` bucket (timer methods currently land in Utility at weight 3 — below threshold
   without a class bonus / Show-All).
