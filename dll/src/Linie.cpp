@@ -42,15 +42,21 @@ void RecordCall(uintptr_t ufunc, uint64_t nowMs) {
     auto& s = g_stats[ufunc];       // default-constructs on first sight
     if (s.count == 0) {
         s.firstSeq = seq;
-    } else {
+        s.lastMs = nowMs;
+    } else if (nowMs > s.lastMs) {
         // Inter-arrival gap since this function's previous fire — Welford update.
+        // Guarded on nowMs > lastMs: multi-thread PE can deliver two fires of the SAME
+        // ufunc out of timestamp order (nowMs is stamped before the g_mu lock), and an
+        // unsigned nowMs - s.lastMs would underflow to a ~1.8e19 gap that poisons the
+        // Welford mean/cv for the rest of the window. Skip the reordered sample and don't
+        // let it lower the base. (L5)
         double gap = static_cast<double>(nowMs - s.lastMs);
         s.gaps += 1;
         double delta = gap - s.mean;
         s.mean += delta / static_cast<double>(s.gaps);
         s.m2   += delta * (gap - s.mean);
+        s.lastMs = nowMs;
     }
-    s.lastMs = nowMs;
     ++s.count;
 }
 

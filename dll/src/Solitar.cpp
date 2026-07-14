@@ -340,13 +340,20 @@ void WorkerLoop() {
     LOG_INFO("GodMode: re-assert worker stopped");
 }
 
-// Start the worker if not already running. Holds s_workerMutex (NOT s_mutex).
-void StartWorker() {
-    std::lock_guard<std::mutex> lk(s_workerMutex);
+// Start/stop the worker. The *Locked cores assume the caller already holds
+// s_workerMutex, so SetGodMode can decide start-vs-stop under the SAME hold as the
+// state mutate — concurrent ON/OFF (pipe SetGodMode + CE-mailbox CMD_PROTECT) then
+// can't join a wanted worker or leave an orphan (audit #8 discipline, retrofitted). (L1)
+void StartWorkerLocked() {
     if (Tot::ShutdownRequested()) return;   // don't (re)spawn during the shutdown window (M5)
     if (s_worker.joinable()) return;   // already running
     s_workerStop.store(false);
     s_worker = std::thread(WorkerLoop);
+}
+void StopWorkerLocked() {
+    if (!s_worker.joinable()) return;
+    s_workerStop.store(true);
+    s_worker.join();   // s_workerMutex held; s_mutex must NOT be (worker locks it per tick)
 }
 
 } // namespace
@@ -381,16 +388,20 @@ int32_t ResolveProtectBits(std::vector<ProtectBit>& out) {
 }
 
 int32_t SetGodMode(bool on) {
+    // Hold s_workerMutex (outer) across the state mutate AND the start/stop decision, and
+    // decide on the FINAL s_wantGod (not the `on` arg), so a concurrent ON/OFF from the
+    // pipe + CE mailbox can't join a wanted worker or leave an orphan. s_mutex (inner) is
+    // released before the start/stop — the worker locks s_mutex per tick, so joining
+    // under it would deadlock. (L1)
+    std::lock_guard<std::mutex> wlk(s_workerMutex);
     int32_t rc;
     {
         std::lock_guard<std::mutex> lk(s_mutex);
         s_wantGod.store(on);
         rc = ApplyGodNowLocked(/*verbose=*/true);
     }
-    // Start/stop the worker OUTSIDE s_mutex — StopWorker() joins a thread that
-    // itself locks s_mutex, so joining under s_mutex would deadlock.
-    if (on) StartWorker();
-    else    StopWorker();
+    if (s_wantGod.load()) StartWorkerLocked();
+    else                  StopWorkerLocked();
     LOG_INFO("GodMode: set %s -> rc=%d (want=%d)", on ? "ON" : "OFF", rc,
              s_wantGod.load() ? 1 : 0);
     return rc;
@@ -459,9 +470,7 @@ int32_t GetActorBool(uintptr_t obj, uintptr_t classAddr, const char* propName) {
 
 void StopWorker() {
     std::lock_guard<std::mutex> lk(s_workerMutex);
-    if (!s_worker.joinable()) return;
-    s_workerStop.store(true);
-    s_worker.join();
+    StopWorkerLocked();
 }
 
 } // namespace Solitar
