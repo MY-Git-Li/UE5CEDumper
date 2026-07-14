@@ -656,6 +656,12 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             _gravDirActive = false;
             ApplyMouseCursorState(-1);   // cursor badge back to Unknown
             ClearPovDisplay();
+            // Reset the Stealth card too — otherwise a reconnect (possibly to a DIFFERENT
+            // game) shows the old game's hold and Hold @0 would send its stale
+            // class::field. (L13)
+            _stealthCandidate = null;
+            StealthFieldText = "—";
+            (StealthState, StealthBadgeColor) = ("Off", "#999999");
         }
     }
 

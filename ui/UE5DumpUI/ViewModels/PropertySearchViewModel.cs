@@ -610,8 +610,10 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
             if (!ok) return;
         }
 
-        _xrefBatchCts?.Cancel();
+        var oldCts = _xrefBatchCts;          // dispose the prior run's CTS (L14)
         _xrefBatchCts = new CancellationTokenSource();
+        oldCts?.Cancel();
+        oldCts?.Dispose();
         var ct = _xrefBatchCts.Token;
         IsXrefBatchRunning = true;
         int done = 0, withFuncs = 0, cached = 0;
@@ -640,9 +642,14 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
             StatusText = $"Find Funcs done: {withFuncs}/{targets.Count} referenced by a function"
                        + (cached > 0 ? $" ({cached} cached)." : ".");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             StatusText = $"Find Funcs cancelled at {done}/{targets.Count}.";
+        }
+        catch (Exception ex)   // incl. a bare disconnect-OCE (token NOT cancelled) (L14)
+        {
+            _log.Error("Batch Find Funcs failed", ex);
+            StatusText = $"Find Funcs failed at {done}/{targets.Count}.";
         }
         finally { IsXrefBatchRunning = false; }
     }

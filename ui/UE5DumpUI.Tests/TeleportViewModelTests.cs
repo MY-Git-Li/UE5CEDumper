@@ -517,6 +517,31 @@ public class TeleportViewModelTests
         Assert.Equal(0, fake.ResetFieldCalls);
     }
 
+    // Regression for audit #3 L13: SetConnected(false) reset every card badge EXCEPT the
+    // Stealth card, so a reconnect (possibly to a different game) showed a stale hold.
+    [Fact]
+    public async Task Disconnect_resets_stealth_card()
+    {
+        var fake = new FakeDumpService
+        {
+            NextStealthCandidates = new List<StealthCandidate>
+            {
+                new() { ClassName = "BP_Enemy_C", FieldName = "Awareness" },
+            },
+            NextForce = new() { Held = 1, Resolved = true },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+        await vm.DetectStealthMeterCommand.ExecuteAsync(null);
+        await vm.HoldStealthCommand.ExecuteAsync(null);
+        Assert.Equal("Holding @0", vm.StealthState);
+
+        vm.SetConnected(false);
+
+        Assert.Equal("Off", vm.StealthState);
+        Assert.Equal("—", vm.StealthFieldText);
+    }
+
     [Fact]
     public async Task HoldStealth_zero_held_shows_not_found()
     {

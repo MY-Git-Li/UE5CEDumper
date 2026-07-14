@@ -1250,7 +1250,9 @@ public partial class SnapshotViewModel : ViewModelBase
                 $"(sampled {sampledObjects:N0} -> {SnapshotFormat.Bytes(sampledBytes)}; " +
                 $"scope={dataType} family={family} gameOnly={gameOnly} noise={autoSkipNoise} native={includeNative})");
         }
-        catch (OperationCanceledException) { EstimateText = "Estimate cancelled."; }
+        // Only a genuine user cancel (our token) reads as "cancelled"; a bare
+        // disconnect-OCE (token NOT cancelled) falls through to "failed". (L15)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { EstimateText = "Estimate cancelled."; }
         catch (Exception ex)
         {
             _log.Error(Constants.LogCatView, "Snapshot: size estimate failed", ex);

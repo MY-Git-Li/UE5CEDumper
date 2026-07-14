@@ -1935,6 +1935,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     _sessionEpoch++;
                     _proxyConfirmTimer?.Dispose();
                     _proxyConfirmTimer = null;
+                    LiveFuncs.ResetOnDisconnect();   // clear stuck "recording" UI state (L16)
                 }
             });
         };
