@@ -722,10 +722,17 @@ public partial class SnapshotViewModel : ViewModelBase
                             if (chunk.Scanned == 0 || offset >= chunk.Total) break;
                         }
                     }
-                    // Swallow cancellation (real ct OR consumer-triggered) — the consumer
-                    // surfaces the real fault; non-cancel exceptions propagate out + fault
-                    // the producer task, which WhenAll surfaces.
-                    catch (OperationCanceledException) { }
+                    // Swallow cancellation ONLY when OUR token actually cancelled it — a
+                    // genuine user Cancel/Stop (ct→lct) or the consumer's linked.Cancel() on
+                    // a write failure. A pipe DISCONNECT mid-chunk surfaces as a *bare*
+                    // OperationCanceledException (PipeClient completes pending requests via
+                    // TrySetCanceled() with NO token) while lct is NOT cancelled — that must
+                    // NOT be swallowed: letting it fault the producer makes Task.WhenAll
+                    // rethrow, so CompleteSnapshotAsync (which would mark the row usable) is
+                    // skipped and the outer catch deletes the partial. Swallowing it would
+                    // finalise a half-captured snapshot as is_usable=1 (the column default),
+                    // poisoning SPC/Pivot/diff with a truncated-but-"complete" dataset.
+                    catch (OperationCanceledException) when (lct.IsCancellationRequested) { }
                     finally { channel.Writer.TryComplete(); }
                 }, lct);
 

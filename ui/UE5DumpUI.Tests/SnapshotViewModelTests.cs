@@ -142,6 +142,64 @@ public class SnapshotViewModelTests : IDisposable
         Assert.Empty(await _store.ListSnapshotsAsync(ct));   // the partial snapshot was deleted
     }
 
+    // Simulates a pipe DISCONNECT mid-capture: delivers one chunk, then the second
+    // fetch throws a BARE OperationCanceledException (no token) WITHOUT the capture
+    // token being cancelled — exactly how PipeClient surfaces a disconnect
+    // (DisconnectAsync/Dispose complete pending requests via TrySetCanceled() with no
+    // token). The producer must NOT treat this as a clean cancel.
+    private sealed class DisconnectingCaptureStub : StubDumpService
+    {
+        public override Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default)
+            => Task.FromResult(100);
+
+        public override Task<SnapshotChunkResult> SnapshotChunkAsync(
+            string dataType, bool gameOnly, int offset, int limit,
+            bool nativeC = false, bool autoSkipNoise = true,
+            string numericFamily = "Any", CancellationToken ct = default)
+        {
+            if (offset == 0)
+            {
+                var r = new SnapshotChunkResult { Total = 100, Scanned = 2 };
+                var o = new SnapshotCapturedObject
+                {
+                    Index = 0, Addr = "0x0", Name = "Obj_0",
+                    ClassName = "BP_Thing_C", OuterClassName = "World",
+                    Path = "/Game/Map.Map:PersistentLevel.Obj_0",
+                };
+                o.Fields.Add(new SnapshotCapturedField { Name = "A", Type = "IntProperty", Hex = "01000000" });
+                r.Objects.Add(o);
+                return Task.FromResult(r);
+            }
+            // Disconnect: a bare OCE while the capture token is NOT cancelled.
+            throw new OperationCanceledException();
+        }
+    }
+
+    // Regression for audit #3 H1: a pipe disconnect mid-capture used to be swallowed by
+    // the producer's unfiltered catch, so the half-captured snapshot was finalised
+    // is_usable=1 (the column default) and read downstream as a complete dataset. The
+    // fix filters that catch on lct.IsCancellationRequested, so a bare disconnect-OCE
+    // now faults the producer, CompleteSnapshotAsync is skipped, and the partial is
+    // deleted — never left usable.
+    [Fact]
+    public async Task Capture_DisconnectMidStream_DoesNotSaveUsablePartial()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dump = new DisconnectingCaptureStub();
+        var vm = new SnapshotViewModel(dump, _store, new MockLoggingService())
+        {
+            SelectedScope = "NumericNoByte", GameOnly = true, Label = "disc",
+        };
+        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "01D9ABCDEF012345" });
+
+        await vm.CaptureCommand.ExecuteAsync(null);
+
+        Assert.False(vm.IsCapturing);
+        // No snapshot may survive as usable — the truncated partial is deleted, not
+        // finalised. (Before the fix this list held one usable, truncated snapshot.)
+        Assert.Empty(await _store.ListSnapshotsAsync(ct));
+    }
+
     [Fact]
     public async Task Capture_StreamsAllChunks_PersistsWithCorrectCounts()
     {
