@@ -93,7 +93,7 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ⚠️ = partially-confirmed (claim refined during verification — see the item's **Note**).
 
-**Progress:** ✅ **H1 FIXED** (commit `452d3ff`, build 2182, +1 regression test — 2526 green). Remaining scheduled: 9 MED + 13 LOW.
+**Progress:** ✅ **H1 FIXED** (`452d3ff`) · ✅ **M7 FIXED** (`1b108a9`, +1 test — 2527 green). Remaining scheduled: 8 MED + 13 LOW.
 
 ---
 
@@ -183,6 +183,15 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 - **Where:** [`dll/src/Fern.cpp:757-761`](../dll/src/Fern.cpp:757), [`dll/src/Fern.cpp:497-503`](../dll/src/Fern.cpp:497), [`dll/src/Solide.cpp:38`](../dll/src/Solide.cpp:38), [`dll/src/Solide.cpp:281-304`](../dll/src/Solide.cpp:281), [`dll/src/Frieren.cpp:495`](../dll/src/Frieren.cpp:495), [`dll/src/Renge.h:124-128`](../dll/src/Renge.h:124)
 
 ### M7 — Auto-snapshot loop wedges (stuck enabled, manual buttons disabled) on disconnect-OCE
+
+> **✅ FIXED — commit `1b108a9` (build 2183).** The outer OCE catch now reports a disconnect (our token
+> NOT cancelled) as `Failed` instead of `Cancelled`, so the auto-loop routes to `case Failed` →
+> `StopAutoSnapshot()` and stops cleanly; `case Cancelled` also calls `StopAutoSnapshot()` defensively.
+> **Also hardened the H1 family:** the partial delete+reclaim is factored into a `RemovePartialAsync` local
+> and now runs on the generic `catch (Exception)` too, so a non-OCE mid-capture failure (unexpected pipe
+> death → `IOException`, or a between-chunks disconnect → `InvalidOperationException`) can no longer leave a
+> usable `is_usable=1` partial. Regression test `AutoSnapshot_DisconnectMidCapture_StopsLoopWithoutWedge`
+> (new `internal AutoLoopTaskForTests` hook drives the real loop).
 
 **🟠 MEDIUM** · Effort **S** · Risk **low** · *confirmed* · Module: SnapshotViewModel (CaptureCoreAsync outer catch + RunAutoLoopAsync)
 

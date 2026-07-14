@@ -61,10 +61,8 @@ the row here when it ships.
   > persist), and an off-switch exists (reconnect → `reset_all_fields`, or game restart). The real disconnect
   > defect here is **M4**, which stays scheduled.
 
-- **[MED] Snapshot/Proxy/Teleport/PropertySearch UI lifecycle + rule fixes (M7–M10)** —
-  Effort: **S–M** each · Risk: low. **M7** auto-snapshot loop wedges (stuck enabled, manual buttons
-  disabled) on disconnect-OCE — add the `when (ct.IsCancellationRequested)` filter at `SnapshotViewModel.cs:844`
-  so it routes to `case Failed` → `StopAutoSnapshot()`; **M8** LKG proxy-confirm 20s timer records a *crashed*
+- **[MED] Snapshot/Proxy/Teleport/PropertySearch UI lifecycle + rule fixes (M8–M10)** —
+  Effort: **S–M** each · Risk: low. **M8** LKG proxy-confirm 20s timer records a *crashed*
   proxy on a later unrelated reconnect (checks only current `IsConnected`, never session identity; never
   disposed on early-return / disconnect / in `Dispose()`) — capture a session token at schedule time +
   re-check in the callback; **M9** experimental gate-off force-offs Foreground/Fly/SeeThrough but **not** an
@@ -72,7 +70,13 @@ the row here when it ships.
   teardown block; **M10** PropertySearch ResultFilter uses one whole-string `Contains` (no space=AND, no
   `KeywordSearchMemory`) — the only client filter box missed by the b2088 unification; rewrite on
   `ObjectTreeFilter.MatchesAllTerms` + wire keyword memory + `AutoCompleteBox`. *Parent:
-  audit-2026-07-14-findings §M7–M10.*
+  audit-2026-07-14-findings §M8–M10.*
+  > **✅ DONE — M7** (SHIPPED commit `1b108a9`, build 2183). Disconnect now reports `Failed` (not
+  > `Cancelled`), so the auto-loop stops via `case Failed` instead of wedging; `case Cancelled` also stops
+  > defensively; the partial delete+reclaim (`RemovePartialAsync`) now also runs on the generic
+  > `catch (Exception)`, closing the non-OCE (IOException/InvalidOperationException) H1 sibling hole.
+  > Regression test `AutoSnapshot_DisconnectMidCapture_StopsLoopWithoutWedge`; 2527 green. *Delete after the
+  > audit batch is merged to main.*
 
 - **[LOW ×13] Audit #3 low-severity batch — scheduled (double-confirmed)** —
   Effort: **S–M** each · Risk: low. Grouped for a cleanup pass — see the findings doc for each fix shape:
