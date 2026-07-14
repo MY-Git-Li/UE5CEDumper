@@ -1448,6 +1448,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// the user can verify the auto-find picked the right meter before holding it.</summary>
     [ObservableProperty] private string _stealthFieldText = "—";
 
+    /// <summary>Badge text set while the meter is actively held at 0 — the single source
+    /// of truth for "a hold is live", so the experimental gate-off teardown knows to
+    /// release it. (M9)</summary>
+    private const string StealthHoldingState = "Holding @0";
+
     /// <summary>The auto-found candidate held at 0 (null until Detect finds one).</summary>
     private UE5DumpUI.Models.StealthCandidate? _stealthCandidate;
 
@@ -1505,7 +1510,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 StatusText = $"Hold failed: {(r.Held == 0 ? "no live instance matched" : $"DLL error {r.Code}")}.";
                 return;
             }
-            (StealthState, StealthBadgeColor) = ("Holding @0", "#4EC9B0");
+            (StealthState, StealthBadgeColor) = (StealthHoldingState, "#4EC9B0");
             StatusText = $"✓ Holding {c.FieldName} = 0 on {r.Held} instance(s) — you are minimal to detection that reads this meter.";
         }
         catch (Exception ex)
@@ -2916,6 +2921,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 _ = ForceForegroundLockOffCommand.ExecuteAsync(null);
                 if (_flyActive) _ = ResetFlyCommand.ExecuteAsync(null);
                 if (_seeThroughActive) _ = ResetSeeThroughCommand.ExecuteAsync(null);
+                // Release an active Solide stealth-meter hold too — its card is about to be
+                // hidden (IsVisible=ExperimentalEnabled), so a live re-assert worker would
+                // otherwise keep writing game memory with no visible way to stop it. (M9)
+                if (StealthState == StealthHoldingState) _ = ResetStealthCommand.ExecuteAsync(null);
             }
             UnregisterExperimentalHotkeys();
         }
