@@ -93,11 +93,22 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ⚠️ = partially-confirmed (claim refined during verification — see the item's **Note**).
 
+**Progress:** ✅ **H1 FIXED** (commit `452d3ff`, build 2182, +1 regression test — 2526 green). Remaining scheduled: 9 MED + 13 LOW.
+
 ---
 
 ## 🔴 HIGH
 
 ### H1 — Disconnect during snapshot capture silently truncates but saves as usable/Success
+
+> **✅ FIXED — commit `452d3ff` (build 2182).** Producer catch now filters on
+> `lct.IsCancellationRequested`; a bare disconnect-OCE faults the producer so `CompleteSnapshotAsync` is
+> skipped and the outer catch deletes the partial. Regression test
+> `Capture_DisconnectMidStream_DoesNotSaveUsablePartial`. **Verification note corrected:** `is_usable`
+> defaults to **1** and `CreateSnapshotAsync` never sets it, so an un-finalised row is *usable*, not
+> auto-cleaned — filtering the **outer** catch too would reroute the disconnect to the generic handler
+> (which does not delete) and re-leave a usable partial, so it was deliberately left unfiltered (that is
+> M7's separate concern).
 
 **🔴 HIGH** · Effort **M** · Risk **med** · *confirmed* · Module: SnapshotViewModel (CaptureCoreAsync producer/consumer) + PipeClient
 

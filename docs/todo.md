@@ -33,14 +33,15 @@ leaves. **Prefer fixing the shared root** (an `IsUserCancel(ct)` helper + a sing
 reset registry) over each site individually. Each ID below maps to a section in the findings doc; delete
 the row here when it ships.
 
-- **[HIGH] H1 — Snapshot silently truncated but saved as usable/Success on user Disconnect** —
-  Effort: **M** · Risk: med. Producer catch (`SnapshotViewModel.cs:728`) swallows the bare disconnect-OCE →
-  channel completes → `CompleteSnapshotAsync(..., usable:true)` (:786) + `outcome=Success` (:839); the
-  half-captured snapshot then poisons SPC/Pivot/diff as if complete. **Data-integrity — fix first.** Fix:
-  `catch (OCE) when (lct.IsCancellationRequested)` so the disconnect-OCE faults the producer + gate
-  finalize on the `capReached`/`diskLowReached` flags (NOT on "partial", which the legitimate cap/low-disk
-  keep path needs). Apply together with M7 (a propagated OCE must not be re-swallowed at :844).
-  *Parent: audit-2026-07-14-findings §H1.*
+- **✅ DONE — H1 — Snapshot silently truncated but saved as usable/Success on user Disconnect** —
+  SHIPPED commit `452d3ff` (build 2182). Producer catch now filters on `lct.IsCancellationRequested`, so a
+  bare disconnect-OCE faults the producer → `Task.WhenAll` rethrows → `CompleteSnapshotAsync` is skipped →
+  the existing outer OCE catch deletes the partial. **Verified `is_usable` defaults to 1** (so an
+  un-finalised row is *usable* — the fix relies on deletion, not on it being auto-cleaned); the outer catch
+  was deliberately **not** filtered (that would reroute to the non-deleting generic handler and re-leave a
+  usable partial — M7's separate concern). Regression test
+  `Capture_DisconnectMidStream_DoesNotSaveUsablePartial`; 2526 green. *Delete this row after the audit batch
+  is merged to main.* *Parent: audit-2026-07-14-findings §H1.*
 
 - **[MED] Solide + Schlacht disconnect/shutdown lifecycle (M1–M5 — the DLL cluster)** —
   Effort: **M** total · Risk: med. Five DLL-worker lifecycle bugs that share the "last client gone / shutdown"
