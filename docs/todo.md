@@ -43,15 +43,16 @@ the row here when it ships.
   `Capture_DisconnectMidStream_DoesNotSaveUsablePartial`; 2526 green. *Delete this row after the audit batch
   is merged to main.* *Parent: audit-2026-07-14-findings §H1.*
 
-- **[MED] M5 — UE5_Shutdown revive window (DLL; needs in-game verify)** —
-  Effort: **S–M** · Risk: med. `UE5_Shutdown` joins the re-assert workers *before* stopping the pipe, but
-  `Tot::RequestShutdown()` is set only inside `Fern::Stop` (at the very end), so during the window
-  `m_running` is still true and detached pipe handlers keep dispatching; no worker-spawning mutator has a
-  shutdown gate (`Solide::AddForce` checks only `g_cachedGWorld`) → a `force_field`/`set_time_dilation`/
-  `set_god_mode`/`set_movement_multiplier` landing in the window re-spawns a just-joined worker that nothing
-  joins again → orphan thread runs unmapped code after a later DLL unload. Fix: call `Tot::RequestShutdown()`
-  (or a dedicated `s_shuttingDown` latch) at the **top** of `UE5_Shutdown`, and gate the four spawning
-  mutators to return an error instead of `StartWorkerLocked` when it's set. *Parent: audit-2026-07-14-findings §M5.*
+- **[✅ ALL MEDIUMs DONE — 1 HIGH + 10 MED shipped on `dev`; DLL M1–M5 await in-game verify]** — the entire
+  audit-#3 HIGH+MEDIUM set is fixed. Remaining audit work = the **13 LOW** batch (below) + optional/cosmetic
+  items. Done-notes for the DLL cluster:
+  > **✅ DONE — M5 + M2 enable-recovery leak** (SHIPPED commit `61e1f7f`, build 2189, **needs in-game verify**).
+  > `Tot::RequestShutdown()` at the TOP of `UE5_Shutdown` + every module's `StartWorker*` gated on
+  > `Tot::ShutdownRequested()` (single spawn chokepoint) → no worker revives in the shutdown window; cleared
+  > by `Fern::Start`. **Adversarially verified** (5 lenses: no deadlock / lock-order / M3↔M5 / M4↔M5
+  > regression; `EnqueueInvoke` gates on Stark's hook flag not `g_shutdown` so the M3 un-hide survives). The
+  > same pass caught + fixed a leak in the M1/M2 enable-recovery (un-responsive re-enable orphaned the
+  > leftover). *Delete after in-game verify.*
   > **✅ DONE — M1/M2/M3** (SHIPPED commit `0f6f6e0`, build 2188, **needs in-game verify**). All Schlacht:
   > disable now joins the worker *before* snapshot/restore (M1); an unresponsive game thread keeps the hidden
   > record + recovers it on the next enable instead of discarding it (M2); `SetEnabled(false)` is called from

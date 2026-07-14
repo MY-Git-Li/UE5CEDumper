@@ -93,7 +93,7 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ⚠️ = partially-confirmed (claim refined during verification — see the item's **Note**).
 
-**Progress:** ✅ H1 · ✅ M7 · ✅ M8 · ✅ M9 · ✅ M10 · ✅ M4 (`7edea28`) · ✅ **M1/M2/M3 FIXED** (`0f6f6e0`, Schlacht — needs in-game verify). Remaining scheduled: **1 MED (M5 — UE5_Shutdown revive window) + 13 LOW.** DLL fixes (M1–M4) await in-game verification.
+**Progress:** ✅ H1 · ✅ M7 · ✅ M8 · ✅ M9 · ✅ M10 · ✅ M4 · ✅ M1/M2/M3 · ✅ **M5 FIXED** (`61e1f7f`, +M2 enable-recovery leak found by adversarial verify). **ALL 1 HIGH + 10 MEDIUM done.** Remaining scheduled: **13 LOW.** DLL fixes (M1–M5) await in-game verification (no crash/deadlock found by 5-lens adversarial pass).
 
 ---
 
@@ -136,9 +136,12 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ### M2 — Schlacht disable while game thread stalled discards the restore set, actors never un-hidden
 
-> **✅ FIXED — commit `0f6f6e0` (build 2188, with M1/M3).** When the game thread is unresponsive at disable,
-> `SetEnabled(false)` now **keeps** `hiddenActors` (no move/clear) + `WARN`s instead of discarding it; the
-> enable path un-hides any leftover set **before** clearing, so a later re-enable recovers them.
+> **✅ FIXED — commit `0f6f6e0` (build 2188, with M1/M3); enable-path leak fixed in `61e1f7f`.** When the game
+> thread is unresponsive at disable, `SetEnabled(false)` now **keeps** `hiddenActors` (no move/clear) + `WARN`s
+> instead of discarding it. **Adversarial-verify follow-up (`61e1f7f`):** the enable-recovery must only pull
+> the leftover out when the thread is responsive — otherwise it move/cleared the record but skipped the
+> (responsive-gated) un-hide, orphaning the actors; now it leaves `hiddenActors` intact when unresponsive so
+> the worker's first live tick self-heals on resume.
 
 **🟠 MEDIUM** · Effort **S** · Risk **low** · *confirmed* · Module: Schlacht (SeeThrough)
 
@@ -183,6 +186,14 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 - **Where:** [`dll/src/Tot.h:34`](../dll/src/Tot.h:34), [`dll/src/Tot.h:44-47`](../dll/src/Tot.h:44), [`dll/src/Tot.h:25`](../dll/src/Tot.h:25), [`dll/src/Fern.cpp:548-551`](../dll/src/Fern.cpp:548), [`dll/src/Fern.cpp:621`](../dll/src/Fern.cpp:621), [`dll/src/Fern.cpp:422`](../dll/src/Fern.cpp:422), [`dll/src/Aura.cpp:1339-1346`](../dll/src/Aura.cpp:1339), [`dll/src/Solide.cpp:253`](../dll/src/Solide.cpp:253), [`dll/src/Solide.cpp:295`](../dll/src/Solide.cpp:295)
 
 ### M5 — UE5_Shutdown joins hold workers before stopping the pipe; a mutator in the window respawns an unjoined worker
+
+> **✅ FIXED — commit `61e1f7f` (build 2189, NEEDS IN-GAME VERIFY).** `Tot::RequestShutdown()` now runs at the
+> TOP of `UE5_Shutdown` (also speeds the joins — in-flight scans bail), and every module's `StartWorker*` (the
+> single thread-spawn chokepoint) is gated on `Tot::ShutdownRequested()`, so no worker can (re)spawn during
+> the join→pipe-stop window; cleared by `Fern::Start` on re-enable. **Adversarially verified** (5 lenses, no
+> deadlock / lock-order / M3↔M5 or M4↔M5 regression): `EnqueueInvoke` gates on Stark's own hook flag (flipped
+> only by the later `Stark::Shutdown`), so setting `g_shutdown` early does NOT break the M3 un-hide. The same
+> pass also caught + fixed a leak in the M1/M2 enable-recovery (see M2).
 
 **🟠 MEDIUM** · Effort **M** · Risk **med** · *confirmed* · Module: Frieren (ExportAPI/UE5_Shutdown) ↔ Solide/Hemmung/Laufen/Solitar
 
