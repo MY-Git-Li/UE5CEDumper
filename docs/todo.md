@@ -19,6 +19,87 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## 🔎 Audit #3 fixes (build 2168 — 2026-07-14; full detail in [audit-2026-07-14-findings.md](audit-2026-07-14-findings.md))
+
+Third bug/leak audit of the post-b1872 code (Solide/Hemmung/Linie/Schlacht/Grausam + Auto-Snapshot/
+Dump-Explorer/Live-Funcs/Teleport-Stealth). 32 findings raised, verified against current code, then
+put through an **adversarial double-confirm** (skeptics mandated to refute; HIGH got 3 diverse lenses).
+**Net after double-confirm: 23 scheduled** (1 HIGH + 9 MED + 13 LOW) — **M6 and L6 refuted/dropped**,
+7 LOWs downgraded to optional cleanup. 0 regressions from audit #2. **Common root cause of 8 of the 10
+HIGH/MED: disconnect/shutdown lifecycle** — a *bare* `OperationCanceledException` from `PipeClient`
+(DisconnectAsync/Dispose `TrySetCanceled()` with **no token**, so only ambient `ct.IsCancellationRequested`
+distinguishes it from a real cancel), or a DLL worker whose state isn't reset/restored when the last client
+leaves. **Prefer fixing the shared root** (an `IsUserCancel(ct)` helper + a single `OnLastClientGone()`
+reset registry) over each site individually. Each ID below maps to a section in the findings doc; delete
+the row here when it ships.
+
+- **[HIGH] H1 — Snapshot silently truncated but saved as usable/Success on user Disconnect** —
+  Effort: **M** · Risk: med. Producer catch (`SnapshotViewModel.cs:728`) swallows the bare disconnect-OCE →
+  channel completes → `CompleteSnapshotAsync(..., usable:true)` (:786) + `outcome=Success` (:839); the
+  half-captured snapshot then poisons SPC/Pivot/diff as if complete. **Data-integrity — fix first.** Fix:
+  `catch (OCE) when (lct.IsCancellationRequested)` so the disconnect-OCE faults the producer + gate
+  finalize on the `capReached`/`diskLowReached` flags (NOT on "partial", which the legitimate cap/low-disk
+  keep path needs). Apply together with M7 (a propagated OCE must not be re-swallowed at :844).
+  *Parent: audit-2026-07-14-findings §H1.*
+
+- **[MED] Solide + Schlacht disconnect/shutdown lifecycle (M1–M5 — the DLL cluster)** —
+  Effort: **M** total · Risk: med. Five DLL-worker lifecycle bugs that share the "last client gone / shutdown"
+  root: **M1** Schlacht disable↔Tick race repopulates `hiddenActors` after restore → walls permanently
+  invisible (fix: join worker *before* restore); **M2** Schlacht disable while game-thread stalled discards
+  the restore set (fix: keep `hiddenActors` populated + retry when responsive); **M3** Schlacht never
+  un-hides on pipe-disconnect or `UE5_Shutdown` (fix: call `SetEnabled(false)` from Fern last-client cleanup
+  + shutdown — note the CE-Lua Disable path *does* already restore); **M4** the shared `Tot::g_perCommand`
+  cancel latch makes `FindInstancesByClass` return empty every Solide worker tick → hold silently dead the
+  whole disconnected window (fix: hold-worker instance-resolution must ignore `g_perCommand`, honour only
+  `g_shutdown`); **M5** `UE5_Shutdown` joins workers *before* stopping the pipe with no shutdown gate on the
+  mutators → a `force_field`/`set_time_dilation`/… in the window respawns an unjoined worker (fix:
+  `Tot::RequestShutdown()` at the *top* of shutdown + gate the four spawning mutators). *Parent:
+  audit-2026-07-14-findings §M1–M5.*
+  > **~~M6~~ dropped by double-confirm** — "Solide hold unstoppable after UI crash" is working-as-designed:
+  > hold persistence across disconnect is deliberate and family-uniform (Solitar/Laufen/Hemmung/Wirbel also
+  > persist), and an off-switch exists (reconnect → `reset_all_fields`, or game restart). The real disconnect
+  > defect here is **M4**, which stays scheduled.
+
+- **[MED] Snapshot/Proxy/Teleport/PropertySearch UI lifecycle + rule fixes (M7–M10)** —
+  Effort: **S–M** each · Risk: low. **M7** auto-snapshot loop wedges (stuck enabled, manual buttons
+  disabled) on disconnect-OCE — add the `when (ct.IsCancellationRequested)` filter at `SnapshotViewModel.cs:844`
+  so it routes to `case Failed` → `StopAutoSnapshot()`; **M8** LKG proxy-confirm 20s timer records a *crashed*
+  proxy on a later unrelated reconnect (checks only current `IsConnected`, never session identity; never
+  disposed on early-return / disconnect / in `Dispose()`) — capture a session token at schedule time +
+  re-check in the callback; **M9** experimental gate-off force-offs Foreground/Fly/SeeThrough but **not** an
+  active Solide Stealth Hold @0, stranding an invisible write worker — call `ResetStealthAsync` in the
+  teardown block; **M10** PropertySearch ResultFilter uses one whole-string `Contains` (no space=AND, no
+  `KeywordSearchMemory`) — the only client filter box missed by the b2088 unification; rewrite on
+  `ObjectTreeFilter.MatchesAllTerms` + wire keyword memory + `AutoCompleteBox`. *Parent:
+  audit-2026-07-14-findings §M7–M10.*
+
+- **[LOW ×13] Audit #3 low-severity batch — scheduled (double-confirmed)** —
+  Effort: **S–M** each · Risk: low. Grouped for a cleanup pass — see the findings doc for each fix shape:
+  DLL — **L1** Solitar `SetGodMode` never got the audit-#8 start/stop-race retrofit; **L2** Solide
+  `FR_ERR_WEAK_PTR` dead code → silent futile job (partial: also covers wrong-type refusal); **L3** Solide
+  substring-class + fuzzy `FindField` fallback can force a same-prefix numeric field (fix: exact match);
+  **L4** Solide representative-base restore writes a foreign base to every instance; **L5** Linie Welford gap
+  underflows on out-of-order multi-thread PE timestamps; **L8** Grausam `GetWindowTextW` under `g_mutex` can
+  hang the pipe thread (it's dead code — delete); **L10** Grausam misses post-enable windows + no shutdown
+  teardown (lock latched on); **L12** Fern `invoke_function` `str_params` malloc leak on malformed JSON.
+  UI — **L13** Stealth card state survives disconnect; **L14** `_xrefBatchCts` replaced without Dispose +
+  bare-OCE (also InstanceFinder); **L15** EstimateSize bare-OCE mislabel; **L16** LiveFuncs `IsRecording` not
+  reset on disconnect + auto-stop race; **L17** ObjectTree `FilterText=""` without `Flush()` drops a
+  just-typed keyword. *Parent: audit-2026-07-14-findings §L1–L17.*
+
+- **[optional / cosmetic] Audit #3 downgraded items (do only if touching the file)** —
+  Effort: **S** each · Risk: low. Double-confirm judged these real-but-not-worth-a-dedicated-fix (no
+  incorrect/harmful outcome): **~~L6~~** DROPPED (Welford `m2` provably ≥ 0 → NaN unreachable + tolerant
+  downstream); **L7** Linie post-Reset phantom row (wiped by next `StartRecording`); **L9** Grausam per-frame
+  global `ClipCursor(nullptr)` (deliberate release tradeoff; niche third-party case); **L11** Schlacht raw
+  `AActor*` across GC (SEH-guarded, self-corrects next tick, no crash); **L18** DetectStats missing detach has
+  zero functional effect (no `OnSelectedResultChanged`) — only the no-`ct` usability point stands; **L19**
+  LiveFuncs `Clear()` inverted detach order (cosmetic); **L20** Dump All export no `CancellationToken`
+  (usability gap, output correct); **L21** (INFO) DumpExplorer reimplements space=AND (semantically
+  identical — style only). *Parent: audit-2026-07-14-findings §L6–L21 (see per-item ⬇/⛔ banners).*
+
+-----
+
 ## ▶ Next up (genuinely actionable now)
 
 - **Multi-pipe Phase 1 — residual verification (low priority; lane split SHIPPED PR #396)** —
