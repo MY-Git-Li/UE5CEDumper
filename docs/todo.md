@@ -89,19 +89,12 @@ the row here when it ships.
   > Regression test `AutoSnapshot_DisconnectMidCapture_StopsLoopWithoutWedge`; 2527 green. *Delete after the
   > audit batch is merged to main.*
 
-- **[LOW ×13] Audit #3 low-severity batch — scheduled (double-confirmed)** —
-  Effort: **S–M** each · Risk: low. Grouped for a cleanup pass — see the findings doc for each fix shape:
-  DLL — **L1** Solitar `SetGodMode` never got the audit-#8 start/stop-race retrofit; **L2** Solide
-  `FR_ERR_WEAK_PTR` dead code → silent futile job (partial: also covers wrong-type refusal); **L3** Solide
-  substring-class + fuzzy `FindField` fallback can force a same-prefix numeric field (fix: exact match);
-  **L4** Solide representative-base restore writes a foreign base to every instance; **L5** Linie Welford gap
-  underflows on out-of-order multi-thread PE timestamps; **L8** Grausam `GetWindowTextW` under `g_mutex` can
-  hang the pipe thread (it's dead code — delete); **L10** Grausam misses post-enable windows + no shutdown
-  teardown (lock latched on); **L12** Fern `invoke_function` `str_params` malloc leak on malformed JSON.
-  UI — **L13** Stealth card state survives disconnect; **L14** `_xrefBatchCts` replaced without Dispose +
-  bare-OCE (also InstanceFinder); **L15** EstimateSize bare-OCE mislabel; **L16** LiveFuncs `IsRecording` not
-  reset on disconnect + auto-stop race; **L17** ObjectTree `FilterText=""` without `Flush()` drops a
-  just-typed keyword. *Parent: audit-2026-07-14-findings §L1–L17.*
+- **[✅ ALL 13 LOWs DONE] Audit #3 low-severity batch** — SHIPPED on `dev` in four commits:
+  UI L13–L17 (`8bd33f8`, +2 tests), Solide L2/L3/L4 (`408fd2d`), DLL L1/L5/L8/L10/L12 (`7f3898f`), and the
+  adversarial-verify followups (`3362636`: L4 prune-guard for >256-instance churn + L10 GFW-hook re-subclass
+  race). The DLL LOWs (L1–L12) **await in-game verify**. With the HIGH + all 10 MED, the entire scheduled
+  audit-#3 set is now fixed — only the optional/cosmetic downgrades below remain. *Delete after batch merged +
+  DLL in-game verified. Parent: audit-2026-07-14-findings §L1–L17.*
 
 - **[optional / cosmetic] Audit #3 downgraded items (do only if touching the file)** —
   Effort: **S** each · Risk: low. Double-confirm judged these real-but-not-worth-a-dedicated-fix (no

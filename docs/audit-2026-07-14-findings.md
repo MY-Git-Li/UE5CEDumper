@@ -93,7 +93,11 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ⚠️ = partially-confirmed (claim refined during verification — see the item's **Note**).
 
-**Progress:** ✅ H1 · ✅ M7 · ✅ M8 · ✅ M9 · ✅ M10 · ✅ M4 · ✅ M1/M2/M3 · ✅ **M5 FIXED** (`61e1f7f`, +M2 enable-recovery leak found by adversarial verify). **ALL 1 HIGH + 10 MEDIUM done.** Remaining scheduled: **13 LOW.** DLL fixes (M1–M5) await in-game verification (no crash/deadlock found by 5-lens adversarial pass).
+**Progress:** ✅ **ALL SCHEDULED DONE — 1 HIGH + 10 MEDIUM + 13 LOW.** UI LOWs L13–L17 (`8bd33f8`); Solide LOWs
+L2/L3/L4 (`408fd2d`); DLL LOWs L1/L5/L8/L10/L12 (`7f3898f`); adversarial-verify followups (`3362636`: L4
+prune-guard + L10 GFW-hook race). Two adversarial-verify passes (DLL M-cluster + DLL LOW batch) each caught a
+real bug that was fixed. **Remaining = only the 7 optional/cosmetic downgrades (L6 dropped; L7/L9/L11/L18/L19/L20/L21).**
+DLL fixes (M1–M5 + L1–L12) await in-game verification.
 
 ---
 
