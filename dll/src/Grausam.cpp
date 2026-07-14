@@ -87,8 +87,14 @@ HWND WINAPI HookedGetForegroundWindow() {
         // The cached window went invalid (e.g. a fullscreen toggle recreated it) —
         // subclass any new top-level game windows so WM_ACTIVATEAPP rewriting covers
         // them too, not just the ones present at enable. Runs only on this rare re-find;
-        // SubclassEnumProc skips already-subclassed windows. (L10)
-        SubclassAllGameWindows();
+        // SubclassEnumProc skips already-subclassed windows. Non-blocking try_lock on
+        // g_mutex serializes with the enable-path subclass so concurrent GFW-hook threads
+        // can't race SubclassEnumProc's check-then-act (which would corrupt the saved
+        // WNDPROC), and the hot hook never blocks. (L10)
+        if (g_mutex.try_lock()) {
+            SubclassAllGameWindows();
+            g_mutex.unlock();
+        }
     }
     return (gw && ::IsWindow(gw)) ? gw : real;
 }

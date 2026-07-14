@@ -293,9 +293,15 @@ void ApplyJobLocked(Job& job, bool restore, bool* drifted) {
         job.sampleOffset = sampleOffset;
         job.lastRefusal = refusal;
         // Prune per-instance bases for owners no longer in the live pool — bounds the map
-        // and avoids restoring a stale base to a GC-reused address. (L4)
-        for (auto it = job.baseByOwner.begin(); it != job.baseByOwner.end(); )
-            it = seen.count(it->first) ? std::next(it) : job.baseByOwner.erase(it);
+        // and avoids restoring a stale base to a GC-reused address. Only when the pool was
+        // NOT capped: a capped result is a shifting first-N window, so an absent owner may
+        // be live-but-past-cap (not gone) — dropping its true base then recapturing our
+        // own forced value later would corrupt the restore. Below the cap the pool is
+        // complete, so absent == genuinely gone. (L4)
+        if (static_cast<int32_t>(rset.results.size()) < Grimoire::SOLIDE_MAX_INSTANCES) {
+            for (auto it = job.baseByOwner.begin(); it != job.baseByOwner.end(); )
+                it = seen.count(it->first) ? std::next(it) : job.baseByOwner.erase(it);
+        }
     }
 }
 
