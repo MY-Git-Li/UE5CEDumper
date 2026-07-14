@@ -28,6 +28,7 @@
 #include "../src/Neu.h"     // UEnum::Names layout parse (legacy TArray vs UE5.6+ FNameData)
 #include "../src/GraphPath.h"   // Pure BFS shortest-path core ("Locate in GWorld")
 #include "../src/Solitar.h"     // GodMode FBoolProperty bit write (ApplyBoolBit, header-inline)
+#include "../src/Solide.h"      // Force-field / stealth-meter matcher (MatchStealthField, header-inline)
 #include "../src/Orden.h"       // Multi-value group scan: source-agnostic SDR matcher (MatchGroup)
 #include "../src/Ubel.h"        // Native-C scan P0: ComputeHoles / ComputeClassHoles / NormalizeGuessedTypeToProperty (inline, pure)
 #include "../src/Aura.h"        // IsEnginePackage (header-inline, pure) — engine/game package gate
@@ -2362,6 +2363,31 @@ static void Test_Solitar_MatchProtectionBool() {
     EXPECT("breplicates NOT matched", !Solitar::MatchProtectionBool("breplicates", p));
 }
 
+// ----- Solide::MatchStealthField (stealth/detection-meter field scorer) --------
+// A positive stem must score > 0; a config/limit name that merely CONTAINS a stem
+// must be demoted; unrelated names must score 0.
+
+static void Test_Solide_MatchStealthField() {
+    using Solide::MatchStealthField;
+    // Positive: detection/stealth vocabulary scores > 0.
+    EXPECT("visibility scores",   MatchStealthField("visibility") > 0);
+    EXPECT("detectionlevel scores", MatchStealthField("detectionlevel") > 0);
+    EXPECT("noiselevel scores",   MatchStealthField("noiselevel") > 0);
+    EXPECT("awareness scores",    MatchStealthField("awareness") > 0);
+    EXPECT("stealthmeter scores", MatchStealthField("stealthmeter") > 0);
+    EXPECT("concealment scores",  MatchStealthField("concealment") > 0);
+    EXPECT("suspicion scores",    MatchStealthField("suspicion") > 0);
+    // Negative demotion: a config/limit name ranks below the bare meter.
+    EXPECT("maxvisibility demoted below visibility",
+           MatchStealthField("maxvisibility") < MatchStealthField("visibility"));
+    EXPECT("detectionradius demoted below detectionlevel",
+           MatchStealthField("detectionradius") < MatchStealthField("detectionlevel"));
+    // Unrelated names: no positive signal.
+    EXPECT("health scores 0",   MatchStealthField("health") == 0);
+    EXPECT("velocity scores 0", MatchStealthField("velocity") == 0);
+    EXPECT("position scores 0", MatchStealthField("position") == 0);
+}
+
 // ----- Neu: UEnum::Names layout (legacy TArray vs UE5.6+ FNameData) -----------
 // Synthetic memory: register buffers at chosen virtual addresses; the read
 // callback serves bytes from registered ranges and FAILS for any unmapped
@@ -3062,6 +3088,7 @@ int main() {
     // Solitar GodMode — FBoolProperty single-bit read-modify-write
     Test_Solitar_ApplyBoolBit();
     Test_Solitar_MatchProtectionBool();
+    Test_Solide_MatchStealthField();
 
     // Neu — UEnum::Names layout: legacy TArray vs UE5.6+ FNameData (synthetic memory)
     Test_Neu_Legacy_Basic();

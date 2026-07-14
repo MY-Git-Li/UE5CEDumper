@@ -319,6 +319,56 @@ countdown float) or the **function** (the timer callback) driving an effect:
 
 -----
 
+## Hiding from enemies / forcing a discovered flag (Force field + Stealth Meter)
+
+Unreal has **no universal "enemies can't detect you" bool** — detection is per-game
+(a stealth/visibility meter, a `bIsInvisible` flag, a team id, a per-enemy target
+pointer). So instead of a magic toggle, this tool gives you a **discover-then-hold**
+workflow: find the game's own field, then force-and-hold it. Both features are
+behind the **Experimental** opt-in (they write to live gameplay objects).
+
+### Zero your stealth / visibility meter (Teleport → Stealth Meter card)
+
+1. Enable **Experimental features**, connect, and enter gameplay (a live pawn).
+2. Teleport tab → **Stealth Meter** card → **Detect meter**. It resolves the player
+   pawn + its owned components and keyword-scores numeric fields
+   (visibility / noise / detection / awareness / concealment). The readout shows the
+   field it locked onto (e.g. `BP_Player_C::Visibility = 0.73`) — **verify it's right**.
+3. **Hold @0** freezes that field at 0 across every live instance of its class, and
+   the DLL re-asserts it (write-on-drift) so the game can't refill it. **Reset** releases it.
+4. **Nothing found?** The game doesn't expose a reflected stealth meter — use the
+   Force workflow below on a field you find yourself.
+
+### Force any discovered field (Property Search → right-click → Force field)
+
+For a flag / meter / target pointer you locate yourself:
+
+1. **Property Search** for the field — e.g. `invisible`, `stealth`, `detect`,
+   `aggro`, `target`, `alert`, or a game-specific name. (Live Funcs / Related Objects
+   help you find *which* class and field.)
+2. Right-click the row → **Force field** (submenu appears when Experimental is on):
+   - **Force ON / OFF** — a `BoolProperty` (e.g. `bIsInvisible` → ON, `bIsAlerted` → OFF).
+   - **Force → null** — a strong `ObjectProperty` (e.g. an enemy's `TargetActor`); a
+     confirm warns that nulling a live pointer can crash if the game dereferences it.
+   - **Force value…** — a numeric field held at a value you enter.
+3. The hold applies to **all live instances of the row's class**. The bottom
+   **"Forced fields (N held)"** strip shows how many instances each hold is on —
+   **N = 0 means the class/field matched nothing right now** (an honest no-op signal;
+   enter combat / spawn the enemy and re-force). Remove a hold with **✕**, or **Clear all**.
+
+### Honest limits
+
+- **By-class, not per-instance.** A force hits *every* live instance of the class
+  (the N-held count shows it). For a player-only field that's usually 1; for a shared
+  enemy class it's all of them (often what you want).
+- **Only reflected fields.** Native (non-`UPROPERTY`) team ids / raw handles aren't
+  reachable this way — find them with the Native-C Value Scan and Freeze instead.
+- **Perception ≠ de-aggro.** Zeroing a visibility meter stops *new* detection that
+  reads it; an already-aggro'd enemy with a latched target may keep chasing.
+- **Single-player only** — these are client-side writes.
+
+-----
+
 ## Flattening save-data records into a clean Cheat Engine table
 
 A struct-heavy object — a save slot, a stats block, a `TMap` of mission records —

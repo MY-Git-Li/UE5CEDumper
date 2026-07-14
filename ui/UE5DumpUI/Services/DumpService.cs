@@ -2913,6 +2913,102 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    // === Force-field hold + stealth meter (Solide) ===
+
+    public async Task<ForceFieldResult> ForceFieldAsync(string className, string fieldName, string kind, double value = 0, bool on = false, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"]        = "force_field",
+            ["class_name"] = className,
+            ["field_name"] = fieldName,
+            ["kind"]       = kind,
+        };
+        if (kind == "bool") req["on"] = on;
+        else if (kind == "numeric") req["value"] = value;
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return new ForceFieldResult
+        {
+            Held     = res["held"]?.GetValue<int>() ?? 0,
+            Resolved = res["resolved"]?.GetValue<bool>() ?? false,
+            Code     = res["code"]?.GetValue<int>() ?? 0,
+        };
+    }
+
+    public async Task<int> ResetFieldAsync(string className, string fieldName, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"]        = "reset_field",
+            ["class_name"] = className,
+            ["field_name"] = fieldName,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return res["code"]?.GetValue<int>() ?? 0;
+    }
+
+    public async Task<int> ResetAllFieldsAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "reset_all_fields" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return res["code"]?.GetValue<int>() ?? 0;
+    }
+
+    public async Task<IReadOnlyList<ForcedFieldInfo>> GetForcedFieldsAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "get_forced_fields" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        var list = new List<ForcedFieldInfo>();
+        if (res["fields"] is JsonArray arr)
+        {
+            foreach (var f in arr)
+            {
+                if (f == null) continue;
+                list.Add(new ForcedFieldInfo
+                {
+                    ClassName   = f["class_name"]?.GetValue<string>() ?? "",
+                    FieldName   = f["field_name"]?.GetValue<string>() ?? "",
+                    Kind        = f["kind"]?.GetValue<string>() ?? "bool",
+                    Value       = f["value"]?.GetValue<double>() ?? 0,
+                    Held        = f["held"]?.GetValue<int>() ?? 0,
+                    OwnerAddr   = f["owner_addr"]?.GetValue<string>() ?? "",
+                    FieldOffset = f["field_offset"]?.GetValue<int>() ?? -1,
+                });
+            }
+        }
+        return list;
+    }
+
+    public async Task<IReadOnlyList<StealthCandidate>> FindStealthMeterAsync(int max = 8, CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "find_stealth_meter", ["max"] = max };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        var list = new List<StealthCandidate>();
+        if (res["candidates"] is JsonArray arr)
+        {
+            foreach (var c in arr)
+            {
+                if (c == null) continue;
+                list.Add(new StealthCandidate
+                {
+                    ClassName = c["class_name"]?.GetValue<string>() ?? "",
+                    ClassAddr = c["class_addr"]?.GetValue<string>() ?? "",
+                    FieldName = c["field_name"]?.GetValue<string>() ?? "",
+                    PropType  = c["prop_type"]?.GetValue<string>() ?? "",
+                    OwnerAddr = c["owner_addr"]?.GetValue<string>() ?? "",
+                    Current   = c["current"]?.GetValue<double>() ?? 0,
+                    Score     = c["score"]?.GetValue<int>() ?? 0,
+                });
+            }
+        }
+        return list;
+    }
+
     // === Fly (Dunste) — no-gravity keyboard-driven 3D flight ===
 
     public async Task<FlyStatus> FlySetAsync(bool? enable, double? speed, int? preset, bool? noclip, CancellationToken ct = default)

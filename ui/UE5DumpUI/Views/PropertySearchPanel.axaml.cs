@@ -40,10 +40,42 @@ public partial class PropertySearchPanel : UserControl
         // Inject the value-prompt callback: the VM stays View-free so it
         // remains unit-testable, while the dialog mechanics live here.
         vm.FreezeValuePrompt = PromptFreezeValueAsync;
+        // Force-field (Solide) dialogs — numeric value prompt + object-null confirm.
+        vm.ForceValuePrompt = PromptForceValueAsync;
+        vm.ForceNullConfirm = ConfirmForceNullAsync;
         // Probe AOBMaker once on attach so the Freeze button reflects
         // current state (cooldown inside the VM prevents pipe spam).
         _ = vm.RefreshAobMakerAvailabilityAsync();
+        // Reflect any holds already active in the DLL (e.g. from a prior session).
+        _ = vm.RefreshForcedFieldsAsync();
     }
+
+    private async System.Threading.Tasks.Task<double?> PromptForceValueAsync(PropertySearchMatch match)
+    {
+        // Reuse the Freeze value dialog (per-type validation), then parse the
+        // returned literal to the double the force_field command carries.
+        var dialog = new FreezeValueDialog(match);
+        Window? owner = null;
+        if (Avalonia.Application.Current?.ApplicationLifetime
+                is IClassicDesktopStyleApplicationLifetime desktop)
+            owner = desktop.MainWindow;
+        if (owner != null)
+            await dialog.ShowDialog(owner);
+        else
+            dialog.Show();
+        var literal = dialog.ValueLiteral;
+        if (string.IsNullOrWhiteSpace(literal)) return null;
+        return double.TryParse(literal, System.Globalization.NumberStyles.Any,
+                               System.Globalization.CultureInfo.InvariantCulture, out var v)
+            ? v : (double?)null;
+    }
+
+    private async System.Threading.Tasks.Task<bool> ConfirmForceNullAsync(PropertySearchMatch match)
+        => await ConfirmDialog.ShowAsync(
+            "Force object pointer to null?",
+            $"This nulls {match.ClassName}::{match.PropName} on every live instance and holds " +
+            "it null. If the game later dereferences that pointer it may crash. Continue?",
+            confirmText: "Force null", cancelText: "Cancel");
 
     private async System.Threading.Tasks.Task<string?> PromptFreezeValueAsync(PropertySearchMatch match)
     {

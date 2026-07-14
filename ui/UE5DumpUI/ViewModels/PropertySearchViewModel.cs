@@ -22,6 +22,7 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     private readonly ILoggingService _log;
     private readonly IAobMakerBridge? _aobMaker;
     private readonly IPlatformService? _platform;
+    private readonly IExperimentalGate? _experimentalGate;
 
     /// <summary>
     /// Cooldown for live AOBMaker availability re-checks so rapid grid
@@ -157,12 +158,16 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
 
     public PropertySearchViewModel(IDumpService dump, ILoggingService log,
                                    IAobMakerBridge? aobMaker = null,
-                                   IPlatformService? platform = null)
+                                   IPlatformService? platform = null,
+                                   IExperimentalGate? experimentalGate = null)
     {
         _dump = dump;
         _log = log;
         _aobMaker = aobMaker;
         _platform = platform;
+        _experimentalGate = experimentalGate;
+        if (_experimentalGate != null)
+            _experimentalGate.Changed += OnExperimentalGateChanged;
         ClassFilter = new ClassFacetFilter(ApplyResultFilter)
         {
             AutoDetectProvider = async names =>
@@ -289,6 +294,135 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
         StatusText = sent
             ? $"Freeze script created in CE: {description}"
             : "Freeze script not sent — AOBMaker rejected the request";
+    }
+
+    // ── Force field (Solide) — hold a discovered field across live instances ──
+
+    /// <summary>Whether the per-row Force actions are exposed. Gated behind the
+    /// shared Experimental toggle (like SeeThrough) — these are combat-affecting
+    /// live writes across a class's instances. When off the context submenu hides.</summary>
+    public bool ForceEnabled => _experimentalGate?.IsEnabled ?? false;
+
+    private void OnExperimentalGateChanged(object? sender, EventArgs e)
+        => OnPropertyChanged(nameof(ForceEnabled));
+
+    /// <summary>Active force-field holds (from get_forced_fields) — the "N held"
+    /// honesty list shown at the panel bottom.</summary>
+    public ObservableCollection<ForcedFieldInfo> ForcedFields { get; } = new();
+
+    [ObservableProperty] private bool _hasForcedFields;
+
+    /// <summary>View-injected numeric-value prompt (keeps the VM dialog-free /
+    /// testable). Returns the value, or null on cancel.</summary>
+    public Func<PropertySearchMatch, Task<double?>>? ForceValuePrompt { get; set; }
+
+    /// <summary>View-injected confirm for the higher-risk "Force → null" (nulling a
+    /// live object pointer the game may later dereference). Returns true to proceed.</summary>
+    public Func<PropertySearchMatch, Task<bool>>? ForceNullConfirm { get; set; }
+
+    [RelayCommand]
+    private Task ForceBoolOn(PropertySearchMatch? m) => ApplyForceAsync(m, "bool", on: true);
+
+    [RelayCommand]
+    private Task ForceBoolOff(PropertySearchMatch? m) => ApplyForceAsync(m, "bool", on: false);
+
+    [RelayCommand]
+    private async Task ForceNull(PropertySearchMatch? m)
+    {
+        if (m == null) return;
+        if (ForceNullConfirm != null && !await ForceNullConfirm(m)) return;
+        await ApplyForceAsync(m, "object_null");
+    }
+
+    [RelayCommand]
+    private async Task ForceNumeric(PropertySearchMatch? m)
+    {
+        if (m == null) return;
+        if (ForceValuePrompt == null) { StatusText = "Force value prompt not wired"; return; }
+        double? v;
+        try { v = await ForceValuePrompt(m); }
+        catch (Exception ex) { StatusText = $"Force dialog error: {ex.Message}"; return; }
+        if (v == null) return;   // cancelled
+        await ApplyForceAsync(m, "numeric", value: v.Value);
+    }
+
+    /// <summary>Force <paramref name="m"/>'s field to a value on all live instances
+    /// of its class and hold it (DLL force_field). Uses the concrete matched
+    /// <see cref="PropertySearchMatch.ClassName"/> (not the base defining class) so
+    /// the pool scan stays targeted.</summary>
+    private async Task ApplyForceAsync(PropertySearchMatch? m, string kind, double value = 0, bool on = false)
+    {
+        if (m == null || string.IsNullOrEmpty(m.ClassName) || string.IsNullOrEmpty(m.PropName)) return;
+        try
+        {
+            var r = await _dump.ForceFieldAsync(m.ClassName, m.PropName, kind, value, on);
+            if (r.Code < 0)
+                StatusText = $"Force {m.PropName}: DLL error {r.Code}.";
+            else if (r.Held == 0)
+                StatusText = $"Force {m.PropName}: 0 live instances of {m.ClassName} matched — nothing held.";
+            else
+            {
+                var what = kind == "bool" ? (on ? "ON" : "OFF")
+                         : kind == "object_null" ? "null"
+                         : value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                StatusText = $"✓ Holding {m.ClassName}::{m.PropName} = {what} on {r.Held} instance(s).";
+            }
+            await RefreshForcedFieldsAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Force {m.PropName} failed: {ex.Message}";
+            _log.Error($"PropertySearch Force({m.PropName}) failed", ex);
+        }
+    }
+
+    /// <summary>Re-read the active holds from the DLL into <see cref="ForcedFields"/>.</summary>
+    public async Task RefreshForcedFieldsAsync()
+    {
+        try
+        {
+            var fields = await _dump.GetForcedFieldsAsync();
+            ForcedFields.Clear();
+            foreach (var f in fields) ForcedFields.Add(f);
+            HasForcedFields = ForcedFields.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            _log.Error("PropertySearch RefreshForcedFields failed", ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RemoveForcedField(ForcedFieldInfo? f)
+    {
+        if (f == null) return;
+        try
+        {
+            await _dump.ResetFieldAsync(f.ClassName, f.FieldName);
+            StatusText = $"Released {f.ClassName}::{f.FieldName}.";
+            await RefreshForcedFieldsAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Release failed: {ex.Message}";
+            _log.Error("PropertySearch RemoveForcedField failed", ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task ClearAllForcedFields()
+    {
+        try
+        {
+            await _dump.ResetAllFieldsAsync();
+            StatusText = "Released all forced fields.";
+            await RefreshForcedFieldsAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Release-all failed: {ex.Message}";
+            _log.Error("PropertySearch ClearAllForcedFields failed", ex);
+        }
     }
 
     [RelayCommand]
@@ -523,6 +657,8 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        if (_experimentalGate != null)
+            _experimentalGate.Changed -= OnExperimentalGateChanged;
         _xrefBatchCts?.Cancel();
         _xrefBatchCts?.Dispose();
         _resultFilterDebounce?.Dispose();

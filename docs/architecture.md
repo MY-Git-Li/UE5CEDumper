@@ -17,7 +17,7 @@ UE5CEDumper/
 │
 ├── dll/                            ← C++ DLL (injected into game process)
 │   ├── CMakeLists.txt              ← DLL build config (versioning, git hash, deps)
-│   └── src/                        ← 27 .cpp + 32 .h as of build 2144 (Frieren-themed; see naming-convention.md)
+│   └── src/                        ← 28 .cpp + 33 .h as of build 2168 (Frieren-themed; see naming-convention.md)
 │       ├── Heiter.cpp              ← dllmain — DLL_PROCESS_ATTACH, AutoStartThreadProc
 │       ├── Methode.cpp             ← CEPlugin — CE plugin Type 5 main menu
 │       ├── BuildStamp.cpp / .h     ← build/version metadata accessors (only TU that includes generated BuildInfo.h), build 1817
@@ -48,6 +48,7 @@ UE5CEDumper/
 │       ├── Grausam.cpp / .h        ← ForegroundLock — GetForegroundWindow hook + WndProc subclass + cursor-clip release (build ~1955)
 │       ├── Schlacht.cpp / .h       ← SeeThrough — hide N nearest camera-blocking non-Pawn occluders (builds 2006-2011)
 │       ├── Edel.cpp / .h           ← CurrentTarget — auto-detect the player's current target (build 1400)
+│       ├── Solide.cpp / .h         ← ForceField — hold a discovered field (bool/object-null/numeric) across all live instances of a class via a write-on-drift worker + player stealth-meter finder (build 2168)
 │       ├── Linie.cpp / .h          ← LivePEProfiler — per-UFunction fire-count recording window (build 2109)
 │       ├── Denken.cpp / .h         ← NativeDisasm — Zydis x64 decoder, native UFunction → property xref (build 862)
 │       ├── Radar.cpp / .h          ← ValueScan — Value Search session manager + DataType / ScanType /

@@ -53,6 +53,26 @@ public class TeleportViewModelTests
         public override Task<int> GetGodModeAsync(CancellationToken ct = default)
         { GetGodModeCalls++; return Task.FromResult(NextGodModeState); }
 
+        // ── Player stealth meter (Solide) ──
+        public IReadOnlyList<StealthCandidate> NextStealthCandidates { get; set; } = new List<StealthCandidate>();
+        public ForceFieldResult NextForce { get; set; } = new() { Held = 1, Resolved = true };
+        public int FindStealthCalls { get; private set; }
+        public int ForceFieldCalls { get; private set; }
+        public int ResetFieldCalls { get; private set; }
+        public string? LastForceClass { get; private set; }
+        public string? LastForceField { get; private set; }
+        public string? LastForceKind { get; private set; }
+        public double LastForceValue { get; private set; }
+
+        public override Task<IReadOnlyList<StealthCandidate>> FindStealthMeterAsync(int max = 8, CancellationToken ct = default)
+        { FindStealthCalls++; return Task.FromResult(NextStealthCandidates); }
+
+        public override Task<ForceFieldResult> ForceFieldAsync(string className, string fieldName, string kind, double value = 0, bool on = false, CancellationToken ct = default)
+        { ForceFieldCalls++; LastForceClass = className; LastForceField = fieldName; LastForceKind = kind; LastForceValue = value; return Task.FromResult(NextForce); }
+
+        public override Task<int> ResetFieldAsync(string className, string fieldName, CancellationToken ct = default)
+        { ResetFieldCalls++; LastForceClass = className; LastForceField = fieldName; return Task.FromResult(0); }
+
         // ── Movement tuning (Laufen) ──
         public MovementParams NextMovementParams { get; set; } = new();
         public MovementSetResult NextMovementSet { get; set; } = new() { State = 1 };
@@ -379,6 +399,102 @@ public class TeleportViewModelTests
         Assert.Equal("global", fake.LastTimeTarget);
         Assert.Equal(0.5, fake.LastTimeValue);
         Assert.Equal("ON", vm.TimeDilationState);
+    }
+
+    // ── Player stealth meter (Solide) ──
+
+    [Fact]
+    public async Task DetectStealthMeter_loads_top_candidate_and_readout()
+    {
+        var fake = new FakeDumpService
+        {
+            NextStealthCandidates = new List<StealthCandidate>
+            {
+                new() { ClassName = "BP_Player_C", FieldName = "Visibility", PropType = "FloatProperty", Current = 0.8, Score = 9 },
+                new() { ClassName = "BP_Player_C", FieldName = "NoiseLevel", PropType = "FloatProperty", Current = 0.2, Score = 8 },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.DetectStealthMeterCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.FindStealthCalls);
+        Assert.Contains("Visibility", vm.StealthFieldText);
+        Assert.Equal("Ready", vm.StealthState);
+    }
+
+    [Fact]
+    public async Task DetectStealthMeter_none_found_shows_amber_not_found()
+    {
+        var fake = new FakeDumpService();   // empty candidate list
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.DetectStealthMeterCommand.ExecuteAsync(null);
+
+        Assert.Equal("Not found", vm.StealthState);
+        Assert.Equal("#C9A04E", vm.StealthBadgeColor);
+    }
+
+    [Fact]
+    public async Task HoldStealth_forces_detected_field_to_zero()
+    {
+        var fake = new FakeDumpService
+        {
+            NextStealthCandidates = new List<StealthCandidate>
+            {
+                new() { ClassName = "BP_Player_C", FieldName = "Visibility" },
+            },
+            NextForce = new() { Held = 2, Resolved = true },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.DetectStealthMeterCommand.ExecuteAsync(null);
+        await vm.HoldStealthCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.ForceFieldCalls);
+        Assert.Equal("BP_Player_C", fake.LastForceClass);
+        Assert.Equal("Visibility", fake.LastForceField);
+        Assert.Equal("numeric", fake.LastForceKind);
+        Assert.Equal(0.0, fake.LastForceValue);
+        Assert.Equal("Holding @0", vm.StealthState);
+    }
+
+    [Fact]
+    public async Task HoldStealth_zero_held_shows_not_found()
+    {
+        var fake = new FakeDumpService
+        {
+            NextStealthCandidates = new List<StealthCandidate> { new() { ClassName = "C", FieldName = "F" } },
+            NextForce = new() { Held = 0, Resolved = false },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.DetectStealthMeterCommand.ExecuteAsync(null);
+        await vm.HoldStealthCommand.ExecuteAsync(null);
+
+        Assert.Equal("Not found", vm.StealthState);
+    }
+
+    [Fact]
+    public async Task ResetStealth_releases_hold_and_resets_badge()
+    {
+        var fake = new FakeDumpService
+        {
+            NextStealthCandidates = new List<StealthCandidate> { new() { ClassName = "BP_Player_C", FieldName = "Visibility" } },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.DetectStealthMeterCommand.ExecuteAsync(null);
+        await vm.HoldStealthCommand.ExecuteAsync(null);
+        await vm.ResetStealthCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.ResetFieldCalls);
+        Assert.Equal("Off", vm.StealthState);
     }
 
     [Fact]

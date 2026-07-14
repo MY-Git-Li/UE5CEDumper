@@ -138,6 +138,11 @@ public class StubDumpService : IDumpService
     public virtual Task<FlyStatus> FlyGetStateAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<SeeThroughStatus> SeeThroughSetAsync(bool? enable, int? count, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<SeeThroughStatus> SeeThroughGetStateAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<ForceFieldResult> ForceFieldAsync(string className, string fieldName, string kind, double value = 0, bool on = false, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<int> ResetFieldAsync(string className, string fieldName, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<int> ResetAllFieldsAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<IReadOnlyList<ForcedFieldInfo>> GetForcedFieldsAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<IReadOnlyList<StealthCandidate>> FindStealthMeterAsync(int max = 8, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<DataTableWalkResult> WalkDataTableRowsAsync(string addr, int offset = 0, int limit = 64, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<TeleportPose> TeleportSaveMarkerAsync(int slot, CancellationToken ct = default) => throw new NotImplementedException();

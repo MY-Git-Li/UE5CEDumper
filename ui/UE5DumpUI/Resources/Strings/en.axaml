@@ -752,6 +752,16 @@
     <sys:String x:Key="str.PropertySearch.FindInstances">finder</sys:String>
     <sys:String x:Key="str.PropertySearch.CopyOffset">Copy Offset</sys:String>
     <sys:String x:Key="str.PropertySearch.Freeze">Freeze</sys:String>
+    <!-- Force field (Solide) — hold a discovered field across live instances -->
+    <sys:String x:Key="str.PropertySearch.ForceMenu">Force field (hold across instances)</sys:String>
+    <sys:String x:Key="str.PropertySearch.ForceOn">Force ON</sys:String>
+    <sys:String x:Key="str.PropertySearch.ForceOff">Force OFF</sys:String>
+    <sys:String x:Key="str.PropertySearch.ForceNull">Force → null</sys:String>
+    <sys:String x:Key="str.PropertySearch.ForceValue">Force value…</sys:String>
+    <sys:String x:Key="str.PropertySearch.ForcedHeader">Forced fields:</sys:String>
+    <sys:String x:Key="str.PropertySearch.ForcedClearAll">Clear all</sys:String>
+    <sys:String x:Key="str.Tip.PropertySearch.ForcedClearAll">Release every forced-field hold (best-effort restore each field's captured base).</sys:String>
+    <sys:String x:Key="str.Tip.PropertySearch.ForcedRemove">Release this hold (restore the captured base) and stop re-asserting it.</sys:String>
 
     <!-- Game Class Filter -->
     <sys:String x:Key="str.GameClassFilter.Load">Load</sys:String>
@@ -987,6 +997,17 @@
     <sys:String x:Key="str.Tip.TP.GmOff">Turn God Mode OFF (restore bCanBeDamaged) and stop the re-assert worker.</sys:String>
     <sys:String x:Key="str.Tip.TP.GmRefresh">Re-read the live God Mode state (1=immune / 0=can be damaged / unknown if no pawn).</sys:String>
     <sys:String x:Key="str.Tip.TP.GmCopyScript">Add a self-contained Cheat Engine AA record (tick = ON, untick = OFF) that drives God Mode via the DLL mailbox. Pushed straight into CE via AOBMaker, or copied as paste-able CE memory-record XML if AOBMaker isn't connected (right-click the address list → Paste). Works offline — no pipe / UI connection needed.</sys:String>
+
+    <!-- Player Stealth meter (Solide — auto-find + hold a stealth/visibility float at 0) -->
+    <sys:String x:Key="str.TP.StHeader">Stealth Meter</sys:String>
+    <sys:String x:Key="str.TP.StState">State:</sys:String>
+    <sys:String x:Key="str.TP.StHint">Auto-finds a numeric "visibility / noise / detection / awareness" meter on the player pawn (and its owned components) and holds it at 0 so detection that reads that meter never fills. There is NO universal detection flag in Unreal — this only works when the game exposes a reflected stealth/visibility field. Click Detect, verify the field it locked onto, then Hold @0. If nothing is found, search Property Search (e.g. 'visib', 'detect', 'noise') and Force a numeric field to 0. Single-player only.</sys:String>
+    <sys:String x:Key="str.TP.StDetect">Detect meter</sys:String>
+    <sys:String x:Key="str.TP.StHold">Hold @0</sys:String>
+    <sys:String x:Key="str.TP.StReset">Reset</sys:String>
+    <sys:String x:Key="str.Tip.TP.StDetect">Resolve the player pawn + its owned components and keyword-score reflected numeric fields for a stealth/visibility/detection meter. Read-only — loads the top candidate into the readout for you to verify before holding it.</sys:String>
+    <sys:String x:Key="str.Tip.TP.StHold">Force the detected meter to 0 on every live instance of its class and hold it there (re-asserted on a timer). "N held" shows how many instances are held.</sys:String>
+    <sys:String x:Key="str.Tip.TP.StReset">Release the hold — restore the captured base value and stop holding the meter.</sys:String>
     <sys:String x:Key="str.TP.FgHeader">Keep Foreground</sys:String>
     <sys:String x:Key="str.TP.FgState">State:</sys:String>
     <sys:String x:Key="str.TP.FgHint">Force the game to always behave as the foreground app so it doesn't idle/pause its game thread when unfocused (t.IdleWhenNotForeground). Needed for POV / UFunction invokes on games that halt when backgrounded — e.g. Persona 3 Reload. Off by default.</sys:String>

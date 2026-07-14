@@ -275,7 +275,7 @@ German spelling.
 | Draht | ドラート | Draht | Lügner's assistant ("wire") | ⬜ | Wiring / binding / IPC plumbing |
 | Revolte | レヴォルテ | Revolte | Four-handed general, four swords | ⬜ | Parallelism / multi-threaded dispatch |
 | Hemmung | ヘムング | Hemmung | Mist→energy ("inhibition") | 🟢 TimeDilation | Hold the game's reflected time-dilation floats — global `AWorldSettings::TimeDilation` (whole-world slow-mo / freeze / fast-forward) + per-pawn `AActor::CustomTimeDilation` — at an absolute value via a write-on-drift re-assert worker (the absolute-value sibling of Laufen); *inhibits* the game clock against slow-mo abilities / Sequencer tracks. CE `CMD_TIME=15` (`Hemmung.cpp/.h`, build 2147) |
-| Solide | ゾリーデ | Solide | Blindfold swordsman ("solid") | ⬜ | Robust read validation |
+| Solide | ゾリーデ | Solide | Blindfold swordsman ("solid") | 🟢 ForceField | Force-and-hold a discovered reflected field (bool ON/OFF / ObjectProperty→null / numeric→absolute) across all live instances of a class via a write-on-drift re-assert worker; + player stealth/visibility-meter auto-finder (`MatchStealthField`). Powers Property Search "Force" + the Teleport Stealth card — the honest subset of "enemies can't detect you" (`Solide.cpp/.h`, build 2168) |
 | Jung | ユング | Jung | Curious demon child ("young") | ⬜ | Experimental / sandbox features |
 | Zart | ツァルト | Zart | "Lingering Shadow", spatial transference | ⬜ | Memory remap/relocate (note: Wirbel owns teleport) |
 

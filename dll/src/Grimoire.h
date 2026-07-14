@@ -222,6 +222,10 @@ constexpr int    TIME_REASSERT_MS         = 250;     // re-assert worker tick (w
 constexpr double TIME_DILATION_MIN        = 0.0;     // 0 = frozen (near-freeze if the game NaNs on exact 0)
 constexpr double TIME_DILATION_MAX        = 100.0;   // 100x fast-forward — UI slider ceiling
 
+// --- Force-field hold (Solide) — Property Search "Force" + stealth-meter zero ---
+constexpr int    SOLIDE_REASSERT_MS       = 300;     // re-assert worker tick (write-on-drift)
+constexpr int    SOLIDE_MAX_INSTANCES     = 256;     // per-job pool cap (bounded FindInstancesByClass)
+
 // --- Fly (Dunste) — no-gravity 3D flight ---
 constexpr int     FLY_TICK_MS            = 16;       // fly worker tick (~60 Hz)
 constexpr double  FLY_SPEED_MIN          = 50.0;     // uu/s — UI slider floor

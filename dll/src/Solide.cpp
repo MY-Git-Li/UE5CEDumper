@@ -1,0 +1,455 @@
+// ============================================================
+// Solide — ゾリーデ (剣士 — blindfold swordsman, "solid")
+// ForceField / stealth-meter hold: hold a discovered reflected field
+// (bool / ObjectProperty-null / numeric) at a value across all live instances of
+// a class via a write-on-drift re-assert worker. Contract: Solide.h.
+//
+// The multi-instance sibling of Hemmung (absolute-value hold): same s_mutex +
+// s_workerMutex two-lock split, same worker (write-on-drift, base capture), same
+// "no cached instance pointers — re-resolve the pool every tick" discipline.
+// Self-contained (Path B): only public Solitar/Ubel/Aura/Macht + DynOff.
+// ============================================================
+
+#define LOG_CAT "WALK"
+#include "Sein.h"
+#include "Solide.h"
+#include "Solitar.h"   // SetActorBool / GetActorBool (bool kind reuse)
+#include "Grimoire.h"
+#include "Macht.h"
+#include "Aura.h"
+#include "Ubel.h"
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+// &GWorld — deref once for UWorld* (defined in Frieren.cpp; same as Hemmung/Solitar).
+extern uintptr_t g_cachedGWorld;
+
+namespace {
+
+using namespace Solide;
+
+// ---- active hold-jobs (survive UI reconnect; live for the game process) ----
+struct Job {
+    std::string className;
+    std::string fieldName;
+    int32_t     kind  = K_BOOL;
+    double      value = 0.0;      // desired (bool: 1/0; numeric: absolute)
+    // Restore base — captured from the FIRST resolved instance (representative).
+    bool        hasBase   = false;
+    double      baseValue = 0.0;  // numeric base OR bool base bit (0/1)
+    // Last-tick stats (for the UI badge + Locate handoff).
+    int32_t     held         = 0;
+    uintptr_t   sampleOwner  = 0;
+    int32_t     sampleOffset = -1;
+};
+std::vector<Job> s_jobs;
+
+std::mutex        s_mutex;        // serializes ops (pipe thread + worker)
+std::thread       s_worker;
+std::mutex        s_workerMutex;  // guards start/stop join (never held with s_mutex)
+std::atomic<bool> s_workerStop{false};
+
+// ---- low-level reads (copied from Hemmung; public APIs only) ----
+
+uintptr_t DerefWorld() {
+    if (!g_cachedGWorld) return 0;
+    uintptr_t w = 0;
+    if (!Macht::ReadSafe(g_cachedGWorld, w)) return 0;
+    return w;
+}
+
+uintptr_t ReadPtrAt(uintptr_t obj, int32_t off) {
+    if (!obj || off < 0) return 0;
+    uintptr_t v = 0;
+    Macht::ReadSafe(obj + static_cast<uintptr_t>(off), v);
+    return v;
+}
+
+std::string ToLower(const std::string& s) {
+    std::string r = s;
+    for (char& c : r) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return r;
+}
+
+// LWC-width-aware float read/write (4B float / 8B double), keyed on FieldInfo.Size.
+bool ReadFloatAt(uintptr_t addr, int32_t size, double& out) {
+    if (size >= 8) {
+        double d = 0;
+        if (!Macht::ReadSafe(addr, d)) return false;
+        out = d; return true;
+    }
+    float f = 0;
+    if (!Macht::ReadSafe(addr, f)) return false;
+    out = static_cast<double>(f); return true;
+}
+bool WriteFloatAt(uintptr_t addr, int32_t size, double v) {
+    if (size >= 8) { double d = v; return Macht::WriteBytes(addr, &d, 8); }
+    float f = static_cast<float>(v); return Macht::WriteBytes(addr, &f, 4);
+}
+
+// ---- numeric type classification (MVP: float/double + int32/int64/byte) ----
+
+bool IsFloatType(const std::string& t) {
+    return t == "FloatProperty" || t == "DoubleProperty";
+}
+bool IsIntType(const std::string& t) {
+    return t == "IntProperty" || t == "Int64Property"
+        || t == "ByteProperty" || t == "UInt8Property" || t == "Int8Property";
+}
+bool IsNumericType(const std::string& t) { return IsFloatType(t) || IsIntType(t); }
+
+bool ReadNumeric(uintptr_t addr, const FieldInfo& fi, double& out) {
+    if (IsFloatType(fi.TypeName)) return ReadFloatAt(addr, fi.Size, out);
+    if (fi.TypeName == "IntProperty") {
+        int32_t v = 0; if (!Macht::ReadSafe(addr, v)) return false; out = v; return true;
+    }
+    if (fi.TypeName == "Int64Property") {
+        int64_t v = 0; if (!Macht::ReadSafe(addr, v)) return false; out = static_cast<double>(v); return true;
+    }
+    // ByteProperty / UInt8Property / Int8Property
+    uint8_t v = 0; if (!Macht::ReadSafe(addr, v)) return false; out = static_cast<double>(v); return true;
+}
+bool WriteNumeric(uintptr_t addr, const FieldInfo& fi, double value) {
+    if (IsFloatType(fi.TypeName)) return WriteFloatAt(addr, fi.Size, value);
+    if (fi.TypeName == "IntProperty") {
+        int32_t v = static_cast<int32_t>(std::llround(value)); return Macht::WriteBytes(addr, &v, 4);
+    }
+    if (fi.TypeName == "Int64Property") {
+        int64_t v = static_cast<int64_t>(std::llround(value)); return Macht::WriteBytes(addr, &v, 8);
+    }
+    uint8_t v = static_cast<uint8_t>(std::llround(value)); return Macht::WriteBytes(addr, &v, 1);
+}
+
+// ---- local-pawn resolution (for FindStealthMeter; copied from Hemmung) ----
+
+uintptr_t ResolveLocalPC(uintptr_t world) {
+    do {
+        if (!world) break;
+        uintptr_t worldClass = Ubel::GetClass(world);
+        int32_t giOff = Ubel::FindFieldOffset(worldClass, "OwningGameInstance",
+                                              "GameInstance", nullptr, "ObjectProperty");
+        uintptr_t gi = ReadPtrAt(world, giOff);
+        if (!gi) break;
+        uintptr_t giClass = Ubel::GetClass(gi);
+        int32_t lpOff = Ubel::FindFieldOffset(giClass, "LocalPlayers", "LocalPlayers",
+                                              nullptr, "ArrayProperty");
+        if (lpOff < 0) break;
+        Macht::TArrayView arr;
+        if (!Macht::ReadTArray(gi + static_cast<uintptr_t>(lpOff), arr) || arr.Count <= 0)
+            break;
+        uintptr_t lp = Macht::ReadTArrayElement(arr, 0);
+        if (!lp) break;
+        uintptr_t lpClass = Ubel::GetClass(lp);
+        int32_t pcOff = Ubel::FindFieldOffset(lpClass, "PlayerController",
+                                              "PlayerController", nullptr, "ObjectProperty");
+        uintptr_t pc = ReadPtrAt(lp, pcOff);
+        if (pc) return pc;
+    } while (false);
+
+    auto rset = Aura::FindInstancesByClass("PlayerController", false, 100);
+    uintptr_t firstNonCdo = 0;
+    for (const auto& r : rset.results) {
+        if (!r.addr || r.name.find("Default__") != std::string::npos) continue;
+        if (!firstNonCdo) firstNonCdo = r.addr;
+        uintptr_t cls = Ubel::GetClass(r.addr);
+        int32_t playerOff = Ubel::FindFieldOffset(cls, "Player", "Player",
+                                                  "Controller", "ObjectProperty");
+        if (playerOff >= 0 && ReadPtrAt(r.addr, playerOff))
+            return r.addr;
+    }
+    return firstNonCdo;
+}
+
+uintptr_t HopThroughDebugCamera(uintptr_t pc) {
+    if (!pc) return pc;
+    uintptr_t cls = Ubel::GetClass(pc);
+    std::string clsName = Ubel::GetName(cls);
+    if (clsName.find("DebugCameraController") == std::string::npos) return pc;
+    int32_t origOff = Ubel::FindFieldOffset(cls, "OriginalControllerRef",
+                                            "OriginalController", nullptr, "ObjectProperty");
+    uintptr_t orig = ReadPtrAt(pc, origOff);
+    return orig ? orig : pc;
+}
+
+uintptr_t ResolvePawn(uintptr_t pc) {
+    uintptr_t cls = Ubel::GetClass(pc);
+    uintptr_t pawn = ReadPtrAt(pc, Ubel::FindFieldOffset(cls, "Pawn"));
+    if (pawn) return pawn;
+    return ReadPtrAt(pc, Ubel::FindFieldOffset(cls, "AcknowledgedPawn"));
+}
+
+// ---- per-instance apply ----
+
+// Apply (or restore) one job on one live object. Returns true when the field
+// resolved on this object (counts toward "N held"); fills sample owner/offset.
+// `restore` writes the captured base instead of the desired value.
+bool ApplyToInstance(Job& job, uintptr_t obj, uintptr_t cls, bool restore,
+                     bool* drifted, uintptr_t& sampleOwner, int32_t& sampleOffset) {
+    sampleOwner = 0; sampleOffset = -1;
+
+    if (job.kind == K_BOOL) {
+        int32_t cur = Solitar::GetActorBool(obj, cls, job.fieldName.c_str());
+        if (cur < 0) return false;   // bool not resolvable on this instance
+        if (!job.hasBase) { job.baseValue = static_cast<double>(cur); job.hasBase = true; }
+        bool desired = restore ? (job.baseValue != 0.0) : (job.value != 0.0);
+        // Report drift (the game re-wrote the bit off our target) for telemetry
+        // parity with the numeric/object-null branches — the "game keeps
+        // re-writing it" LOG_WARN is the in-field "this lever is a no-op" signal.
+        if (((cur != 0) != desired) && drifted) *drifted = true;
+        int32_t rc = Solitar::SetActorBool(obj, cls, job.fieldName.c_str(), desired);
+        if (rc < 0) return false;
+        sampleOwner  = obj;
+        sampleOffset = Ubel::FindFieldOffset(cls, job.fieldName.c_str(), job.fieldName.c_str(),
+                                             nullptr, "BoolProperty");
+        return true;
+    }
+
+    FieldInfo fi{};
+    if (!Ubel::FindField(cls, job.fieldName.c_str(), job.fieldName.c_str(), nullptr, nullptr, fi)
+        || fi.Offset < 0)
+        return false;
+    uintptr_t addr = obj + static_cast<uintptr_t>(fi.Offset);
+
+    if (job.kind == K_OBJECT_NULL) {
+        // Strong ObjectProperty only: writing 8 zero bytes into a Weak/Soft/Lazy
+        // ptr sets ObjectIndex 0 = a VALID GObjects[0] slot, not null (crash trap).
+        if (fi.TypeName != "ObjectProperty") return false;
+        sampleOwner = obj; sampleOffset = fi.Offset;
+        if (restore) return true;   // original ptr not saved (stale) — no restore
+        uintptr_t cur = 0;
+        if (!Macht::ReadSafe(addr, cur)) return false;
+        if (cur != 0) {
+            uintptr_t z = 0;
+            if (Macht::WriteBytes(addr, &z, sizeof(uintptr_t)) && drifted) *drifted = true;
+        }
+        return true;
+    }
+
+    // K_NUMERIC
+    if (!IsNumericType(fi.TypeName)) return false;
+    double cur = 0;
+    if (!ReadNumeric(addr, fi, cur)) return false;
+    if (!job.hasBase) { job.baseValue = cur; job.hasBase = true; }
+    double target = restore ? job.baseValue : job.value;
+    double eps = IsFloatType(fi.TypeName) ? (std::max)(1e-4, std::fabs(target) * 1e-5) : 0.5;
+    if (std::fabs(cur - target) > eps) {
+        if (WriteNumeric(addr, fi, target) && drifted) *drifted = true;
+    }
+    sampleOwner = obj; sampleOffset = fi.Offset;
+    return true;
+}
+
+// Apply (or restore) one job across the live instance pool (caller holds s_mutex).
+void ApplyJobLocked(Job& job, bool restore, bool* drifted) {
+    int32_t held = 0;
+    uintptr_t sampleOwner = 0; int32_t sampleOffset = -1;
+    auto rset = Aura::FindInstancesByClass(job.className, false, Grimoire::SOLIDE_MAX_INSTANCES);
+    for (const auto& r : rset.results) {
+        if (!r.addr || r.name.find("Default__") != std::string::npos) continue;
+        uintptr_t cls = r.classAddr ? r.classAddr : Ubel::GetClass(r.addr);
+        if (!cls) continue;
+        uintptr_t so = 0; int32_t soff = -1;
+        if (ApplyToInstance(job, r.addr, cls, restore, drifted, so, soff)) {
+            ++held;
+            if (!sampleOwner && so) { sampleOwner = so; sampleOffset = soff; }
+        }
+    }
+    if (!restore) {
+        job.held = held;
+        job.sampleOwner = sampleOwner;
+        job.sampleOffset = sampleOffset;
+    }
+}
+
+bool AnyJobLocked() { return !s_jobs.empty(); }
+
+std::vector<Job>::iterator FindJobLocked(const std::string& cls, const std::string& field) {
+    return std::find_if(s_jobs.begin(), s_jobs.end(), [&](const Job& j) {
+        return j.className == cls && j.fieldName == field;
+    });
+}
+
+// ---- re-assert worker (identical discipline to Hemmung) ----
+
+void WorkerLoop() {
+    LOG_INFO("Solide: force-field re-assert worker started (%d ms)", Grimoire::SOLIDE_REASSERT_MS);
+    int driftCount = 0;
+    while (!s_workerStop.load()) {
+        for (int slept = 0;
+             slept < Grimoire::SOLIDE_REASSERT_MS && !s_workerStop.load();
+             slept += 25)
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        if (s_workerStop.load()) break;
+
+        std::lock_guard<std::mutex> lk(s_mutex);
+        if (!AnyJobLocked()) continue;
+        bool drifted = false;
+        for (auto& job : s_jobs)
+            ApplyJobLocked(job, /*restore=*/false, &drifted);
+        if (drifted) {
+            ++driftCount;
+            if (driftCount <= 5 || driftCount % 100 == 0)
+                LOG_WARN("Solide: re-asserted forced field(s) (drift #%d) — the game keeps "
+                         "re-writing them; the hold is being maintained against it.", driftCount);
+        }
+    }
+    LOG_INFO("Solide: force-field re-assert worker stopped");
+}
+
+void StartWorkerLocked() {
+    if (s_worker.joinable()) return;
+    s_workerStop.store(false);
+    s_worker = std::thread(WorkerLoop);
+}
+void StopWorkerLocked() {
+    if (!s_worker.joinable()) return;
+    s_workerStop.store(true);
+    s_worker.join();
+}
+
+} // namespace
+
+namespace Solide {
+
+int32_t AddForce(const char* className, const char* fieldName, int32_t kind, double value) {
+    if (!className || !*className || !fieldName || !*fieldName) return FR_ERR_BAD_ARGS;
+    if (kind < K_BOOL || kind > K_NUMERIC) return FR_ERR_BAD_KIND;
+    if (!g_cachedGWorld) return FR_ERR_NOT_INIT;
+
+    std::lock_guard<std::mutex> wlk(s_workerMutex);   // outer (audit #8 discipline)
+    int32_t held = 0;
+    {
+        std::lock_guard<std::mutex> lk(s_mutex);
+        auto it = FindJobLocked(className, fieldName);
+        if (it == s_jobs.end()) {
+            Job j;
+            j.className = className;
+            j.fieldName = fieldName;
+            j.kind = kind;
+            j.value = value;
+            s_jobs.push_back(std::move(j));
+            it = s_jobs.end() - 1;
+        } else {
+            // Re-arm an existing hold with a new value/kind; keep the captured base
+            // when the kind is unchanged so a re-apply doesn't fold our own write in.
+            if (it->kind != kind) { it->kind = kind; it->hasBase = false; }
+            it->value = value;
+        }
+        bool drifted = false;
+        ApplyJobLocked(*it, /*restore=*/false, &drifted);
+        held = it->held;
+    }
+    StartWorkerLocked();   // s_workerMutex held, s_mutex released
+    return held;           // >= 0 : live "N held" count (0 = matched nothing)
+}
+
+int32_t RemoveForce(const char* className, const char* fieldName) {
+    if (!className || !fieldName) return FR_ERR_BAD_ARGS;
+    std::lock_guard<std::mutex> wlk(s_workerMutex);
+    bool anyLeft;
+    {
+        std::lock_guard<std::mutex> lk(s_mutex);
+        auto it = FindJobLocked(className, fieldName);
+        if (it == s_jobs.end()) return FR_OK;   // already gone
+        bool drifted = false;
+        ApplyJobLocked(*it, /*restore=*/true, &drifted);   // best-effort restore
+        s_jobs.erase(it);
+        anyLeft = AnyJobLocked();
+    }
+    if (!anyLeft) StopWorkerLocked();
+    return FR_OK;
+}
+
+int32_t ClearAll() {
+    std::lock_guard<std::mutex> wlk(s_workerMutex);
+    {
+        std::lock_guard<std::mutex> lk(s_mutex);
+        bool drifted = false;
+        for (auto& job : s_jobs)
+            ApplyJobLocked(job, /*restore=*/true, &drifted);
+        s_jobs.clear();
+    }
+    StopWorkerLocked();
+    return FR_OK;
+}
+
+int32_t GetState(std::vector<ForcedFieldInfo>& out) {
+    out.clear();
+    std::lock_guard<std::mutex> lk(s_mutex);
+    out.reserve(s_jobs.size());
+    for (const auto& j : s_jobs) {
+        ForcedFieldInfo fi;
+        fi.className   = j.className;
+        fi.fieldName   = j.fieldName;
+        fi.kind        = j.kind;
+        fi.value       = j.value;
+        fi.held        = j.held;
+        fi.sampleOwner = j.sampleOwner;
+        fi.sampleOffset= j.sampleOffset;
+        out.push_back(std::move(fi));
+    }
+    return FR_OK;
+}
+
+int32_t FindStealthMeter(std::vector<StealthCandidate>& out, int32_t maxResults) {
+    out.clear();
+    uintptr_t world = DerefWorld();
+    if (!world) return FR_ERR_NOT_INIT;
+    uintptr_t pc = ResolveLocalPC(world);
+    if (!pc) return FR_ERR_NO_TARGET;
+    pc = HopThroughDebugCamera(pc);
+    uintptr_t pawn = ResolvePawn(pc);
+    if (!pawn) return FR_ERR_NO_TARGET;
+
+    // Scan the pawn + its owned components/counterparts for numeric stealth fields.
+    std::vector<Aura::RelatedObject> related = Aura::GetRelatedObjects(pawn);
+    std::vector<StealthCandidate> cands;
+    std::vector<std::pair<std::string, std::string>> seen; // (className, fieldName) dedupe
+    for (const auto& ro : related) {
+        if (!ro.addr) continue;
+        if (ro.relation == "Class" || ro.relation == "Outer") continue; // UClass / level — no meter
+        uintptr_t cls = Ubel::GetClass(ro.addr);
+        if (!cls) continue;
+        std::string clsName = Ubel::GetName(cls);
+        ClassInfo ci = Ubel::WalkClassEx(cls);
+        for (const auto& f : ci.Fields) {
+            if (!IsFloatType(f.TypeName)) continue;   // meters are floats
+            int32_t score = MatchStealthField(ToLower(f.Name));
+            if (score <= 0) continue;
+            auto key = std::make_pair(clsName, f.Name);
+            if (std::find(seen.begin(), seen.end(), key) != seen.end()) continue;
+            seen.push_back(key);
+            StealthCandidate c;
+            c.className = clsName;
+            c.classAddr = cls;
+            c.fieldName = f.Name;
+            c.typeName  = f.TypeName;
+            c.ownerAddr = ro.addr;
+            c.score     = score;
+            double cur = 0;
+            if (ReadFloatAt(ro.addr + static_cast<uintptr_t>(f.Offset), f.Size, cur)) c.current = cur;
+            cands.push_back(std::move(c));
+        }
+    }
+    std::sort(cands.begin(), cands.end(), [](const StealthCandidate& a, const StealthCandidate& b) {
+        return a.score > b.score;
+    });
+    if (maxResults > 0 && static_cast<int32_t>(cands.size()) > maxResults)
+        cands.resize(maxResults);
+    out = std::move(cands);
+    return FR_OK;
+}
+
+void StopWorker() {
+    std::lock_guard<std::mutex> lk(s_workerMutex);
+    StopWorkerLocked();
+}
+
+} // namespace Solide

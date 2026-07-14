@@ -442,6 +442,18 @@ int32_t SetActorBool(uintptr_t obj, uintptr_t classAddr, const char* propName, b
     return v ? 1 : 0;
 }
 
+int32_t GetActorBool(uintptr_t obj, uintptr_t classAddr, const char* propName) {
+    if (!obj || !classAddr || !propName) return PR_ERR_REFLECT;
+    std::lock_guard<std::mutex> lk(s_mutex);
+    uintptr_t byteAddr = 0;
+    uint8_t mask = 0;
+    int32_t rc = ResolveActorBoolBit(obj, classAddr, propName, propName, byteAddr, mask);
+    if (rc != PR_OK) return rc;
+    uint8_t b = 0;
+    if (!Macht::ReadSafe(byteAddr, b)) return PR_ERR_REFLECT;
+    return ((b & mask) != 0) ? 1 : 0;
+}
+
 void StopWorker() {
     std::lock_guard<std::mutex> lk(s_workerMutex);
     if (!s_worker.joinable()) return;

@@ -18,6 +18,48 @@ builds ≤696 in
 
 -----
 
+## 2026-07-14 — Solide: force-and-hold a discovered field + player stealth-meter zero (build 2168)
+
+**SHIPPED (full DLL + UI build + 841 native + 2525 C# tests green).** The honest, low-risk subset of the
+"enemies can't detect you" evaluation ([project-enemy-undetectable-eval] memory; the locked Non-Goal in
+[godmode-spec.md](godmode-spec.md) §3.2/§5.4 — *no universal detection bool; surface per-game via Property
+Search*). Two user-facing deliverables over one new DLL module.
+
+- **New DLL module `Solide`** ([Solide.cpp](../dll/src/Solide.cpp)/[.h](../dll/src/Solide.h)) — the
+  multi-instance sibling of Hemmung: holds a list of *force-jobs*, each forcing one reflected field to a
+  value across **all live instances** of a class via a write-on-drift re-assert worker (`SOLIDE_REASSERT_MS=300`,
+  cap `SOLIDE_MAX_INSTANCES=256`, CDO-skipped, re-resolved every tick — no cached pointers). Three kinds:
+  **bool** (reuses the public `Solitar::SetActorBool`; new read-only `Solitar::GetActorBool` companion captures
+  the restore base), **object-null** (strong `ObjectProperty` only — weak/soft/lazy refused, since 8 zero
+  bytes into a weak ptr = valid `GObjects[0]`, the eval's flagged trap), **numeric** (Float/Double/Int/Int64/Byte,
+  Hemmung's LWC-width-aware read/write). `RemoveForce`/`ClearAll` best-effort restore the captured base.
+  Plus `FindStealthMeter` — resolve the local pawn + owned components (`Aura::GetRelatedObjects`), keyword-score
+  numeric fields via the pure header-inline `MatchStealthField` (unit-tested), return ranked candidates.
+- **Pipe (Solide, pipe-only MVP)** — 5 commands (`Renge.h` + `Fern.cpp`): `force_field {class_name, field_name,
+  kind, value|on}` → `{held, resolved, code}`; `reset_field`; `reset_all_fields`; `get_forced_fields`;
+  `find_stealth_meter`. Fern calls `Solide::` directly (no Frieren export); `Solide::StopWorker()` registered
+  in `UE5_Shutdown`.
+- **UI — Property Search one-click Force** ([PropertySearchViewModel.cs](../ui/UE5DumpUI/ViewModels/PropertySearchViewModel.cs)
+  + [PropertySearchPanel.axaml](../ui/UE5DumpUI/Views/PropertySearchPanel.axaml)): a row context submenu
+  (Force ON / OFF / → null / value…) forces the field across all live instances of the row's class and holds it,
+  with a bottom **"Forced fields (N held)"** honesty strip (per-hold remove + clear-all). Row gates
+  `CanForceBool`/`CanForceNull`/`CanForceNumeric` by the reflected type; numeric prompts via the Freeze value
+  dialog, object-null via a `ConfirmDialog`. Gated behind the shared `IExperimentalGate`.
+- **UI — Teleport "Stealth Meter" card** ([TeleportViewModel.cs](../ui/UE5DumpUI/ViewModels/TeleportViewModel.cs)):
+  Detect (auto-find, verifiable readout) → Hold @0 → Reset, tri-state badge. Experimental-gated. Falls back to
+  a Property-Search recipe when the auto-find misses.
+- **Honest limits (surfaced, not hidden):** `held=0` badge = the class/field matched nothing (no-op signal);
+  by-class holds affect *every* instance of that class (N-held shows it); there is no universal detection bool,
+  so this only works where the game exposes a reflected stealth/flag/target field. Single-player only.
+- **VERIFIED in-game (Elliot / UE Shipping):** `force_field PointLightComponent::InverseExposureBlend → 0`
+  resolved 83 instances, worker started (300 ms), re-resolved the pool each tick, `reset_field` stopped it
+  clean — no errors, correct lifecycle (DLL `walk` log).
+- **Follow-up (UI-only): Teleport quick-jump nav** ([TeleportPanel.axaml.cs](../ui/UE5DumpUI/Views/TeleportPanel.axaml.cs)) —
+  right-click anywhere in the Teleport tab → a menu of the currently-visible cards; clicking one scrolls it to
+  the top (via `ScrollViewer.Offset`, since `ContentRoot` swallows `RequestBringIntoView`). Built dynamically
+  from the visible `Border` cards (label = each card's SemiBold header), so hidden cards are auto-excluded;
+  the whole menu is **experimental-gated** (the card list would otherwise leak experimental card names).
+
 ## 2026-07-13 — Auto Snapshot (periodic capture) + free-disk-space guard (build 2166; UI-only, no DLL/pipe change)
 
 **SHIPPED (UI-only; full UI build + 2509 C# tests + C++ self-tests green).** Two additions to the
