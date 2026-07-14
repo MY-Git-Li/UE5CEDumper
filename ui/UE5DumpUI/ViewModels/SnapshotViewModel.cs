@@ -121,6 +121,9 @@ public partial class SnapshotViewModel : ViewModelBase
     private CancellationTokenSource? _autoCts;   // auto-loop lifetime
     private Task? _autoLoopTask;
 
+    /// <summary>Test hook: await the running auto-snapshot loop to a deterministic stop.</summary>
+    internal Task? AutoLoopTaskForTests => _autoLoopTask;
+
     public IReadOnlyList<AutoSnapshotRetentionMode> RetentionModeOptions { get; } =
         new[] { AutoSnapshotRetentionMode.KeepRecent, AutoSnapshotRetentionMode.FixedCount };
 
@@ -624,6 +627,24 @@ public partial class SnapshotViewModel : ViewModelBase
 
         CaptureOutcome outcome = CaptureOutcome.Failed;
         long snapshotId = 0;
+
+        // Delete + reclaim the partial snapshot left by ANY abnormal exit — user cancel,
+        // pipe disconnect (bare OCE), an unexpected pipe death (IOException), or any other
+        // mid-capture failure. is_usable defaults to 1 and CompleteSnapshotAsync never ran,
+        // so leaving the row would surface a truncated snapshot to SPC/Pivot/diff as if
+        // complete. Reclaim too: a cancelled snapshot can be multi-GB and DELETE alone
+        // leaves the file size unchanged until a Delete All. NO ct: the capture token may
+        // already be cancelled, but this cleanup (incl. a possibly multi-second VACUUM)
+        // must run to completion.
+        async Task RemovePartialAsync()
+        {
+            StatusText = "Removing incomplete snapshot…";
+            try { await Task.Run(() => _store.DeleteSnapshotAsync(snapshotId, reclaim: true)); }
+            catch (Exception ex) { _log.Warn(Constants.LogCatView, $"Snapshot: partial cleanup failed: {ex.Message}"); }
+            await RefreshAsync();
+            await UpdateUsageAsync();   // reflect the reclaimed space in the usage bar
+        }
+
         try
         {
             // Auto-reclaim any previously-flagged UNUSABLE snapshots (captures that
@@ -850,25 +871,26 @@ public partial class SnapshotViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            outcome = CaptureOutcome.Cancelled;
+            // A genuine user Cancel/Stop cancels OUR token; a pipe DISCONNECT surfaces as a
+            // *bare* OperationCanceledException (PipeClient completes pending requests via
+            // TrySetCanceled() with no token) while the token is NOT cancelled. Report the
+            // disconnect as a FAILURE, not a cancel: outcome=Cancelled would make the
+            // auto-loop's `case Cancelled` skip StopAutoSnapshot() and wedge
+            // (AutoSnapshotEnabled stuck true, _autoCts leaked, manual capture disabled). (M7)
+            // BOTH paths still delete the partial — it is is_usable=1 by default. (H1)
+            bool userCancelled = ct.IsCancellationRequested;
+            outcome = userCancelled ? CaptureOutcome.Cancelled : CaptureOutcome.Failed;
             StopCaptureHeartbeat();
             if (snapshotId > 0)
             {
-                // Drop the partial capture AND reclaim its disk now — a cancelled snapshot
-                // can be multi-GB and DELETE alone leaves the file size unchanged (the space
-                // would otherwise linger until a Delete All). Show a message during the
-                // VACUUM (it can take a few seconds on a large file). NO ct: the capture's
-                // token is already cancelled, but this cleanup must run to completion.
-                StatusText = "Removing incomplete snapshot…";
-                try { await Task.Run(() => _store.DeleteSnapshotAsync(snapshotId, reclaim: true)); }
-                catch (Exception ex) { _log.Warn(Constants.LogCatView, $"Snapshot: partial cleanup failed: {ex.Message}"); }
-                await RefreshAsync();
-                await UpdateUsageAsync();   // reflect the reclaimed space in the usage bar
-                StatusText = "Capture cancelled — incomplete data removed.";
+                await RemovePartialAsync();
+                StatusText = userCancelled
+                    ? "Capture cancelled — incomplete data removed."
+                    : "Capture failed (disconnected) — incomplete data removed.";
             }
             else
             {
-                StatusText = "Capture cancelled.";
+                StatusText = userCancelled ? "Capture cancelled." : "Capture failed (disconnected).";
             }
         }
         catch (Exception ex)
@@ -877,7 +899,18 @@ public partial class SnapshotViewModel : ViewModelBase
             StopCaptureHeartbeat();
             _log.Error(Constants.LogCatView, "Snapshot: capture failed", ex);
             SetError(ex);
-            StatusText = "Capture failed.";
+            // A non-OCE mid-capture failure (e.g. an unexpected pipe death → IOException,
+            // or a between-chunks disconnect → InvalidOperationException) leaves the same
+            // is_usable=1 partial — delete it so it can't surface as a complete snapshot. (H1)
+            if (snapshotId > 0)
+            {
+                await RemovePartialAsync();
+                StatusText = "Capture failed — incomplete data removed.";
+            }
+            else
+            {
+                StatusText = "Capture failed.";
+            }
         }
         finally
         {
@@ -1085,7 +1118,13 @@ public partial class SnapshotViewModel : ViewModelBase
                         StopAutoSnapshot();
                         return;
                     case CaptureOutcome.Cancelled:
-                        return;   // user cancelled the in-flight capture → stop the loop
+                        // A genuine user cancel already cancelled the loop token, so we break
+                        // at the top of the loop before reaching here; a disconnect now
+                        // returns Failed (above), not Cancelled. StopAutoSnapshot is
+                        // idempotent — call it defensively so NO Cancelled path can leave the
+                        // loop wedged with AutoSnapshotEnabled stuck on. (M7)
+                        StopAutoSnapshot();
+                        return;
                 }
 
                 // Success / Partial — a snapshot was written.

@@ -200,6 +200,35 @@ public class SnapshotViewModelTests : IDisposable
         Assert.Empty(await _store.ListSnapshotsAsync(ct));
     }
 
+    // Regression for audit #3 M7: a pipe disconnect during an AUTO-snapshot capture used
+    // to be reported as CaptureOutcome.Cancelled, which the loop's `case Cancelled: return`
+    // handled by exiting WITHOUT StopAutoSnapshot() — leaving AutoSnapshotEnabled stuck
+    // true, _autoCts leaked, and manual capture disabled (wedged). A disconnect is now
+    // reported as Failed, so the loop stops cleanly via `case Failed`.
+    [Fact]
+    public async Task AutoSnapshot_DisconnectMidCapture_StopsLoopWithoutWedge()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dump = new DisconnectingCaptureStub();
+        var vm = new SnapshotViewModel(dump, _store, new MockLoggingService())
+        {
+            SelectedScope = "NumericNoByte", GameOnly = true,
+        };
+        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "01D9ABCDEF012345" });
+
+        // Start the periodic loop; its first capture hits the disconnect (bare OCE).
+        vm.AutoSnapshotEnabled = true;
+        var loop = vm.AutoLoopTaskForTests;
+        Assert.NotNull(loop);
+        await loop!.WaitAsync(TimeSpan.FromSeconds(10), ct);
+
+        // The loop stopped itself (not wedged): toggle reset + manual capture re-enabled.
+        Assert.False(vm.AutoSnapshotEnabled);
+        Assert.True(vm.CanManualCapture);
+        // And the disconnect-truncated partial was deleted, not left usable.
+        Assert.Empty(await _store.ListSnapshotsAsync(ct));
+    }
+
     [Fact]
     public async Task Capture_StreamsAllChunks_PersistsWithCorrectCounts()
     {
