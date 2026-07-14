@@ -61,13 +61,15 @@ the row here when it ships.
   > persist), and an off-switch exists (reconnect → `reset_all_fields`, or game restart). The real disconnect
   > defect here is **M4**, which stays scheduled.
 
-- **[MED] Teleport/PropertySearch UI lifecycle + rule fixes (M9–M10)** —
-  Effort: **S–M** each · Risk: low. **M9** experimental gate-off force-offs Foreground/Fly/SeeThrough but **not** an
-  active Solide Stealth Hold @0, stranding an invisible write worker — call `ResetStealthAsync` in the
-  teardown block; **M10** PropertySearch ResultFilter uses one whole-string `Contains` (no space=AND, no
+- **[MED] PropertySearch keyword rule fix (M10)** —
+  Effort: **M** · Risk: low. **M10** PropertySearch ResultFilter uses one whole-string `Contains` (no space=AND, no
   `KeywordSearchMemory`) — the only client filter box missed by the b2088 unification; rewrite on
   `ObjectTreeFilter.MatchesAllTerms` + wire keyword memory + `AutoCompleteBox`. *Parent:
-  audit-2026-07-14-findings §M9–M10.*
+  audit-2026-07-14-findings §M10.*
+  > **✅ DONE — M9** (SHIPPED commit `1f46994`, build 2185). Gate-off teardown releases an active Solide
+  > stealth hold (`if (StealthState == StealthHoldingState) ResetStealthCommand`), matching the
+  > Foreground/Fly/SeeThrough force-off pattern; `"Holding @0"` factored into a shared const. Tests
+  > `ExperimentalGateOff_releases_active_stealth_hold` (+ no-op case). *Delete after batch merged to main.*
   > **✅ DONE — M8** (SHIPPED commit `ad9a7e7`, build 2184). `_sessionEpoch` bumped on disconnect; the dwell
   > records only via the pure gate `ShouldConfirmProxy(IsConnected, scheduledEpoch, currentEpoch)`; timer
   > disposed before early returns, on disconnect, and in `Dispose()`. Tests `MainWindowProxyConfirmTests`.

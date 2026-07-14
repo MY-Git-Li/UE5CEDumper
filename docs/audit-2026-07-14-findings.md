@@ -93,7 +93,7 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ⚠️ = partially-confirmed (claim refined during verification — see the item's **Note**).
 
-**Progress:** ✅ **H1 FIXED** (`452d3ff`) · ✅ **M7 FIXED** (`1b108a9`) · ✅ **M8 FIXED** (`ad9a7e7`, +4 tests — 2531 green). Remaining scheduled: 7 MED + 13 LOW.
+**Progress:** ✅ **H1** (`452d3ff`) · ✅ **M7** (`1b108a9`) · ✅ **M8** (`ad9a7e7`) · ✅ **M9 FIXED** (`1f46994`, +2 tests — 2533 green). Remaining scheduled: 6 MED + 13 LOW.
 
 ---
 
@@ -219,6 +219,12 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 - **Where:** [`ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2554`](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2554), [`ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2556`](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2556), [`ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2560`](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2560), [`ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2564`](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2564), [`ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2566`](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2566), [`ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2571`](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:2571), [`ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:1919`](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:1919), [`ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:1951`](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:1951)
 
 ### M9 — Experimental gate-off teardown skips active Stealth Hold @0 (Solide)
+
+> **✅ FIXED — commit `1f46994` (build 2185).** The gate-off teardown now releases an active stealth hold:
+> `if (StealthState == StealthHoldingState) _ = ResetStealthCommand.ExecuteAsync(null);` alongside the
+> Foreground/Fly/SeeThrough force-offs. The `"Holding @0"` literal is factored into a shared const so the
+> hold-set (`HoldStealthAsync`) and the teardown check can't drift. Tests
+> `ExperimentalGateOff_releases_active_stealth_hold` + `..._no_stealth_hold_does_not_reset`.
 
 **🟠 MEDIUM** · Effort **S** · Risk **low** · *confirmed* · Module: TeleportViewModel (Solide Stealth card)
 
