@@ -93,7 +93,7 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ⚠️ = partially-confirmed (claim refined during verification — see the item's **Note**).
 
-**Progress:** ✅ **H1** (`452d3ff`) · ✅ **M7** (`1b108a9`) · ✅ **M8** (`ad9a7e7`) · ✅ **M9** (`1f46994`) · ✅ **M10** (`8108ff2`) · ✅ **M4 FIXED** (`7edea28`, DLL — needs in-game verify). All UI MEDIUMs done. Remaining scheduled: 4 MED (DLL: M1/M2/M3/M5, all Schlacht + shutdown) + 13 LOW.
+**Progress:** ✅ H1 · ✅ M7 · ✅ M8 · ✅ M9 · ✅ M10 · ✅ M4 (`7edea28`) · ✅ **M1/M2/M3 FIXED** (`0f6f6e0`, Schlacht — needs in-game verify). Remaining scheduled: **1 MED (M5 — UE5_Shutdown revive window) + 13 LOW.** DLL fixes (M1–M4) await in-game verification.
 
 ---
 
@@ -122,6 +122,10 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ### M1 — Schlacht disable<->Tick race repopulates hiddenActors after restore, leaking hidden actors
 
+> **✅ FIXED — commit `0f6f6e0` (build 2188, with M2/M3, NEEDS IN-GAME VERIFY).** `SetEnabled(false)` now
+> quiesces the worker (set `active=false` + `StopWorkerLocked`/join) **before** snapshotting + restoring the
+> hidden set, so no in-flight `Tick` can repopulate `hiddenActors` after the restore.
+
 **🟠 MEDIUM** · Effort **S** · Risk **med** · *confirmed* · Module: Schlacht (SeeThrough)
 
 - **Defect:** SetEnabled(false) snapshots+moves out s_state.hiddenActors and un-hides it BEFORE StopWorkerLocked() joins the worker, while Tick() re-checks nothing after the active-gate — a mid-flight Tick can hide a fresh occluder and write it into hiddenActors after the restore already ran, leaving those actors hidden with no un-hide.
@@ -132,6 +136,10 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ### M2 — Schlacht disable while game thread stalled discards the restore set, actors never un-hidden
 
+> **✅ FIXED — commit `0f6f6e0` (build 2188, with M1/M3).** When the game thread is unresponsive at disable,
+> `SetEnabled(false)` now **keeps** `hiddenActors` (no move/clear) + `WARN`s instead of discarding it; the
+> enable path un-hides any leftover set **before** clearing, so a later re-enable recovers them.
+
 **🟠 MEDIUM** · Effort **S** · Risk **low** · *confirmed* · Module: Schlacht (SeeThrough)
 
 - **Defect:** restore = std::move(s_state.hiddenActors) at 457 is unconditional and hiddenActors is cleared, but the un-hide loop at 464 is gated on Stark::IsGameThreadResponsive(); when the gate is false the moved-out local `restore` goes out of scope discarded — the hidden actors are neither restored nor retained, so they remain hidden with no record.
@@ -141,6 +149,11 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 - **Where:** [`dll/src/Schlacht.cpp:457`](../dll/src/Schlacht.cpp:457), [`dll/src/Schlacht.cpp:459-462`](../dll/src/Schlacht.cpp:459), [`dll/src/Schlacht.cpp:464-465`](../dll/src/Schlacht.cpp:464)
 
 ### M3 — Schlacht never un-hides on disconnect or shutdown despite header contract
+
+> **✅ FIXED — commit `0f6f6e0` (build 2188, with M1/M2).** `Schlacht::SetEnabled(false)` is now called from
+> Fern's last-client cleanup and from `UE5_Shutdown` (before `Stark::Shutdown` so the un-hide invokes still
+> dispatch); an early-out makes it a cheap no-op when see-through was never enabled, so it's safe to call
+> blindly. (The CE-Lua Disable path already routed through `SetEnabled(false)` — the partially-confirmed note.)
 
 **🟠 MEDIUM** · Effort **S** · Risk **low** · *partially-confirmed* · Module: Schlacht (SeeThrough) / Fern (PipeServer) / Frieren (Shutdown)
 
