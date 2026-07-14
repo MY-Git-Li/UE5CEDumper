@@ -61,11 +61,13 @@ the row here when it ships.
   > persist), and an off-switch exists (reconnect → `reset_all_fields`, or game restart). The real disconnect
   > defect here is **M4**, which stays scheduled.
 
-- **[MED] PropertySearch keyword rule fix (M10)** —
-  Effort: **M** · Risk: low. **M10** PropertySearch ResultFilter uses one whole-string `Contains` (no space=AND, no
-  `KeywordSearchMemory`) — the only client filter box missed by the b2088 unification; rewrite on
-  `ObjectTreeFilter.MatchesAllTerms` + wire keyword memory + `AutoCompleteBox`. *Parent:
-  audit-2026-07-14-findings §M10.*
+- **[✅ ALL UI MEDIUMs DONE — M7/M8/M9/M10]** — the four UI-side audit-#3 MEDIUMs are shipped on `dev`
+  (H1 too). Remaining MEDIUMs are the **M1–M5 DLL disconnect/shutdown cluster** (above). Done-notes:
+  > **✅ DONE — M10** (SHIPPED commit `8108ff2`, build 2186). PropertySearch ResultFilter now uses
+  > `ObjectTreeFilter.SplitTerms` + `MatchesAllTerms(terms, Class, Prop, Type, Super, Preview)` (space=AND,
+  > field-OR) + `KeywordSearchMemory` (field + `ResultFilterHistory` + probe + `Schedule` + `Dispose`); axaml
+  > `TextBox`→`AutoCompleteBox`. Tests `PropertySearchFilterTests`; made `StubDumpService.SearchPropertiesAsync`
+  > virtual. *Delete after batch merged to main.*
   > **✅ DONE — M9** (SHIPPED commit `1f46994`, build 2185). Gate-off teardown releases an active Solide
   > stealth hold (`if (StealthState == StealthHoldingState) ResetStealthCommand`), matching the
   > Foreground/Fly/SeeThrough force-off pattern; `"Holding @0"` factored into a shared const. Tests

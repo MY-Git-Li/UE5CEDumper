@@ -93,7 +93,7 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ⚠️ = partially-confirmed (claim refined during verification — see the item's **Note**).
 
-**Progress:** ✅ **H1** (`452d3ff`) · ✅ **M7** (`1b108a9`) · ✅ **M8** (`ad9a7e7`) · ✅ **M9 FIXED** (`1f46994`, +2 tests — 2533 green). Remaining scheduled: 6 MED + 13 LOW.
+**Progress:** ✅ **H1** (`452d3ff`) · ✅ **M7** (`1b108a9`) · ✅ **M8** (`ad9a7e7`) · ✅ **M9** (`1f46994`) · ✅ **M10 FIXED** (`8108ff2`, +4 tests — 2537 green). **All UI MEDIUMs done.** Remaining scheduled: 5 MED (all DLL: M1–M5) + 13 LOW.
 
 ---
 
@@ -235,6 +235,13 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 - **Where:** [`ui/UE5DumpUI/ViewModels/TeleportViewModel.cs:2909-2921`](../ui/UE5DumpUI/ViewModels/TeleportViewModel.cs:2909), [`ui/UE5DumpUI/ViewModels/TeleportViewModel.cs:2914-2918`](../ui/UE5DumpUI/ViewModels/TeleportViewModel.cs:2914), [`ui/UE5DumpUI/ViewModels/TeleportViewModel.cs:1519-1539`](../ui/UE5DumpUI/ViewModels/TeleportViewModel.cs:1519), [`ui/UE5DumpUI/Views/TeleportPanel.axaml:586`](../ui/UE5DumpUI/Views/TeleportPanel.axaml:586)
 
 ### M10 — PropertySearch ResultFilter uses single whole-string Contains, no space=AND, no keyword memory
+
+> **✅ FIXED — commit `8108ff2` (build 2186).** `ApplyResultFilter` now splits on `SplitTerms` and gates each
+> row on `ObjectTreeFilter.MatchesAllTerms(terms, Class, Prop, Type, Super, Preview)` (term-AND / field-OR);
+> `KeywordSearchMemory` wired (field + `ResultFilterHistory` + ctor probe + `Schedule` in the handler +
+> `Dispose`); axaml `TextBox`→`AutoCompleteBox` (Text TwoWay, ItemsSource, FilterMode=Contains,
+> PlaceholderText). Tests `PropertySearchFilterTests` (the old whole-string `Contains` found 0 for
+> "max health"). Made `StubDumpService.SearchPropertiesAsync` virtual for the test.
 
 **🟠 MEDIUM** · Effort **M** · Risk **low** · *confirmed* · Module: PropertySearchViewModel (client-side ResultFilter box)
 
