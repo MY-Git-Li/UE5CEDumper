@@ -155,10 +155,18 @@ public static class BakedScriptGenerator
             // 'fstringn'），這是 helper 建立字元 buffer 所需。
             var helperType = MapInputType(v.UeTypeName);
             var literal = RenderLiteral(v.UeTypeName, v.LiteralText);
-            // Each row: { name='...', type='...', offset=N, value=LITERAL },  -- shortType
+            // By-value struct ('fstruct'): emit the exact byte size so the
+            // helper zeroes the right region instead of falling back to its
+            // fragile next-offset-difference heuristic (the params list is in
+            // declaration order, not sorted by offset).
+            // 傳值 struct（'fstruct'）：輸出精確位元組大小，讓 helper 歸零正確
+            // 區塊，而非退回脆弱的「下一個 offset 相減」推算（參數依宣告順序而
+            // 非 offset 排序）。
+            var sizeField = helperType == "fstruct" ? $"size={v.Size}, " : "";
+            // Each row: { name='...', type='...', offset=N, [size=N,] value=LITERAL },  -- shortType
             Line(sb,
                 $"  {{ name='{EscapeLua(v.ParamName)}', type='{helperType}', " +
-                $"offset={v.Offset}, value={literal} }},  " +
+                $"offset={v.Offset}, {sizeField}value={literal} }},  " +
                 $"-- {ShortTypeNameForComment(v.UeTypeName)} {v.Size}B");
         }
         Line(sb, "}");
