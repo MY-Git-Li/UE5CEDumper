@@ -18,7 +18,7 @@ builds ≤696 in
 
 -----
 
-## 2026-07-14 — Solide: force-and-hold a discovered field + player stealth-meter zero (build 2168)
+## 2026-07-14 — Solide: force-and-hold a discovered field + player stealth-meter zero (build 2168; MERGED main PR #437)
 
 **SHIPPED (full DLL + UI build + 841 native + 2525 C# tests green).** The honest, low-risk subset of the
 "enemies can't detect you" evaluation ([project-enemy-undetectable-eval] memory; the locked Non-Goal in
