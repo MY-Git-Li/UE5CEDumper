@@ -738,7 +738,8 @@ public class InvokeScriptTests
         Assert.Contains("function freeInvokeStringBuffers(", content);
         Assert.Contains("t == 'fstring'", content);
         Assert.Contains("t == 'fstringn'", content);
-        Assert.Contains("UE5_INVOKE_HELPER_VERSION = '1.2'", content);
+        Assert.Contains("t == 'fstruct'", content);               // by-value struct param support
+        Assert.Contains("UE5_INVOKE_HELPER_VERSION = '1.3'", content);
     }
 
     // --- InputParams property ---
@@ -946,6 +947,31 @@ public class InvokeScriptTests
         Assert.Contains("offset=16, value=100.5", script);
         Assert.Contains("offset=20, value=200.5", script);
         Assert.Contains("offset=24, value=0", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_StructInputParam_EmitsFstructWithExplicitSize()
+    {
+        // An opaque (undecomposed) StructProperty input param maps to the
+        // helper's 'fstruct' token. The generator must emit size=N so the
+        // helper zeroes exactly the struct's bytes instead of guessing from
+        // the next param's offset (params are declaration-ordered, not sorted
+        // by offset, so the difference heuristic is not reliable).
+        var values = new[]
+        {
+            new BakedParamValue("ActionValue", "StructProperty", 32, 0, ""),
+            new BakedParamValue("ElapsedTime", "FloatProperty",   4, 32, "0"),
+        };
+        var script = BakedScriptGenerator.Generate("Ability_C", "OnAction", 40, values);
+
+        // fstruct row carries an explicit byte size and a zero-fill value.
+        Assert.Contains(
+            "name='ActionValue', type='fstruct', offset=0, size=32, value=0",
+            script);
+        // Scalar rows stay minimal -- no size= field.
+        Assert.Contains(
+            "name='ElapsedTime', type='float', offset=32, value=0", script);
+        Assert.DoesNotContain("type='float', offset=32, size=", script);
     }
 
     [Fact]

@@ -462,6 +462,86 @@ public class TeleportViewModelTests
         Assert.Equal("Holding @0", vm.StealthState);
     }
 
+    // Regression for audit #3 M9: turning the experimental gate OFF force-disabled
+    // Keep-Foreground / Fly / SeeThrough but NOT an active Solide stealth hold, so its
+    // re-assert worker kept writing after the (gated) Stealth card was hidden, with no
+    // visible way to stop it. The gate-off teardown now releases the hold too.
+    [Fact]
+    public async Task ExperimentalGateOff_releases_active_stealth_hold()
+    {
+        var fake = new FakeDumpService
+        {
+            NextStealthCandidates = new List<StealthCandidate>
+            {
+                new() { ClassName = "BP_Enemy_C", FieldName = "Awareness" },
+            },
+            NextForce = new() { Held = 3, Resolved = true },
+        };
+        var gate = new FakeExperimentalGate(enabled: true);
+        var vm = CreateVm(fake, out _, experimentalGate: gate);
+        vm.IsConnected = true;
+
+        await vm.DetectStealthMeterCommand.ExecuteAsync(null);
+        await vm.HoldStealthCommand.ExecuteAsync(null);
+        Assert.Equal("Holding @0", vm.StealthState);
+        Assert.Equal(0, fake.ResetFieldCalls);
+
+        gate.IsEnabled = false;   // hides the Stealth card → teardown must release the hold
+
+        Assert.Equal(1, fake.ResetFieldCalls);
+        Assert.Equal("BP_Enemy_C", fake.LastForceClass);
+        Assert.Equal("Awareness", fake.LastForceField);
+        Assert.Equal("Off", vm.StealthState);
+    }
+
+    // The teardown must NOT fire a needless release when no hold is active.
+    [Fact]
+    public async Task ExperimentalGateOff_no_stealth_hold_does_not_reset()
+    {
+        var fake = new FakeDumpService
+        {
+            NextStealthCandidates = new List<StealthCandidate>
+            {
+                new() { ClassName = "BP_Enemy_C", FieldName = "Awareness" },
+            },
+        };
+        var gate = new FakeExperimentalGate(enabled: true);
+        var vm = CreateVm(fake, out _, experimentalGate: gate);
+        vm.IsConnected = true;
+
+        await vm.DetectStealthMeterCommand.ExecuteAsync(null);   // "Ready", not holding
+        Assert.Equal("Ready", vm.StealthState);
+
+        gate.IsEnabled = false;
+
+        Assert.Equal(0, fake.ResetFieldCalls);
+    }
+
+    // Regression for audit #3 L13: SetConnected(false) reset every card badge EXCEPT the
+    // Stealth card, so a reconnect (possibly to a different game) showed a stale hold.
+    [Fact]
+    public async Task Disconnect_resets_stealth_card()
+    {
+        var fake = new FakeDumpService
+        {
+            NextStealthCandidates = new List<StealthCandidate>
+            {
+                new() { ClassName = "BP_Enemy_C", FieldName = "Awareness" },
+            },
+            NextForce = new() { Held = 1, Resolved = true },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+        await vm.DetectStealthMeterCommand.ExecuteAsync(null);
+        await vm.HoldStealthCommand.ExecuteAsync(null);
+        Assert.Equal("Holding @0", vm.StealthState);
+
+        vm.SetConnected(false);
+
+        Assert.Equal("Off", vm.StealthState);
+        Assert.Equal("—", vm.StealthFieldText);
+    }
+
     [Fact]
     public async Task HoldStealth_zero_held_shows_not_found()
     {

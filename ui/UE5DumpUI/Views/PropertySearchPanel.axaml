@@ -51,10 +51,12 @@
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
       <TextBlock Text="{StaticResource str.PropertySearch.ResultFilterLabel}"
                  Foreground="#888" FontSize="12" VerticalAlignment="Center"/>
-      <TextBox PlaceholderText="{StaticResource str.PropertySearch.ResultFilterHint}"
-               Text="{Binding ResultFilter}"
-               ToolTip.Tip="{StaticResource str.Tip.PropertySearch.ResultFilter}"
-               Width="320" Padding="4,2" FontSize="12"/>
+      <AutoCompleteBox Text="{Binding ResultFilter, Mode=TwoWay}"
+                       ItemsSource="{Binding ResultFilterHistory}"
+                       FilterMode="Contains"
+                       PlaceholderText="{StaticResource str.PropertySearch.ResultFilterHint}"
+                       ToolTip.Tip="{StaticResource str.Tip.PropertySearch.ResultFilter}"
+                       Width="320" Padding="4,2" FontSize="12"/>
       <views:ClassFacetFilterButton Filter="{Binding ClassFilter}"/>
       <Button Content="{StaticResource str.Common.BatchFuncs}"
               Click="OnBatchFindFuncsClick"

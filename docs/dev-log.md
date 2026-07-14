@@ -18,6 +18,31 @@ builds ≤696 in
 
 -----
 
+## 2026-07-14 — Invoke: by-value `fstruct` struct params in the CE Lua helper (dev commit `f66e602`; helper v1.3; reworked from PR #433)
+
+**Committed to `dev` (managed build clean + `InvokeScriptTests` 108/108 green; no C++/pipe change).** Closes a real gap
+surfaced by external contributor PR #433 (Rixef): a UFunction taking a **by-value `StructProperty` input param** maps to
+the helper token `fstruct` (`BakedScriptGenerator.MapInputType`), but `ue5_invoke_helper.lua`'s `writeBakedParams` had no
+`fstruct` arm — the token fell through to the `else` and raised *"Unknown param type 'fstruct'"*. Under the `pcall` in
+`invokeUFunction` that surfaced as a graceful invoke failure (`showMessage`), so any function taking an undecomposable
+struct param could not be fired from a generated baked script.
+
+- **Helper — recursive `writeParams` + `fstruct` arm** ([ue5_invoke_helper.lua](../scripts/ue5_invoke_helper.lua)): split
+  the param loop into `writeParams(base, regionSize, params)`; `writeBakedParams` zero-fills the whole buffer once (still
+  via `writeByte`, a valid CE Lua single-byte write) then delegates. The `fstruct` arm resolves struct size (explicit
+  `p.size` wins → next-member-offset diff → rest-of-region), zeroes the region in one `writeBytes`, and recurses only when
+  `value` is a member table (nested fields, offsets relative to the struct base). Guards a hand-edited row missing
+  `offset=`, clamps negative sizes, keeps the bilingual comments + the "supported types" error list. Version 1.2 → 1.3.
+- **Generator emits `size=`** ([BakedScriptGenerator.cs](../ui/UE5DumpUI/Services/BakedScriptGenerator.cs)): `fstruct` rows
+  now carry `size=<bytes>` so the helper zeroes exactly the struct region instead of the fragile next-offset heuristic
+  (the param list is declaration-ordered, not sorted by offset). Scalar rows stay minimal (no `size=`).
+- **Reworked, not merged:** PR #433 also retyped the zero-fill `writeByte` → `writeBytes({0})` — reverted; `writeByte` is
+  valid CE Lua (used across `ue5_freeze_helper.lua` + the other script generators). Landed as a cleaned commit crediting
+  the author (`Co-authored-by: Rixef`); the PR is **closed as superseded**, not merged (merging would re-introduce the
+  churn + comment/error-list regressions and conflict with `f66e602`).
+- **Tests** ([InvokeScriptTests.cs](../ui/UE5DumpUI.Tests/InvokeScriptTests.cs)): the embedded-helper test now asserts the
+  `fstruct` arm at v1.3; a new generator test asserts a `StructProperty` input row emits `type='fstruct', size=N`.
+
 ## 2026-07-14 — Solide: force-and-hold a discovered field + player stealth-meter zero (build 2168; MERGED main PR #437)
 
 **SHIPPED (full DLL + UI build + 841 native + 2525 C# tests green).** The honest, low-risk subset of the

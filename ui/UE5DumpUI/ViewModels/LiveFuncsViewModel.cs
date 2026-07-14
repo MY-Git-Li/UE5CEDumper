@@ -172,7 +172,6 @@ public partial class LiveFuncsViewModel : ViewModelBase
             ClearError();
             IsBusy = true;
             await _dump.PeProfileStopAsync();
-            IsRecording = false;
             await FetchAndPopulateAsync();
         }
         catch (Exception ex)
@@ -181,7 +180,9 @@ public partial class LiveFuncsViewModel : ViewModelBase
             StatusText = "Stop failed";
             _log.Error("LivePEProfiler stop failed", ex);
         }
-        finally { IsBusy = false; }
+        // Clear the recording UI state even if the stop round-trip threw, so a failed
+        // Stop doesn't leave the tab stuck "recording" (which would swallow Start). (L16)
+        finally { IsBusy = false; IsRecording = false; }
     }
 
     /// <summary>Re-fetch the current table without stopping — a live peek while
@@ -345,9 +346,19 @@ public partial class LiveFuncsViewModel : ViewModelBase
 
     private async Task AutoStopOnLeaveAsync()
     {
+        // Clear the UI state up-front (before the round-trip) so returning to the tab and
+        // clicking Start inside the stop window isn't swallowed by StartAsync's guard. (L16)
+        IsRecording = false;
         try { await _dump.PeProfileStopAsync(); }
         catch (Exception ex) { _log.Error("LivePEProfiler auto-stop failed", ex); }
-        IsRecording = false;
         StatusText = "Recording auto-stopped (left the tab). Re-open and Refresh to see counts.";
+    }
+
+    /// <summary>Reset the recording UI state on pipe disconnect. The DLL (Linie) already
+    /// drops its recording on last-client-gone; this keeps the UI in sync so a reconnect
+    /// doesn't show a stuck "recording" that swallows the next Start. (L16)</summary>
+    public void ResetOnDisconnect()
+    {
+        if (IsRecording) IsRecording = false;
     }
 }

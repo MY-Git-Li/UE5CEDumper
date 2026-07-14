@@ -17,6 +17,7 @@
 #include "Grimoire.h"
 #include "Macht.h"
 #include "Aura.h"
+#include "Tot.h"     // Tot::MarkBackgroundWorker — re-assert worker ignores per-command cancel (M4)
 #include "Ubel.h"
 
 #include <algorithm>
@@ -27,6 +28,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 
 // &GWorld — deref once for UWorld* (defined in Frieren.cpp; same as Hemmung/Solitar).
 extern uintptr_t g_cachedGWorld;
@@ -41,9 +44,13 @@ struct Job {
     std::string fieldName;
     int32_t     kind  = K_BOOL;
     double      value = 0.0;      // desired (bool: 1/0; numeric: absolute)
-    // Restore base — captured from the FIRST resolved instance (representative).
-    bool        hasBase   = false;
-    double      baseValue = 0.0;  // numeric base OR bool base bit (0/1)
+    // Restore base captured PER INSTANCE (owner addr → original value / bool bit) at
+    // first force, so RemoveForce writes each instance's OWN base, never a foreign one.
+    // Pruned to the live pool each re-assert tick to bound it. (L4)
+    std::unordered_map<uintptr_t, double> baseByOwner;
+    // Set when the field resolved on >=1 instance but was type-refused everywhere
+    // (weak/soft/lazy ptr → GObjects[0] trap, or wrong numeric type). (L2)
+    int32_t     lastRefusal = 0;
     // Last-tick stats (for the UI badge + Locate handoff).
     int32_t     held         = 0;
     uintptr_t   sampleOwner  = 0;
@@ -191,14 +198,21 @@ uintptr_t ResolvePawn(uintptr_t pc) {
 // resolved on this object (counts toward "N held"); fills sample owner/offset.
 // `restore` writes the captured base instead of the desired value.
 bool ApplyToInstance(Job& job, uintptr_t obj, uintptr_t cls, bool restore,
-                     bool* drifted, uintptr_t& sampleOwner, int32_t& sampleOffset) {
-    sampleOwner = 0; sampleOffset = -1;
+                     bool* drifted, uintptr_t& sampleOwner, int32_t& sampleOffset,
+                     int32_t& refusal) {
+    sampleOwner = 0; sampleOffset = -1; refusal = 0;
 
     if (job.kind == K_BOOL) {
         int32_t cur = Solitar::GetActorBool(obj, cls, job.fieldName.c_str());
         if (cur < 0) return false;   // bool not resolvable on this instance
-        if (!job.hasBase) { job.baseValue = static_cast<double>(cur); job.hasBase = true; }
-        bool desired = restore ? (job.baseValue != 0.0) : (job.value != 0.0);
+        // Per-instance base (L4): capture this object's ORIGINAL bit on first force; on
+        // restore, only rewrite instances we actually captured (never a foreign base).
+        auto b = job.baseByOwner.find(obj);
+        if (b == job.baseByOwner.end()) {
+            if (restore) return false;
+            b = job.baseByOwner.emplace(obj, static_cast<double>(cur)).first;
+        }
+        bool desired = restore ? (b->second != 0.0) : (job.value != 0.0);
         // Report drift (the game re-wrote the bit off our target) for telemetry
         // parity with the numeric/object-null branches — the "game keeps
         // re-writing it" LOG_WARN is the in-field "this lever is a no-op" signal.
@@ -206,13 +220,16 @@ bool ApplyToInstance(Job& job, uintptr_t obj, uintptr_t cls, bool restore,
         int32_t rc = Solitar::SetActorBool(obj, cls, job.fieldName.c_str(), desired);
         if (rc < 0) return false;
         sampleOwner  = obj;
-        sampleOffset = Ubel::FindFieldOffset(cls, job.fieldName.c_str(), job.fieldName.c_str(),
-                                             nullptr, "BoolProperty");
+        sampleOffset = Ubel::FindFieldOffset(cls, job.fieldName.c_str(), nullptr,
+                                             nullptr, "BoolProperty");   // exact-only (L3)
         return true;
     }
 
+    // Exact field name only — the forced name comes from Property Search / the stealth
+    // finder as an exact leaf name, so the fuzzy "contains" fallback (which could hit a
+    // same-prefix field like HealthRegenRate) is refused. (L3)
     FieldInfo fi{};
-    if (!Ubel::FindField(cls, job.fieldName.c_str(), job.fieldName.c_str(), nullptr, nullptr, fi)
+    if (!Ubel::FindField(cls, job.fieldName.c_str(), /*contains=*/nullptr, nullptr, nullptr, fi)
         || fi.Offset < 0)
         return false;
     uintptr_t addr = obj + static_cast<uintptr_t>(fi.Offset);
@@ -220,7 +237,7 @@ bool ApplyToInstance(Job& job, uintptr_t obj, uintptr_t cls, bool restore,
     if (job.kind == K_OBJECT_NULL) {
         // Strong ObjectProperty only: writing 8 zero bytes into a Weak/Soft/Lazy
         // ptr sets ObjectIndex 0 = a VALID GObjects[0] slot, not null (crash trap).
-        if (fi.TypeName != "ObjectProperty") return false;
+        if (fi.TypeName != "ObjectProperty") { refusal = FR_ERR_WEAK_PTR; return false; }   // L2
         sampleOwner = obj; sampleOffset = fi.Offset;
         if (restore) return true;   // original ptr not saved (stale) — no restore
         uintptr_t cur = 0;
@@ -233,11 +250,15 @@ bool ApplyToInstance(Job& job, uintptr_t obj, uintptr_t cls, bool restore,
     }
 
     // K_NUMERIC
-    if (!IsNumericType(fi.TypeName)) return false;
+    if (!IsNumericType(fi.TypeName)) { refusal = FR_ERR_REFLECT; return false; }   // L2
     double cur = 0;
     if (!ReadNumeric(addr, fi, cur)) return false;
-    if (!job.hasBase) { job.baseValue = cur; job.hasBase = true; }
-    double target = restore ? job.baseValue : job.value;
+    auto b = job.baseByOwner.find(obj);   // per-instance base (L4)
+    if (b == job.baseByOwner.end()) {
+        if (restore) return false;
+        b = job.baseByOwner.emplace(obj, cur).first;
+    }
+    double target = restore ? b->second : job.value;
     double eps = IsFloatType(fi.TypeName) ? (std::max)(1e-4, std::fabs(target) * 1e-5) : 0.5;
     if (std::fabs(cur - target) > eps) {
         if (WriteNumeric(addr, fi, target) && drifted) *drifted = true;
@@ -248,23 +269,39 @@ bool ApplyToInstance(Job& job, uintptr_t obj, uintptr_t cls, bool restore,
 
 // Apply (or restore) one job across the live instance pool (caller holds s_mutex).
 void ApplyJobLocked(Job& job, bool restore, bool* drifted) {
-    int32_t held = 0;
+    int32_t held = 0, refusal = 0;
     uintptr_t sampleOwner = 0; int32_t sampleOffset = -1;
-    auto rset = Aura::FindInstancesByClass(job.className, false, Grimoire::SOLIDE_MAX_INSTANCES);
+    // Exact class match (L3): forcing "Enemy" must not also capture "EnemyProjectile".
+    auto rset = Aura::FindInstancesByClass(job.className, /*exactMatch=*/true, Grimoire::SOLIDE_MAX_INSTANCES);
+    std::unordered_set<uintptr_t> seen;
     for (const auto& r : rset.results) {
         if (!r.addr || r.name.find("Default__") != std::string::npos) continue;
         uintptr_t cls = r.classAddr ? r.classAddr : Ubel::GetClass(r.addr);
         if (!cls) continue;
-        uintptr_t so = 0; int32_t soff = -1;
-        if (ApplyToInstance(job, r.addr, cls, restore, drifted, so, soff)) {
+        seen.insert(r.addr);
+        uintptr_t so = 0; int32_t soff = -1, ref = 0;
+        if (ApplyToInstance(job, r.addr, cls, restore, drifted, so, soff, ref)) {
             ++held;
             if (!sampleOwner && so) { sampleOwner = so; sampleOffset = soff; }
+        } else if (ref != 0) {
+            refusal = ref;   // field resolved but type-refused on this instance (L2)
         }
     }
     if (!restore) {
         job.held = held;
         job.sampleOwner = sampleOwner;
         job.sampleOffset = sampleOffset;
+        job.lastRefusal = refusal;
+        // Prune per-instance bases for owners no longer in the live pool — bounds the map
+        // and avoids restoring a stale base to a GC-reused address. Only when the pool was
+        // NOT capped: a capped result is a shifting first-N window, so an absent owner may
+        // be live-but-past-cap (not gone) — dropping its true base then recapturing our
+        // own forced value later would corrupt the restore. Below the cap the pool is
+        // complete, so absent == genuinely gone. (L4)
+        if (static_cast<int32_t>(rset.results.size()) < Grimoire::SOLIDE_MAX_INSTANCES) {
+            for (auto it = job.baseByOwner.begin(); it != job.baseByOwner.end(); )
+                it = seen.count(it->first) ? std::next(it) : job.baseByOwner.erase(it);
+        }
     }
 }
 
@@ -279,6 +316,7 @@ std::vector<Job>::iterator FindJobLocked(const std::string& cls, const std::stri
 // ---- re-assert worker (identical discipline to Hemmung) ----
 
 void WorkerLoop() {
+    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
     LOG_INFO("Solide: force-field re-assert worker started (%d ms)", Grimoire::SOLIDE_REASSERT_MS);
     int driftCount = 0;
     while (!s_workerStop.load()) {
@@ -304,6 +342,7 @@ void WorkerLoop() {
 }
 
 void StartWorkerLocked() {
+    if (Tot::ShutdownRequested()) return;   // don't (re)spawn during the shutdown window (M5)
     if (s_worker.joinable()) return;
     s_workerStop.store(false);
     s_worker = std::thread(WorkerLoop);
@@ -328,6 +367,7 @@ int32_t AddForce(const char* className, const char* fieldName, int32_t kind, dou
     {
         std::lock_guard<std::mutex> lk(s_mutex);
         auto it = FindJobLocked(className, fieldName);
+        bool newlyAdded = false;
         if (it == s_jobs.end()) {
             Job j;
             j.className = className;
@@ -336,15 +376,25 @@ int32_t AddForce(const char* className, const char* fieldName, int32_t kind, dou
             j.value = value;
             s_jobs.push_back(std::move(j));
             it = s_jobs.end() - 1;
+            newlyAdded = true;
         } else {
-            // Re-arm an existing hold with a new value/kind; keep the captured base
+            // Re-arm an existing hold with a new value/kind; keep the captured bases
             // when the kind is unchanged so a re-apply doesn't fold our own write in.
-            if (it->kind != kind) { it->kind = kind; it->hasBase = false; }
+            if (it->kind != kind) { it->kind = kind; it->baseByOwner.clear(); }
             it->value = value;
         }
         bool drifted = false;
         ApplyJobLocked(*it, /*restore=*/false, &drifted);
         held = it->held;
+        // Field resolved on >=1 instance but was type-refused everywhere (weak/soft/lazy
+        // ptr → GObjects[0] trap, or wrong numeric type) → a futile hold. Don't persist a
+        // newly-added job or start the worker; surface the reason instead of a silent
+        // held=0 (Fern maps a negative return to `code`). (L2)
+        if (held == 0 && it->lastRefusal != 0 && newlyAdded) {
+            int32_t refusal = it->lastRefusal;
+            s_jobs.erase(it);
+            return refusal;
+        }
     }
     StartWorkerLocked();   // s_workerMutex held, s_mutex released
     return held;           // >= 0 : live "N held" count (0 = matched nothing)

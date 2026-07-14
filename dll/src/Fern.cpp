@@ -758,6 +758,10 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         Radar::SessionManager::Instance().DropAll();
         Radar::GroupSessionManager::Instance().DropAll();
         Linie::Reset();   // last client gone — drop any live PE-profile recording
+        // Un-hide any see-through occluders + stop its worker — the header contract is
+        // "un-hidden on disable / disconnect", and there's no UI left to toggle it.
+        // Cheap no-op when see-through was never enabled. (M3)
+        Schlacht::SetEnabled(false);
     }
 
     m_connCv.notify_all();
@@ -4203,6 +4207,7 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             // 指標必須是遊戲行程內的有效位址。此 DLL 為注入式，故我們在此配置的 heap
             // buffer 就位於遊戲位址空間（與 paramBuf.data() 可作為 params 同理）。
             std::vector<void*> strAllocs;
+            try {
             if (request.contains("str_params") && request["str_params"].is_array()) {
                 for (const auto& sp : request["str_params"]) {
                     int off  = sp.value("off", -1);
@@ -4247,6 +4252,14 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                     memcpy(paramBuf.data() + off + 8,  &num,     sizeof(int32_t));
                     memcpy(paramBuf.data() + off + 12, &num,     sizeof(int32_t));
                 }
+            }
+            }
+            catch (...) {
+                // A malformed str_params element (a nlohmann type_error thrown mid-loop)
+                // must not leak the heap buffers earlier iterations allocated. Free them
+                // and rethrow — the dispatch envelope turns it into an error response. (L12)
+                for (void* p : strAllocs) free(p);
+                throw;
             }
 
             uintptr_t paramPtr = bufSize > 0

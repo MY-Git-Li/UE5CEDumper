@@ -19,6 +19,96 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## 🔎 Audit #3 fixes (build 2168 — 2026-07-14; full detail in [audit-2026-07-14-findings.md](audit-2026-07-14-findings.md))
+
+Third bug/leak audit of the post-b1872 code (Solide/Hemmung/Linie/Schlacht/Grausam + Auto-Snapshot/
+Dump-Explorer/Live-Funcs/Teleport-Stealth). 32 findings raised, verified against current code, then
+put through an **adversarial double-confirm** (skeptics mandated to refute; HIGH got 3 diverse lenses).
+**Net after double-confirm: 23 scheduled** (1 HIGH + 9 MED + 13 LOW) — **M6 and L6 refuted/dropped**,
+7 LOWs downgraded to optional cleanup. 0 regressions from audit #2. **Common root cause of 8 of the 10
+HIGH/MED: disconnect/shutdown lifecycle** — a *bare* `OperationCanceledException` from `PipeClient`
+(DisconnectAsync/Dispose `TrySetCanceled()` with **no token**, so only ambient `ct.IsCancellationRequested`
+distinguishes it from a real cancel), or a DLL worker whose state isn't reset/restored when the last client
+leaves. **Prefer fixing the shared root** (an `IsUserCancel(ct)` helper + a single `OnLastClientGone()`
+reset registry) over each site individually. Each ID below maps to a section in the findings doc; delete
+the row here when it ships.
+
+- **✅ DONE — H1 — Snapshot silently truncated but saved as usable/Success on user Disconnect** —
+  SHIPPED commit `452d3ff` (build 2182). Producer catch now filters on `lct.IsCancellationRequested`, so a
+  bare disconnect-OCE faults the producer → `Task.WhenAll` rethrows → `CompleteSnapshotAsync` is skipped →
+  the existing outer OCE catch deletes the partial. **Verified `is_usable` defaults to 1** (so an
+  un-finalised row is *usable* — the fix relies on deletion, not on it being auto-cleaned); the outer catch
+  was deliberately **not** filtered (that would reroute to the non-deleting generic handler and re-leave a
+  usable partial — M7's separate concern). Regression test
+  `Capture_DisconnectMidStream_DoesNotSaveUsablePartial`; 2526 green. *Delete this row after the audit batch
+  is merged to main.* *Parent: audit-2026-07-14-findings §H1.*
+
+- **[✅ ALL MEDIUMs DONE — 1 HIGH + 10 MED shipped on `dev`; DLL M1–M5 await in-game verify]** — the entire
+  audit-#3 HIGH+MEDIUM set is fixed. Remaining audit work = the **13 LOW** batch (below) + optional/cosmetic
+  items. Done-notes for the DLL cluster:
+  > **✅ DONE — M5 + M2 enable-recovery leak** (SHIPPED commit `61e1f7f`, build 2189, **needs in-game verify**).
+  > `Tot::RequestShutdown()` at the TOP of `UE5_Shutdown` + every module's `StartWorker*` gated on
+  > `Tot::ShutdownRequested()` (single spawn chokepoint) → no worker revives in the shutdown window; cleared
+  > by `Fern::Start`. **Adversarially verified** (5 lenses: no deadlock / lock-order / M3↔M5 / M4↔M5
+  > regression; `EnqueueInvoke` gates on Stark's hook flag not `g_shutdown` so the M3 un-hide survives). The
+  > same pass caught + fixed a leak in the M1/M2 enable-recovery (un-responsive re-enable orphaned the
+  > leftover). *Delete after in-game verify.*
+  > **✅ DONE — M1/M2/M3** (SHIPPED commit `0f6f6e0`, build 2188, **needs in-game verify**). All Schlacht:
+  > disable now joins the worker *before* snapshot/restore (M1); an unresponsive game thread keeps the hidden
+  > record + recovers it on the next enable instead of discarding it (M2); `SetEnabled(false)` is called from
+  > Fern last-client cleanup + `UE5_Shutdown` with a cheap no-op early-out (M3). *Delete after in-game verify.*
+  > **✅ DONE — M4** (SHIPPED commit `7edea28`, build 2187, **needs in-game verify**). `Tot::MarkBackgroundWorker()`
+  > thread-local marks each re-assert worker (Solide/Hemmung/Laufen/Solitar/Dunste/Schlacht) so `Tot::Requested()`
+  > returns `g_shutdown`-only on those threads → workers no longer freeze on the per-command cancel latch while
+  > a pipe command still honours it. Did NOT reset `g_perCommand` on disconnect (would regress the
+  > orphaned-scan abort). *Delete after batch merged + in-game verified.*
+  > **~~M6~~ dropped by double-confirm** — "Solide hold unstoppable after UI crash" is working-as-designed:
+  > hold persistence across disconnect is deliberate and family-uniform (Solitar/Laufen/Hemmung/Wirbel also
+  > persist), and an off-switch exists (reconnect → `reset_all_fields`, or game restart). The real disconnect
+  > defect here is **M4**, which stays scheduled.
+
+- **[✅ ALL UI MEDIUMs DONE — M7/M8/M9/M10]** — the four UI-side audit-#3 MEDIUMs are shipped on `dev`
+  (H1 too). Remaining MEDIUMs are the **M1–M5 DLL disconnect/shutdown cluster** (above). Done-notes:
+  > **✅ DONE — M10** (SHIPPED commit `8108ff2`, build 2186). PropertySearch ResultFilter now uses
+  > `ObjectTreeFilter.SplitTerms` + `MatchesAllTerms(terms, Class, Prop, Type, Super, Preview)` (space=AND,
+  > field-OR) + `KeywordSearchMemory` (field + `ResultFilterHistory` + probe + `Schedule` + `Dispose`); axaml
+  > `TextBox`→`AutoCompleteBox`. Tests `PropertySearchFilterTests`; made `StubDumpService.SearchPropertiesAsync`
+  > virtual. *Delete after batch merged to main.*
+  > **✅ DONE — M9** (SHIPPED commit `1f46994`, build 2185). Gate-off teardown releases an active Solide
+  > stealth hold (`if (StealthState == StealthHoldingState) ResetStealthCommand`), matching the
+  > Foreground/Fly/SeeThrough force-off pattern; `"Holding @0"` factored into a shared const. Tests
+  > `ExperimentalGateOff_releases_active_stealth_hold` (+ no-op case). *Delete after batch merged to main.*
+  > **✅ DONE — M8** (SHIPPED commit `ad9a7e7`, build 2184). `_sessionEpoch` bumped on disconnect; the dwell
+  > records only via the pure gate `ShouldConfirmProxy(IsConnected, scheduledEpoch, currentEpoch)`; timer
+  > disposed before early returns, on disconnect, and in `Dispose()`. Tests `MainWindowProxyConfirmTests`.
+  > *Delete after the audit batch is merged to main.*
+  > **✅ DONE — M7** (SHIPPED commit `1b108a9`, build 2183). Disconnect now reports `Failed` (not
+  > `Cancelled`), so the auto-loop stops via `case Failed` instead of wedging; `case Cancelled` also stops
+  > defensively; the partial delete+reclaim (`RemovePartialAsync`) now also runs on the generic
+  > `catch (Exception)`, closing the non-OCE (IOException/InvalidOperationException) H1 sibling hole.
+  > Regression test `AutoSnapshot_DisconnectMidCapture_StopsLoopWithoutWedge`; 2527 green. *Delete after the
+  > audit batch is merged to main.*
+
+- **[✅ ALL 13 LOWs DONE] Audit #3 low-severity batch** — SHIPPED on `dev` in four commits:
+  UI L13–L17 (`8bd33f8`, +2 tests), Solide L2/L3/L4 (`408fd2d`), DLL L1/L5/L8/L10/L12 (`7f3898f`), and the
+  adversarial-verify followups (`3362636`: L4 prune-guard for >256-instance churn + L10 GFW-hook re-subclass
+  race). The DLL LOWs (L1–L12) **await in-game verify**. With the HIGH + all 10 MED, the entire scheduled
+  audit-#3 set is now fixed — only the optional/cosmetic downgrades below remain. *Delete after batch merged +
+  DLL in-game verified. Parent: audit-2026-07-14-findings §L1–L17.*
+
+- **[optional / cosmetic] Audit #3 downgraded items (do only if touching the file)** —
+  Effort: **S** each · Risk: low. Double-confirm judged these real-but-not-worth-a-dedicated-fix (no
+  incorrect/harmful outcome): **~~L6~~** DROPPED (Welford `m2` provably ≥ 0 → NaN unreachable + tolerant
+  downstream); **L7** Linie post-Reset phantom row (wiped by next `StartRecording`); **L9** Grausam per-frame
+  global `ClipCursor(nullptr)` (deliberate release tradeoff; niche third-party case); **L11** Schlacht raw
+  `AActor*` across GC (SEH-guarded, self-corrects next tick, no crash); **L18** DetectStats missing detach has
+  zero functional effect (no `OnSelectedResultChanged`) — only the no-`ct` usability point stands; **L19**
+  LiveFuncs `Clear()` inverted detach order (cosmetic); **L20** Dump All export no `CancellationToken`
+  (usability gap, output correct); **L21** (INFO) DumpExplorer reimplements space=AND (semantically
+  identical — style only). *Parent: audit-2026-07-14-findings §L6–L21 (see per-item ⬇/⛔ banners).*
+
+-----
+
 ## ▶ Next up (genuinely actionable now)
 
 - **Multi-pipe Phase 1 — residual verification (low priority; lane split SHIPPED PR #396)** —

@@ -50,7 +50,7 @@
     {$asm}
 
   Constants exposed:
-    UE5_INVOKE_HELPER_VERSION  = '1.2'
+    UE5_INVOKE_HELPER_VERSION  = '1.3'
     UE5_INVOKE_PARAMS_OFFSET   = 0x328  (params_data offset within mailbox)
 ]]
 
@@ -59,7 +59,7 @@
 -- ============================================================
 
 if not UE5_INVOKE_HELPER_VERSION then
-  UE5_INVOKE_HELPER_VERSION = '1.2'
+  UE5_INVOKE_HELPER_VERSION = '1.3'
 end
 
 -- ============================================================
@@ -200,55 +200,102 @@ local function writeFStringInline(pd, off, s, wide)
   _ue5_invoke_str_bufs[#_ue5_invoke_str_bufs + 1] = buf
 end
 
-local function writeBakedParams(mb, parmsSize, params)
-  local PD = mb + OFF_PARAMS
-
-  -- Zero-fill the params buffer (clears any stale data from previous calls).
-  for i = 0, parmsSize - 1 do
-    writeByte(PD + i, 0)
-  end
-
+-- Stamp a list of baked params into the buffer at `base`. Each entry is
+-- { name, type, offset, value, size? }. Split out of writeBakedParams so a
+-- nested 'fstruct' member table can recurse (offsets RELATIVE to the struct
+-- base) -- hence the explicit base + region size rather than assuming the
+-- mailbox layout. Does NOT zero the buffer (writeBakedParams does that once).
+-- 將一組 baked 參數寫入 `base` 起始的緩衝區。每筆為
+-- { name, type, offset, value, size? }。自 writeBakedParams 拆出，讓巢狀
+-- 'fstruct' 成員表格能遞迴（offset 相對於結構起點），因此以明確的 base +
+-- 區塊大小為參數，而非假設 mailbox 佈局。本函式不負責歸零（由 writeBakedParams
+-- 一次完成）。
+local function writeParams(base, regionSize, params)
   if not params then return end
 
-  for _, p in ipairs(params) do
-    local v   = p.value or 0
-    local off = p.offset or 0
-    local t   = p.type or 'int32'
+  for i, p in ipairs(params) do
+    local v    = p.value or 0
+    local off  = p.offset or 0
+    local t    = p.type or 'int32'
+    local size = p.size            -- optional explicit byte size (any type)
 
     if t == 'bool' then
-      writeBytes(PD + off, { (v ~= 0 and v ~= false) and 1 or 0 })
+      writeBytes(base + off, { (v ~= 0 and v ~= false) and 1 or 0 })
     elseif t == 'byte' then
-      writeBytes(PD + off, { math.floor(v) % 256 })
+      writeBytes(base + off, { math.floor(v) % 256 })
     elseif t == 'int16' or t == 'uint16' then
-      writeSmallInteger(PD + off, math.floor(v))
+      writeSmallInteger(base + off, math.floor(v))
     elseif t == 'int32' or t == 'uint32' or t == 'enum' then
-      writeInteger(PD + off, math.floor(v))
+      writeInteger(base + off, math.floor(v))
     elseif t == 'int64' or t == 'uint64' or t == 'qword' then
-      writeQword(PD + off, v)
+      writeQword(base + off, v)
     elseif t == 'float' then
-      writeFloat(PD + off, v)
+      writeFloat(base + off, v)
     elseif t == 'double' then
-      writeDouble(PD + off, v)
+      writeDouble(base + off, v)
     elseif t == 'pointer' or t == 'object' or t == 'class'
            or t == 'name' or t == 'soft' or t == 'weak'
            or t == 'lazy' or t == 'interface' then
-      writeQword(PD + off, v)
+      writeQword(base + off, v)
     elseif t == 'fstring' then
       -- Wide UE FString INPUT param (value = Lua string).
       -- 寬字元 UE FString 輸入參數（value = Lua 字串）。
-      writeFStringInline(PD, off, v, true)
+      writeFStringInline(base, off, v, true)
     elseif t == 'fstringn' then
       -- Narrow FUtf8String / FAnsiString INPUT param (value = Lua string).
       -- 窄字元 FUtf8String / FAnsiString 輸入參數（value = Lua 字串）。
-      writeFStringInline(PD, off, v, false)
+      writeFStringInline(base, off, v, false)
+    elseif t == 'fstruct' then
+      -- By-value UE struct param. Size resolution: explicit p.size wins
+      -- (the generator now emits it); else infer from the next member's
+      -- offset; else consume the rest of the region. value == a member
+      -- table -> recurse and stamp fields; anything else -> zero-fill only.
+      -- 傳值的 UE 結構參數。大小判定：明確 p.size 優先（產生器已輸出）；否則
+      -- 以下一個成員的 offset 推算；再否則吃掉區塊剩餘空間。value 為成員表格
+      -- -> 遞迴寫入子欄位；否則僅歸零。
+      local structSize = size
+      if not structSize then
+        if i < #params then
+          structSize = (params[i + 1].offset or 0) - off
+        else
+          structSize = regionSize - off
+        end
+      end
+      if structSize < 0 then structSize = 0 end
+      -- Zero the struct region in one write. writeBakedParams already wiped
+      -- the top-level buffer, but a nested recursion runs on a sub-region
+      -- the caller did not pre-zero, so keep this local wipe.
+      -- 一次寫入歸零整個結構區塊。writeBakedParams 已清過頂層緩衝區，但巢狀
+      -- 遞迴作用於 caller 未預先歸零的子區塊，故保留此區域歸零。
+      if structSize > 0 then
+        local zeros = {}
+        for j = 1, structSize do zeros[j] = 0 end
+        writeBytes(base + off, zeros)
+      end
+      if type(v) == 'table' then
+        writeParams(base + off, structSize, v)
+      end
     else
       error(string.format(
         "[ue5_invoke] Unknown param type '%s' for '%s' -- " ..
         "supported: bool/byte/int16/int32/int64/float/double/pointer/" ..
-        "fstring/fstringn",
+        "fstring/fstringn/fstruct",
         tostring(t), tostring(p.name or '?')))
     end
   end
+end
+
+-- Zero the whole params buffer (clears stale data from the previous invoke --
+-- the mailbox is a single shared slot reused across every call) then stamp
+-- the baked params.
+-- 先歸零整個 params 緩衝區（清掉前次 invoke 的殘留 -- mailbox 是所有 invoke
+-- 共用的單一槽），再寫入 baked 參數。
+local function writeBakedParams(mb, parmsSize, params)
+  local PD = mb + OFF_PARAMS
+  for i = 0, parmsSize - 1 do
+    writeByte(PD + i, 0)
+  end
+  writeParams(PD, parmsSize, params)
 end
 
 local function waitDone(mb, timeoutMs)

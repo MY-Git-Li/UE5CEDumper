@@ -802,8 +802,10 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
             if (!ok) return;
         }
 
-        _xrefBatchCts?.Cancel();
+        var oldCts = _xrefBatchCts;          // dispose the prior run's CTS (L14)
         _xrefBatchCts = new CancellationTokenSource();
+        oldCts?.Cancel();
+        oldCts?.Dispose();
         var ct = _xrefBatchCts.Token;
         IsXrefBatchRunning = true;
         var classCache = new Dictionary<string, string>();
@@ -837,9 +839,14 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
             StatusText = $"Find Func done: {classesScanned} classes scanned across {targets.Count} rows"
                        + (reused > 0 ? $" ({reused} reused/cached)." : ".");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             StatusText = $"Find Func cancelled ({classesScanned} classes scanned).";
+        }
+        catch (Exception ex)   // incl. a bare disconnect-OCE (token NOT cancelled) (L14)
+        {
+            _log.Error("Batch Find Func failed", ex);
+            StatusText = $"Find Func failed ({classesScanned} classes scanned).";
         }
         finally { IsXrefBatchRunning = false; }
     }

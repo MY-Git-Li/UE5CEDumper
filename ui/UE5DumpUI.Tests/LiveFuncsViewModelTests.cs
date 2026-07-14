@@ -89,6 +89,20 @@ public class LiveFuncsViewModelTests
         Assert.Contains("Recording", vm.StatusText);
     }
 
+    // Regression for audit #3 L16: nothing reset IsRecording on pipe disconnect, so a
+    // reconnect showed a stuck "recording" that swallowed the next Start.
+    [Fact]
+    public async Task ResetOnDisconnect_clears_recording_state()
+    {
+        var (vm, _) = MakeVm();
+        await vm.StartCommand.ExecuteAsync(null);
+        Assert.True(vm.IsRecording);
+
+        vm.ResetOnDisconnect();
+
+        Assert.False(vm.IsRecording);
+    }
+
     [Fact]
     public async Task Start_NoHook_SurfacesDllReason()
     {

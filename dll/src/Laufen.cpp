@@ -17,6 +17,7 @@
 #include "Grimoire.h"
 #include "Macht.h"
 #include "Aura.h"
+#include "Tot.h"     // Tot::MarkBackgroundWorker — re-assert worker ignores per-command cancel (M4)
 #include "Ubel.h"
 
 #include <algorithm>
@@ -355,6 +356,7 @@ void FillKnobLocked(const Ctx& c, int knobId, KnobInfo& info) {
 // ---- re-assert worker ----
 
 void WorkerLoop() {
+    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
     LOG_INFO("Movement: re-assert worker started (%d ms)", Grimoire::MOVE_REASSERT_MS);
     int driftCount = 0;
     while (!s_workerStop.load()) {
@@ -392,6 +394,7 @@ void WorkerLoop() {
 // (outer) → s_mutex (inner); the join in StopWorkerLocked runs with s_mutex
 // RELEASED because WorkerLoop takes s_mutex every tick (joining under it deadlocks).
 void StartWorkerLocked() {
+    if (Tot::ShutdownRequested()) return;   // don't (re)spawn during the shutdown window (M5)
     if (s_worker.joinable()) return;   // already running
     s_workerStop.store(false);
     s_worker = std::thread(WorkerLoop);

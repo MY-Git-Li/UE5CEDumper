@@ -24,6 +24,8 @@
 #include "Solide.h"
 #include "Dunste.h"
 #include "Schlacht.h"
+#include "Grausam.h"  // Grausam::SetForegroundLock — soft-disable the foreground lock on shutdown (L10)
+#include "Tot.h"     // Tot::RequestShutdown — enter the shutdown window before joining workers (M5)
 
 #include <string>
 #include <cstring>
@@ -488,13 +490,20 @@ bool UE5_Init() {
 
 void UE5_Shutdown() {
     LOG_INFO("UE5_Shutdown: Cleaning up...");
+    // Enter the shutdown window up-front: (a) in-flight scans bail so the worker
+    // joins below complete fast, and (b) every module's StartWorker* refuses to
+    // (re)spawn, so a pipe/mailbox command landing between the joins and the pipe
+    // stop can't revive a just-joined worker that nothing would join again. Cleared
+    // by Fern::Start (ResetShutdown) on re-enable in the same process. (M5)
+    Tot::RequestShutdown();
     Mimic::StopThread();
     Solitar::StopWorker();   // join the GodMode re-assert worker before unload
     Laufen::StopWorker();    // join the movement-tuning re-assert worker before unload
     Hemmung::StopWorker();   // join the time-dilation re-assert worker before unload
     Solide::StopWorker();    // join the force-field hold worker before unload
     Dunste::StopWorker();    // join the fly worker before unload
-    Schlacht::StopWorker();  // join the see-through worker before unload
+    Schlacht::SetEnabled(false);  // un-hide occluders (contract) THEN join the worker; runs before Stark::Shutdown so the un-hide invokes can still dispatch (M3)
+    Grausam::SetForegroundLock(false);  // soft-disable: g_enabled=false so the GFW/WndProc hooks pass through + release the masked cursor clip — otherwise the game believes it's foreground forever after a CE-Lua Disable (L10)
     // Full teardown: RemoveHook + MH_Uninitialize + drain pending invoke queue.
     // Pipe server is stopped after Shutdown() so any in-flight pipe thread
     // blocked on EnqueueInvoke receives its -7 result and unwinds cleanly.

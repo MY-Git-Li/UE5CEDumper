@@ -1929,6 +1929,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     WindowTitle = "UE5 Dump UI";
                     GameThreadStalled = false;   // clear the paused banner on disconnect
+                    // End the session epoch and cancel any pending proxy-confirm dwell, so
+                    // a proxy that just crashed the game isn't recorded as working when the
+                    // user reconnects within the 20 s dwell. (M8)
+                    _sessionEpoch++;
+                    _proxyConfirmTimer?.Dispose();
+                    _proxyConfirmTimer = null;
+                    LiveFuncs.ResetOnDisconnect();   // clear stuck "recording" UI state (L16)
                 }
             });
         };
@@ -1968,6 +1975,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Teleport owns a DispatcherTimer (auto-refresh) — dispose so it can't
         // tick after the window closes.
         Teleport.Dispose();
+        // Cancel a pending LKG proxy-confirm dwell so its callback can't fire after
+        // the window is gone. (M8)
+        _proxyConfirmTimer?.Dispose();
+        _proxyConfirmTimer = null;
 
         GC.SuppressFinalize(this);
     }
@@ -2541,6 +2552,17 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     // recorded, short enough to fire in a normal session.
     private const int ProxyConfirmDwellMs = 20_000;
     private Timer? _proxyConfirmTimer;
+    // Bumped on every disconnect. A proxy-confirm dwell captures the epoch when it is
+    // scheduled and only records if the epoch is unchanged when it fires — so a proxy
+    // that crashed its game (disconnect) can't be recorded against a later reconnect,
+    // even to a different game. (M8)
+    private int _sessionEpoch;
+
+    /// <summary>The LKG proxy-confirm gate: record the dwelled proxy ONLY if the same
+    /// connection is still up (isConnected) AND no disconnect happened since it was
+    /// scheduled (scheduledEpoch == currentEpoch). Pure so the gate is unit-testable.</summary>
+    internal static bool ShouldConfirmProxy(bool isConnected, int scheduledEpoch, int currentEpoch)
+        => isConnected && scheduledEpoch == currentEpoch;
 
     /// <summary>
     /// Phase 2 LKG stability gate. When the DLL self-reports that a PROXY loaded
@@ -2553,6 +2575,12 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ScheduleProxyConfirmation(EngineState state)
     {
+        // Cancel any dwell still pending from a prior connection BEFORE the early returns,
+        // so a non-proxy reconnect can't leave a stale timer alive to record the previous
+        // session's proxy. (M8)
+        _proxyConfirmTimer?.Dispose();
+        _proxyConfirmTimer = null;
+
         if (ProxyDeploy is null) return;
 
         const string prefix = "proxy:";
@@ -2563,12 +2591,15 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         string exeName = state.ModuleName;          // bare game .exe file name
         if (string.IsNullOrEmpty(proxyDll) || string.IsNullOrEmpty(exeName)) return;
 
-        _proxyConfirmTimer?.Dispose();
+        int epoch = _sessionEpoch;   // the connection that scheduled this dwell
         _proxyConfirmTimer = new Timer(_ =>
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
-                // Still connected after the dwell → the proxy didn't crash the game.
-                if (IsConnected)
+                // Record ONLY if the SAME connection is still up after the dwell. A crash
+                // (or any disconnect) bumps _sessionEpoch, so a proxy that loaded +
+                // connected then crashed the game — even if the user reconnects to a
+                // DIFFERENT game within the dwell — is never recorded as working. (M8)
+                if (ShouldConfirmProxy(IsConnected, epoch, _sessionEpoch))
                     ProxyDeploy?.RecordConfirmedProxy(exeName, proxyDll);
             }),
             null, ProxyConfirmDwellMs, Timeout.Infinite);
