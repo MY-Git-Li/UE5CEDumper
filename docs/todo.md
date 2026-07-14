@@ -43,19 +43,22 @@ the row here when it ships.
   `Capture_DisconnectMidStream_DoesNotSaveUsablePartial`; 2526 green. *Delete this row after the audit batch
   is merged to main.* *Parent: audit-2026-07-14-findings §H1.*
 
-- **[MED] Solide + Schlacht disconnect/shutdown lifecycle (M1–M5 — the DLL cluster)** —
-  Effort: **M** total · Risk: med. Five DLL-worker lifecycle bugs that share the "last client gone / shutdown"
-  root: **M1** Schlacht disable↔Tick race repopulates `hiddenActors` after restore → walls permanently
+- **[MED] Solide + Schlacht disconnect/shutdown lifecycle (M1/M2/M3/M5 — DLL cluster; needs in-game verify)** —
+  Effort: **M** total · Risk: med. DLL-worker lifecycle bugs sharing the "last client gone / shutdown" root:
+  **M1** Schlacht disable↔Tick race repopulates `hiddenActors` after restore → walls permanently
   invisible (fix: join worker *before* restore); **M2** Schlacht disable while game-thread stalled discards
   the restore set (fix: keep `hiddenActors` populated + retry when responsive); **M3** Schlacht never
   un-hides on pipe-disconnect or `UE5_Shutdown` (fix: call `SetEnabled(false)` from Fern last-client cleanup
-  + shutdown — note the CE-Lua Disable path *does* already restore); **M4** the shared `Tot::g_perCommand`
-  cancel latch makes `FindInstancesByClass` return empty every Solide worker tick → hold silently dead the
-  whole disconnected window (fix: hold-worker instance-resolution must ignore `g_perCommand`, honour only
-  `g_shutdown`); **M5** `UE5_Shutdown` joins workers *before* stopping the pipe with no shutdown gate on the
-  mutators → a `force_field`/`set_time_dilation`/… in the window respawns an unjoined worker (fix:
-  `Tot::RequestShutdown()` at the *top* of shutdown + gate the four spawning mutators). *Parent:
-  audit-2026-07-14-findings §M1–M5.*
+  + shutdown — note the CE-Lua Disable path *does* already restore); **M5** `UE5_Shutdown` joins workers
+  *before* stopping the pipe with no shutdown gate on the mutators → a `force_field`/`set_time_dilation`/…
+  in the window respawns an unjoined worker (fix: `Tot::RequestShutdown()` at the *top* of shutdown + gate
+  the four spawning mutators). M1–M3 are all Schlacht (one focused change set). *Parent:
+  audit-2026-07-14-findings §M1/M2/M3/M5.*
+  > **✅ DONE — M4** (SHIPPED commit `7edea28`, build 2187, **needs in-game verify**). `Tot::MarkBackgroundWorker()`
+  > thread-local marks each re-assert worker (Solide/Hemmung/Laufen/Solitar/Dunste/Schlacht) so `Tot::Requested()`
+  > returns `g_shutdown`-only on those threads → workers no longer freeze on the per-command cancel latch while
+  > a pipe command still honours it. Did NOT reset `g_perCommand` on disconnect (would regress the
+  > orphaned-scan abort). *Delete after batch merged + in-game verified.*
   > **~~M6~~ dropped by double-confirm** — "Solide hold unstoppable after UI crash" is working-as-designed:
   > hold persistence across disconnect is deliberate and family-uniform (Solitar/Laufen/Hemmung/Wirbel also
   > persist), and an off-switch exists (reconnect → `reset_all_fields`, or game restart). The real disconnect

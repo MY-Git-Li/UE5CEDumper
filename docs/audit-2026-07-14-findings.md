@@ -93,7 +93,7 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ⚠️ = partially-confirmed (claim refined during verification — see the item's **Note**).
 
-**Progress:** ✅ **H1** (`452d3ff`) · ✅ **M7** (`1b108a9`) · ✅ **M8** (`ad9a7e7`) · ✅ **M9** (`1f46994`) · ✅ **M10 FIXED** (`8108ff2`, +4 tests — 2537 green). **All UI MEDIUMs done.** Remaining scheduled: 5 MED (all DLL: M1–M5) + 13 LOW.
+**Progress:** ✅ **H1** (`452d3ff`) · ✅ **M7** (`1b108a9`) · ✅ **M8** (`ad9a7e7`) · ✅ **M9** (`1f46994`) · ✅ **M10** (`8108ff2`) · ✅ **M4 FIXED** (`7edea28`, DLL — needs in-game verify). All UI MEDIUMs done. Remaining scheduled: 4 MED (DLL: M1/M2/M3/M5, all Schlacht + shutdown) + 13 LOW.
 
 ---
 
@@ -151,6 +151,15 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 - **Where:** [`dll/src/Schlacht.h:11`](../dll/src/Schlacht.h:11), [`dll/src/Schlacht.cpp:494-497`](../dll/src/Schlacht.cpp:494), [`dll/src/Fern.cpp:757-761`](../dll/src/Fern.cpp:757), [`dll/src/Fern.cpp:497-500`](../dll/src/Fern.cpp:497), [`dll/src/Frieren.cpp:497`](../dll/src/Frieren.cpp:497), [`dll/src/Mimic.cpp:955`](../dll/src/Mimic.cpp:955)
 
 ### M4 — Shared per-command cancel latch zombifies Solide hold during disconnect window
+
+> **✅ FIXED — commit `7edea28` (build 2187, NEEDS IN-GAME VERIFY).** Added `Tot::MarkBackgroundWorker()`
+> (thread-local `t_backgroundWorker`) called once at the top of each re-assert worker loop
+> (Solide/Hemmung/Laufen/Solitar/Dunste/Schlacht); `Tot::Requested()` returns `g_shutdown`-only on a marked
+> thread, so a re-assert worker's `FindInstancesByClass` no longer bails on the per-command latch — while a
+> pipe command calling the *same* `Resolve*` helper still honours it (thread-local, no signature churn).
+> **Deliberately did NOT** reset `g_perCommand` on last-disconnect (the finding's secondary idea): an
+> orphaned in-flight scan on the dropped connection must keep seeing the cancel until it unwinds (Tot's
+> problem #2). Verify: force a field → disconnect the UI → the hold keeps asserting → reconnect → still held.
 
 **🟠 MEDIUM** · Effort **M** · Risk **med** · *confirmed* · Module: Tot (Cancellation) ↔ Solide (ForceField) ↔ Fern/Aura
 
