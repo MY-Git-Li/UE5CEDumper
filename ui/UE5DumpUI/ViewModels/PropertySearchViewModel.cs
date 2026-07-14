@@ -125,6 +125,10 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
 
     /// <summary>Debounce timer for client-side ResultFilter typing.</summary>
     private System.Threading.Timer? _resultFilterDebounce;
+    /// <summary>Per-keyword LRU memory for the ResultFilter box. The match count is
+    /// client-side (synchronous after ApplyResultFilter), so it uses Schedule, not Commit.</summary>
+    private readonly KeywordSearchMemory _resultFilterMemory;
+    public ObservableCollection<string> ResultFilterHistory => _resultFilterMemory.History;
     private bool _disposed;
 
     /// <summary>
@@ -166,6 +170,7 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
         _aobMaker = aobMaker;
         _platform = platform;
         _experimentalGate = experimentalGate;
+        _resultFilterMemory = new KeywordSearchMemory(() => (ResultFilter, Results.Count > 0));
         if (_experimentalGate != null)
             _experimentalGate.Changed += OnExperimentalGateChanged;
         ClassFilter = new ClassFacetFilter(ApplyResultFilter)
@@ -488,24 +493,31 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
         _resultFilterDebounce = new System.Threading.Timer(
             _ => Avalonia.Threading.Dispatcher.UIThread.Post(ApplyResultFilter),
             null, 150, Timeout.Infinite);
+        // Remember keywords that produce matches (client-side count is synchronous
+        // after the debounced ApplyResultFilter — 700 ms memory delay > 150 ms filter).
+        _resultFilterMemory.Schedule(value);
     }
 
     /// <summary>
-    /// Rebuild Results from _allResults, applying ResultFilter as a
-    /// case-insensitive substring across Class / Property / Type / Preview.
-    /// Called on every search completion AND on each filter change.
+    /// Rebuild Results from _allResults, applying ResultFilter with <b>space = AND</b>
+    /// (term-level AND, field-level OR) across Class / Property / Type / Super / Preview
+    /// via <see cref="ObjectTreeFilter.MatchesAllTerms(string[], string?[])"/> — the shared
+    /// keyword-box semantics. Called on every search completion AND on each filter change.
+    /// Internal so the AND behaviour has a deterministic unit test (no debounce).
     /// </summary>
-    private void ApplyResultFilter()
+    internal void ApplyResultFilter()
     {
-        var filter = (ResultFilter ?? "").Trim();
-        var hasFilter = filter.Length > 0;
+        var terms = ObjectTreeFilter.SplitTerms(ResultFilter);
         SelectedResult = null;   // detach before rebuilding the selection-bound list
         Results.Clear();
 
         int hiddenByClass = 0;
         foreach (var m in _allResults)
         {
-            if (hasFilter && !MatchesFilter(m, filter)) continue;
+            // space = AND: every term must match at least one visible column.
+            if (terms.Length > 0 &&
+                !ObjectTreeFilter.MatchesAllTerms(terms, m.ClassName, m.PropName, m.PropType, m.SuperName, m.Preview))
+                continue;
             // Class-noise exclusion last, so the count reflects rows that would
             // otherwise be visible.
             if (ClassFilter.IsExcluded(m.ClassName)) { hiddenByClass++; continue; }
@@ -513,20 +525,6 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
         }
         ClassFilterNote = hiddenByClass > 0 ? $"{hiddenByClass} hidden by class filter" : "";
     }
-
-    private static bool MatchesFilter(PropertySearchMatch m, string filter)
-    {
-        // Case-insensitive Contains across the columns the user can see.
-        return ContainsCI(m.ClassName, filter)
-            || ContainsCI(m.PropName,  filter)
-            || ContainsCI(m.PropType,  filter)
-            || ContainsCI(m.SuperName, filter)
-            || ContainsCI(m.Preview,   filter);
-    }
-
-    private static bool ContainsCI(string? haystack, string needle) =>
-        !string.IsNullOrEmpty(haystack)
-        && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
 
     [RelayCommand]
     private void FindInstances(PropertySearchMatch? match)
@@ -663,6 +661,7 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
         _xrefBatchCts?.Dispose();
         _resultFilterDebounce?.Dispose();
         _resultFilterDebounce = null;
+        _resultFilterMemory.Dispose();
         GC.SuppressFinalize(this);
     }
 }
