@@ -8,6 +8,15 @@ state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
 > build 2142 (PR #431, 2026-07-11).** Newer work lives in [dev-log.md](dev-log.md):
+> - build **2168 (2026-07-14)** — **`Solide` (ForceField)** — the honest subset of the
+>   "enemies can't detect you" eval (no universal detection bool). New DLL module (Hemmung
+>   sibling) holds a *discovered* reflected field (bool ON/OFF / ObjectProperty→null /
+>   numeric→absolute) across **all live instances** of a class via a write-on-drift re-assert
+>   worker (cap 256, CDO-skip, re-resolve/tick), + `FindStealthMeter` keyword auto-finder. **UI:**
+>   Property Search row context "Force" submenu + "Forced fields (N held)" strip; Teleport
+>   "Stealth Meter" card (Detect→Hold@0→Reset); Teleport right-click quick-jump nav. All
+>   experimental-gated, pipe-only. **VERIFIED in-game (Elliot):** force_field held 83 instances,
+>   clean worker lifecycle.
 > - builds **2147–2151 (2026-07-13)** — **Time/Timer control L1** (eval: layered detect/lock/
 >   reset/adjust/persist, memory `project-timer-feature-eval`). **Global slow-mo / freeze / speed-up:**
 >   new `Hemmung` DLL module (the absolute-value sibling of Laufen) holds reflected dilation floats —

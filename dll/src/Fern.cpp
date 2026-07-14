@@ -23,6 +23,7 @@
 #include "Dunste.h"    // Dunste::SetEnabled/SetSpeed/SetPreset/GetStatus for fly_*
 #include "Schlacht.h"  // Schlacht::SetEnabled/GetStatus for seethrough_*
 #include "Solitar.h"   // Solitar::ResolveProtectBits for get_trainer_offsets
+#include "Solide.h"    // Solide::AddForce/RemoveForce/GetState/FindStealthMeter for force_field / stealth
 #include "Grausam.h"   // Grausam::SetForegroundLock — keep game thread alive when backgrounded
 #include "Edel.h"
 #include "Linie.h"     // Live PE profiler — pe_profile_start/stop/get
@@ -4568,6 +4569,97 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 dils["global"] = dilJson(snap.dils[Hemmung::DIL_GLOBAL]);
                 dils["pawn"]   = dilJson(snap.dils[Hemmung::DIL_PAWN]);
                 data["dilation"] = dils;
+                return Renge::MakeResponse(id, data).dump();
+            }
+        }
+
+        // ── force_field / reset_field / reset_all_fields / get_forced_fields /
+        //    find_stealth_meter (Solide) — hold a discovered reflected field ──
+        {
+            auto kindId = [](const std::string& k) -> int32_t {
+                return (k == "bool")        ? Solide::K_BOOL
+                     : (k == "object_null") ? Solide::K_OBJECT_NULL
+                     : (k == "numeric")     ? Solide::K_NUMERIC : -1;
+            };
+            auto kindStr = [](int32_t k) -> const char* {
+                return (k == Solide::K_BOOL)        ? "bool"
+                     : (k == Solide::K_OBJECT_NULL) ? "object_null"
+                     : (k == Solide::K_NUMERIC)     ? "numeric" : "?";
+            };
+            if (cmd == Renge::CMD_FORCE_FIELD) {
+                std::string className = request.value("class_name", std::string());
+                std::string fieldName = request.value("field_name", std::string());
+                std::string kind      = request.value("kind", std::string("bool"));
+                if (className.empty() || fieldName.empty())
+                    return Renge::MakeError(id, "force_field: missing class_name or field_name").dump();
+                int32_t k = kindId(kind);
+                if (k < 0) return Renge::MakeError(id, "force_field: unknown kind: " + kind).dump();
+                double value = (k == Solide::K_BOOL)
+                             ? (request.value("on", false) ? 1.0 : 0.0)
+                             : request.value("value", 0.0);
+                Sein::Info("PIPE:cmd", "force_field: class=%s field=%s kind=%s value=%.4f",
+                           className.c_str(), fieldName.c_str(), kind.c_str(), value);
+                int32_t held = Solide::AddForce(className.c_str(), fieldName.c_str(), k, value);
+                json data;
+                data["held"]     = (held < 0) ? 0 : held;   // live "N held" count
+                data["resolved"] = (held > 0);
+                data["code"]     = (held < 0) ? held : 0;
+                return Renge::MakeResponse(id, data).dump();
+            }
+            if (cmd == Renge::CMD_RESET_FIELD) {
+                std::string className = request.value("class_name", std::string());
+                std::string fieldName = request.value("field_name", std::string());
+                if (className.empty() || fieldName.empty())
+                    return Renge::MakeError(id, "reset_field: missing class_name or field_name").dump();
+                Sein::Info("PIPE:cmd", "reset_field: class=%s field=%s",
+                           className.c_str(), fieldName.c_str());
+                int32_t code = Solide::RemoveForce(className.c_str(), fieldName.c_str());
+                json data; data["code"] = code;
+                return Renge::MakeResponse(id, data).dump();
+            }
+            if (cmd == Renge::CMD_RESET_ALL_FIELDS) {
+                Sein::Info("PIPE:cmd", "reset_all_fields");
+                int32_t code = Solide::ClearAll();
+                json data; data["code"] = code;
+                return Renge::MakeResponse(id, data).dump();
+            }
+            if (cmd == Renge::CMD_GET_FORCED_FIELDS) {
+                std::vector<Solide::ForcedFieldInfo> fields;
+                int32_t code = Solide::GetState(fields);
+                json arr = json::array();
+                for (const auto& f : fields) {
+                    json j;
+                    j["class_name"] = f.className;
+                    j["field_name"] = f.fieldName;
+                    j["kind"]       = kindStr(f.kind);
+                    j["value"]      = f.value;
+                    j["held"]       = f.held;
+                    if (f.sampleOwner && f.sampleOffset >= 0) {
+                        j["owner_addr"]   = Renge::AddrToStr(f.sampleOwner);
+                        j["field_offset"] = f.sampleOffset;
+                    }
+                    arr.push_back(j);
+                }
+                json data; data["code"] = code; data["fields"] = arr;
+                return Renge::MakeResponse(id, data).dump();
+            }
+            if (cmd == Renge::CMD_FIND_STEALTH_METER) {
+                int maxResults = request.value("max", 8);
+                std::vector<Solide::StealthCandidate> cands;
+                int32_t code = Solide::FindStealthMeter(cands, maxResults);
+                json arr = json::array();
+                for (const auto& c : cands) {
+                    json j;
+                    j["class_name"] = c.className;
+                    j["class_addr"] = Renge::AddrToStr(c.classAddr);
+                    j["field_name"] = c.fieldName;
+                    j["prop_type"]  = c.typeName;
+                    j["owner_addr"] = Renge::AddrToStr(c.ownerAddr);
+                    j["current"]    = c.current;
+                    j["score"]      = c.score;
+                    arr.push_back(j);
+                }
+                json data; data["code"] = code; data["candidates"] = arr;
                 return Renge::MakeResponse(id, data).dump();
             }
         }

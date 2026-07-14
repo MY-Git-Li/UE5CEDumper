@@ -104,6 +104,12 @@ int32_t GetState(State& out);
 // re-assert). Returns the observed property bit (1/0) or a negative ProtectResult.
 int32_t SetActorBool(uintptr_t obj, uintptr_t classAddr, const char* propName, bool on);
 
+// Read-only companion to SetActorBool: resolve + read one reflected FBoolProperty
+// bit on an object. Returns the observed bit (1/0) or a negative ProtectResult
+// when the object/property can't be resolved. Used by Solide to capture a bool's
+// restore base before forcing it.
+int32_t GetActorBool(uintptr_t obj, uintptr_t classAddr, const char* propName);
+
 // Resolve ALL matched protection bits on the CURRENT live pawn (bCanBeDamaged +
 // any invincibility bool the universal keyword table matches), expressed as
 // offsets from the pawn base — for baking into a standalone CE-Lua trainer. Read

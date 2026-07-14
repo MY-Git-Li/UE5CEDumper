@@ -475,6 +475,39 @@ Response for `pe_profile_get`:
 
 -----
 
+### Force-field hold + stealth meter (Solide — build 2168)
+
+Hold a *discovered* reflected field at a value across **all live instances** of a
+class via a write-on-drift re-assert worker (the honest subset of "enemies can't
+detect you" — there is no universal detection bool). Pipe-only.
+
+```jsonc
+// Force a field on all live instances of a class and hold it.
+// kind = "bool" (uses `on`) | "object_null" (value ignored — strong ObjectProperty
+//        only; weak/soft/lazy refused) | "numeric" (uses `value`, absolute).
+{ "cmd": "force_field", "class_name": "BP_Enemy_C", "field_name": "bInvincible",
+  "kind": "bool", "on": true }
+// → { "held": 3, "resolved": true, "code": 0 }   // held = live "N held" count (0 = matched nothing)
+
+// Release one hold (best-effort restore the captured base; object-null is not reversible).
+{ "cmd": "reset_field", "class_name": "BP_Enemy_C", "field_name": "bInvincible" }
+// → { "code": 0 }
+
+{ "cmd": "reset_all_fields" }                      // → { "code": 0 }
+
+// Snapshot the active holds + their live counts.
+{ "cmd": "get_forced_fields" }
+// → { "code": 0, "fields": [ { "class_name", "field_name", "kind", "value",
+//        "held", "owner_addr"?, "field_offset"? } ] }
+
+// Auto-find the player's stealth/noise/visibility/detection meter (read-only).
+{ "cmd": "find_stealth_meter", "max": 8 }
+// → { "code": 0, "candidates": [ { "class_name", "class_addr", "field_name",
+//        "prop_type", "owner_addr", "current", "score" } ] }   // ranked, best first
+```
+
+-----
+
 ## Responses (DLL → UI)
 
 ### init

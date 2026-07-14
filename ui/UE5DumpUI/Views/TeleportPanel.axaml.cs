@@ -1,6 +1,13 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Linq;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
+using Avalonia.VisualTree;
 using UE5DumpUI.ViewModels;
 
 namespace UE5DumpUI.Views;
@@ -25,6 +32,57 @@ public partial class TeleportPanel : UserControl
 
     private void OnRequestBringIntoView(object? sender, RequestBringIntoViewEventArgs e)
         => e.Handled = true;
+
+    // ── Quick-jump nav (right-click → jump to a card) ──
+    // Experimental-gated (the card list would otherwise reveal experimental card
+    // names when the opt-in is off). The menu is rebuilt on each open from the
+    // currently-VISIBLE cards, so hidden/experimental cards are never listed.
+    private void OnJumpMenuOpening(object? sender, CancelEventArgs e)
+    {
+        if (DataContext is not TeleportViewModel vm || !vm.ExperimentalEnabled)
+        {
+            e.Cancel = true;   // no quick-jump menu unless experimental features are on
+            return;
+        }
+        if (sender is not ContextMenu menu) { e.Cancel = true; return; }
+
+        var items = new List<object>();
+        foreach (var child in ContentRoot.Children)
+        {
+            if (child is not Border card || !card.IsEffectivelyVisible) continue;
+            var title = ExtractCardTitle(card);
+            if (string.IsNullOrWhiteSpace(title)) continue;
+            var target = card;   // capture per-iteration
+            var mi = new MenuItem { Header = title };
+            mi.Click += (_, _) => ScrollCardIntoView(target);
+            items.Add(mi);
+        }
+        if (items.Count == 0) { e.Cancel = true; return; }
+        menu.ItemsSource = items;
+    }
+
+    /// <summary>A card's label = its header TextBlock (the SemiBold one), falling
+    /// back to the first non-empty TextBlock in the card.</summary>
+    private static string? ExtractCardTitle(Border card)
+    {
+        TextBlock? header = null, first = null;
+        foreach (var t in card.GetVisualDescendants().OfType<TextBlock>())
+        {
+            if (string.IsNullOrWhiteSpace(t.Text)) continue;
+            first ??= t;
+            if (t.FontWeight == FontWeight.SemiBold) { header = t; break; }
+        }
+        return (header ?? first)?.Text?.Trim();
+    }
+
+    /// <summary>Scroll a card to the top of the viewport. Uses the ScrollViewer's
+    /// Offset directly because ContentRoot swallows RequestBringIntoView (the
+    /// focus-auto-scroll suppression above), which would defeat BringIntoView().</summary>
+    private void ScrollCardIntoView(Border card)
+    {
+        if (card.TranslatePoint(new Point(0, 0), ContentRoot) is { } p)
+            Scroller.Offset = new Vector(Scroller.Offset.X, Math.Max(0, p.Y - 6));
+    }
 
     private void OnTunnelKeyDown(object? sender, KeyEventArgs e)
     {

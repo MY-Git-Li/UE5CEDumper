@@ -1436,6 +1436,108 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         => PushOrCopyToggleScriptAsync(
             "God Mode (toggle)", UE5DumpUI.Services.ProtectionScriptGenerator.Generate());
 
+    // ── Player stealth meter (Solide via find_stealth_meter + force_field) ──
+    /// <summary>Tri-state badge: "Holding @0" (green) / "Off" / "Ready" / "Not
+    /// found" (amber). The meter is auto-found on the local pawn + its owned
+    /// components (keyword-scored numeric field) and held at 0 by the DLL's
+    /// force-and-hold worker — the honest, per-game subset of "enemies can't detect
+    /// you" (there is no universal detection bool; docs/godmode-spec.md §3.2).</summary>
+    [ObservableProperty] private string _stealthState = "Off";
+    [ObservableProperty] private string _stealthBadgeColor = "#999999";
+    /// <summary>Readout of the field Detect locked onto (class::field = value), so
+    /// the user can verify the auto-find picked the right meter before holding it.</summary>
+    [ObservableProperty] private string _stealthFieldText = "—";
+
+    /// <summary>The auto-found candidate held at 0 (null until Detect finds one).</summary>
+    private UE5DumpUI.Models.StealthCandidate? _stealthCandidate;
+
+    /// <summary>Auto-find the player's stealth/noise/visibility meter (read-only).
+    /// Loads the top candidate into the readout for the user to verify.</summary>
+    [RelayCommand]
+    private async Task DetectStealthMeterAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var cands = await _dump.FindStealthMeterAsync();
+            if (cands.Count == 0)
+            {
+                _stealthCandidate = null;
+                StealthFieldText = "—";
+                (StealthState, StealthBadgeColor) = ("Not found", "#C9A04E");
+                StatusText = "No stealth/visibility meter auto-found on the player pawn. " +
+                             "Search Property Search (e.g. 'visib', 'detect', 'noise', 'aware') " +
+                             "and Force → a numeric field to 0 instead.";
+                return;
+            }
+            var top = cands[0];
+            _stealthCandidate = top;
+            StealthFieldText = $"{top.ClassName}::{top.FieldName} = {top.Current:0.###}";
+            (StealthState, StealthBadgeColor) = ("Ready", "#888888");
+            StatusText = $"Found {cands.Count} candidate(s). Top: {top.FieldName} (score {top.Score}). " +
+                         "Verify it, then Hold @0.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport DetectStealthMeter failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Hold the detected meter at 0 across live instances of its class.</summary>
+    [RelayCommand]
+    private async Task HoldStealthAsync()
+    {
+        if (!IsConnected) return;
+        if (_stealthCandidate == null) { StatusText = "Detect a meter first."; return; }
+        var c = _stealthCandidate;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var r = await _dump.ForceFieldAsync(c.ClassName, c.FieldName, "numeric", 0);
+            if (r.Code < 0 || r.Held == 0)
+            {
+                (StealthState, StealthBadgeColor) = ("Not found", "#C9A04E");
+                StatusText = $"Hold failed: {(r.Held == 0 ? "no live instance matched" : $"DLL error {r.Code}")}.";
+                return;
+            }
+            (StealthState, StealthBadgeColor) = ("Holding @0", "#4EC9B0");
+            StatusText = $"✓ Holding {c.FieldName} = 0 on {r.Held} instance(s) — you are minimal to detection that reads this meter.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport HoldStealth failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Release the hold (restore the captured base) and reset the badge.</summary>
+    [RelayCommand]
+    private async Task ResetStealthAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            if (_stealthCandidate != null)
+                await _dump.ResetFieldAsync(_stealthCandidate.ClassName, _stealthCandidate.FieldName);
+            (StealthState, StealthBadgeColor) = ("Off", "#999999");
+            StatusText = "Released the stealth-meter hold.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport ResetStealth failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
     // ── Foreground lock (keep game thread alive when unfocused, Grausam) ──
 
     /// <summary>Map the DLL state (1=on, 0=off, &lt;0=error/unknown) onto the badge.</summary>

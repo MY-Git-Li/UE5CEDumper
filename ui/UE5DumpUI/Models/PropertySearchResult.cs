@@ -70,6 +70,25 @@ public partial class PropertySearchMatch : ObservableObject
     /// </summary>
     public bool ShowScalarActions => !IsNested;
 
+    // === Force-field (Solide) per-row action gates ===
+    // A direct (non-nested) row can be held by the DLL force-and-hold worker.
+    // The kind is decided by the reflected property type.
+
+    /// <summary>Row is a BoolProperty → "Force ON / OFF" applies.</summary>
+    public bool CanForceBool => ShowScalarActions && PropType == "BoolProperty";
+
+    /// <summary>Row is a strong ObjectProperty → "Force → null" applies (weak/soft
+    /// object ptrs are intentionally excluded — nulling their index hits GObjects[0]).</summary>
+    public bool CanForceNull => ShowScalarActions && PropType == "ObjectProperty";
+
+    /// <summary>Row is a DLL-supported numeric type → "Force value…" applies.</summary>
+    public bool CanForceNumeric => ShowScalarActions && PropType is
+        "FloatProperty" or "DoubleProperty" or "IntProperty" or "Int64Property"
+        or "ByteProperty" or "UInt8Property" or "Int8Property";
+
+    /// <summary>Any Force action applies to this row (gates the context submenu).</summary>
+    public bool CanForceAny => CanForceBool || CanForceNull || CanForceNumeric;
+
     /// <summary>
     /// Tooltip for the Property column. Empty for a normal direct field;
     /// for a nested (deep) match it explains the dotted path is a drill

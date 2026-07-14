@@ -399,7 +399,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate, snapshotStore, pipeClient);
         LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker, bookmarks);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
-        PropertySearch = new PropertySearchViewModel(dump, log, aobMaker, platform);
+        PropertySearch = new PropertySearchViewModel(dump, log, aobMaker, platform, experimentalGate);
         GameClassFilter = new GameClassFilterViewModel(dump, log, platform);
         InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker, platform);
         LiveFuncs = new LiveFuncsViewModel(dump, log, platform);

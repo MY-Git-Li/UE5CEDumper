@@ -83,6 +83,43 @@
                Foreground="#F44747" Margin="0,0,0,4"
                IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
 
+    <!-- Forced fields (Solide) — active DLL holds with the "N held" honesty count.
+         Docked bottom; only visible while at least one field is being held. -->
+    <Border DockPanel.Dock="Bottom" IsVisible="{Binding HasForcedFields}"
+            Background="#252526" BorderBrush="#3C3C3C" BorderThickness="0,1,0,0"
+            Padding="6,4" Margin="0,4,0,0">
+      <StackPanel Spacing="4">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <TextBlock Text="{StaticResource str.PropertySearch.ForcedHeader}"
+                     Foreground="#CCCCCC" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          <Button Content="{StaticResource str.PropertySearch.ForcedClearAll}"
+                  Command="{Binding ClearAllForcedFieldsCommand}"
+                  ToolTip.Tip="{StaticResource str.Tip.PropertySearch.ForcedClearAll}"
+                  Padding="6,2" FontSize="11"/>
+        </StackPanel>
+        <ItemsControl ItemsSource="{Binding ForcedFields}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="m:ForcedFieldInfo">
+              <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,1">
+                <Button Content="✕"
+                        Command="{Binding $parent[ItemsControl].((vm:PropertySearchViewModel)DataContext).RemoveForcedFieldCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.PropertySearch.ForcedRemove}"
+                        Padding="5,0" FontSize="11"/>
+                <TextBlock Foreground="#D4D4D4" FontFamily="Consolas, monospace" FontSize="11"
+                           VerticalAlignment="Center" Text="{Binding ClassName}"/>
+                <TextBlock Foreground="#808080" FontSize="11" VerticalAlignment="Center" Text="::"/>
+                <TextBlock Foreground="#D4D4D4" FontFamily="Consolas, monospace" FontSize="11"
+                           VerticalAlignment="Center" Text="{Binding FieldName}"/>
+                <TextBlock Foreground="#4EC9B0" FontSize="11" VerticalAlignment="Center"
+                           Text="{Binding Held, StringFormat='({0} held)'}"/>
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
+
     <!-- Results DataGrid -->
     <DataGrid x:Name="ResultsGrid"
               ItemsSource="{Binding Results}"
@@ -104,6 +141,28 @@
                     Command="{Binding PivotThisCommand}"
                     CommandParameter="{Binding SelectedResult}"
                     IsVisible="{Binding PivotEnabled}"/>
+          <!-- Force field (Solide) — hold the field across live instances.
+               Gated behind the shared Experimental toggle (combat-affecting writes). -->
+          <Separator IsVisible="{Binding ForceEnabled}"/>
+          <MenuItem Header="{StaticResource str.PropertySearch.ForceMenu}"
+                    IsVisible="{Binding ForceEnabled}">
+            <MenuItem Header="{StaticResource str.PropertySearch.ForceOn}"
+                      Command="{Binding ForceBoolOnCommand}"
+                      CommandParameter="{Binding SelectedResult}"
+                      IsVisible="{Binding SelectedResult.CanForceBool}"/>
+            <MenuItem Header="{StaticResource str.PropertySearch.ForceOff}"
+                      Command="{Binding ForceBoolOffCommand}"
+                      CommandParameter="{Binding SelectedResult}"
+                      IsVisible="{Binding SelectedResult.CanForceBool}"/>
+            <MenuItem Header="{StaticResource str.PropertySearch.ForceNull}"
+                      Command="{Binding ForceNullCommand}"
+                      CommandParameter="{Binding SelectedResult}"
+                      IsVisible="{Binding SelectedResult.CanForceNull}"/>
+            <MenuItem Header="{StaticResource str.PropertySearch.ForceValue}"
+                      Command="{Binding ForceNumericCommand}"
+                      CommandParameter="{Binding SelectedResult}"
+                      IsVisible="{Binding SelectedResult.CanForceNumeric}"/>
+          </MenuItem>
         </ContextMenu>
       </DataGrid.ContextMenu>
       <DataGrid.Columns>

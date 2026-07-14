@@ -539,6 +539,34 @@ public interface IDumpService
     /// <summary>Poll the live see-through status (active / has-target / hidden count).</summary>
     Task<SeeThroughStatus> SeeThroughGetStateAsync(CancellationToken ct = default);
 
+    // === Force-field hold + stealth meter (Solide) ===
+
+    /// <summary>
+    /// Force a discovered reflected field to a value on ALL live instances of
+    /// <paramref name="className"/> and hold it via a re-assert worker.
+    /// <paramref name="kind"/> = "bool" (uses <paramref name="on"/>) | "object_null"
+    /// (value ignored) | "numeric" (uses <paramref name="value"/>). Returns the live
+    /// "N held" instance count (0 = the class/field matched nothing — a no-op signal).
+    /// </summary>
+    Task<ForceFieldResult> ForceFieldAsync(string className, string fieldName, string kind, double value = 0, bool on = false, CancellationToken ct = default);
+
+    /// <summary>Remove a hold-job (best-effort restore the captured base on live
+    /// instances; object-null is not reversible). Returns the DLL code (0 = OK).</summary>
+    Task<int> ResetFieldAsync(string className, string fieldName, CancellationToken ct = default);
+
+    /// <summary>Remove ALL hold-jobs (best-effort restore each). Returns 0 on OK.</summary>
+    Task<int> ResetAllFieldsAsync(CancellationToken ct = default);
+
+    /// <summary>Snapshot the active hold-jobs + their live held counts.</summary>
+    Task<IReadOnlyList<ForcedFieldInfo>> GetForcedFieldsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Auto-find the player's stealth/noise/visibility/detection meter: resolve the
+    /// local pawn + its owned components, keyword-score every reflected numeric field,
+    /// return the ranked candidates (best first). Read-only. Empty list = none found.
+    /// </summary>
+    Task<IReadOnlyList<StealthCandidate>> FindStealthMeterAsync(int max = 8, CancellationToken ct = default);
+
     // === Teleport (Wirbel: marker save/recall + cursor teleport) ===
     // docs/teleport-spec.md §7. Model Code/Codes carry the DLL's Wirbel
     // result code (0 = OK, negatives mapped by TeleportCodes).

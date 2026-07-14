@@ -5,7 +5,14 @@
              x:DataType="vm:TeleportViewModel"
              x:Name="Root">
 
-  <ScrollViewer>
+  <ScrollViewer x:Name="Scroller">
+    <!-- Quick-jump nav: right-click anywhere in the tab → jump to a card.
+         Experimental-gated (the card list would otherwise leak experimental card
+         names) + built dynamically from the currently-VISIBLE cards in code-behind,
+         so hidden/experimental cards are never listed when the opt-in is off. -->
+    <ScrollViewer.ContextMenu>
+      <ContextMenu Opening="OnJumpMenuOpening"/>
+    </ScrollViewer.ContextMenu>
     <StackPanel x:Name="ContentRoot" Margin="10" Spacing="10" MaxWidth="720" HorizontalAlignment="Left">
 
       <!-- Single-player warning -->
@@ -567,6 +574,46 @@
                     Command="{Binding CopyGodModeScriptCommand}"
                     ToolTip.Tip="{StaticResource str.Tip.TP.GmCopyScript}"
                     Padding="10,4"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- ── Player Stealth meter (Solide — auto-find + hold a stealth/visibility
+           float at 0; the honest subset of "enemies can't detect you") ──
+           Experimental-gated: combat-affecting live write, hidden unless opted in. -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10"
+              IsVisible="{Binding ExperimentalEnabled}">
+        <StackPanel Spacing="8">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="{StaticResource str.TP.StHeader}"
+                       Foreground="#DDDDDD" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <TextBlock Text="{StaticResource str.TP.StState}" Foreground="#999999"
+                       FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            <Border Background="#333337" CornerRadius="3" Padding="6,1">
+              <TextBlock Text="{Binding StealthState}"
+                         Foreground="{Binding StealthBadgeColor}"
+                         FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </Border>
+          </StackPanel>
+          <TextBlock Text="{StaticResource str.TP.StHint}"
+                     Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
+          <TextBlock Text="{Binding StealthFieldText}"
+                     Foreground="#B5CEA8" FontSize="11" FontFamily="Consolas, monospace"
+                     TextWrapping="Wrap"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="{StaticResource str.TP.StDetect}"
+                    Command="{Binding DetectStealthMeterCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.StDetect}"
+                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+            <Button Content="{StaticResource str.TP.StHold}"
+                    Command="{Binding HoldStealthCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.StHold}"
+                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+            <Button Content="{StaticResource str.TP.StReset}"
+                    Command="{Binding ResetStealthCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.StReset}"
+                    IsEnabled="{Binding CanOperate}" Padding="10,4"/>
           </StackPanel>
         </StackPanel>
       </Border>

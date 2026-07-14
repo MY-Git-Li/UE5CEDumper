@@ -21,6 +21,7 @@
 #include "Solitar.h"
 #include "Laufen.h"
 #include "Hemmung.h"
+#include "Solide.h"
 #include "Dunste.h"
 #include "Schlacht.h"
 
@@ -491,6 +492,7 @@ void UE5_Shutdown() {
     Solitar::StopWorker();   // join the GodMode re-assert worker before unload
     Laufen::StopWorker();    // join the movement-tuning re-assert worker before unload
     Hemmung::StopWorker();   // join the time-dilation re-assert worker before unload
+    Solide::StopWorker();    // join the force-field hold worker before unload
     Dunste::StopWorker();    // join the fly worker before unload
     Schlacht::StopWorker();  // join the see-through worker before unload
     // Full teardown: RemoveHook + MH_Uninitialize + drain pending invoke queue.

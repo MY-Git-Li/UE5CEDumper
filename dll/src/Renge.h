@@ -117,6 +117,16 @@ constexpr const char* CMD_SET_TIME_DILATION        = "set_time_dilation";
 constexpr const char* CMD_RESET_TIME_DILATION      = "reset_time_dilation";
 constexpr const char* CMD_GET_TIME_STATE           = "get_time_state";
 
+// Force-field hold (Solide) — hold a discovered reflected field at a value across
+// all live instances of a class via a re-assert worker: bool ON/OFF, ObjectProperty
+// → null, or numeric → absolute. "kind" string selects: "bool" | "object_null" |
+// "numeric". Plus find_stealth_meter (auto-find the player's stealth/noise float).
+constexpr const char* CMD_FORCE_FIELD              = "force_field";
+constexpr const char* CMD_RESET_FIELD              = "reset_field";
+constexpr const char* CMD_RESET_ALL_FIELDS         = "reset_all_fields";
+constexpr const char* CMD_GET_FORCED_FIELDS        = "get_forced_fields";
+constexpr const char* CMD_FIND_STEALTH_METER       = "find_stealth_meter";
+
 // Fly (Dunste) — no-gravity keyboard-driven 3D flight. fly_set applies whichever
 // of {enable, speed, preset} are present and returns the live status; fly_get_state
 // polls it. Input is read DLL-side (GetAsyncKeyState); the UI only toggles/config.

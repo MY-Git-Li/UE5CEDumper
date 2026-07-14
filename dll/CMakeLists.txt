@@ -227,6 +227,7 @@ set(UE5_COMMON_SOURCES
     src/Solitar.cpp
     src/Laufen.cpp
     src/Hemmung.cpp
+    src/Solide.cpp
     src/Dunste.cpp
     src/Edel.cpp
     src/Grausam.cpp
