@@ -93,7 +93,7 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 
 ⚠️ = partially-confirmed (claim refined during verification — see the item's **Note**).
 
-**Progress:** ✅ **H1 FIXED** (`452d3ff`) · ✅ **M7 FIXED** (`1b108a9`, +1 test — 2527 green). Remaining scheduled: 8 MED + 13 LOW.
+**Progress:** ✅ **H1 FIXED** (`452d3ff`) · ✅ **M7 FIXED** (`1b108a9`) · ✅ **M8 FIXED** (`ad9a7e7`, +4 tests — 2531 green). Remaining scheduled: 7 MED + 13 LOW.
 
 ---
 
@@ -202,6 +202,13 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 - **Where:** [`ui/UE5DumpUI/ViewModels/SnapshotViewModel.cs:844`](../ui/UE5DumpUI/ViewModels/SnapshotViewModel.cs:844), [`ui/UE5DumpUI/ViewModels/SnapshotViewModel.cs:846`](../ui/UE5DumpUI/ViewModels/SnapshotViewModel.cs:846), [`ui/UE5DumpUI/ViewModels/SnapshotViewModel.cs:642`](../ui/UE5DumpUI/ViewModels/SnapshotViewModel.cs:642), [`ui/UE5DumpUI/ViewModels/SnapshotViewModel.cs:1080`](../ui/UE5DumpUI/ViewModels/SnapshotViewModel.cs:1080), [`ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:1919`](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:1919)
 
 ### M8 — LKG proxy-confirm timer records a crashed proxy on a later unrelated reconnect
+
+> **✅ FIXED — commit `ad9a7e7` (build 2184).** Added `_sessionEpoch` (bumped on every disconnect); the
+> dwell captures the epoch at schedule time and records only via the pure gate
+> `ShouldConfirmProxy(IsConnected, scheduledEpoch, currentEpoch)` — same session still up + no disconnect
+> since. Bumping only on disconnect avoids an ordering hazard with `ApplyEngineState`. Also disposes+nulls
+> the timer BEFORE the early returns, on disconnect, and in `Dispose()`. Unit tests `MainWindowProxyConfirmTests`
+> (4 cases).
 
 **🟠 MEDIUM** · Effort **S** · Risk **low** · *confirmed* · Module: MainWindowViewModel (ScheduleProxyConfirmation — ProxyDeploy LKG gate)
 

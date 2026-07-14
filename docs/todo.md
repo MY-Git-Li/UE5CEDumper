@@ -61,16 +61,17 @@ the row here when it ships.
   > persist), and an off-switch exists (reconnect → `reset_all_fields`, or game restart). The real disconnect
   > defect here is **M4**, which stays scheduled.
 
-- **[MED] Snapshot/Proxy/Teleport/PropertySearch UI lifecycle + rule fixes (M8–M10)** —
-  Effort: **S–M** each · Risk: low. **M8** LKG proxy-confirm 20s timer records a *crashed*
-  proxy on a later unrelated reconnect (checks only current `IsConnected`, never session identity; never
-  disposed on early-return / disconnect / in `Dispose()`) — capture a session token at schedule time +
-  re-check in the callback; **M9** experimental gate-off force-offs Foreground/Fly/SeeThrough but **not** an
+- **[MED] Teleport/PropertySearch UI lifecycle + rule fixes (M9–M10)** —
+  Effort: **S–M** each · Risk: low. **M9** experimental gate-off force-offs Foreground/Fly/SeeThrough but **not** an
   active Solide Stealth Hold @0, stranding an invisible write worker — call `ResetStealthAsync` in the
   teardown block; **M10** PropertySearch ResultFilter uses one whole-string `Contains` (no space=AND, no
   `KeywordSearchMemory`) — the only client filter box missed by the b2088 unification; rewrite on
   `ObjectTreeFilter.MatchesAllTerms` + wire keyword memory + `AutoCompleteBox`. *Parent:
-  audit-2026-07-14-findings §M8–M10.*
+  audit-2026-07-14-findings §M9–M10.*
+  > **✅ DONE — M8** (SHIPPED commit `ad9a7e7`, build 2184). `_sessionEpoch` bumped on disconnect; the dwell
+  > records only via the pure gate `ShouldConfirmProxy(IsConnected, scheduledEpoch, currentEpoch)`; timer
+  > disposed before early returns, on disconnect, and in `Dispose()`. Tests `MainWindowProxyConfirmTests`.
+  > *Delete after the audit batch is merged to main.*
   > **✅ DONE — M7** (SHIPPED commit `1b108a9`, build 2183). Disconnect now reports `Failed` (not
   > `Cancelled`), so the auto-loop stops via `case Failed` instead of wedging; `case Cancelled` also stops
   > defensively; the partial delete+reclaim (`RemovePartialAsync`) now also runs on the generic
