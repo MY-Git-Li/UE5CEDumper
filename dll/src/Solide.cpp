@@ -306,6 +306,7 @@ void WorkerLoop() {
 }
 
 void StartWorkerLocked() {
+    if (Tot::ShutdownRequested()) return;   // don't (re)spawn during the shutdown window (M5)
     if (s_worker.joinable()) return;
     s_workerStop.store(false);
     s_worker = std::thread(WorkerLoop);

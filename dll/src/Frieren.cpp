@@ -24,6 +24,7 @@
 #include "Solide.h"
 #include "Dunste.h"
 #include "Schlacht.h"
+#include "Tot.h"     // Tot::RequestShutdown — enter the shutdown window before joining workers (M5)
 
 #include <string>
 #include <cstring>
@@ -488,6 +489,12 @@ bool UE5_Init() {
 
 void UE5_Shutdown() {
     LOG_INFO("UE5_Shutdown: Cleaning up...");
+    // Enter the shutdown window up-front: (a) in-flight scans bail so the worker
+    // joins below complete fast, and (b) every module's StartWorker* refuses to
+    // (re)spawn, so a pipe/mailbox command landing between the joins and the pipe
+    // stop can't revive a just-joined worker that nothing would join again. Cleared
+    // by Fern::Start (ResetShutdown) on re-enable in the same process. (M5)
+    Tot::RequestShutdown();
     Mimic::StopThread();
     Solitar::StopWorker();   // join the GodMode re-assert worker before unload
     Laufen::StopWorker();    // join the movement-tuning re-assert worker before unload

@@ -419,6 +419,7 @@ void WorkerLoop() {
 }
 
 void StartWorkerLocked() {
+    if (Tot::ShutdownRequested()) return;   // don't (re)spawn during the shutdown window (M5)
     if (s_worker.joinable()) return;
     s_workerStop.store(false);
     s_worker = std::thread(WorkerLoop);
@@ -437,23 +438,29 @@ int32_t SetEnabled(bool enable) {
     // lock order: s_workerMutex (outer) → s_mutex (inner).
     std::lock_guard<std::mutex> wlk(s_workerMutex);
     if (enable) {
-        // Recover any actors left hidden by a prior stalled disable (M2): un-hide the
-        // leftover set BEFORE clearing it, so re-enabling never orphans them. (M1)
+        // Recover any actors left hidden by a prior stalled disable. Only pull the
+        // leftover OUT of hiddenActors when we can actually un-hide it now (game thread
+        // responsive); if it's still unresponsive, LEAVE the set intact so the worker
+        // inherits it and its first live tick's diff un-hides anything no longer
+        // occluding — moving+clearing it here without un-hiding would orphan those
+        // actors (they'd stay SetActorHiddenInGame with nothing tracking them). (M1/M2)
+        bool responsive = Stark::IsGameThreadResponsive();
         std::unordered_set<uintptr_t> leftover;
         {
             std::lock_guard<std::mutex> lk(s_mutex);
             if (s_state.active) return 1;   // already on
-            leftover = std::move(s_state.hiddenActors);
-            s_state.hiddenActors.clear();
+            if (responsive) {
+                leftover = std::move(s_state.hiddenActors);
+                s_state.hiddenActors.clear();
+            }
         }
-        if (!leftover.empty() && Stark::IsGameThreadResponsive())
-            for (uintptr_t a : leftover) InvokeSetHidden(a, false);
+        for (uintptr_t a : leftover) InvokeSetHidden(a, false);
         int32_t n;
         {
             std::lock_guard<std::mutex> lk(s_mutex);
             n = s_state.pierceCount;
             s_state.active = true;
-            s_state.hiddenCount = 0;
+            s_state.hiddenCount = static_cast<int32_t>(s_state.hiddenActors.size());
             s_state.code = STR_OK;
             s_state.state = 1;
         }

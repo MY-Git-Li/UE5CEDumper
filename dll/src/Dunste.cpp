@@ -484,6 +484,7 @@ void WorkerLoop() {
 // StopWorkerLocked runs with s_mutex RELEASED (WorkerLoop takes s_mutex every
 // tick → joining under it deadlocks); s_workerMutex serializes start vs stop.
 void StartWorkerLocked() {
+    if (Tot::ShutdownRequested()) return;   // don't (re)spawn during the shutdown window (M5)
     if (s_worker.joinable()) return;
     s_workerStop.store(false);
     s_worker = std::thread(WorkerLoop);

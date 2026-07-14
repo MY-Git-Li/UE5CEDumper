@@ -40,11 +40,14 @@ namespace Tot {
 // disconnect: the orphaned scan must still see the cancel until it unwinds).
 inline std::atomic<bool> g_perCommand{false};
 
-// Sticky: set by Fern::Stop() / UE5_Shutdown() so in-flight ops abort and
-// the accept-thread join completes quickly. Cleared only by Fern::Start()
-// (ResetShutdown) so re-enabling the CE script in the same game process
-// brings the server back to a non-aborting state — otherwise every long op
-// would bail on its first Requested() poll.
+// Sticky: set at the TOP of UE5_Shutdown() (and by Fern::Stop()) so in-flight
+// ops abort and the accept-thread join completes quickly, AND so every module's
+// StartWorker* refuses to (re)spawn a re-assert worker during the shutdown window
+// (join → Stark::Shutdown → pipe stop) — otherwise a pipe/mailbox command landing
+// in that window could revive a just-joined worker that nothing joins again (M5).
+// Cleared only by Fern::Start() (ResetShutdown) so re-enabling the CE script in
+// the same game process brings the server back to a non-aborting state — otherwise
+// every long op would bail on its first Requested() poll.
 inline std::atomic<bool> g_shutdown{false};
 
 // Marks the current thread as a background re-assert worker (Solide/Hemmung/
@@ -68,6 +71,10 @@ inline bool Requested() {
     return g_perCommand.load(std::memory_order_relaxed)
         || g_shutdown.load(std::memory_order_relaxed);
 }
+
+// True once teardown has begun (g_shutdown). Used by the worker (re)start gate to
+// refuse spawning a re-assert worker during the shutdown window. (M5)
+inline bool ShutdownRequested() { return g_shutdown.load(std::memory_order_relaxed); }
 
 inline void RequestPerCommand() { g_perCommand.store(true,  std::memory_order_relaxed); }
 inline void ResetPerCommand()   { g_perCommand.store(false, std::memory_order_relaxed); }

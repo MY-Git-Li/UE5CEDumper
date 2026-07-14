@@ -343,6 +343,7 @@ void WorkerLoop() {
 // Start the worker if not already running. Holds s_workerMutex (NOT s_mutex).
 void StartWorker() {
     std::lock_guard<std::mutex> lk(s_workerMutex);
+    if (Tot::ShutdownRequested()) return;   // don't (re)spawn during the shutdown window (M5)
     if (s_worker.joinable()) return;   // already running
     s_workerStop.store(false);
     s_worker = std::thread(WorkerLoop);
