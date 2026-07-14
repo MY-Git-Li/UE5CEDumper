@@ -27,6 +27,7 @@
 #include "Grimoire.h"
 #include "Macht.h"
 #include "Aura.h"
+#include "Tot.h"     // Tot::MarkBackgroundWorker — re-assert worker ignores per-command cancel (M4)
 #include "Ubel.h"
 
 #include <atomic>
@@ -309,6 +310,7 @@ int32_t ApplyGodNowLocked(bool verbose, bool* outDrifted = nullptr) {
 // ---- re-assert worker ----
 
 void WorkerLoop() {
+    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
     LOG_INFO("GodMode: re-assert worker started (%d ms)", Grimoire::PROTECT_REASSERT_MS);
     int driftCount = 0;
     while (!s_workerStop.load()) {

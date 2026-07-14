@@ -30,6 +30,7 @@
 #include "Grimoire.h"
 #include "Macht.h"
 #include "Aura.h"
+#include "Tot.h"     // Tot::MarkBackgroundWorker — fly worker ignores per-command cancel (M4)
 #include "Ubel.h"
 #include "Stark.h"      // IsGameThreadResponsive — gate the Noclip teleport invoke
 
@@ -454,6 +455,7 @@ void FlyTickLocked(const Ctx& c, double dtSec, uintptr_t& outCollPawn, int& outC
 
 // ---- fly worker ----
 void WorkerLoop() {
+    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
     LOG_INFO("Fly: worker started (%d ms tick)", Grimoire::FLY_TICK_MS);
     const double dtSec = Grimoire::FLY_TICK_MS / 1000.0;
     while (!s_workerStop.load()) {

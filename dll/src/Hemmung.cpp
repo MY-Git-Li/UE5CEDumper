@@ -16,6 +16,7 @@
 #include "Grimoire.h"
 #include "Macht.h"
 #include "Aura.h"
+#include "Tot.h"     // Tot::MarkBackgroundWorker — re-assert worker ignores per-command cancel (M4)
 #include "Ubel.h"
 
 #include <algorithm>
@@ -281,6 +282,7 @@ void FillDilLocked(int32_t target, DilationInfo& info) {
 // ---- re-assert worker (identical discipline to Laufen) ----
 
 void WorkerLoop() {
+    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
     LOG_INFO("Time: re-assert worker started (%d ms)", Grimoire::TIME_REASSERT_MS);
     int driftCount = 0;
     while (!s_workerStop.load()) {

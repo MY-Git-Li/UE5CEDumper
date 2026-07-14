@@ -15,6 +15,7 @@
 #include "Grimoire.h"
 #include "Macht.h"
 #include "Aura.h"
+#include "Tot.h"     // Tot::MarkBackgroundWorker — see-through worker ignores per-command cancel (M4)
 #include "Ubel.h"
 #include "Stark.h"      // IsGameThreadResponsive — gate the game-thread invokes
 
@@ -404,6 +405,7 @@ void Tick() {
 }
 
 void WorkerLoop() {
+    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
     LOG_INFO("SeeThrough: worker started (%d ms tick)", Grimoire::SCHLACHT_TICK_MS);
     while (!s_workerStop.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(Grimoire::SCHLACHT_TICK_MS));

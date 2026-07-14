@@ -17,6 +17,7 @@
 #include "Grimoire.h"
 #include "Macht.h"
 #include "Aura.h"
+#include "Tot.h"     // Tot::MarkBackgroundWorker — re-assert worker ignores per-command cancel (M4)
 #include "Ubel.h"
 
 #include <algorithm>
@@ -279,6 +280,7 @@ std::vector<Job>::iterator FindJobLocked(const std::string& cls, const std::stri
 // ---- re-assert worker (identical discipline to Hemmung) ----
 
 void WorkerLoop() {
+    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
     LOG_INFO("Solide: force-field re-assert worker started (%d ms)", Grimoire::SOLIDE_REASSERT_MS);
     int driftCount = 0;
     while (!s_workerStop.load()) {
