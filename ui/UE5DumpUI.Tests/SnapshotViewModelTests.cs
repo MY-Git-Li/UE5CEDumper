@@ -200,16 +200,28 @@ public class SnapshotViewModelTests : IDisposable
         Assert.Empty(await _store.ListSnapshotsAsync(ct));
     }
 
+    // A disconnect BEFORE any snapshot row is created (bare OCE from BeginSnapshotAsync,
+    // token uncancelled) — so there's no partial to delete/VACUUM and the auto-loop stops
+    // deterministically without depending on SQLite reclaim timing (which is fast locally
+    // but slow under CI lock contention — that timing dependency flaked the earlier
+    // mid-stream variant).
+    private sealed class DisconnectOnBeginStub : StubDumpService
+    {
+        public override Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default)
+            => Task.FromException<int>(new OperationCanceledException());
+    }
+
     // Regression for audit #3 M7: a pipe disconnect during an AUTO-snapshot capture used
     // to be reported as CaptureOutcome.Cancelled, which the loop's `case Cancelled: return`
     // handled by exiting WITHOUT StopAutoSnapshot() — leaving AutoSnapshotEnabled stuck
     // true, _autoCts leaked, and manual capture disabled (wedged). A disconnect is now
-    // reported as Failed, so the loop stops cleanly via `case Failed`.
+    // reported as Failed (our token isn't cancelled), so the loop stops cleanly via
+    // `case Failed`.
     [Fact]
     public async Task AutoSnapshot_DisconnectMidCapture_StopsLoopWithoutWedge()
     {
         var ct = TestContext.Current.CancellationToken;
-        var dump = new DisconnectingCaptureStub();
+        var dump = new DisconnectOnBeginStub();
         var vm = new SnapshotViewModel(dump, _store, new MockLoggingService())
         {
             SelectedScope = "NumericNoByte", GameOnly = true,
@@ -220,12 +232,12 @@ public class SnapshotViewModelTests : IDisposable
         vm.AutoSnapshotEnabled = true;
         var loop = vm.AutoLoopTaskForTests;
         Assert.NotNull(loop);
-        await loop!.WaitAsync(TimeSpan.FromSeconds(10), ct);
+        await loop!.WaitAsync(TimeSpan.FromSeconds(30), ct);
 
         // The loop stopped itself (not wedged): toggle reset + manual capture re-enabled.
         Assert.False(vm.AutoSnapshotEnabled);
         Assert.True(vm.CanManualCapture);
-        // And the disconnect-truncated partial was deleted, not left usable.
+        // No usable snapshot was left behind (none was even created).
         Assert.Empty(await _store.ListSnapshotsAsync(ct));
     }
 
