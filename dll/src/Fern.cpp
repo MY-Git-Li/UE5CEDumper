@@ -758,6 +758,10 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         Radar::SessionManager::Instance().DropAll();
         Radar::GroupSessionManager::Instance().DropAll();
         Linie::Reset();   // last client gone — drop any live PE-profile recording
+        // Un-hide any see-through occluders + stop its worker — the header contract is
+        // "un-hidden on disable / disconnect", and there's no UI left to toggle it.
+        // Cheap no-op when see-through was never enabled. (M3)
+        Schlacht::SetEnabled(false);
     }
 
     m_connCv.notify_all();

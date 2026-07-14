@@ -494,7 +494,7 @@ void UE5_Shutdown() {
     Hemmung::StopWorker();   // join the time-dilation re-assert worker before unload
     Solide::StopWorker();    // join the force-field hold worker before unload
     Dunste::StopWorker();    // join the fly worker before unload
-    Schlacht::StopWorker();  // join the see-through worker before unload
+    Schlacht::SetEnabled(false);  // un-hide occluders (contract) THEN join the worker; runs before Stark::Shutdown so the un-hide invokes can still dispatch (M3)
     // Full teardown: RemoveHook + MH_Uninitialize + drain pending invoke queue.
     // Pipe server is stopped after Shutdown() so any in-flight pipe thread
     // blocked on EnqueueInvoke receives its -7 result and unwinds cleanly.

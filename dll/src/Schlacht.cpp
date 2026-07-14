@@ -437,13 +437,22 @@ int32_t SetEnabled(bool enable) {
     // lock order: s_workerMutex (outer) → s_mutex (inner).
     std::lock_guard<std::mutex> wlk(s_workerMutex);
     if (enable) {
+        // Recover any actors left hidden by a prior stalled disable (M2): un-hide the
+        // leftover set BEFORE clearing it, so re-enabling never orphans them. (M1)
+        std::unordered_set<uintptr_t> leftover;
+        {
+            std::lock_guard<std::mutex> lk(s_mutex);
+            if (s_state.active) return 1;   // already on
+            leftover = std::move(s_state.hiddenActors);
+            s_state.hiddenActors.clear();
+        }
+        if (!leftover.empty() && Stark::IsGameThreadResponsive())
+            for (uintptr_t a : leftover) InvokeSetHidden(a, false);
         int32_t n;
         {
             std::lock_guard<std::mutex> lk(s_mutex);
             n = s_state.pierceCount;
-            if (s_state.active) return 1;   // already on
             s_state.active = true;
-            s_state.hiddenActors.clear();
             s_state.hiddenCount = 0;
             s_state.code = STR_OK;
             s_state.state = 1;
@@ -452,21 +461,42 @@ int32_t SetEnabled(bool enable) {
         LOG_INFO("SeeThrough: enabled (pierce=%d)", n);
         return 1;
     }
-    // Disable: un-hide everything we hid (game thread, off-lock), then stop.
-    std::unordered_set<uintptr_t> restore;
+    // Disable. Early-out when there is genuinely nothing to undo (not running, nothing
+    // hidden) so blind disconnect/shutdown callers don't spam or probe. (M3)
     {
         std::lock_guard<std::mutex> lk(s_mutex);
-        restore = std::move(s_state.hiddenActors);
-        s_state.hiddenActors.clear();
+        if (!s_state.active && s_state.hiddenActors.empty()) return 0;
         s_state.active = false;
-        s_state.hiddenCount = 0;
         s_state.state = 0;
         s_state.hasTarget = false;
     }
-    if (Stark::IsGameThreadResponsive())
-        for (uintptr_t a : restore) InvokeSetHidden(a, false);
+    // Quiesce the worker BEFORE snapshotting the hidden set — otherwise an in-flight
+    // Tick could repopulate hiddenActors AFTER we restore it, orphaning those actors
+    // on the next enable. Join first, THEN restore. (M1)
     StopWorkerLocked();        // join with s_mutex released
-    LOG_INFO("SeeThrough: disabled");
+    if (Stark::IsGameThreadResponsive()) {
+        std::unordered_set<uintptr_t> restore;
+        {
+            std::lock_guard<std::mutex> lk(s_mutex);
+            restore = std::move(s_state.hiddenActors);
+            s_state.hiddenActors.clear();
+            s_state.hiddenCount = 0;
+        }
+        for (uintptr_t a : restore) InvokeSetHidden(a, false);
+        LOG_INFO("SeeThrough: disabled (%zu restored)", restore.size());
+    } else {
+        // Game thread unresponsive (paused / backgrounded) → we can't un-hide now.
+        // KEEP the record so the next enable (when responsive) restores them, rather
+        // than discarding it and leaving the actors hidden with nothing tracking. (M2)
+        size_t kept;
+        {
+            std::lock_guard<std::mutex> lk(s_mutex);
+            kept = s_state.hiddenActors.size();
+            s_state.hiddenCount = static_cast<int32_t>(kept);
+        }
+        LOG_WARN("SeeThrough: disabled but %zu actor(s) remain hidden (game thread unresponsive); "
+                 "re-enable after the game resumes to restore them", kept);
+    }
     return 0;
 }
 
