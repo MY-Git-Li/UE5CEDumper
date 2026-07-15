@@ -47,8 +47,8 @@ public class UiOptionsStoreTests : IDisposable
         Assert.Equal(ValueScanDataType.Int32, o.ValueSearch.SelectedDataType);
         Assert.Equal(7, o.Main.ArrayLimitExponent);
         Assert.Equal(100.0, o.Teleport.ZOffset);
-        Assert.Equal(1.0, o.Teleport.TimeDilation);   // must match VM _timeDilation default
-        Assert.False(o.Teleport.TimeTargetIsPawn);
+        Assert.Equal(1.0, o.Teleport.WorldTimeDilation);   // must match VM _worldTimeDilation default
+        Assert.Equal(1.0, o.Teleport.PawnTimeDilation);    // must match VM _pawnTimeDilation default
         Assert.Equal(ProxyType.Version, o.ProxyDeploy.SelectedProxyType);
 
         Assert.False(File.Exists(store.FilePath)); // load must not create the file
@@ -83,8 +83,8 @@ public class UiOptionsStoreTests : IDisposable
         o.Snapshot.RoundingMode = FloatRoundMode.Ceil;
         o.Teleport.ZOffset = 250.5;
         o.Teleport.TraceChannel = 3;
-        o.Teleport.TimeDilation = 0.5;
-        o.Teleport.TimeTargetIsPawn = true;
+        o.Teleport.WorldTimeDilation = 0.5;
+        o.Teleport.PawnTimeDilation = 2.0;
         o.Spc.SelectedJoinMode = "Loose";
         o.Spc.RoundingMode = FloatRoundMode.Trunc;
         o.Pivot.SelectedSource = "DataTable";
@@ -107,8 +107,8 @@ public class UiOptionsStoreTests : IDisposable
         Assert.Equal(FloatRoundMode.Ceil, r.Snapshot.RoundingMode);
         Assert.Equal(250.5, r.Teleport.ZOffset);
         Assert.Equal(3, r.Teleport.TraceChannel);
-        Assert.Equal(0.5, r.Teleport.TimeDilation);
-        Assert.True(r.Teleport.TimeTargetIsPawn);
+        Assert.Equal(0.5, r.Teleport.WorldTimeDilation);
+        Assert.Equal(2.0, r.Teleport.PawnTimeDilation);
         Assert.Equal("Loose", r.Spc.SelectedJoinMode);
         Assert.Equal(FloatRoundMode.Trunc, r.Spc.RoundingMode);
         Assert.Equal("DataTable", r.Pivot.SelectedSource);

@@ -382,7 +382,7 @@ public class TeleportViewModelTests
     // ── Time dilation (Hemmung) ──
 
     [Fact]
-    public async Task ApplyTimeDilation_global_sends_global_target_and_slider_value()
+    public async Task ApplyWorldTime_sends_global_target_and_slider_value()
     {
         var fake = new FakeDumpService
         {
@@ -391,14 +391,14 @@ public class TeleportViewModelTests
         };
         var vm = CreateVm(fake, out _);
         vm.IsConnected = true;
-        vm.TimeDilation = 0.5;
+        vm.WorldTimeDilation = 0.5;
 
-        await vm.ApplyTimeDilationCommand.ExecuteAsync(null);
+        await vm.ApplyWorldTimeCommand.ExecuteAsync(null);
 
         Assert.Equal(1, fake.SetTimeCalls);
         Assert.Equal("global", fake.LastTimeTarget);
         Assert.Equal(0.5, fake.LastTimeValue);
-        Assert.Equal("ON", vm.TimeDilationState);
+        Assert.Equal("ON", vm.WorldTimeState);
     }
 
     // ── Player stealth meter (Solide) ──
@@ -578,86 +578,126 @@ public class TeleportViewModelTests
     }
 
     [Fact]
-    public async Task ApplyTimeDilation_pawn_toggle_switches_target_key()
+    public async Task ApplyPawnTime_sends_pawn_target_and_slider_value()
     {
         var fake = new FakeDumpService { NextTimeSet = new() { State = 1 } };
         var vm = CreateVm(fake, out _);
         vm.IsConnected = true;
-        vm.TimeTargetIsPawn = true;
-        Assert.Equal("pawn", vm.TimeTargetKey);
+        vm.PawnTimeDilation = 2.0;
 
-        await vm.ApplyTimeDilationCommand.ExecuteAsync(null);
+        await vm.ApplyPawnTimeCommand.ExecuteAsync(null);
 
         Assert.Equal("pawn", fake.LastTimeTarget);
+        Assert.Equal(2.0, fake.LastTimeValue);
     }
 
     [Fact]
-    public async Task ApplyTimeDilation_negative_state_shows_no_owner_hint()
+    public async Task ApplyWorldThenPawn_holds_both_levers_independently()
+    {
+        // The whole point of the dual-row card: set World and Player to different
+        // values; each Apply hits only its own target and neither resets the other.
+        var fake = new FakeDumpService { NextTimeSet = new() { State = 1 } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        vm.WorldTimeDilation = 0.5;
+        await vm.ApplyWorldTimeCommand.ExecuteAsync(null);
+        Assert.Equal("global", fake.LastTimeTarget);
+        Assert.Equal(0.5, fake.LastTimeValue);
+
+        vm.PawnTimeDilation = 2.0;
+        await vm.ApplyPawnTimeCommand.ExecuteAsync(null);
+        Assert.Equal("pawn", fake.LastTimeTarget);
+        Assert.Equal(2.0, fake.LastTimeValue);
+
+        Assert.Equal(2, fake.SetTimeCalls);   // one Set per lever; no ResetTime calls
+        Assert.Equal(0, fake.ResetTimeCalls);
+    }
+
+    [Fact]
+    public async Task ApplyWorldTime_negative_state_shows_no_owner_hint()
     {
         var fake = new FakeDumpService { NextTimeSet = new() { State = -6 } };
         var vm = CreateVm(fake, out _);
         vm.IsConnected = true;
 
-        await vm.ApplyTimeDilationCommand.ExecuteAsync(null);
+        await vm.ApplyWorldTimeCommand.ExecuteAsync(null);
 
-        Assert.Equal("Unavailable", vm.TimeDilationState);
+        Assert.Equal("Unavailable", vm.WorldTimeState);
         Assert.Contains("WorldSettings", vm.StatusText);
     }
 
     [Fact]
-    public async Task ResetTimeDilation_restores_slider_to_normal()
+    public async Task ResetWorldTime_restores_slider_to_normal()
     {
         var fake = new FakeDumpService();
         var vm = CreateVm(fake, out _);
         vm.IsConnected = true;
-        vm.TimeDilation = 0.2;
+        vm.WorldTimeDilation = 0.2;
 
-        await vm.ResetTimeDilationCommand.ExecuteAsync(null);
+        await vm.ResetWorldTimeCommand.ExecuteAsync(null);
 
         Assert.Equal(1, fake.ResetTimeCalls);
         Assert.Equal("global", fake.LastTimeTarget);
-        Assert.Equal(1.0, vm.TimeDilation);
+        Assert.Equal(1.0, vm.WorldTimeDilation);
     }
 
     [Fact]
-    public async Task ApplyTimePreset_sets_slider_then_applies()
+    public async Task ApplyWorldTimePreset_sets_slider_then_applies()
     {
         var fake = new FakeDumpService { NextTimeSet = new() { State = 1 } };
         var vm = CreateVm(fake, out _);
         vm.IsConnected = true;
 
-        await vm.ApplyTimePresetCommand.ExecuteAsync("0.25");
+        await vm.ApplyWorldTimePresetCommand.ExecuteAsync("0.25");
 
-        Assert.Equal(0.25, vm.TimeDilation);
+        Assert.Equal(0.25, vm.WorldTimeDilation);
         Assert.Equal(1, fake.SetTimeCalls);
         Assert.Equal(0.25, fake.LastTimeValue);
     }
 
     [Fact]
-    public void TimeDilationPercentText_reflects_slider()
+    public async Task ApplyPawnTimePreset_sets_pawn_slider_then_applies()
     {
-        var vm = CreateVm(new FakeDumpService(), out _);
-        vm.TimeDilation = 0.5;
-        Assert.Equal("50%", vm.TimeDilationPercentText);
+        var fake = new FakeDumpService { NextTimeSet = new() { State = 1 } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.ApplyPawnTimePresetCommand.ExecuteAsync("0.5");
+
+        Assert.Equal(0.5, vm.PawnTimeDilation);
+        Assert.Equal("pawn", fake.LastTimeTarget);
+        Assert.Equal(0.5, fake.LastTimeValue);
     }
 
     [Fact]
-    public void SetConnected_reflects_held_dilation_and_syncs_slider()
+    public void WorldTimePercentText_reflects_slider()
     {
-        // The DLL keeps holding the dilation as long as the game lives, so on a UI
-        // reconnect the card must reflect the engaged override (badge ON + slider).
+        var vm = CreateVm(new FakeDumpService(), out _);
+        vm.WorldTimeDilation = 0.5;
+        Assert.Equal("50%", vm.WorldTimePercentText);
+    }
+
+    [Fact]
+    public void SetConnected_reflects_held_dilation_and_syncs_both_sliders()
+    {
+        // The DLL keeps holding BOTH levers as long as the game lives, so on a UI
+        // reconnect the card must reflect each engaged override (badge ON + slider).
         var fake = new FakeDumpService
         {
             NextTimeState = new()
             {
                 Global = new() { Resolved = true, Active = true, Current = 0.3, Base = 1.0, Value = 0.3 },
+                Pawn   = new() { Resolved = true, Active = true, Current = 2.0, Base = 1.0, Value = 2.0 },
             },
         };
         var vm = CreateVm(fake, out _);
         vm.SetConnected(true);
 
-        Assert.Equal("ON", vm.TimeDilationState);
-        Assert.Equal(0.3, vm.TimeDilation);   // slider synced to the held value
+        Assert.Equal("ON", vm.WorldTimeState);
+        Assert.Equal(0.3, vm.WorldTimeDilation);   // world slider synced to the held value
+        Assert.Equal("ON", vm.PawnTimeState);
+        Assert.Equal(2.0, vm.PawnTimeDilation);    // pawn slider synced to the held value
     }
 
     [Fact]
@@ -667,11 +707,11 @@ public class TeleportViewModelTests
         // untouched and the badge reads Unavailable.
         var fake = new FakeDumpService { NextTimeState = new() };   // both levers Resolved=false
         var vm = CreateVm(fake, out _);
-        vm.TimeDilation = 0.7;   // simulate a restored preference
+        vm.WorldTimeDilation = 0.7;   // simulate a restored preference
         vm.SetConnected(true);
 
-        Assert.Equal(0.7, vm.TimeDilation);          // unchanged
-        Assert.Equal("Unavailable", vm.TimeDilationState);
+        Assert.Equal(0.7, vm.WorldTimeDilation);          // unchanged
+        Assert.Equal("Unavailable", vm.WorldTimeState);
     }
 
     [Fact]

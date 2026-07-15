@@ -707,67 +707,127 @@
       </Border>
 
       <!-- ── Time dilation (Hemmung — force TimeDilation / CustomTimeDilation) ── -->
+      <!-- Two independent levers, held together by the DLL: whole-world +
+           per-pawn. Effective pawn rate = world × pawn (World 0.5× + Player 2× =
+           bullet time). -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
               CornerRadius="4" Padding="10">
         <StackPanel Spacing="8">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="{StaticResource str.TP.TdHeader}"
-                       Foreground="#DDDDDD" FontWeight="SemiBold" VerticalAlignment="Center"/>
-            <TextBlock Text="{StaticResource str.TP.TdState}" Foreground="#999999"
-                       FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"/>
-            <Border Background="#333337" CornerRadius="3" Padding="6,1">
-              <TextBlock Text="{Binding TimeDilationState}"
-                         Foreground="{Binding TimeDilationBadgeColor}"
-                         FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
-            </Border>
-          </StackPanel>
+          <TextBlock Text="{StaticResource str.TP.TdHeader}"
+                     Foreground="#DDDDDD" FontWeight="SemiBold"/>
           <TextBlock Text="{StaticResource str.TP.TdHint}"
                      Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
-          <CheckBox Content="{StaticResource str.TP.TdPawnToggle}"
-                    IsChecked="{Binding TimeTargetIsPawn}"
-                    ToolTip.Tip="{StaticResource str.Tip.TP.TdPawnToggle}"
-                    IsEnabled="{Binding CanOperate}" Foreground="#BBBBBB" FontSize="12"/>
-          <TextBlock Text="{Binding TimeDilationCurrentText}"
-                     Foreground="#BBBBBB" FontSize="12"/>
-          <Grid ColumnDefinitions="*,Auto">
-            <Slider Grid.Column="0" Minimum="0" Maximum="3"
-                    Value="{Binding TimeDilation}"
-                    IsEnabled="{Binding CanOperate}" VerticalAlignment="Center"/>
-            <TextBlock Grid.Column="1" Text="{Binding TimeDilationPercentText}"
-                       Foreground="#DDDDDD" FontWeight="SemiBold" MinWidth="56"
-                       TextAlignment="Right" VerticalAlignment="Center" Margin="8,0,0,0"/>
-          </Grid>
-          <StackPanel Orientation="Horizontal" Spacing="6">
-            <Button Content="{StaticResource str.TP.TdFreeze}"
-                    Command="{Binding ApplyTimePresetCommand}" CommandParameter="0"
-                    IsEnabled="{Binding CanOperate}" Padding="8,3"/>
-            <Button Content="{StaticResource str.TP.TdQuarter}"
-                    Command="{Binding ApplyTimePresetCommand}" CommandParameter="0.25"
-                    IsEnabled="{Binding CanOperate}" Padding="8,3"/>
-            <Button Content="{StaticResource str.TP.TdHalf}"
-                    Command="{Binding ApplyTimePresetCommand}" CommandParameter="0.5"
-                    IsEnabled="{Binding CanOperate}" Padding="8,3"/>
-            <Button Content="{StaticResource str.TP.TdNormal}"
-                    Command="{Binding ApplyTimePresetCommand}" CommandParameter="1"
-                    IsEnabled="{Binding CanOperate}" Padding="8,3"/>
-            <Button Content="{StaticResource str.TP.TdDouble}"
-                    Command="{Binding ApplyTimePresetCommand}" CommandParameter="2"
-                    IsEnabled="{Binding CanOperate}" Padding="8,3"/>
+
+          <!-- Whole world (AWorldSettings.TimeDilation) -->
+          <StackPanel Spacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="{StaticResource str.TP.TdWorldHeader}"
+                         Foreground="#CCCCCC" FontWeight="SemiBold" VerticalAlignment="Center"/>
+              <TextBlock Text="{StaticResource str.TP.TdState}" Foreground="#999999"
+                         FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"/>
+              <Border Background="#333337" CornerRadius="3" Padding="6,1">
+                <TextBlock Text="{Binding WorldTimeState}"
+                           Foreground="{Binding WorldTimeBadgeColor}"
+                           FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+              </Border>
+            </StackPanel>
+            <TextBlock Text="{Binding WorldTimeCurrentText}"
+                       Foreground="#BBBBBB" FontSize="12"/>
+            <Grid ColumnDefinitions="*,Auto">
+              <Slider Grid.Column="0" Minimum="0" Maximum="3"
+                      Value="{Binding WorldTimeDilation}"
+                      IsEnabled="{Binding CanOperate}" VerticalAlignment="Center"/>
+              <TextBlock Grid.Column="1" Text="{Binding WorldTimePercentText}"
+                         Foreground="#DDDDDD" FontWeight="SemiBold" MinWidth="56"
+                         TextAlignment="Right" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Button Content="{StaticResource str.TP.TdFreeze}"
+                      Command="{Binding ApplyWorldTimePresetCommand}" CommandParameter="0"
+                      IsEnabled="{Binding CanOperate}" Padding="8,3"/>
+              <Button Content="{StaticResource str.TP.TdQuarter}"
+                      Command="{Binding ApplyWorldTimePresetCommand}" CommandParameter="0.25"
+                      IsEnabled="{Binding CanOperate}" Padding="8,3"/>
+              <Button Content="{StaticResource str.TP.TdHalf}"
+                      Command="{Binding ApplyWorldTimePresetCommand}" CommandParameter="0.5"
+                      IsEnabled="{Binding CanOperate}" Padding="8,3"/>
+              <Button Content="{StaticResource str.TP.TdNormal}"
+                      Command="{Binding ApplyWorldTimePresetCommand}" CommandParameter="1"
+                      IsEnabled="{Binding CanOperate}" Padding="8,3"/>
+              <Button Content="{StaticResource str.TP.TdDouble}"
+                      Command="{Binding ApplyWorldTimePresetCommand}" CommandParameter="2"
+                      IsEnabled="{Binding CanOperate}" Padding="8,3"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="{StaticResource str.TP.TdApply}"
+                      Command="{Binding ApplyWorldTimeCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.TdApply}"
+                      IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+              <Button Content="{StaticResource str.TP.TdReset}"
+                      Command="{Binding ResetWorldTimeCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.TdReset}"
+                      IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+            </StackPanel>
           </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button Content="{StaticResource str.TP.TdApply}"
-                    Command="{Binding ApplyTimeDilationCommand}"
-                    ToolTip.Tip="{StaticResource str.Tip.TP.TdApply}"
-                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
-            <Button Content="{StaticResource str.TP.TdReset}"
-                    Command="{Binding ResetTimeDilationCommand}"
-                    ToolTip.Tip="{StaticResource str.Tip.TP.TdReset}"
-                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
-            <Button Content="{StaticResource str.TP.TdRefresh}"
-                    Command="{Binding RefreshTimeStateCommand}"
-                    ToolTip.Tip="{StaticResource str.Tip.TP.TdRefresh}"
-                    IsEnabled="{Binding CanOperate}" Padding="10,4"/>
+
+          <Border Height="1" Background="#3E3E42" Margin="0,2"/>
+
+          <!-- Player pawn (AActor.CustomTimeDilation) -->
+          <StackPanel Spacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="{StaticResource str.TP.TdPawnHeader}"
+                         Foreground="#CCCCCC" FontWeight="SemiBold" VerticalAlignment="Center"/>
+              <TextBlock Text="{StaticResource str.TP.TdState}" Foreground="#999999"
+                         FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"/>
+              <Border Background="#333337" CornerRadius="3" Padding="6,1">
+                <TextBlock Text="{Binding PawnTimeState}"
+                           Foreground="{Binding PawnTimeBadgeColor}"
+                           FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+              </Border>
+            </StackPanel>
+            <TextBlock Text="{Binding PawnTimeCurrentText}"
+                       Foreground="#BBBBBB" FontSize="12"/>
+            <Grid ColumnDefinitions="*,Auto">
+              <Slider Grid.Column="0" Minimum="0" Maximum="3"
+                      Value="{Binding PawnTimeDilation}"
+                      IsEnabled="{Binding CanOperate}" VerticalAlignment="Center"/>
+              <TextBlock Grid.Column="1" Text="{Binding PawnTimePercentText}"
+                         Foreground="#DDDDDD" FontWeight="SemiBold" MinWidth="56"
+                         TextAlignment="Right" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Button Content="{StaticResource str.TP.TdFreeze}"
+                      Command="{Binding ApplyPawnTimePresetCommand}" CommandParameter="0"
+                      IsEnabled="{Binding CanOperate}" Padding="8,3"/>
+              <Button Content="{StaticResource str.TP.TdQuarter}"
+                      Command="{Binding ApplyPawnTimePresetCommand}" CommandParameter="0.25"
+                      IsEnabled="{Binding CanOperate}" Padding="8,3"/>
+              <Button Content="{StaticResource str.TP.TdHalf}"
+                      Command="{Binding ApplyPawnTimePresetCommand}" CommandParameter="0.5"
+                      IsEnabled="{Binding CanOperate}" Padding="8,3"/>
+              <Button Content="{StaticResource str.TP.TdNormal}"
+                      Command="{Binding ApplyPawnTimePresetCommand}" CommandParameter="1"
+                      IsEnabled="{Binding CanOperate}" Padding="8,3"/>
+              <Button Content="{StaticResource str.TP.TdDouble}"
+                      Command="{Binding ApplyPawnTimePresetCommand}" CommandParameter="2"
+                      IsEnabled="{Binding CanOperate}" Padding="8,3"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="{StaticResource str.TP.TdApply}"
+                      Command="{Binding ApplyPawnTimeCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.TdApply}"
+                      IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+              <Button Content="{StaticResource str.TP.TdReset}"
+                      Command="{Binding ResetPawnTimeCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.TdReset}"
+                      IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+            </StackPanel>
           </StackPanel>
+
+          <Button Content="{StaticResource str.TP.TdRefreshBoth}"
+                  Command="{Binding RefreshTimeStateCommand}"
+                  ToolTip.Tip="{StaticResource str.Tip.TP.TdRefresh}"
+                  IsEnabled="{Binding CanOperate}" Padding="10,4" HorizontalAlignment="Left"/>
         </StackPanel>
       </Border>
 

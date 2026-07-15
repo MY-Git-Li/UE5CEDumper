@@ -406,36 +406,43 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     public string MoveSpeedPercentText => $"{Math.Round(MoveSpeedMultiplier * 100.0)}%";
 
     // ── Time dilation (Hemmung via set_time_dilation) ──────────────────
-    /// <summary>Target lever: false = global world speed
-    /// (AWorldSettings::TimeDilation), true = player-only
-    /// (AActor::CustomTimeDilation). Switching refreshes the readout.</summary>
-    [ObservableProperty] private bool _timeTargetIsPawn;
+    // Two INDEPENDENT levers, held simultaneously by the DLL re-assert worker:
+    // whole-world AWorldSettings::TimeDilation and per-pawn
+    // AActor::CustomTimeDilation. The effective pawn rate is world × pawn, so
+    // World 0.5× + Player 2× = the player at normal speed in a half-speed world
+    // (bullet time). Each lever has its own slider / badge / readout / commands.
 
-    /// <summary>Absolute dilation the slider represents: 1.0 = normal, 0.5 = half,
-    /// 0 = frozen, 3 = triple. Linear slider (0…3).</summary>
+    /// <summary>Absolute WORLD dilation (AWorldSettings::TimeDilation): 1.0 =
+    /// normal, 0.5 = half, 0 = frozen, 3 = triple. Linear slider (0…3).</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(TimeDilationPercentText))]
-    private double _timeDilation = 1.0;
+    [NotifyPropertyChangedFor(nameof(WorldTimePercentText))]
+    private double _worldTimeDilation = 1.0;
 
-    /// <summary>Tri-state badge: "ON" (held) / "OFF" / "Unavailable".</summary>
-    [ObservableProperty] private string _timeDilationState = "Unknown";
-    [ObservableProperty] private string _timeDilationBadgeColor = "#888888";
+    /// <summary>Absolute PLAYER dilation (AActor::CustomTimeDilation), same scale.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PawnTimePercentText))]
+    private double _pawnTimeDilation = 1.0;
 
-    /// <summary>Live "Current: 0.5× (held; natural 1×)" readout for the target.</summary>
-    [ObservableProperty] private string _timeDilationCurrentText = "—";
+    /// <summary>Tri-state badge for the world lever: "ON" / "OFF" / "Unavailable".</summary>
+    [ObservableProperty] private string _worldTimeState = "Unknown";
+    [ObservableProperty] private string _worldTimeBadgeColor = "#888888";
 
-    /// <summary>Pipe target key for the selected lever.</summary>
-    public string TimeTargetKey => TimeTargetIsPawn ? "pawn" : "global";
+    /// <summary>Tri-state badge for the player lever.</summary>
+    [ObservableProperty] private string _pawnTimeState = "Unknown";
+    [ObservableProperty] private string _pawnTimeBadgeColor = "#888888";
+
+    /// <summary>Live "Current: 0.5× (held; natural 1×)" readout per lever.</summary>
+    [ObservableProperty] private string _worldTimeCurrentText = "—";
+    [ObservableProperty] private string _pawnTimeCurrentText = "—";
 
     /// <summary>Slider position as a percentage string (e.g. "50%").</summary>
-    public string TimeDilationPercentText => $"{Math.Round(TimeDilation * 100.0)}%";
+    public string WorldTimePercentText => $"{Math.Round(WorldTimeDilation * 100.0)}%";
+    public string PawnTimePercentText => $"{Math.Round(PawnTimeDilation * 100.0)}%";
 
-    partial void OnTimeTargetIsPawnChanged(bool value)
-    {
-        // Reflect the newly-selected lever's live state — and sync the slider to
-        // its held value if engaged (fire-and-forget; guarded by IsConnected inside).
-        _ = RefreshHeldTimeStateAsync();
-    }
+    /// <summary>The two dilation levers, for the shared apply/reset/readout core.</summary>
+    private enum TimeLane { World, Pawn }
+    private static string LaneKey(TimeLane lane) => lane == TimeLane.Pawn ? "pawn" : "global";
+    private static string LaneName(TimeLane lane) => lane == TimeLane.Pawn ? "Player" : "World";
 
     // ── Gravity multiplier (Laufen via "gravity" knob = GravityScale) ──
     /// <summary>Tri-state badge: "ON" (held) / "OFF" / "Unavailable".</summary>
@@ -638,8 +645,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             ApplyForegroundLockState(-1);// foreground-lock badge back to Unknown
             ApplyMoveSpeedState(-1);     // move-speed badge back to Unknown
             MoveSpeedCurrentText = "—";
-            ApplyTimeDilationState(-1);  // time-dilation badge back to Unknown
-            TimeDilationCurrentText = "—";
+            ApplyLaneState(TimeLane.World, -1);  // time-dilation badges back to Unknown
+            ApplyLaneState(TimeLane.Pawn, -1);
+            WorldTimeCurrentText = "—";
+            PawnTimeCurrentText = "—";
             ApplyGravityState(-1);       // gravity badge back to Unknown
             GravityCurrentText = "—";
             ApplySuperJumpState(-1);     // super-jump badge back to Unknown
@@ -1879,39 +1888,51 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 
     // ── Time dilation (force TimeDilation / CustomTimeDilation, Hemmung) ─
 
-    /// <summary>Map the override state (1 = held, 0 = off, &lt;0 = no owner) onto
-    /// the badge.</summary>
-    private void ApplyTimeDilationState(int state)
+    /// <summary>Map a lever's override state (1 = held, 0 = off, &lt;0 = no owner)
+    /// onto its badge.</summary>
+    private void ApplyLaneState(TimeLane lane, int state)
     {
-        (TimeDilationState, TimeDilationBadgeColor) = state switch
+        var (label, color) = state switch
         {
             1 => ("ON",          "#4EC9B0"),   // green — override held
             0 => ("OFF",         "#999999"),   // grey — natural value restored
             _ => ("Unavailable", "#C9A04E"),   // amber — no WorldSettings / no pawn
         };
+        if (lane == TimeLane.Pawn) { PawnTimeState = label; PawnTimeBadgeColor = color; }
+        else                        { WorldTimeState = label; WorldTimeBadgeColor = color; }
     }
 
-    /// <summary>Format the live "Current: X× (held; natural Y×)" readout for the
-    /// currently-selected lever.</summary>
+    /// <summary>Fill BOTH lever readouts + badges from one get_time_state snapshot
+    /// (the DLL holds world and pawn dilation independently and simultaneously).</summary>
     private void ApplyTimeDilationReadout(TimeState ts)
     {
-        var k = TimeTargetIsPawn ? ts.Pawn : ts.Global;
+        FillLaneReadout(TimeLane.World, ts.Global);
+        FillLaneReadout(TimeLane.Pawn, ts.Pawn);
+    }
+
+    /// <summary>Format one lever's live "Current: X× (held; natural Y×)" readout and
+    /// badge.</summary>
+    private void FillLaneReadout(TimeLane lane, TimeDilationKnob k)
+    {
+        bool pawn = lane == TimeLane.Pawn;
         if (!k.Resolved)
         {
-            TimeDilationCurrentText = TimeTargetIsPawn
+            string txt = pawn
                 ? "Current: unavailable (no player pawn — enter gameplay first)."
                 : "Current: unavailable (no WorldSettings — enter a level first).";
-            ApplyTimeDilationState(-1);
+            if (pawn) PawnTimeCurrentText = txt; else WorldTimeCurrentText = txt;
+            ApplyLaneState(lane, -1);
             return;
         }
-        TimeDilationCurrentText = k.Active
+        string cur = k.Active
             ? string.Format(CultureInfo.InvariantCulture,
                 "Current: {0:0.###}×  (held; natural {1:0.###}×)", k.Current, k.Base)
             : string.Format(CultureInfo.InvariantCulture, "Current: {0:0.###}×", k.Current);
-        ApplyTimeDilationState(k.Active ? 1 : 0);
+        if (pawn) PawnTimeCurrentText = cur; else WorldTimeCurrentText = cur;
+        ApplyLaneState(lane, k.Active ? 1 : 0);
     }
 
-    /// <summary>↻ — re-read the live dilation value + override state.</summary>
+    /// <summary>↻ — re-read both levers' live dilation values + override state.</summary>
     [RelayCommand]
     private async Task RefreshTimeStateAsync()
     {
@@ -1926,20 +1947,21 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            ApplyTimeDilationState(-1);
+            ApplyLaneState(TimeLane.World, -1);
+            ApplyLaneState(TimeLane.Pawn, -1);
             SetError(ex);
             _log.Error("Teleport RefreshTimeState failed", ex);
         }
         finally { IsBusy = false; }
     }
 
-    /// <summary>Quiet read-back of the held dilation (used on connect and on
-    /// target-switch): the DLL's re-assert worker keeps holding the dilation as
-    /// long as the game process lives, so on a UI reconnect the card should reflect
-    /// whatever is engaged (a value set by a prior session or a CE .CT record) — the
-    /// same "state lives in the DLL" model as teleport markers. Syncs the slider to
-    /// the engaged value so the card shows the true override; leaves the slider at
-    /// the persisted preference when nothing is held. Does not touch StatusText.</summary>
+    /// <summary>Quiet read-back of both held levers (used on connect): the DLL's
+    /// re-assert worker keeps holding each dilation as long as the game process
+    /// lives, so on a UI reconnect the card should reflect whatever is engaged (a
+    /// value set by a prior session or a CE .CT record) — the same "state lives in
+    /// the DLL" model as teleport markers. Syncs each slider to its engaged value so
+    /// the card shows the true override; leaves a slider at the persisted preference
+    /// when that lever isn't held. Does not touch StatusText.</summary>
     private async Task RefreshHeldTimeStateAsync()
     {
         if (!IsConnected) return;
@@ -1947,39 +1969,39 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         {
             var ts = await _dump.GetTimeStateAsync();
             ApplyTimeDilationReadout(ts);
-            var k = TimeTargetIsPawn ? ts.Pawn : ts.Global;
-            if (k.Active) TimeDilation = k.Value;   // reflect the engaged value on the slider
+            if (ts.Global.Active) WorldTimeDilation = ts.Global.Value; // reflect engaged value
+            if (ts.Pawn.Active)   PawnTimeDilation   = ts.Pawn.Value;
         }
         catch (Exception ex)
         {
-            ApplyTimeDilationState(-1);
+            ApplyLaneState(TimeLane.World, -1);
+            ApplyLaneState(TimeLane.Pawn, -1);
             _log.Error("Teleport RefreshHeldTimeState failed", ex);
         }
     }
 
-    /// <summary>Hold the selected lever at the slider's absolute value via the DLL
-    /// re-assert worker (the natural value is captured DLL-side, so Reset restores
-    /// the true original even if the game changed dilation meanwhile).</summary>
-    [RelayCommand]
-    private async Task ApplyTimeDilationAsync()
+    /// <summary>Hold one lever at its slider's absolute value via the DLL re-assert
+    /// worker (the natural value is captured DLL-side, so Reset restores the true
+    /// original even if the game changed dilation meanwhile). World and pawn are
+    /// independent — applying one never disturbs the other.</summary>
+    private async Task ApplyTimeAsync(TimeLane lane)
     {
         if (!IsConnected) return;
-        double value = TimeDilation;
-        bool pawn = TimeTargetIsPawn;
+        double value = lane == TimeLane.Pawn ? PawnTimeDilation : WorldTimeDilation;
+        string scope = LaneName(lane);
         try
         {
             IsBusy = true;
             ClearError();
-            var r = await _dump.SetTimeDilationAsync(TimeTargetKey, value);
+            var r = await _dump.SetTimeDilationAsync(LaneKey(lane), value);
             var ts = await _dump.GetTimeStateAsync();
             ApplyTimeDilationReadout(ts);
-            string scope = pawn ? "Player" : "World";
             StatusText = r.State switch
             {
                 1   => string.Format(CultureInfo.InvariantCulture,
                          "✓ {0} time held at {1:0.###}× ({2:0}%). Drag + Apply to change; Reset to restore.",
                          scope, value, value * 100.0),
-                < 0 => pawn
+                < 0 => lane == TimeLane.Pawn
                          ? "No player pawn — enter gameplay first; the override applies once a pawn exists."
                          : "No WorldSettings — enter a level first; the override applies once a world is loaded.",
                 _   => $"{scope} time override is off.",
@@ -1988,47 +2010,55 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             SetError(ex);
-            StatusText = $"Apply time dilation failed: {ex.Message}";
-            _log.Error("Teleport ApplyTimeDilation failed", ex);
+            StatusText = $"Apply {scope.ToLowerInvariant()} time dilation failed: {ex.Message}";
+            _log.Error($"Teleport Apply {scope} time failed", ex);
         }
         finally { IsBusy = false; }
     }
 
-    /// <summary>Restore the selected lever to its captured natural value and stop
-    /// holding it.</summary>
-    [RelayCommand]
-    private async Task ResetTimeDilationAsync()
+    /// <summary>Restore one lever to its captured natural value and stop holding it;
+    /// the other lever keeps its state.</summary>
+    private async Task ResetTimeAsync(TimeLane lane)
     {
         if (!IsConnected) return;
+        string scope = LaneName(lane);
         try
         {
             IsBusy = true;
             ClearError();
-            await _dump.ResetTimeDilationAsync(TimeTargetKey);
-            TimeDilation = 1.0;   // slider back to normal speed
+            await _dump.ResetTimeDilationAsync(LaneKey(lane));
+            if (lane == TimeLane.Pawn) PawnTimeDilation = 1.0; else WorldTimeDilation = 1.0;
             var ts = await _dump.GetTimeStateAsync();
             ApplyTimeDilationReadout(ts);
-            StatusText = (TimeTargetIsPawn ? "Player" : "World") + " time restored to normal.";
+            StatusText = scope + " time restored to normal.";
         }
         catch (Exception ex)
         {
             SetError(ex);
-            _log.Error("Teleport ResetTimeDilation failed", ex);
+            _log.Error($"Teleport Reset {scope} time failed", ex);
         }
         finally { IsBusy = false; }
     }
 
-    /// <summary>Preset buttons (Freeze / ½× / Normal / 2× …): set the slider to the
-    /// parameter value, then Apply. The parameter is an invariant-culture double
-    /// string (e.g. "0.5").</summary>
-    [RelayCommand]
-    private async Task ApplyTimePresetAsync(string value)
+    /// <summary>Preset buttons (Freeze / ½× / Normal / 2× …): set the lever's slider
+    /// to the parameter value, then Apply. The parameter is an invariant-culture
+    /// double string (e.g. "0.5").</summary>
+    private async Task ApplyTimePresetAsync(TimeLane lane, string value)
     {
         if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
             return;
-        TimeDilation = Math.Clamp(v, 0.0, 3.0);
-        await ApplyTimeDilationAsync();
+        double clamped = Math.Clamp(v, 0.0, 3.0);
+        if (lane == TimeLane.Pawn) PawnTimeDilation = clamped; else WorldTimeDilation = clamped;
+        await ApplyTimeAsync(lane);
     }
+
+    // Per-lever command wrappers (CommunityToolkit generates XxxCommand for each).
+    [RelayCommand] private Task ApplyWorldTimeAsync() => ApplyTimeAsync(TimeLane.World);
+    [RelayCommand] private Task ResetWorldTimeAsync() => ResetTimeAsync(TimeLane.World);
+    [RelayCommand] private Task ApplyWorldTimePresetAsync(string value) => ApplyTimePresetAsync(TimeLane.World, value);
+    [RelayCommand] private Task ApplyPawnTimeAsync() => ApplyTimeAsync(TimeLane.Pawn);
+    [RelayCommand] private Task ResetPawnTimeAsync() => ResetTimeAsync(TimeLane.Pawn);
+    [RelayCommand] private Task ApplyPawnTimePresetAsync(string value) => ApplyTimePresetAsync(TimeLane.Pawn, value);
 
     // ── Gravity multiplier (force GravityScale, Laufen) ────────────────
 
@@ -3214,14 +3244,14 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 ok++;
             // Time dilation (Hemmung) — one record per lever baked at the current
             // slider value; stateful (tick = hold value, untick = RESET to natural).
-            var timeSpecs = new (string Desc, TimeDilationScriptGenerator.Target Target)[]
+            var timeSpecs = new (string Desc, TimeDilationScriptGenerator.Target Target, double Value)[]
             {
-                ($"Time: World ({TimeDilation:0.0##}x)",  TimeDilationScriptGenerator.Target.Global),
-                ($"Time: Player ({TimeDilation:0.0##}x)", TimeDilationScriptGenerator.Target.Pawn),
+                ($"Time: World ({WorldTimeDilation:0.0##}x)",  TimeDilationScriptGenerator.Target.Global, WorldTimeDilation),
+                ($"Time: Player ({PawnTimeDilation:0.0##}x)", TimeDilationScriptGenerator.Target.Pawn, PawnTimeDilation),
             };
             foreach (var s in timeSpecs)
             {
-                string script = TimeDilationScriptGenerator.Generate(s.Target, TimeDilation);
+                string script = TimeDilationScriptGenerator.Generate(s.Target, s.Value);
                 if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false, group: CeGroupDll))
                     ok++;
             }
@@ -3265,8 +3295,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 MoveSpeedMultiplier * 100, GravityMultiplier * 100,
                 SuperJumpHeightMultiplier * 100,
                 GravDirX, GravDirY, GravDirZ));
-            // Time dilation (Hemmung) — World + Player levers baked at the current slider.
-            rows.AddRange(TimeDilationScriptGenerator.BuildBatchRows(TimeDilation));
+            // Time dilation (Hemmung) — World + Player levers baked at each lever's slider.
+            rows.AddRange(TimeDilationScriptGenerator.BuildBatchRows(WorldTimeDilation, PawnTimeDilation));
             // Fly (Dunste) — DLL-driven no-gravity flight on/off + noclip on/off.
             rows.AddRange(FlyScriptGenerator.BuildBatchRows());
             string ct = CheatTableBuilder.Build("Teleport — UE5CEDumper", rows);

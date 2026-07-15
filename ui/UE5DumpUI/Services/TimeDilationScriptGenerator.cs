@@ -60,6 +60,10 @@ public static class TimeDilationScriptGenerator
             Line(sb, $"-- Tick = hold {Mult(value)} (re-asserted by the DLL worker), untick = OFF (restore natural).");
             Line(sb, "-- Talks to UE5Dumper.dll's mailbox directly (CMD_TIME=15, op SET/RESET).");
             Line(sb, $"-- {(target == Target.Global ? "Whole-world AWorldSettings.TimeDilation (everything slows)." : "Per-pawn AActor.CustomTimeDilation (the player only).")}");
+            Line(sb, "-- World + Player are INDEPENDENT records held by the DLL -- tick BOTH at");
+            Line(sb, "-- once for bullet time (effective pawn rate = world x pawn: World 0.5x +");
+            Line(sb, "-- Player 2x = the player at normal speed in a half-speed world). Enabling");
+            Line(sb, "-- one never disturbs the other.");
             Line(sb, "-- 1x = normal, 0.5x = half speed, 0 = frozen (a literal 0 can destabilise");
             Line(sb, "-- physics on some games -- use a small value like 0.05x). Requires");
             Line(sb, "-- UE5Dumper.dll injected (version.dll proxy or CE inject).");
@@ -123,25 +127,33 @@ public static class TimeDilationScriptGenerator
         Line(sb, "{$asm}");
     }
 
-    /// <summary>Build the .CT batch (both levers) baked at <paramref name="value"/>,
-    /// ready for <see cref="CheatTableBuilder.Build"/>. Both records carry the same
-    /// starting value; edit each in CE (or re-export) for a different per-lever
-    /// dilation.</summary>
+    /// <summary>Build the .CT batch (both levers) baked at a single shared
+    /// <paramref name="value"/>. Convenience overload of
+    /// <see cref="BuildBatchRows(double, double)"/>.</summary>
     public static List<CheatTableRow> BuildBatchRows(double value)
+        => BuildBatchRows(value, value);
+
+    /// <summary>Build the .CT batch (both levers) with INDEPENDENT per-lever values —
+    /// the whole-world dilation baked at <paramref name="worldValue"/> and the pawn at
+    /// <paramref name="pawnValue"/> (e.g. World 0.5× + Player 2× = bullet time). The
+    /// two records are stateful toggles held simultaneously by the DLL worker; edit
+    /// each in CE (or re-export) to retune. Ready for
+    /// <see cref="CheatTableBuilder.Build"/>.</summary>
+    public static List<CheatTableRow> BuildBatchRows(double worldValue, double pawnValue)
     {
         return new List<CheatTableRow>
         {
             new CtScriptRow
             {
                 Category = "Time",
-                Description = $"Time: World {Mult(value)}",
-                Script = Generate(Target.Global, value),
+                Description = $"Time: World {Mult(worldValue)}",
+                Script = Generate(Target.Global, worldValue),
             },
             new CtScriptRow
             {
                 Category = "Time",
-                Description = $"Time: Player {Mult(value)}",
-                Script = Generate(Target.Pawn, value),
+                Description = $"Time: Player {Mult(pawnValue)}",
+                Script = Generate(Target.Pawn, pawnValue),
             },
         };
     }

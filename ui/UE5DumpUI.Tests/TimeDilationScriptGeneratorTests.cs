@@ -64,4 +64,16 @@ public class TimeDilationScriptGeneratorTests
         var rows = TimeDilationScriptGenerator.BuildBatchRows(0.5);
         Assert.Equal(2, rows.Count);   // World + Player
     }
+
+    [Fact]
+    public void BuildBatchRows_two_arg_bakes_independent_world_and_player_values()
+    {
+        var rows = TimeDilationScriptGenerator.BuildBatchRows(0.25, 2.0);
+        Assert.Equal(2, rows.Count);
+        // World row (index 0) baked at 0.25; Player row (index 1) at 2.0.
+        Assert.Contains("writeDouble(mb + 0x328, 0.25)", rows[0].GenerateScript());
+        Assert.Contains("writeQword(mb + 0x18, 0)", rows[0].GenerateScript());   // target Global
+        Assert.Contains("writeDouble(mb + 0x328, 2.0)", rows[1].GenerateScript());
+        Assert.Contains("writeQword(mb + 0x18, 1)", rows[1].GenerateScript());   // target Pawn
+    }
 }
