@@ -276,7 +276,10 @@ revert it.
    row has its own slider + **Apply** / **Reset**, and the DLL holds both at once, so
    you can run them **together**: the pawn's effective rate is *world × pawn*, so
    **World ½× + Player 2× = the player at normal speed in a half-speed world**
-   (classic bullet-time dodging).
+   (classic bullet-time dodging). The Player row shows a live **Combined player
+   speed = world × pawn** readout, so *Whole world* also slowing the player is never
+   a surprise — for a slow world but a normal-speed player, set **Player = 1 ÷ World**
+   (World 0.5× → Player 2×).
 3. On each row, drag the slider (**0 – 3×**) or hit a preset
    (**Freeze / ¼× / ½× / 1× / 2×**) → **Apply**. `1×` = normal, `0.5×` = half speed,
    `0` = frozen. **Reset** restores that lever's natural value and snaps its slider
