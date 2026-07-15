@@ -653,11 +653,29 @@ Delete-cache button; a UE version override still wins over everything.
   GNames `GNAM_SAT425_3`, **GWorld ✅ via instance-scan recovery** (raw deref hits
   a decoy `0x1C2D5`). ProcessEvent vtable+0x260, dispatch validated. Closes the
   build-1064 "+0x08 needs a real stock-5.7 game" live-confirm.
+- **Pionero Capital Demo** ✅ (stock UE 5.7, 117,663 objects, Pionero Games,
+  `dxgi.dll` proxy, build 1.0.0.2202 user logs 2026-07-15): the **second**
+  stock-UE5.7 `Object`@+0x08 title, re-confirming the +0x08 fall-through on a
+  different game (classic +0x00 `named=66 / bad=69` → +0x08 pass `size=24,
+  offset=+0x08, 200 named / 0 bad` → sanity 10/10). GObjects `GOBJ_ES53_1`
+  (`0x7FF6F65689D0`), GNames `GNAM_V5` (`0x7FF6F649A940`), **GWorld ✅ directly**
+  (`GWLD_TQ_1` unique, `0x7FF6F66F3780` — no decoy / instance-scan recovery, unlike
+  Solarpunk), SparseDelegates `SPARSE_ES2_1`. FProperty + TaggedFFieldVariant
+  (UE5.3+), CPN=no; enum names ✅ (`ENetRole`, UEnum::Names @ +0x40). GWorld walk
+  ✅ — live world `NewPioneroIsland` (World 42 fields), `JoebillGameInstance`
+  (6 fields). **First stock-UE5.7 title verified through the `dxgi.dll` proxy**
+  (D3D12 EXE, like Elliot / Echoes of Aincrad / Avowed). Install
+  `H:\SteamLibrary\steamapps\common\Pionero Capital Demo`, exe
+  `PioneroCapital\Binaries\Win64\PioneroCapital-Win64-Shipping.exe`; internal
+  UClasses use a `Joebill` prefix (`JoebillGameInstance`, `BP_JoebillGameMode_C`,
+  `BP_JoebillPlayer_C`) — a city-builder / tycoon sim. PE hash `C200F9770A5F1000`.
+  Pionero Games (publisher=- — Epic default copyright placeholder, no thumbprint).
 
 GWorld success ratio: **100% of all tested games** — see the
 [test-games.md](test-games.md) GWorld Status Summary for the authoritative tally
-(**31 / 31** as of 2026-07-06, incl. Stellar Blade UE4.26-fork and Persona 3
-Reload via GWLD_GH_1 direct);
+(**32 / 32** as of 2026-07-15, incl. Stellar Blade UE4.26-fork, Persona 3
+Reload via GWLD_GH_1 direct, and Pionero Capital Demo — stock UE5.7 Object@+0x08,
+GWLD_TQ_1 direct, dxgi proxy);
 the list above itemises only a subset and is otherwise last-verified 2026-06-11.
 Satisfactory (modular DLL build): scan side OK — `Macht::AOBScanAllModules`
 falls through to `FactoryGameSteam-CoreUObject-Win64-Shipping.dll`
