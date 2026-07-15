@@ -270,14 +270,18 @@ revert it.
 ### Do it
 
 1. Enter actual gameplay (a live world / pawn), open the **Teleport** tab.
-2. **Whole world vs Player only.** Leave **Player only** *off* to write
-   `AWorldSettings.TimeDilation` — **everything** slows (enemies, projectiles,
-   physics). Tick it to write only the player pawn's `AActor.CustomTimeDilation`
-   (you move at a different speed from the world — bullet-time dodging).
-3. Drag the slider (**0 – 3×**) or hit a preset (**Freeze / ¼× / ½× / 1× / 2×**)
-   → **Apply**. `1×` = normal, `0.5×` = half speed, `0` = frozen. **Reset**
-   restores the game's natural value and snaps back to 1×; **↻** re-reads the live
-   value + shows whether an override is engaged.
+2. **Two independent rows — Whole world and Player pawn.** The **Whole world** row
+   writes `AWorldSettings.TimeDilation` — **everything** slows (enemies, projectiles,
+   physics); the **Player pawn** row writes only `AActor.CustomTimeDilation`. Each
+   row has its own slider + **Apply** / **Reset**, and the DLL holds both at once, so
+   you can run them **together**: the pawn's effective rate is *world × pawn*, so
+   **World ½× + Player 2× = the player at normal speed in a half-speed world**
+   (classic bullet-time dodging).
+3. On each row, drag the slider (**0 – 3×**) or hit a preset
+   (**Freeze / ¼× / ½× / 1× / 2×**) → **Apply**. `1×` = normal, `0.5×` = half speed,
+   `0` = frozen. **Reset** restores that lever's natural value and snaps its slider
+   back to 1× (the other row is untouched); **↻ Refresh both** re-reads both levers'
+   live values + whether each override is engaged.
 
 The held value lives in the DLL, so it **survives a UI reconnect** (reconnect and
 the card shows what's engaged), and your last slider value + target are remembered
@@ -286,9 +290,12 @@ across UI restarts.
 ### No UI? Export it to Cheat Engine
 
 The card's **Add to CE** (AOBMaker) / **Save .CT…** ship two on/off records —
-**Time: World** and **Time: Player** — baked at the current dilation. Ticking a
-record holds the value; unticking resets it to the game's natural value. Runs from
-a standalone CE table with just `UE5Dumper.dll` injected, no UI open.
+**Time: World** and **Time: Player** — each baked at its own row's dilation. Ticking
+a record holds the value; unticking resets it to the game's natural value. The two
+records are **independent — tick both at the same time** for the bullet-time combo
+(they serialise cleanly through the DLL's single-slot mailbox, so enabling one never
+clobbers the other). Runs from a standalone CE table with just `UE5Dumper.dll`
+injected, no UI open.
 
 ### Caveats
 

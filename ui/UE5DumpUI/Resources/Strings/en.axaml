@@ -1041,20 +1041,20 @@
     <!-- Time dilation (Hemmung) — global slow-mo / freeze / speed-up -->
     <sys:String x:Key="str.TP.TdHeader">Time Dilation</sys:String>
     <sys:String x:Key="str.TP.TdState">State:</sys:String>
-    <sys:String x:Key="str.TP.TdHint">Slows, freezes, or speeds up game time by forcing a reflected dilation float. "Whole world" writes AWorldSettings.TimeDilation (everything — enemies, projectiles, physics); "Player only" writes the pawn's AActor.CustomTimeDilation. The DLL captures the natural value on first Apply and re-asserts the target every ~250 ms, so a slow-mo ability or Sequencer time-track can't revert it. 1× = normal, 0.5× = half speed, 0 = frozen (a literal 0 can destabilise physics on some games — use a small value like 0.05×). A paused world can't be stepped this way. Single-player only.</sys:String>
-    <sys:String x:Key="str.TP.TdPawnToggle">Player only (CustomTimeDilation)</sys:String>
+    <sys:String x:Key="str.TP.TdHint">Slows, freezes, or speeds up game time by forcing a reflected dilation float. The two levers are independent and held together: "Whole world" writes AWorldSettings.TimeDilation (everything — enemies, projectiles, physics); "Player pawn" writes the pawn's AActor.CustomTimeDilation. The pawn's effective rate is world × pawn, so World 0.5× + Player 2× = the player at normal speed in a half-speed world (bullet time). The DLL captures each natural value on first Apply and re-asserts it every ~250 ms, so a slow-mo ability or Sequencer time-track can't revert it. 1× = normal, 0.5× = half speed, 0 = frozen (a literal 0 can destabilise physics on some games — use a small value like 0.05×). A paused world can't be stepped this way. Single-player only.</sys:String>
+    <sys:String x:Key="str.TP.TdWorldHeader">Whole world (AWorldSettings.TimeDilation)</sys:String>
+    <sys:String x:Key="str.TP.TdPawnHeader">Player pawn (AActor.CustomTimeDilation)</sys:String>
     <sys:String x:Key="str.TP.TdApply">Apply</sys:String>
     <sys:String x:Key="str.TP.TdReset">Reset</sys:String>
-    <sys:String x:Key="str.TP.TdRefresh">↻</sys:String>
+    <sys:String x:Key="str.TP.TdRefreshBoth">↻ Refresh both</sys:String>
     <sys:String x:Key="str.TP.TdFreeze">Freeze</sys:String>
     <sys:String x:Key="str.TP.TdQuarter">¼×</sys:String>
     <sys:String x:Key="str.TP.TdHalf">½×</sys:String>
     <sys:String x:Key="str.TP.TdNormal">1×</sys:String>
     <sys:String x:Key="str.TP.TdDouble">2×</sys:String>
-    <sys:String x:Key="str.Tip.TP.TdApply">Hold the selected lever (whole world or player) at the slider's absolute dilation and re-assert it on a timer so the game can't revert it.</sys:String>
-    <sys:String x:Key="str.Tip.TP.TdReset">Restore the selected lever to its captured natural value and stop holding it. Resets the slider to 1×.</sys:String>
-    <sys:String x:Key="str.Tip.TP.TdRefresh">Re-read the live dilation value and override state for the selected lever.</sys:String>
-    <sys:String x:Key="str.Tip.TP.TdPawnToggle">Off = whole world (AWorldSettings.TimeDilation); On = the player pawn only (AActor.CustomTimeDilation).</sys:String>
+    <sys:String x:Key="str.Tip.TP.TdApply">Hold this lever at the slider's absolute dilation and re-assert it on a timer so the game can't revert it. World and player are independent — applying one doesn't disturb the other.</sys:String>
+    <sys:String x:Key="str.Tip.TP.TdReset">Restore this lever to its captured natural value and stop holding it. Resets its slider to 1×; the other lever is untouched.</sys:String>
+    <sys:String x:Key="str.Tip.TP.TdRefresh">Re-read both levers' live dilation values and override state.</sys:String>
 
     <!-- Gravity multiplier (Laufen — force UCharacterMovementComponent.GravityScale) -->
     <sys:String x:Key="str.TP.GrHeader">Gravity</sys:String>
