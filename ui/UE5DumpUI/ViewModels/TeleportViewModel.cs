@@ -416,11 +416,13 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// normal, 0.5 = half, 0 = frozen, 3 = triple. Linear slider (0…3).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WorldTimePercentText))]
+    [NotifyPropertyChangedFor(nameof(PawnEffectiveRateText))]
     private double _worldTimeDilation = 1.0;
 
     /// <summary>Absolute PLAYER dilation (AActor::CustomTimeDilation), same scale.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PawnTimePercentText))]
+    [NotifyPropertyChangedFor(nameof(PawnEffectiveRateText))]
     private double _pawnTimeDilation = 1.0;
 
     /// <summary>Tri-state badge for the world lever: "ON" / "OFF" / "Unavailable".</summary>
@@ -438,6 +440,15 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// <summary>Slider position as a percentage string (e.g. "50%").</summary>
     public string WorldTimePercentText => $"{Math.Round(WorldTimeDilation * 100.0)}%";
     public string PawnTimePercentText => $"{Math.Round(PawnTimeDilation * 100.0)}%";
+
+    /// <summary>Player's effective time rate = world × pawn — UE multiplies the
+    /// global AWorldSettings.TimeDilation into the pawn's CustomTimeDilation, so
+    /// "Whole world" inherently slows the player too. Surfacing the product makes
+    /// that visible (and shows the bullet-time combo: World 0.5× + Player 2× = the
+    /// player at 1× in a half-speed world). Reactive to both sliders.</summary>
+    public string PawnEffectiveRateText => string.Format(CultureInfo.InvariantCulture,
+        "Combined player speed: {0:0.###}×  (world {1:0.###} * pawn {2:0.###})",
+        WorldTimeDilation * PawnTimeDilation, WorldTimeDilation, PawnTimeDilation);
 
     /// <summary>The two dilation levers, for the shared apply/reset/readout core.</summary>
     private enum TimeLane { World, Pawn }

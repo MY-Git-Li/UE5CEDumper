@@ -679,6 +679,34 @@ public class TeleportViewModelTests
     }
 
     [Fact]
+    public void PawnEffectiveRateText_is_world_times_pawn()
+    {
+        // The player's real speed is world × pawn (UE multiplies global TimeDilation
+        // into the pawn's CustomTimeDilation) — the readout surfaces that product so
+        // "Whole world" slowing the player isn't a surprise.
+        var vm = CreateVm(new FakeDumpService(), out _);
+        vm.WorldTimeDilation = 0.5;
+        vm.PawnTimeDilation = 2.0;
+        // world 0.5 × pawn 2 = 1.0 (bullet time: player normal in a half-speed world)
+        Assert.StartsWith("Combined player speed: 1", vm.PawnEffectiveRateText);
+        Assert.Contains("world 0.5", vm.PawnEffectiveRateText);
+        Assert.Contains("pawn 2", vm.PawnEffectiveRateText);
+    }
+
+    [Fact]
+    public void PawnEffectiveRateText_updates_when_either_slider_changes()
+    {
+        var vm = CreateVm(new FakeDumpService(), out _);
+        int raised = 0;
+        vm.PropertyChanged += (_, e) =>
+        { if (e.PropertyName == nameof(vm.PawnEffectiveRateText)) raised++; };
+        vm.WorldTimeDilation = 0.25;   // world slider change must refresh the combined readout
+        vm.PawnTimeDilation = 3.0;     // pawn slider change too
+        Assert.True(raised >= 2);
+        Assert.StartsWith("Combined player speed: 0.75", vm.PawnEffectiveRateText); // 0.25 × 3
+    }
+
+    [Fact]
     public void SetConnected_reflects_held_dilation_and_syncs_both_sliders()
     {
         // The DLL keeps holding BOTH levers as long as the game lives, so on a UI
