@@ -20,8 +20,11 @@ builds ≤696 in
 
 ## 2026-07-19 — MindsEye: GNames solved — obfuscated FNameEntry payloads decoded from the fork's own key table (build 2238; dev, DLL needs re-inject)
 
-**LIVE-VERIFIED. Name sanity 10/10** (GNames had never been found for this title). Experimental-gated
-end to end; a title without the fork's fingerprint runs byte-identical code.
+**LIVE-VERIFIED on MindsEye game version 7.3.1 ONLY** (PE hash `0863E3B90C993000`; the exe carries no
+game-version resource, so pin the build by that hash). **Name sanity 10/10** — GNames had never been
+found for this title. Every RVA below is build-specific; re-derivation playbook in
+[mindseye-fork-notes.md](mindseye-fork-notes.md). Experimental-gated end to end; a title without the
+fork's fingerprint runs byte-identical code.
 
 **The format.** MindsEye keeps the STOCK UE5 `FNameEntryHeader` but inserts a field and obfuscates
 the payload:
@@ -115,8 +118,10 @@ LocalPlayers -> LocalPlayer -> BP_PlayerController_C` with correct values, class
 
 ## 2026-07-19 — MindsEye: GObjects solved via preset-bound item layout; GNames located + name obfuscation reverse-engineered (build 2220; dev, DLL needs re-inject)
 
-**LIVE-VERIFIED on MindsEye (Build A Rocket Boy, UE 5.4.4 licensee fork).** The first game in the
-matrix where `GNames=MISSING`, and the first where the tool **reported `GObjects=OK` on garbage**.
+**LIVE-VERIFIED on MindsEye (Build A Rocket Boy, UE 5.4.4 licensee fork) — game version 7.3.1 ONLY**
+(PE hash `0863E3B90C993000`). The first game in the matrix where `GNames=MISSING`, and the first where
+the tool **reported `GObjects=OK` on garbage**. Every RVA below is build-specific; see
+[mindseye-fork-notes.md](mindseye-fork-notes.md) to re-derive them after a game update.
 
 **What was actually wrong (two independent bugs).** The AOB *did* find the real `GUObjectArray`
 (RVA `0x0BB139B0`) and `ValidateGObjects` **rejected** it — the existing `"MindsEye"` preset is written

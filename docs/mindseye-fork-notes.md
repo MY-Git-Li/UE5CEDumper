@@ -4,8 +4,27 @@
 > Name sanity 10/10. Live Walker walks `GWorld → PersistentLevel → StormWP → EVMindsEyeGameInstance →
 > LocalPlayers → LocalPlayer → BP_PlayerController_C` with correct values, classes and outer chains.
 > **Game:** MindsEye (Build A Rocket Boy), `MindsEye-Win64-Shipping.exe`, `MindsEye/Binaries/Win64`,
-> Steam, **UE 5.4.4 licensee fork**, `version.dll` proxy. PE hash `0863E3B90C993000`.
-> **Solved on:** exe timestamped 2026-07-19, ~206 MB, `.text` ~145 MB.
+> Steam, **UE 5.4.4 licensee fork**, `version.dll` proxy.
+>
+> ### ⚠ Verified on game version **7.3.1 ONLY**
+>
+> Every RVA, offset and byte pattern below was recovered from that one build. **Nothing here is
+> guaranteed to survive a game update** — see [the fragile constants table](#the-fragile-constants-what-a-game-update-can-move)
+> and the [re-derivation playbook](#re-derivation-playbook).
+>
+> The exe carries **no game-version resource** (`FileVersion` / `ProductVersion` are empty — the
+> `UE 5.4` our scanner reports is the *engine* version), so "7.3.1" comes from Steam / the in-game
+> build string and cannot be read back from the file. Pin the build by these instead, both of which
+> ARE derivable from the binary:
+>
+> | Identifier | Value on the solved build |
+> |---|---|
+> | PE hash (TimeDateStamp + SizeOfImage) | `0863E3B90C993000` |
+> | Build changelist dir in the `__FILE__` paths | `J:\work\e18f6e32b612e2cd\Engine\Source\...` |
+> | File size / `.text` size | 206,803,536 bytes / ~145 MB |
+>
+> If the PE hash differs from `0863E3B90C993000`, treat every constant in this document as
+> **unverified** until re-checked.
 
 **Read this first if MindsEye stops working after a game update.** Everything here was recovered
 offline from the shipped binary with capstone + the PE `.pdata` table — **no Ghidra** (a 145 MB
