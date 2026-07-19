@@ -18,6 +18,101 @@ builds ≤696 in
 
 -----
 
+## 2026-07-19 — MindsEye: GNames solved — obfuscated FNameEntry payloads decoded from the fork's own key table (build 2238; dev, DLL needs re-inject)
+
+**LIVE-VERIFIED. Name sanity 10/10** (GNames had never been found for this title). Experimental-gated
+end to end; a title without the fork's fingerprint runs byte-identical code.
+
+**The format.** MindsEye keeps the STOCK UE5 `FNameEntryHeader` but inserts a field and obfuscates
+the payload:
+
+```
++0x00  u16 header   stock: bIsWide:1 | LowercaseProbeHash:5 | Len:10   (len = header >> 6)
++0x02  u16 tag      NON-STOCK — selects this entry's XOR key
++0x04  chars[len]   single-byte XOR (stock puts chars at +0x02), 2-byte aligned
+```
+
+`FNamePool` = RVA `0x0BA306C0` (`FRWLock`=0, `CurrentBlock`, `CurrentByteCursor`, `Blocks[]` at
+`+0x10`). Block 0 decodes under `0x09` to the canonical EName list — `None`, `ByteProperty`,
+`IntProperty`, … — every length matching `header >> 6`.
+
+**The key is per TAG, not per block** — an early hypothesis that cost a build to disprove. Observed:
+tag `0x0001`→`0x09`, `0x0002`/`0x0082`→`0x5B`, `0x0003`→`0x1D`, `0x0016`→`0xA3`, `0x0036`→`0xE3`,
+`0x0061`→`0xC9`.
+
+**Where the key comes from.** The fork's de-obfuscator (RVA `0x0178B440` ANSI, `0x0178B540` wide)
+does `len = header>>6`, `memcpy(dst, entry+4, len)`, then `KeyDerive(ctx, u16 @ entry+2)`
+(RVA `0x0178CF50`) and `xor byte ptr [rax], dl` with an SSE `xorps` fast path. `KeyDerive` is an
+open-hash probe under `RtlAcquireSRWLockShared`:
+
+```
+ctx +0x10 entries   +0x18 count   +0x44 sentinel (== count => empty)
+ctx +0x48 inline buckets   +0x50 bucket array (0 => inline)   +0x58 capacity (pow2)
+bucket = tag & (capacity-1)
+entry = 24 bytes: +0x00 u16 tag | +0x08 u64 (LOW BYTE = key) | +0x10 i32 next (-1 = end)
+```
+
+**We read that table directly and NEVER call the routine.** Calling it was designed, adversarially
+reviewed and dropped: `KeyDerive` takes the SRW lock *before* probing, so a fault inside it would
+unwind out of game frames with the lock still held and permanently wedge every later
+`FName::ToString` — no crash, no log, and `Tot` is a cooperative poll with no poll point inside game
+code. Its ctx getter also reads `gs:[0x58]` with a lazy per-thread init branch, so calling it from a
+thread the game never used is its own hazard. Reading the table has neither failure mode.
+
+**Locating ctx** — all static, no control transfer: `Sig::AOB_NAMEDECRYPT_ME1` (Himmel, new `ME`
+source tag) matches the de-obfuscator's semantically anchored prologue (unique in the 145 MB
+`.text`; the 16-byte MSVC prologue alone hits 139x), then `match + AOB_NAMEDECRYPT_ME1_CTX_CALL_OFF`
+(`0x2F`) `E8 rel32` -> the getter, and the getter's first `48 8D 05` rip-relative LEA -> ctx
+(RVA `0x0BA47700`). Live: `decrypt fn=0x7FF60492B440 getter=0x7FF604931050 keyTable=0x7FF60EBE7700`
+— all three exactly the RVAs confirmed in CE.
+
+**Changes.**
+- `Flamme::IsExperimentalEnabled()` — reads the SAME `%LOCALAPPDATA%\UE5CEDumper\experimental.json`
+  the UI's `ExperimentalGate` writes, so the DLL honours the toggle on every entry path (UI pipe
+  scan, CE Lua `UE5_Init`, proxy auto-start) with no protocol change. Missing/malformed => OFF.
+- `Genau::TryObfuscatedPool` — appended LAST inside the `ValidateGNames` block-offset loop, after
+  both stock layouts are rejected for that candidate. Acceptance is the SAME standard as stock:
+  entry 0 must decode to exactly `"None"` — found in ONE compare, not 256, since a single-byte XOR
+  onto `"None"` exists only if the three inter-byte deltas already match — then >=6 chained
+  identifier entries must corroborate. The AOB scan runs only after all of that passes, so an
+  ordinary title never scans it. No key table => the pool is REFUSED (decoding block 0 alone is not
+  name resolution).
+- `Serie::InitObfuscated` — adopts the geometry Genau proved instead of running the stock detectors
+  (they all hunt a literal `"None"` in the payload, impossible before decryption), so no stock
+  detection path is modified, only bypassed on this one branch. `s_payloadGap` is 0 for every stock
+  title, so `strStart` resolves to the same address as before.
+
+**Two bugs found on the way, both mine:**
+1. *Heuristic key recovery was wrong.* The first design brute-forced a key per block behind an
+   identifier-charset filter. It rejected 135 of 465 blocks: real pools are full of asset paths
+   (`/Game/Storm/Animations/...` fails a `[A-Za-z0-9_]` gate) and wide entries aborted the walk.
+   Superseded entirely by the table read; every heuristic deleted.
+2. *A memory-ordering race produced wrong keys.* The tag->key cache wrote value then flag as two
+   plain stores; nothing stops the compiler publishing the flag first, so another thread saw
+   "resolved" with a still-zero key and XORed with 0 — `Object` rendered as `Fkclj}`. The same tag
+   resolved to `0x09` on one thread and `0x00` on another **in the same millisecond**. Fixed by
+   collapsing value+flag into ONE `std::atomic<uint16_t>` (bit 8 resolved, bit 9 miss, bits 0-7 key)
+   — a single word cannot tear — plus a decode retry, since the table is LIVE (the game adds names
+   as it runs) and a lock-free read can catch it mid-update.
+
+**What is NOT recoverable, and why that is not a defect.** MindsEye ran a symbol-rename pass over
+its own non-engine symbols at build time: property and class names are generated 16-character
+all-lowercase identifiers (`wcxugjojsqaqvers`, `eurngjogndgrjhls`, ...). Proven, not inferred —
+those strings appear verbatim in the exe's `.rdata`, and the binary holds **21,635** distinct 16-char
+all-lowercase tokens. Length comes from the header and is key-independent, so a wrong key could
+never produce them. Engine symbols (`LocalPlayers`, `NetTimeSyncComponent`, `AnalyticsComponent`, ...)
+are untouched and read normally. The original names exist nowhere — not in memory, not in the
+binary — so no tool can recover them.
+
+Live Walker now walks `GWorld -> PersistentLevel -> StormWP -> EVMindsEyeGameInstance ->
+LocalPlayers -> LocalPlayer -> BP_PlayerController_C` with correct values, classes and outer chains.
+
+> The `GWorld does not deref to a UWorld — recovering...` line in an earlier session log is a
+> scan-time timing artifact, not a defect: `GWorld` is a `UWorld**` static slot and `*GWorld` was
+> still null while the game was loading. Later runs log no warning and `Start from GWorld` works.
+
+-----
+
 ## 2026-07-19 — MindsEye: GObjects solved via preset-bound item layout; GNames located + name obfuscation reverse-engineered (build 2220; dev, DLL needs re-inject)
 
 **LIVE-VERIFIED on MindsEye (Build A Rocket Boy, UE 5.4.4 licensee fork).** The first game in the

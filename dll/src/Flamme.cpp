@@ -27,6 +27,33 @@ namespace Flamme {
 // Helpers
 // ============================================================
 
+bool IsExperimentalEnabled() {
+    // Cached: the scan queries this per GNames candidate, and the answer cannot
+    // meaningfully change mid-scan. -1 = not yet read.
+    static int s_cached = -1;
+    if (s_cached >= 0) return s_cached != 0;
+
+    s_cached = 0;
+    wchar_t* appdata = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &appdata))) {
+        fs::path p = fs::path(appdata) / Grimoire::LOG_FOLDER_NAME / L"experimental.json";
+        CoTaskMemFree(appdata);
+        try {
+            std::ifstream f(p);
+            if (f.is_open()) {
+                json j;
+                f >> j;
+                if (j.contains("enabled") && j["enabled"].is_boolean() && j["enabled"].get<bool>())
+                    s_cached = 1;
+            }
+        } catch (...) {
+            // Malformed or unreadable — stay OFF. Never throws to the caller.
+        }
+    }
+    LOG_INFO("Experimental features: %s", s_cached ? "ENABLED" : "disabled");
+    return s_cached != 0;
+}
+
 /// Build the cache file path: %LOCALAPPDATA%\UE5CEDumper\UE5CEDumper.{COMPUTERNAME}.json
 static fs::path GetCacheFilePath() {
     wchar_t* appdata = nullptr;

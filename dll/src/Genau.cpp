@@ -1325,6 +1325,146 @@ uintptr_t FindGObjects(const char* hintPatternId) {
 //     [+0x0C] CurrentByteCursor (uint32)
 //     [+0x10] Blocks[0]  ← first actual chunk pointer
 //
+// ─────────────────────────────────────────────────────────────────────────────
+// Obfuscated FNameEntry payloads (licensee forks) — EXPERIMENTAL-GATED
+//
+// Some forks keep the stock 2-byte header but insert a field after it and XOR the
+// characters. MindsEye (Build A Rocket Boy, UE 5.4.4):
+//     [+0x00] u16 header  (stock: bIsWide:1 | LowercaseProbeHash:5 | Len:10)
+//     [+0x02] u16 tag     (non-stock — selects this block's XOR key)
+//     [+0x04] chars[len]  (XOR-obfuscated)
+//
+// The key is recovered LOCALLY from the ciphertext — no game code is called. The
+// game's own routine takes a lock before its key lookup, so a fault inside it would
+// unwind out of game frames with that lock still held and permanently wedge every
+// later FName::ToString; recovering the key ourselves has no such failure mode.
+//
+// Acceptance is the SAME standard as the stock path — entry 0 must decode to exactly
+// "None" — plus a chain-walk corroboration, so this cannot accept a pool the stock
+// path would have rejected for being the wrong address.
+static int       g_nameChunksOffset = 0;   // pool -> Blocks[] offset proved by the accept
+static int       g_namePayloadGap   = 0;   // 0 = stock; >0 = obfuscated fork
+static uintptr_t g_nameKeyTableCtx  = 0;   // fork's tag -> key hash map (obfuscated forks only)
+
+// Locate the fork's tag->key table WITHOUT calling any game code.
+//
+// The fork's own name-decrypt routine has a distinctive, semantically anchored
+// prologue (read header / point at entry+4 / len = header >> 6 / take the u16 tag at
+// entry+2). From its match we follow two purely static links:
+//     match+0x2F  E8 rel32          -> the table-context getter
+//     getter      48 8D 05 rip+d    -> the static context object
+// The context is an ordinary open-hash map we can read directly, which is exact —
+// no heuristics, and no control ever transfers into game code (the game's own lookup
+// takes an SRW lock before probing, so a fault inside it would unwind out of game
+// frames with that lock held and wedge every later FName::ToString).
+static uintptr_t ResolveNameKeyTable() {
+    auto hits = Macht::AOBScanAll(Sig::AOB_NAMEDECRYPT_ME1);
+    if (hits.size() != 1) {
+        Sein::Warn("SCAN:GNam", "ObfuscatedNames: decrypt-routine pattern matched %zu time(s), need exactly 1",
+                   hits.size());
+        return 0;
+    }
+    uintptr_t fn = hits[0];
+
+    // The second call in the match is the key-table ctx getter (rel32 at +1).
+    constexpr int kCall = Sig::AOB_NAMEDECRYPT_ME1_CTX_CALL_OFF;
+    int32_t rel = 0;
+    if (!Macht::ReadSafe(fn + kCall + 1, rel)) return 0;
+    uintptr_t getter = fn + kCall + 5 + static_cast<intptr_t>(rel);
+
+    // First `lea rax, [rip+disp32]` inside the getter is the context object.
+    unsigned char code[0x60] = {};
+    if (!Macht::ReadBytesSafe(getter, code, sizeof(code))) return 0;
+    for (size_t i = 0; i + 7 <= sizeof(code); ++i) {
+        if (code[i] == 0x48 && code[i + 1] == 0x8D && code[i + 2] == 0x05) {
+            int32_t d = 0;
+            memcpy(&d, code + i + 3, 4);
+            uintptr_t ctx = getter + i + 7 + static_cast<intptr_t>(d);
+            Sein::Info("SCAN:GNam", "ObfuscatedNames: decrypt fn=0x%llX getter=0x%llX keyTable=0x%llX",
+                       static_cast<unsigned long long>(fn),
+                       static_cast<unsigned long long>(getter),
+                       static_cast<unsigned long long>(ctx));
+            return ctx;
+        }
+    }
+    Sein::Warn("SCAN:GNam", "ObfuscatedNames: no rip-relative LEA in the ctx getter at 0x%llX",
+               static_cast<unsigned long long>(getter));
+    return 0;
+}
+
+static bool ObfChainOk(uintptr_t blockBase, uint8_t key, int gap, int minEntries) {
+    int  entries = 0;
+    int  pos     = 0;
+    char buf[256];
+    while (entries < 16) {
+        uint16_t header = 0;
+        if (!Macht::ReadSafe(blockBase + pos, header)) break;
+        if (header & 1) break;                      // wide entry — stop, do not judge
+        int len = header >> 6;
+        if (len == 0 || len > 255) return false;
+        int strStart = pos + 2 + gap;
+        if (!Macht::ReadBytesSafe(blockBase + strStart, buf, len)) break;
+        for (int i = 0; i < len; ++i) {
+            uint8_t c = static_cast<uint8_t>(buf[i]) ^ key;
+            bool ident = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                         (c >= '0' && c <= '9') || c == '_';
+            if (!ident) return false;
+        }
+        ++entries;
+        pos = strStart + len;
+        if (pos & 1) ++pos;                         // 2-byte entry alignment
+    }
+    return entries >= minEntries;
+}
+
+static bool TryObfuscatedPool(uintptr_t addr, int off, uintptr_t chunk0) {
+    if (!Flamme::IsExperimentalEnabled()) return false;
+
+    constexpr int GAP = 2;   // the only forked geometry seen so far
+    uint16_t header = 0;
+    if (!Macht::ReadSafe(chunk0, header)) return false;
+    if (header & 1) return false;                   // entry 0 ("None") is never wide
+    if ((header >> 6) != 4) return false;           // len must be 4
+
+    uint8_t enc[4] = {};
+    if (!Macht::ReadBytesSafe(chunk0 + 2 + GAP, enc, 4)) return false;
+
+    static const uint8_t kNone[4] = { 'N', 'o', 'n', 'e' };
+    // A single-byte XOR that maps these 4 bytes onto "None" exists only if the three
+    // inter-byte deltas already match, so this costs one compare, not 256.
+    if ((enc[0] ^ enc[1]) != (kNone[0] ^ kNone[1])) return false;
+    if ((enc[1] ^ enc[2]) != (kNone[1] ^ kNone[2])) return false;
+    if ((enc[2] ^ enc[3]) != (kNone[2] ^ kNone[3])) return false;
+    uint8_t key = static_cast<uint8_t>(enc[0] ^ kNone[0]);
+
+    // Corroborate: the rest of block 0 must chain-decode as identifiers under the
+    // same key. Random memory that happens to satisfy "None" dies here.
+    if (!ObfChainOk(chunk0, key, GAP, 6)) return false;
+
+    // The key table is what makes the OTHER blocks decodable — each carries its own
+    // key, and a block whose tag is absent from the table is stored in plain text
+    // (the fork's lookup returns NULL and it XORs with 0). Resolve it only now, once
+    // the pool has already proved itself, so an ordinary title never runs this scan.
+    // Refuse the pool without it: decoding block 0 alone is not name resolution.
+    static uintptr_t s_ctxCache = 0;
+    static bool      s_ctxTried = false;
+    if (!s_ctxTried) { s_ctxTried = true; s_ctxCache = ResolveNameKeyTable(); }
+    if (!s_ctxCache) {
+        Sein::Warn("SCAN:GNam", "ValidateGNames: obfuscated pool at 0x%llX rejected — key table not resolved",
+                   static_cast<unsigned long long>(addr));
+        return false;
+    }
+
+    g_fnameEntryHeaderOffset = 0;
+    g_nameChunksOffset       = off;
+    g_namePayloadGap         = GAP;
+    g_nameKeyTableCtx        = s_ctxCache;
+    Sein::Info("SCAN:GNam",
+             "ValidateGNames: Valid at 0x%llX (chunks@+0x%02X, OBFUSCATED payload gap=%d, block0 key=0x%02X, 'None')",
+             static_cast<unsigned long long>(addr), off, GAP, key);
+    return true;
+}
+
 // We try multiple offsets so the validator works across engine variants.
 static bool ValidateGNames(uintptr_t addr) {
     if (!addr) return false;
@@ -1410,6 +1550,10 @@ static bool ValidateGNames(uintptr_t addr) {
         if (tryHeaderAt(0)) return true;
         // Hash-prefixed layout: 4-byte ComparisonId then 2-byte header at +4
         if (tryHeaderAt(4)) return true;
+        // Obfuscated licensee fork — LAST, and only after both stock layouts have
+        // been rejected for this candidate, so every stock title reaches its accept
+        // through exactly the same code as before.
+        if (TryObfuscatedPool(addr, off, chunk0)) return true;
     }
 
     // Dump the first 128 bytes so we can diagnose the layout manually.
@@ -1867,6 +2011,9 @@ uintptr_t FindGNames(const char* hintPatternId) {
     g_isUE4NameArray = false;
     g_ue4NameStringOffset = 0x10;
     g_fnameEntryHeaderOffset = 0;
+    g_nameChunksOffset = 0;
+    g_namePayloadGap = 0;
+    g_nameKeyTableCtx = 0;
 
     Sein::Info("SCAN:GNam", "FindGNames: Scanning for GNames (FNamePool / TNameEntryArray)...");
 
@@ -3874,6 +4021,9 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
     out.bUE4NameArray = g_isUE4NameArray;
     out.ue4StringOffset = g_ue4NameStringOffset;
     out.fnameEntryHeaderOffset = g_fnameEntryHeaderOffset;
+    out.nameChunksOffset       = g_nameChunksOffset;
+    out.namePayloadGap         = g_namePayloadGap;
+    out.nameKeyTableCtx        = g_nameKeyTableCtx;
 
     // Propagate scan method info (how each pointer was found)
     out.gobjectsMethod = s_gobjectsMethod;
