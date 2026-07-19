@@ -71,6 +71,12 @@ static int g_fnameEntryHeaderOffset = 0;
 static int  g_validationDbgCount = 0;
 static constexpr int kMaxValidationDbgLogs = 10;
 
+// ValidateGNames' 128-byte pool dump gets its own scan-wide budget so the per-offset
+// probe lines can never starve it (see ValidateGNames). Not reset per-pattern: a handful
+// of dumps across the whole scan is all we ever need to diagnose a pool layout.
+static int  g_gnamesDumpCount = 0;
+static constexpr int kMaxGNamesDumps = 8;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Symbol Export Fallback (RE-UE4SS technique)
 // Many retail UE games export MSVC-mangled symbols. GetProcAddress resolves
@@ -174,6 +180,11 @@ static bool ValidateCyclicClassChain(uintptr_t chunk0) {
     return false;
 }
 
+// Loose upper bound on MaxElements for the relaxed (Tier 2) fallback. 8x the strict
+// tier's 0x800000 cap so an aggressively preallocating title still passes, but far below
+// the values produced when the slot actually holds half of a pointer (MindsEye: 233M).
+static constexpr uint32_t kRelaxedMaxCeiling = 0x4000000;  // 67,108,864
+
 static bool ValidateGObjects(uintptr_t addr) {
     if (!addr) return false;
 
@@ -190,6 +201,14 @@ static bool ValidateGObjects(uintptr_t addr) {
         { 0x10, 0x20, 0x24, 0x28, 0x2C, "UE5-Extended" },  // GC prefix + PreAllocatedObjects ptr
         { 0x00, 0x0C, 0x08, 0x14, 0x10, "UE5.8" },          // 5.8 dev: cache-locality reorder, PreAllocatedObjects @+0x18
         { 0x00, 0x08, 0x0C,   -1,   -1, "Flat" },           // FFixedUObjectArray: no chunks (OT / early UE4)
+        // MindsEye (Build A Rocket Boy, UE 5.4.4 licensee fork). The AOB resolves the
+        // FUObjectArray base, not ObjObjects, so the "MindsEye" row above — which is
+        // written relative to FChunkedFixedUObjectArray — has to be shifted by +0x10.
+        // This is exactly the Default -> UE5-Extended relationship already in this table.
+        // Recovered by disassembling FUObjectArray::AllocateObjectPool (RVA 0x019B17B0):
+        //   MaxElements +0x10, NumChunks +0x14, MaxChunks +0x20, NumElements +0x24, Objects +0x28.
+        // Appended LAST: any address matching an earlier preset never reaches it.
+        { 0x28, 0x10, 0x24, 0x20, 0x14, "MindsEye-Extended" },
     };
 
     for (auto& P : presets) {
@@ -243,19 +262,34 @@ static bool ValidateGObjects(uintptr_t addr) {
     // --- Tier 2: Relaxed fallback (prevents regression) ---
     // Only check NumElements range + Objects pointer validity.
     // isFlat: objPtr is FUObjectItem[] directly (no chunk indirection).
-    struct { int numOff; int objOff; bool isFlat; const char* name; } relaxed[] = {
-        { 0x14, 0x00, false, "A/C" },
-        { 0x04, 0x10, false, "B"   },
-        { 0x1C, 0x10, false, "D"   },
-        { 0x24, 0x10, false, "E"   },    // UE5-Extended: GC prefix + PreAllocatedObjects
-        { 0x08, 0x00, false, "F"   },    // UE5.8: cache-locality reorder
-        { 0x0C, 0x00, true,  "Flat" },   // FFixedUObjectArray: no chunks (OT / early UE4)
+    // maxOff mirrors the corresponding Tier 1 preset above (A/C<-Default, B<-Back4Blood,
+    // D<-UE4-Extended, E<-UE5-Extended, F<-UE5.8, Flat<-Flat). It feeds an upper-bound
+    // sanity check only — see kRelaxedMaxCeiling below.
+    struct { int numOff; int maxOff; int objOff; bool isFlat; const char* name; } relaxed[] = {
+        { 0x14, 0x10, 0x00, false, "A/C" },
+        { 0x04, 0x00, 0x10, false, "B"   },
+        { 0x1C, 0x18, 0x10, false, "D"   },
+        { 0x24, 0x20, 0x10, false, "E"   },    // UE5-Extended: GC prefix + PreAllocatedObjects
+        { 0x08, 0x0C, 0x00, false, "F"   },    // UE5.8: cache-locality reorder
+        { 0x0C, 0x08, 0x00, true,  "Flat" },   // FFixedUObjectArray: no chunks (OT / early UE4)
     };
 
     for (auto& L : relaxed) {
         int32_t numElements = 0;
         if (!Macht::ReadSafe(addr + L.numOff, numElements)) continue;
         if (numElements < 0x1000 || numElements > 0x400000) continue;
+
+        // Upper-bound sanity check on the MaxElements slot. A heap blob whose "num" slot
+        // happens to fall in range is still betrayed by its "max" slot: MindsEye's
+        // ICU-like locale blob read max = 0x0DE62600 (233M) because that dword is really
+        // the low half of a module pointer. Deliberately WEAKER than Tier 1 (which uses
+        // `max < num || max > 0x800000`): we apply a loose ceiling only, and skip the
+        // check entirely if the read fails. A title that raises gc.MaxObjectsInGame past
+        // our strict cap — or whose max field is not where this row assumes — therefore
+        // still reaches the relaxed accept path exactly as it did before.
+        int32_t maxElements = 0;
+        if (Macht::ReadSafe(addr + L.maxOff, maxElements) &&
+            static_cast<uint32_t>(maxElements) > kRelaxedMaxCeiling) continue;
 
         uintptr_t objPtr = 0;
         if (!Macht::ReadSafe(addr + L.objOff, objPtr)) continue;
@@ -1304,6 +1338,26 @@ static bool ValidateGNames(uintptr_t addr) {
         uintptr_t chunk0 = 0;
         if (!Macht::ReadSafe(addr + off, chunk0) || chunk0 == 0) continue;
 
+        // Dump the head of the block itself. The per-offset probes below only see the
+        // first entry; several consecutive entries are what actually distinguishes a
+        // stock pool from a forked entry stride, and — where the payload is obfuscated —
+        // whether the transform is a constant, positional, or streaming one.
+        if (g_gnamesDumpCount < kMaxGNamesDumps) {
+            ++g_gnamesDumpCount;
+            unsigned char blk[96] = {};
+            if (Macht::ReadBytesSafe(chunk0, blk, sizeof(blk))) {
+                char hex[sizeof(blk) * 3 + 1] = {};
+                char prn[sizeof(blk) + 1] = {};
+                for (size_t b = 0; b < sizeof(blk); ++b) {
+                    snprintf(hex + b * 3, 4, "%02X ", blk[b]);
+                    prn[b] = (blk[b] >= 0x20 && blk[b] <= 0x7E) ? static_cast<char>(blk[b]) : '.';
+                }
+                Sein::Debug("SCAN:GNam", "ValidateGNames: block@0x%llX (base=0x%llX blocks+0x%02X): %s | %s",
+                          static_cast<unsigned long long>(chunk0),
+                          static_cast<unsigned long long>(addr), off, hex, prn);
+            }
+        }
+
         // Try two header layouts:
         //   (A) Standard: 2-byte header at chunk0+0, string at chunk0+2
         //   (B) Hash-prefixed (UE4.26): 4-byte hash at chunk0+0, 2-byte header at chunk0+4, string at chunk0+6
@@ -1330,9 +1384,25 @@ static bool ValidateGNames(uintptr_t addr) {
                 return true;
             }
 
-            if (g_validationDbgCount++ < kMaxValidationDbgLogs)
-                Sein::Debug("SCAN:GNam", "ValidateGNames: offset +0x%02X hdrOff=%d chunk0=0x%llX header=0x%04X lenA=%d lenB=%d name='%.4s'",
-                          off, hdrOff, static_cast<unsigned long long>(chunk0), header, lenA, lenB, name);
+            // Log the RAW bytes at the header position, not `name`: `name` is only ever
+            // filled when a length check already matched, and is memset back to 0 above,
+            // so an empty name here is a logging artifact — not evidence about the game.
+            // The candidate POOL BASE is logged too; without it a chunk0 value cannot be
+            // attributed to the candidate that produced it.
+            if (g_validationDbgCount++ < kMaxValidationDbgLogs) {
+                unsigned char raw[8] = {};
+                char hex[32] = {}, prn[9] = {};
+                bool okRaw = Macht::ReadBytesSafe(chunk0 + hdrOff, raw, sizeof(raw));
+                for (int b = 0; b < 8; ++b) {
+                    snprintf(hex + b * 3, 4, "%02X ", raw[b]);
+                    prn[b] = (raw[b] >= 0x20 && raw[b] <= 0x7E) ? static_cast<char>(raw[b]) : '.';
+                }
+                Sein::Debug("SCAN:GNam", "ValidateGNames: base=0x%llX blocks+0x%02X hdrOff=%d chunk0=0x%llX "
+                                         "header=0x%04X lenA=%d lenB=%d raw=[%s] '%s'%s",
+                          static_cast<unsigned long long>(addr), off, hdrOff,
+                          static_cast<unsigned long long>(chunk0), header, lenA, lenB,
+                          hex, prn, okRaw ? "" : " (READ FAILED)");
+            }
             return false;
         };
 
@@ -1342,8 +1412,11 @@ static bool ValidateGNames(uintptr_t addr) {
         if (tryHeaderAt(4)) return true;
     }
 
-    // Dump the first 128 bytes so we can diagnose the layout manually
-    if (g_validationDbgCount++ < kMaxValidationDbgLogs) {
+    // Dump the first 128 bytes so we can diagnose the layout manually.
+    // Own budget: a single candidate burns up to 14 per-offset lines above (7 block
+    // offsets x 2 header offsets), which used to exhaust the shared throttle before the
+    // most diagnostic line in the whole GNames path could ever print.
+    if (g_gnamesDumpCount++ < kMaxGNamesDumps) {
         char hexbuf[256];
         int pos = 0;
         for (int i = 0; i < 128 && pos < 200; i += 8) {

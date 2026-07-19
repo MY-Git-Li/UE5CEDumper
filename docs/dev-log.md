@@ -18,6 +18,101 @@ builds ≤696 in
 
 -----
 
+## 2026-07-19 — MindsEye: GObjects solved via preset-bound item layout; GNames located + name obfuscation reverse-engineered (build 2220; dev, DLL needs re-inject)
+
+**LIVE-VERIFIED on MindsEye (Build A Rocket Boy, UE 5.4.4 licensee fork).** The first game in the
+matrix where `GNames=MISSING`, and the first where the tool **reported `GObjects=OK` on garbage**.
+
+**What was actually wrong (two independent bugs).** The AOB *did* find the real `GUObjectArray`
+(RVA `0x0BB139B0`) and `ValidateGObjects` **rejected** it — the existing `"MindsEye"` preset is written
+relative to `FChunkedFixedUObjectArray`, but the AOB resolves the `FUObjectArray` base, `0x10` earlier,
+so `num@+0x14` read `NumChunks=9` and failed the `num < 0x1000` gate. The relaxed Tier 2 fallback then
+accepted an unrelated heap blob (an ICU-like locale object containing the ASCII text `"International"`)
+because its `numOff` landed on the **high half of an adjacent module pointer** — `Num=32758` is literally
+`0x7FF6`. Result: `Count=509`, `named=0`, every lookup empty, init reporting `GObjects=OK`.
+
+**Ground truth by offline disassembly** (capstone + the `.pdata` RUNTIME_FUNCTION table — no Ghidra;
+`.text` is 145 MB so headless analysis was not worth the hours). `.rdata` still carries the `__FILE__`
+anchors (`J:\work\e18f6e32b612e2cd\Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectArray.cpp`),
+so xref → containing function → rip-relative globals recovers everything:
+`FUObjectArray::AllocateObjectPool` (RVA `0x019B17B0`) pins the five chunked fields, and the
+index→object accessors (e.g. RVA `0x0191AA10`: `shr rcx,0x10 / movzx edx,bx / shl rdx,5 /
+add rdx,[r9+rcx*8] / cmp qword [rdx+0x10],0`) pin the item layout.
+
+| | value |
+|---|---|
+| `GUObjectArray` | RVA `0x0BB139B0` (`ObjObjects` at `+0x10`) |
+| chunked fields | MaxElements `+0x10`, NumChunks `+0x14`, MaxChunks `+0x20`, NumElements `+0x24`, Objects `+0x28` |
+| `FUObjectItem` | **32 bytes**, `UObject*` at **`+0x10`** (stock: 24 / `+0x00`) |
+| elements per chunk | 65536 (stock) |
+
+Matches the vendored Dumper-7 `MindsEye` layout exactly (`vendor/Dumper-7/.../ObjectArray.cpp:60`).
+
+**Changes (all additive; the shared detection paths are byte-for-byte unchanged for other titles).**
+- `Genau.cpp` — appended `{ 0x28, 0x10, 0x24, 0x20, 0x14, "MindsEye-Extended" }` as the **last** strict
+  preset (the `Default → UE5-Extended` relationship already in that table).
+- `Aura.cpp` — same row appended **last** in Tier 2 `s_ue4ExtendedPresets`. Cannot steal an existing
+  title: `ValidateChunkedLayout` needs `maxChunks ∈ [6, 0x5FF]`, and on a UE5-Extended array this row
+  reads `MaxElements` (~2.1M) as `maxChunks`.
+- `Aura.cpp` — new **preset-bound `LayoutPreset::itemHint {stride, objOff}`**, consumed by
+  `DetectItemSize` *before* the shared sweep and only when the winning preset carries one.
+  **Deliberately not another entry in `candidates[]`:** MindsEye's 32/`+0x10` item aliases perfectly
+  with stride 16 (every odd 16-byte slot is a real object pointer → `good=100 / bad=100`), so putting
+  it in the shared sweep would let it outscore the true stride on genuine stride-16 titles
+  (Titan Quest II, Octopath Traveler). Still evidence-gated (`hGood >= 8 && hBad*4 <= hGood`, which the
+  50%-aliased result cannot reach); on rejection it logs and falls through to the unchanged sweep.
+- `Genau.cpp` — relaxed Tier 2 rows gained a mirrored `maxOff` feeding an **upper-bound-only** check
+  (`kRelaxedMaxCeiling = 0x4000000`, 8× the strict cap; skipped entirely if the read fails).
+  Deliberately weaker than Tier 1 (no `max < num`, looser ceiling) so a title that raises
+  `gc.MaxObjectsInGame`, or whose max field is elsewhere, still reaches the accept path as before.
+  Kills the blob by 3.5× (its `max` reads `0x0DE62600` = 233M).
+- `Genau.cpp` — GNames diagnostics: `ValidateGNames` now logs the **candidate pool base** (previously
+  never logged, so a `chunk0` could not be attributed) plus **raw header bytes** instead of `name` —
+  `name` is memset before the log and only ever filled after a length match, so the empty name in every
+  historical log was a **logging artifact, not evidence about the game**. Added a 96-byte dump of the
+  block itself on its own budget (the 7×2 per-offset probes used to exhaust the shared 10-line throttle).
+
+Rejected after adversarial regression review (3 hunters × 5 rules): a pointer-high-bits reject rule
+(would kill The Artisan of Glimmith at 24K objects — the qword covering `numOff` on a real array is
+`Max | Num<<32`, which is itself in userspace range), an Aura quality floor, and a DEGRADED-report
+trigger keyed on relaxed-tier acceptance (fires on correct resolutions, e.g. Avowed).
+
+**Result:** `Layout 'MindsEye-Extended' detected (strict)` → `FUObjectItem size=32, object-ptr
+offset=+0x10 (preset item hint) — 200 total, 0 bad` → `Count=530638, ItemSize=32`. Was
+`Count=509, ItemSize=16, bad=100`.
+
+**GNames — located, still unresolved (names ARE obfuscated).** The new block dump identified the pool
+immediately: `FNamePool` = RVA `0x0BA306C0` (`FRWLock=0`, `CurrentBlock=507`,
+`CurrentByteCursor=0x197D4`, then 64 KB-aligned `Blocks[]` at `+0x10`). The entry format keeps the
+**stock UE5 header** but inserts a field and encrypts the payload:
+
+```
++0x00  u16 header   stock: bIsWide:1 | LowercaseProbeHash:5 | Len:10   (len = header >> 6)
++0x02  u16 tag      NON-STOCK — the lookup key for this block's XOR key
++0x04  chars[len]   XOR-obfuscated (stock puts chars at +0x02), 2-byte aligned
+```
+
+Block 0 decodes under XOR `0x09` to the canonical hardcoded EName list — `None`, `ByteProperty`,
+`IntProperty`, `BoolProperty`, `FloatProperty`, `ObjectProperty` — every length matching `header >> 6`.
+The key is **per block**: block 0/1/2/3/6 = `0x09` / `0xE3` / `0x81` / `0xE7` / `0x33`, decoding
+`None` / `GameplayTargetDataFilterHandle` / `RigUnit_DebugTransform` / `GetBoneTrackByName` /
+`NetConnPacke…`. Encrypted bytes are identical across sessions at different addresses, so the key is
+deterministic, not address-derived.
+
+Decrypt routine found: **RVA `0x0178B440`** (ANSI; `0x0178B540` is the wide twin, `add r8,r8`). It does
+`len = header>>6`, `memcpy(dst, entry+4, len)`, then `KeyDerive(ctx, u16 @ entry+2)` (RVA `0x0178CF50`)
+and a byte-wise `xor byte ptr [rax], dl` with an SSE `xorps` fast path. `KeyDerive` is **not** closed
+form — it takes a lock and does a hash-map probe (`bucket = tag & (capacity-1)`) into a runtime table
+at ctx RVA `0x0BA47700`. So the key cannot be computed offline; it must be read from the live table or
+obtained by calling the game's own routine. Follow-up (Plan A): AOB the decrypt function and route
+`Serie` through it for this title.
+
+**Also corrected:** the pak/IoStore container AES (CUE4Parse `MindsEyeAes.cs`) is real but irrelevant —
+that is asset-load-time, not process memory. The binary itself is unpacked, has no Denuvo/EAC/BattlEye,
+and stock `GWLD_ES2_6` / `SPARSE_ES2_1` still match uniquely.
+
+-----
+
 ## 2026-07-14 — Invoke: by-value `fstruct` struct params in the CE Lua helper (dev commit `f66e602`; helper v1.3; reworked from PR #433)
 
 **Committed to `dev` (managed build clean + `InvokeScriptTests` 108/108 green; no C++/pipe change).** Closes a real gap

@@ -42,6 +42,14 @@
 
 -----
 
+### MindsEye — partial (GObjects ✅ / GNames ⚠ obfuscated)
+
+| Game | UE Version | Notes |
+|------|-----------|-------|
+| **MindsEye** | UE5.4.4 licensee fork (PE: 504, exe: `MindsEye-Win64-Shipping.exe`, dir: `MindsEye/Binaries/Win64`, Build A Rocket Boy, Steam; `version.dll` proxy) | **GObjects solved build 2220, LIVE-VERIFIED — see [dev-log](dev-log.md).** `GUObjectArray` RVA `0x0BB139B0` via new **`MindsEye-Extended`** preset (MaxElements `+0x10`, NumChunks `+0x14`, MaxChunks `+0x20`, NumElements `+0x24`, Objects `+0x28`) plus a **preset-bound `itemHint`**: `FUObjectItem` is **32 bytes with `UObject*` at `+0x10`** (65536 elem/chunk). 530,638 objects, Max 2,162,688 / 9 live chunks / 33 max, `200 total / 0 bad`. The item layout MUST stay preset-bound — 32/`+0x10` aliases perfectly with stride 16 and would steal TQ2 / Octopath if added to the shared sweep. GWorld ✅ (`GWLD_ES2_6` unique, `0x7FF60EE239B8`), SparseDelegates ✅ (`SPARSE_ES2_1`). Binary is **unpacked, no Denuvo/EAC/BattlEye**; `.rdata` keeps the `__FILE__` anchors (`J:\work\e18f6e32b612e2cd\Engine\Source\Runtime\...`), which is how the layout was recovered offline (capstone + `.pdata`, no Ghidra). ~206 MB exe / 145 MB `.text` from statically-linked Wwise 2023.1 + NVIDIA NGX + MetaHuman + the BARB `Everywhere`/`Arcadia` platform. **GNames ⚠ — pool found (RVA `0x0BA306C0`) but the name payload is OBFUSCATED.** Entry = stock `u16 header` at `+0x00` (`len = header>>6`), a **non-stock `u16 tag` at `+0x02`**, then XOR'd chars at **`+0x04`** (stock: `+0x02`), 2-byte aligned. Key is **per block**, looked up at runtime by `tag`: blocks 0/1/2/3/6 = `0x09`/`0xE3`/`0x81`/`0xE7`/`0x33` (block 0 decodes to the canonical `None`, `ByteProperty`, `IntProperty`, … EName list). Decrypt routine RVA `0x0178B440` (ANSI) / `0x0178B540` (wide); `KeyDerive` RVA `0x0178CF50` is a locked hash-map probe (`bucket = tag & (capacity-1)`) into a runtime table at ctx RVA `0x0BA47700` — **not computable offline**. The pak/IoStore AES (CUE4Parse `MindsEyeAes.cs`) is real but irrelevant to in-process scanning. PE hash `0863E3B90C993000`. |
+
+-----
+
 ## GWorld Status Summary
 
 **Working (32/32):** TQ2, EverSpace 2, Hogwarts Legacy, IDOLM@STER, Romancing SaGa 2, Tower of Mask, Ghostwire: Tokyo, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT Demo, OctoPath Traveler, FF7R, FF7Re, DQ I&II, DQ III, DQ XI S, Lushfoil Photography Sim, Manor Lords, The Artisan of Glimmith, Barn Finders, Colossal, Extinction, MS Gundam SEED Battle Destiny Remastered, The Adventures of Elliot: The Millennium Tales, Avowed (instance_scan_recovery), Echoes of Aincrad Demo, Star Wars Jedi: Fallen Order (CE manual inject), Satisfactory (modular CoreUObject DLL — v1.1.3.1/UE5.3 + v1.2.3.1/UE5.6), Solarpunk (instance-scan recovery), Stellar Blade, Persona 3 Reload (GWLD_GH_1 direct), Pionero Capital Demo (GWLD_TQ_1 direct, stock UE5.7 Object@+0x08, dxgi proxy)

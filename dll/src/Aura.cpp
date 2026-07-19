@@ -62,6 +62,12 @@ static int         s_itemSize = 16;  // FUObjectItem stride (auto-detected: 16 o
 static int         s_itemObjOffset = 0;
 static bool        s_isFlat   = false; // true = non-chunked flat array (some UE4 builds)
 
+// Preset-bound FUObjectItem hint latched by DetectLayout (see LayoutPreset::itemHint).
+// stride 0 = no hint, sweep as usual. Consumed by DetectItemSize as a first, preset-gated
+// probe that never enters the shared stride candidate list.
+static int         s_hintItemStride = 0;
+static int         s_hintItemObjOff = 0;
+
 // Within-item layout mode. Classic / Unpacked57 both read the UObject* directly at
 // item+s_itemObjOffset (0x00 / 0x08). Packed57 (UE5.7+ UE_ENABLE_FUOBJECT_ITEM_PACKING)
 // must RECONSTRUCT the pointer from two split fields — see Lineal.h. Packed57 is a
@@ -249,9 +255,22 @@ uintptr_t Aura::DecryptObjectPtr(uintptr_t rawPtr) {
 
 // GAP #2: Named preset layouts for FChunkedFixedUObjectArray (from Dumper-7 reference).
 // Games can reorder struct members; these presets cover known variants.
+// Optional per-preset FUObjectItem hint, for licensee forks whose item stride and
+// object-pointer offset cannot be recovered by the shared stride sweep in DetectItemSize.
+// Deliberately preset-BOUND rather than another entry in the shared candidate list:
+// e.g. MindsEye's 32-byte item with the object at +0x10 aliases perfectly with a stock
+// 16-byte item (every odd 16-byte slot lands on the real pointer), so adding 32/+0x10 to
+// the shared sweep would let it outscore the true stride on genuine stride-16 titles
+// (Titan Quest II, Octopath Traveler). stride == 0 means "no hint, sweep as usual".
+struct ItemHint {
+    int stride;
+    int objOff;
+};
+
 struct LayoutPreset {
     const char* name;
     ArrayLayout layout;
+    ItemHint    itemHint;   // {0, 0} = none
 };
 
 // All known chunked layouts. Order: default first, then game-specific.
@@ -270,6 +289,18 @@ static constexpr int NUM_CHUNKED_PRESETS = sizeof(s_chunkedPresets) / sizeof(s_c
 static const LayoutPreset s_ue4ExtendedPresets[] = {
     { "UE4-Extended", { 0x10, 0x18, 0x1C, 0x20, 0x24 } },
     { "UE5-Extended", { 0x10, 0x20, 0x24, 0x28, 0x2C } },
+    // MindsEye (UE 5.4.4 licensee fork): the s_chunkedPresets "MindsEye" row shifted
+    // +0x10, i.e. relative to the FUObjectArray base rather than ObjObjects. Genau
+    // resolves the same address, so without this row DetectLayout would fall through to
+    // the relaxed path and read the wrong fields. Kept LAST in the Tier 2 table:
+    // DetectLayout is first-match-wins and latches the winner into s_layout, so ordering
+    // is load-bearing — UE4-Extended / UE5-Extended keep priority. Cannot steal an
+    // existing title: ValidateChunkedLayout requires maxChunks in [6, 0x5FF], and on a
+    // UE5-Extended array this row reads MaxElements (~2.1M) as maxChunks.
+    // itemHint: FUObjectItem is 32 bytes with UObject* at +0x10 — recovered from the
+    // index->object accessors (e.g. RVA 0x0191AA10): `shr rcx,0x10 / movzx edx,bx /
+    // shl rdx,5 / add rdx,[r9+rcx*8] / cmp qword [rdx+0x10],0`.
+    { "MindsEye-Extended", { 0x28, 0x10, 0x24, 0x20, 0x14 }, { 32, 0x10 } },
 };
 static constexpr int NUM_UE4_EXTENDED_PRESETS = sizeof(s_ue4ExtendedPresets) / sizeof(s_ue4ExtendedPresets[0]);
 
@@ -386,11 +417,17 @@ static bool DetectLayout(uintptr_t addr) {
                   dump[0], dump[1], dump[2], dump[3], dump[4], dump[5]);
     }
 
+    // No preset has claimed an item hint yet this run (Init may run again on re-attach).
+    s_hintItemStride = 0;
+    s_hintItemObjOff = 0;
+
     // --- Tier 1: Try all chunked presets with FULL validation (Dumper-7 rigor) ---
     for (int i = 0; i < NUM_CHUNKED_PRESETS; ++i) {
         const auto& preset = s_chunkedPresets[i];
         if (ValidateChunkedLayout(addr, preset.layout)) {
             s_layout = preset.layout;
+            s_hintItemStride = preset.itemHint.stride;
+            s_hintItemObjOff = preset.itemHint.objOff;
             LOG_INFO("ObjectArray: Layout '%s' detected (strict, preset %d/%d)",
                      preset.name, i + 1, NUM_CHUNKED_PRESETS);
             LogLayoutFields(addr, s_layout, preset.name);
@@ -403,6 +440,8 @@ static bool DetectLayout(uintptr_t addr) {
         const auto& preset = s_ue4ExtendedPresets[i];
         if (ValidateChunkedLayout(addr, preset.layout)) {
             s_layout = preset.layout;
+            s_hintItemStride = preset.itemHint.stride;
+            s_hintItemObjOff = preset.itemHint.objOff;
             LOG_INFO("ObjectArray: Layout '%s' detected (strict)", preset.name);
             LogLayoutFields(addr, s_layout, preset.name);
             return true;
@@ -904,6 +943,34 @@ static void DetectItemSize() {
     // The two direct passes below keep it non-packed; only the last-resort packed branch
     // promotes it to Packed57.
     s_layoutMode = Lineal::ItemLayoutMode::Classic;
+
+    // Preset-bound item hint (licensee forks). Tried FIRST and ONLY when the winning
+    // layout preset carried one, so the shared sweep below is byte-for-byte unchanged for
+    // every other title. Must precede the sweep: on MindsEye the true 32/+0x10 item
+    // aliases with stride 16 (every odd 16-byte slot is a real object pointer), which
+    // scores good=100/bad=100 and would otherwise win with half the pool unreachable.
+    // Still gated on evidence — if the hint does not clearly beat noise we fall through.
+    if (s_hintItemStride > 0) {
+        s_itemObjOffset = s_hintItemObjOff;
+        s_isFlat = false;
+        constexpr int HINT_PROBE_ITEMS = 200;   // same depth as the phase-1 stride probes
+        int hGood, hNamed, hNull, hBad;
+        ProbeStride(chunk0, s_hintItemStride, HINT_PROBE_ITEMS, hGood, hNamed, hNull, hBad);
+        // A correct stride/offset pair reads a real pointer at EVERY item, so demand a
+        // strong majority of valid reads. The aliased stride-16 result cannot reach this
+        // (it is 50% bad by construction).
+        if (hGood >= 8 && hBad * 4 <= hGood) {
+            s_itemSize   = s_hintItemStride;
+            s_layoutMode = (s_itemObjOffset != 0) ? Lineal::ItemLayoutMode::Unpacked57
+                                                  : Lineal::ItemLayoutMode::Classic;
+            LOG_INFO("ObjectArray: FUObjectItem size=%d, object-ptr offset=+0x%02X (preset item hint) — %d named, %d total, %d bad",
+                     s_hintItemStride, s_itemObjOffset, hNamed, hGood, hBad);
+            return;
+        }
+        LOG_WARN("ObjectArray: preset item hint %d/+0x%02X rejected (good=%d bad=%d) — falling back to stride sweep",
+                 s_hintItemStride, s_hintItemObjOff, hGood, hBad);
+        s_itemObjOffset = 0;
+    }
 
     int candidates[] = { 16, 24, 20 };
     constexpr int NUM_CANDIDATES = 3;
