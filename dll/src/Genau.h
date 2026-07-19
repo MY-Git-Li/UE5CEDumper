@@ -43,6 +43,9 @@ struct EnginePointers {
     const char* publisherThumbprint = nullptr; // e.g. "SQUARE_ENIX" (nullptr if no match) — string literal lifetime
     int       ue4StringOffset = 0x10;  // FNameEntry string offset for UE4 mode
     int       fnameEntryHeaderOffset = 0; // Offset to 2-byte header within FNameEntry (0=standard, 4=hash-prefixed UE4.26)
+    int       nameChunksOffset       = 0; // Pool -> Blocks[] offset proved at accept (obfuscated forks only)
+    int       namePayloadGap         = 0; // Bytes between the header and the chars; 0 = stock, >0 = obfuscated fork
+    uintptr_t nameKeyTableCtx        = 0; // Fork's tag -> XOR key hash map (obfuscated forks only)
 
     // FSparseDelegateStorage::SparseDelegates address (UE 5.0+; 0 if scan failed
     // or version unsupported). Optional — drives MulticastSparseDelegateProperty

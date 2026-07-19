@@ -153,6 +153,11 @@ bool UE5_Init() {
     if (ptrs.GNames) {
         if (ptrs.bUE4NameArray) {
             Serie::InitUE4(ptrs.GNames, ptrs.ue4StringOffset);
+        } else if (ptrs.namePayloadGap > 0) {
+            // Obfuscated licensee fork — only ever set when the experimental gate is
+            // on AND Genau proved the format by decoding entry 0 to "None".
+            Serie::InitObfuscated(ptrs.GNames, ptrs.nameChunksOffset, ptrs.namePayloadGap,
+                                  ptrs.nameKeyTableCtx);
         } else {
             Serie::Init(ptrs.GNames, ptrs.fnameEntryHeaderOffset);
         }

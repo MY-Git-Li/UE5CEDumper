@@ -11,6 +11,9 @@
 #include "Utf8Helpers.h"
 
 #include <atomic>
+#include <climits>
+#include <memory>
+#include <algorithm>
 #include <cstring>
 #include <vector>
 #include <string>
@@ -58,6 +61,100 @@ static int s_blockOffsetMask = 0xFFFF;
 // Typical layout: lock (8 bytes), CurrentBlock+CurrentByteCursor (8 bytes), then Blocks[] array
 // But the address from AOB often points directly to the chunk array or to pool start
 static int s_chunksOffset = 0; // Offset from pool address to chunk pointer array
+
+// ── Obfuscated payload support (licensee forks) ───────────────────────────────
+// Some forks keep the STOCK 2-byte header but insert an extra field after it and
+// XOR the character payload. MindsEye (Build A Rocket Boy, UE 5.4.4):
+//   +0x00 u16 header  (stock: bIsWide:1 | LowercaseProbeHash:5 | Len:10)
+//   +0x02 u16 tag     (non-stock — selects this block's XOR key)
+//   +0x04 chars[len]  (XOR-obfuscated)
+// s_payloadGap is the number of bytes between the header and the characters
+// (0 = stock, so every stock title reads exactly the same address as before).
+// The key is looked up in the fork's OWN tag->key table, read straight out of memory
+// (see LookupTagKey). No game code is ever called: the fork's lookup takes an SRW lock
+// before probing, so faulting inside it would unwind out of game frames with that lock
+// still held and wedge every later FName::ToString.
+static bool      s_obfuscated  = false;
+static int       s_payloadGap  = 0;
+static uintptr_t s_keyTableCtx = 0;
+
+// tag -> key cache, 64K tags, allocated only in obfuscated mode so a stock title
+// carries none of this. ONE atomic word per tag, not a (value, flag) pair: with two
+// plain writes the compiler is free to publish the flag before the value, and a reader
+// on another thread then sees "resolved" with a still-zero key. That produced wrong
+// keys in practice — tag 0x0001 resolved to 0x09 on one thread and 0x00 on another in
+// the same millisecond, decoding "Object" as "Fkclj}". A single word cannot tear.
+//   bit 8 = resolved, bit 9 = miss, bits 0-7 = key
+static constexpr uint16_t TAGKEY_RESOLVED = 0x100;
+static constexpr uint16_t TAGKEY_MISS     = 0x200;
+static std::unique_ptr<std::atomic<uint16_t>[]> s_tagKey;
+
+// Look the fork's XOR key up in ITS OWN tag->key table — exact, no heuristics.
+// Layout recovered from the fork's lookup routine (open hashing, 24-byte entries):
+//   ctx +0x10  entries base        ctx +0x18  count      ctx +0x44  (== count => empty)
+//   ctx +0x48  inline buckets      ctx +0x50  bucket array (0 => use inline)
+//   ctx +0x58  capacity (power of two);  bucket = tag & (capacity - 1)
+//   entry +0x00 u16 tag   +0x08 u64 value (LOW BYTE is the key)   +0x10 i32 next (-1 = end)
+// Pure memory reads: no control ever transfers into game code, so the SRW lock the
+// game takes around its own probe can never be left held by us.
+static bool LookupTagKey(uint16_t tag, uint8_t& outKey) {
+    if (!s_keyTableCtx) return false;
+
+    int32_t count = 0, sentinel = 0, capacity = 0;
+    uintptr_t entries = 0, buckets = 0;
+    if (!Macht::ReadSafe(s_keyTableCtx + 0x18, count)) return false;
+    if (!Macht::ReadSafe(s_keyTableCtx + 0x44, sentinel)) return false;
+    if (count == sentinel) return false;                      // table reports empty
+    if (!Macht::ReadSafe(s_keyTableCtx + 0x10, entries) || !entries) return false;
+    if (!Macht::ReadSafe(s_keyTableCtx + 0x58, capacity) || capacity <= 0) return false;
+    if (!Macht::ReadSafe(s_keyTableCtx + 0x50, buckets)) return false;
+    if (!buckets) buckets = s_keyTableCtx + 0x48;             // inline bucket array
+
+    int32_t idx = 0;
+    if (!Macht::ReadSafe(buckets + static_cast<uintptr_t>(tag & (capacity - 1)) * 4, idx))
+        return false;
+
+    // Bounded chain walk — a corrupt/misread table must not spin forever.
+    for (int hop = 0; hop < 64 && idx >= 0; ++hop) {
+        if (idx >= count) return false;
+        uintptr_t entry = entries + static_cast<uintptr_t>(idx) * 24;
+        uint16_t  etag  = 0;
+        if (!Macht::ReadSafe(entry + 0x00, etag)) return false;
+        if (etag == tag) {
+            uint8_t key = 0;
+            if (!Macht::ReadSafe(entry + 0x08, key)) return false;   // low byte of the u64 value
+            outKey = key;
+            return true;
+        }
+        if (!Macht::ReadSafe(entry + 0x10, idx)) return false;
+    }
+    return false;
+}
+
+static bool GetTagKey(uint16_t tag, uint8_t& outKey) {
+    if (!s_tagKey) return false;
+    uint16_t cached = s_tagKey[tag].load(std::memory_order_acquire);
+    if (cached & TAGKEY_MISS) return false;
+    if (cached & TAGKEY_RESOLVED) { outKey = static_cast<uint8_t>(cached & 0xFF); return true; }
+
+    uint8_t key = 0;
+    if (!LookupTagKey(tag, key)) {
+        s_tagKey[tag].store(TAGKEY_MISS, std::memory_order_release);
+        return false;
+    }
+    // Racing threads compute the identical value, so the last writer wins harmlessly.
+    s_tagKey[tag].store(static_cast<uint16_t>(TAGKEY_RESOLVED | key), std::memory_order_release);
+    outKey = key;
+    return true;
+}
+
+// Drop a cached tag so the next resolve re-reads the game's table. Used when a decode
+// comes out non-ASCII: the table is live (the game adds names as it runs), so a lock-free
+// read can legitimately catch it mid-update.
+static void InvalidateTagKey(uint16_t tag) {
+    if (s_tagKey) s_tagKey[tag].store(0, std::memory_order_release);
+}
+
 
 // Helper: try to decode a "None" FNameEntry at the given address with specified header offset.
 // Returns true if successfully verified.
@@ -308,10 +405,46 @@ static void DetectStride() {
     }
 }
 
+void InitObfuscated(uintptr_t gnamesAddr, int chunksOffset, int payloadGap, uintptr_t keyTableCtx) {
+    // Obfuscated-fork path. Deliberately does NOT run the stock auto-detection
+    // (DetectChunksOffset / DetectStride / DetectBlockOffsetBits / DetectHeaderFormat):
+    // every one of those probes reads the character payload looking for a literal
+    // "None", which cannot work before the payload is decrypted. Genau has already
+    // proved the geometry — it recovered a key, decoded entry 0 to exactly "None" and
+    // chain-verified the block — so the parameters it proved are adopted directly.
+    // Keeping the stock detectors untouched is what makes this change inert for every
+    // other title: no stock path is modified, only bypassed on this one branch.
+    s_poolAddr       = gnamesAddr;
+    s_isUE4Mode      = false;
+    s_headerOffset   = 0;              // stock 2-byte header at entry+0
+    s_stride         = Grimoire::FNAME_STRIDE;
+    s_chunksOffset   = chunksOffset;   // proved by Genau (MindsEye: 0x10)
+    s_blockOffsetBits = 16;
+    s_blockOffsetMask = 0xFFFF;
+    s_lenShift       = 6;              // stock Format A: len = header >> 6
+    s_lenMask        = 0x3FF;
+    s_wideFlag       = 0;
+    s_payloadGap     = payloadGap;
+    s_obfuscated     = true;
+    s_keyTableCtx    = keyTableCtx;
+    s_tagKey = std::make_unique<std::atomic<uint16_t>[]>(0x10000);
+    for (size_t i = 0; i < 0x10000; ++i) s_tagKey[i].store(0, std::memory_order_relaxed);
+
+    s_initialized.store(true, std::memory_order_release);
+
+    std::string none  = GetString(0);
+    std::string name1 = GetString(1);
+    LOG_INFO("FNamePool: Initialized OBFUSCATED at 0x%llX (chunks+0x%02X, payloadGap=%d, keyTable=0x%llX), FName[0]='%s', FName[1]='%s'",
+             static_cast<unsigned long long>(gnamesAddr), chunksOffset, payloadGap,
+             static_cast<unsigned long long>(keyTableCtx), none.c_str(), name1.c_str());
+}
+
 void Init(uintptr_t gnamesAddr, int headerOffset) {
     s_poolAddr = gnamesAddr;
     s_isUE4Mode = false;
     s_headerOffset = headerOffset;
+    s_obfuscated = false;
+    s_payloadGap = 0;
 
     // Initial stride guess based on header offset.
     // Hash-prefixed entries (headerOffset=4) have uint32_t ComparisonId as first member,
@@ -428,8 +561,20 @@ std::string GetString(int32_t nameIndex, int32_t number) {
 
     if (len <= 0 || len > FNAME_MAX_LEN) return "";
 
-    // String starts at entry + s_headerOffset + 2
-    int strStart = s_headerOffset + 2;
+    // String starts at entry + s_headerOffset + 2 (+ s_payloadGap on an obfuscated
+    // fork, where a non-stock field sits between the header and the characters).
+    // s_payloadGap is 0 for every stock title, so this is the same address as before.
+    int strStart = s_headerOffset + 2 + s_payloadGap;
+
+    // Obfuscated forks XOR the payload with a key selected by the u16 tag that sits
+    // between the header and the characters. A tag we cannot resolve yields "" rather
+    // than plausible-looking garbage.
+    uint8_t xorKey = 0;
+    uint16_t obfTag = 0;
+    if (s_obfuscated) {
+        if (!Macht::ReadSafe(entry + s_headerOffset + 2, obfTag)) return "";
+        if (!GetTagKey(obfTag, xorKey)) return "";
+    }
 
     std::string result;
 
@@ -465,8 +610,35 @@ std::string GetString(int32_t nameIndex, int32_t number) {
         // A literal '?' (0x3F) is printable and is preserved. The wide branch above has
         // the equivalent guard via IsImplausibleWideName.
         std::vector<char> buf(len + 1, 0);
-        if (!Macht::ReadBytesSafe(entry + strStart, buf.data(), len)) return "";
-        result = Utf8Helpers::SanitizeAnsiName(buf.data(), static_cast<size_t>(len));
+        // Two attempts: a lock-free read of the fork's LIVE key table can catch it
+        // mid-update, and a wrong key still yields bytes — but almost never printable
+        // ASCII ones. So on a rejected decode, drop the cached tag and resolve once more.
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            std::fill(buf.begin(), buf.end(), char(0));
+            if (!Macht::ReadBytesSafe(entry + strStart, buf.data(), len)) return "";
+            if (xorKey) {
+                for (int i = 0; i < len; ++i)
+                    buf[i] = static_cast<char>(static_cast<uint8_t>(buf[i]) ^ xorKey);
+            }
+            result = Utf8Helpers::SanitizeAnsiName(buf.data(), static_cast<size_t>(len));
+            if (!result.empty() || !s_obfuscated || attempt == 1) break;
+            InvalidateTagKey(obfTag);
+            if (!GetTagKey(obfTag, xorKey)) return "";
+        }
+
+        // Obfuscation diagnostic: a WRONG key still yields printable text, so a bad
+        // decode cannot be detected by charset alone. Log a bounded sample of
+        // (entry, tag, key) with the decoded bytes so a mis-keyed name can be compared
+        // against the game's own output and the table walk corrected.
+        if (s_obfuscated) {
+            static int s_obfDbg = 0;
+            if (s_obfDbg < 24) {
+                ++s_obfDbg;
+                LOG_DEBUG("FNamePool: obf idx=%d entry=0x%llX tag=0x%04X key=0x%02X len=%d -> '%s'",
+                          nameIndex, static_cast<unsigned long long>(entry),
+                          obfTag, xorKey, len, result.c_str());
+            }
+        }
         if (result.empty()) return "";
     }
 

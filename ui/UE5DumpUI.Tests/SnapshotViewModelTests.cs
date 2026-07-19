@@ -701,7 +701,15 @@ public class SnapshotViewModelTests : IDisposable
 
         await vm.RunGroupMatchCommand.ExecuteAsync(null);
 
-        var c = Assert.Single(vm.GroupCandidates);
+        // Surface the VM's own explanation on failure. This assert has been seen to flake
+        // under the full parallel suite, and a bare "collection was empty" says nothing:
+        // GroupStatusText already distinguishes a store error from a cancellation from a
+        // genuine zero-row match, so fail with it attached.
+        Assert.True(vm.GroupCandidates.Count == 1,
+            $"expected 1 candidate, got {vm.GroupCandidates.Count}. " +
+            $"status='{vm.GroupStatusText}' error='{vm.ErrorMessage}' " +
+            $"snapshot={vm.GroupSnapshot?.Id.ToString() ?? "null"} matching={vm.IsGroupMatching}");
+        var c = vm.GroupCandidates[0];
         Assert.Equal(1, c.InstanceIndex);                  // only object 1 holds 24 AND 10
         Assert.All(c.Slots, s => Assert.True(s.Locked));
     }

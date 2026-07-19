@@ -34,6 +34,7 @@
 //   SAT52   : Satisfactory UE 5.2 build analysis (work/SF UE 5.21 AOBs.txt)
 //   OT      : Octopath Traveller (UE4, Ghidra + CE analysis, codename "Kingship")
 //   GH      : Ghidra cross-game analysis (aob_export/analysis_report.md)
+//   ME      : MindsEye (Build A Rocket Boy, UE 5.4.4 licensee fork — capstone + .pdata analysis)
 // ============================================================
 
 // ============================================================
@@ -687,6 +688,32 @@ constexpr AobSignature GOBJECTS_PATTERNS[] = {
     SIG_RIP("GOBJ_OT_1", AOB_GOBJECTS_OT_1, AobTarget::GObjects, 2, 3, 7, 0, 85, "OT", "Octopath Traveller UE4 FUObjectArray::Init LEA RCX"),
     SIG_RIP("GOBJ_OT_2", AOB_GOBJECTS_OT_2, AobTarget::GObjects, 2, 3, 7, 0, 86, "OT", "UE4 FUObjectArray::Init generalized (wildcarded regs)"),
 };
+
+// ── Obfuscated FName payloads (licensee forks) ───────────────────────────
+// Not part of any PATTERNS[] table: this does not resolve a global pointer, so it is
+// consumed directly by Genau::ResolveNameKeyTable rather than through ScanForTarget.
+// It is scanned ONLY after the experimental gate is on AND both stock FNameEntry
+// layouts have already been rejected, so an ordinary title never runs it.
+//
+// ME1: the fork's FNameEntry payload de-obfuscator, matched at its function entry.
+//   mov [rsp+8],rbx / mov [rsp+10],rsi / push rdi / sub rsp,20
+//   movzx r8d,word [rcx]      <- stock 2-byte header
+//   lea   rdx,[rcx+4]         <- chars at entry+4 (stock is +2: the fork inserts a u16 tag)
+//   shr   r8,6                <- len = header >> 6 (stock Format A)
+//   call  memcpy              <- rel32 wildcarded
+//   movzx edi,word [rbx] / shr edi,6
+//   call  <key-table ctx getter>   <- rel32 wildcarded; followed at match+0x2F
+//   movzx edx,word [rbx+2]    <- the non-stock u16 tag that selects the XOR key
+// The match address is EVIDENCE, never a call target — Genau follows the second call
+// and the getter's rip-relative LEA to reach the tag->key table and reads it directly.
+// Verified unique in MindsEye's 145 MB .text (the 16-byte MSVC prologue alone hits 139
+// times; the semantic tail is what carries the uniqueness).
+constexpr const char* AOB_NAMEDECRYPT_ME1 =
+    "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 44 0F B7 01 48 8B F2 "
+    "48 8D 51 04 49 C1 E8 06 48 8B D9 48 8B CE E8 ?? ?? ?? ?? 0F B7 3B "
+    "C1 EF 06 E8 ?? ?? ?? ?? 0F B7 53 02";
+// Offset within a match of the `call <ctx getter>` instruction (its rel32 is at +1).
+constexpr int AOB_NAMEDECRYPT_ME1_CTX_CALL_OFF = 0x2F;
 
 // ── GNames ───────────────────────────────────────────────────────────────
 constexpr AobSignature GNAMES_PATTERNS[] = {

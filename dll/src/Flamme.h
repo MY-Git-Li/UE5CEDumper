@@ -91,4 +91,12 @@ void SaveUserOverride(const char* peHash, uint32_t ueVersion,
 void SaveInvokeTimeout(const char* peHash, int32_t timeoutMs,
                        const char* processName);
 
+/// Is the UI's "experimental features" opt-in switched on?
+/// Reads %LOCALAPPDATA%\UE5CEDumper\experimental.json — the SAME file the UI's
+/// ExperimentalGate writes — so the DLL honours the toggle on every entry path
+/// (UI pipe scan, CE Lua UE5_Init, proxy auto-start) with no protocol change.
+/// Result is cached after the first call. Missing/malformed file ⇒ false, i.e.
+/// experimental behaviour stays OFF unless the user explicitly opted in.
+bool IsExperimentalEnabled();
+
 } // namespace Flamme

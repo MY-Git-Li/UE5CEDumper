@@ -16,6 +16,17 @@ namespace Serie {
 //   4 = hash-prefixed (UE4.26 / FF7Re): [4B hash][2B header][string]
 void Init(uintptr_t gnamesAddr, int headerOffset = 0);
 
+// Initialize for a licensee fork that OBFUSCATES the FNameEntry character payload.
+// Experimental-gated; only ever reached when Genau proved the format (decoded entry 0
+// to exactly "None") and located the fork's key table. No game code is called — the
+// table is read directly out of memory.
+//   chunksOffset: pool -> Blocks[] offset that Genau proved (MindsEye: 0x10)
+//   payloadGap:   extra bytes between the 2-byte header and the characters
+//                 (0 = stock layout, 2 = MindsEye's non-stock u16 tag field)
+//   keyTableCtx:  the fork's own tag -> XOR key hash map, located statically by Genau
+void InitObfuscated(uintptr_t gnamesAddr, int chunksOffset, int payloadGap,
+                    uintptr_t keyTableCtx);
+
 // Initialize for UE4 TNameEntryArray mode (UE4 <4.23)
 // nameArrayAddr: pointer to the TNameEntryArray chunk pointer array
 // stringOffset:  offset within FNameEntry to the null-terminated string (typically 0x10)
