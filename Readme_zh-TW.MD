@@ -9,6 +9,12 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
 > 這並不是一般 Dumper、無法把大量資料倒出並分析，其集中在簡單找到 UE 結構，並和 CE 開發配合使用。故請視為是一個通用型的 UE 工具。
 
+> ### 使用範圍
+>
+> **僅限 Windows x64、單機／離線使用。** 這是給你**合法擁有**的遊戲、在你自己的機器上使用的檢視與除錯工具。
+> 請勿用於多人、競技或線上模式 — 除了不公平之外，反作弊、帳號封鎖與法律風險實際上都集中在那裡。
+> UE5CEDumper 讀取執行中 process 的記憶體；它不散布任何遊戲程式碼、資產或金鑰，也不碰 pak/IoStore 的容器加密。
+
 ---
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D4)](https://www.microsoft.com/windows)
 [![UE Version](https://img.shields.io/badge/UE-4.18--5.8-orange)](https://www.unrealengine.com/)
@@ -127,7 +133,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
   接著啟動 **UE5DumpUI.exe** 並 **Connect**。遇到 Access Denied（遊戲以系統管理員執行）時，腳本會自動以系統管理員身分重新啟動（跳一次 UAC）。
 
-> **僅限 x64 遊戲**，且僅限單機／離線使用 — 與所有注入方式相同，`CreateRemoteThread` 可能被防毒標記，並會被 kernel 反作弊（EAC / BattlEye）擋下／封鎖。
+> **僅限 x64 遊戲。** 使用範圍請見本文件開頭的說明 — 與所有注入方式相同，`CreateRemoteThread` 可能被防毒標記，並會被 kernel 反作弊（EAC / BattlEye）擋下或封鎖。
 
 | **Game Process (Injected)** |
 | :---: |

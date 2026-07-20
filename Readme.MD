@@ -9,6 +9,14 @@ UE5CEDumper is a interactive inspector toolchain. It provides a **live window** 
 
 > *UE5CEDumper is not meant to be a another dumper that extracts large amounts of data for analysis. Instead, it focuses on quickly finding UE structures and integrating with CE for live development. Think of it as a general-purpose UE tool rather than a specialized dumper.*
 
+> ### Scope of use
+>
+> **Windows x64, single-player / offline only.** This is an inspection and debugging tool for games
+> you legally own, on your own machine. Do not use it in multiplayer, competitive or online modes —
+> besides being unfair, that is where anti-cheat, account bans and legal exposure actually live.
+> UE5CEDumper reads the memory of a running process; it does not redistribute any game code, assets
+> or keys, and it does not touch pak/IoStore container encryption.
+
 ---
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D4)](https://www.microsoft.com/windows)
 [![UE Version](https://img.shields.io/badge/UE-4.18--5.8-orange)](https://www.unrealengine.com/)
@@ -127,7 +135,7 @@ Inject `UE5Dumper.dll` into an **already-running** game — the quickest path (n
 
   Then launch **UE5DumpUI.exe** and **Connect**. On Access-Denied (an elevated game) the script auto-relaunches itself elevated (one UAC prompt).
 
-> **x64 games only**, single-player / offline use only — like all injection, `CreateRemoteThread` may be flagged by anti-virus and is blocked/banned by kernel anti-cheat (EAC / BattlEye).
+> **x64 games only.** See the scope note at the top of this README — like all injection, `CreateRemoteThread` may be flagged by anti-virus and is blocked/banned by kernel anti-cheat (EAC / BattlEye).
 
 | **Game Process (Injected)** |
 | :---: |
