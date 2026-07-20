@@ -220,7 +220,7 @@ constexpr double MOVE_MULT_MAX            = 10.0;    // 1000% — UI slider ceil
 // --- Time dilation (Hemmung) — global slow-mo / freeze-time / speed-up ---
 constexpr int    TIME_REASSERT_MS         = 250;     // re-assert worker tick (write-on-drift)
 constexpr double TIME_DILATION_MIN        = 0.0;     // 0 = frozen (near-freeze if the game NaNs on exact 0)
-constexpr double TIME_DILATION_MAX        = 100.0;   // 100x fast-forward — UI slider ceiling
+constexpr double TIME_DILATION_MAX        = 100.0;   // 100x — DLL safety clamp (UI ceilings are lower: world 3x, pawn 10x)
 
 // --- Force-field hold (Solide) — Property Search "Force" + stealth-meter zero ---
 constexpr int    SOLIDE_REASSERT_MS       = 300;     // re-assert worker tick (write-on-drift)

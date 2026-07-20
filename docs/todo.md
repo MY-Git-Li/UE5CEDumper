@@ -581,7 +581,7 @@ direction, both shipped (dev-log builds 838-872).
 
 - **Dual-connection pipe (eliminate head-of-line blocking)** — Effort: **M** · Risk:
   **high** (in-process DLL concurrency). **POSTPONED 2026-06-01.** Full design:
-  [multi-connection-pipe-proposal.md](multi-connection-pipe-proposal.md). Engine-side
+  [multi-connection-pipe-proposal.md](archive/multi-connection-pipe-proposal.md) *(archived — superseded by [multipipe-eval.md](multipipe-eval.md))*. Engine-side
   concurrency is already safe (builds 792/793 + SessionManager); residual risk is Fern's
   accept/shutdown rewrite. Benefit is moderate (parallel scans already shrank the blocking
   window) — revisit only if "UI freezes during a big scan" becomes a real pain.
@@ -638,8 +638,10 @@ native-RE parts are exactly the reflection-invisible ones — cut them from v1.*
   FrameTime/Timecode) + `SeedQueries` timer terms + `ClassLocationScorer` GameplayEffect/GameplayAbility/
   WorldSettings +2 + function-side `UtilityKeywords` widen (Cooldown/Dilation/Delay/Interval/Elapsed/
   Recharge). Dev-log 2026-07-13; memory `project-timer-feature-eval`.
-  **Part C UI Time card — DONE (build 2149).** A "Time Dilation" card in the Teleport panel beside
-  Move-Speed/Gravity: "Player only" toggle (global `TimeDilation` vs pawn `CustomTimeDilation`), 0–3×
+  **Part C UI Time card — DONE (build 2149; UI SUPERSEDED at build 2207 by the dual-row World+Player
+  card — see dev-log 2026-07-15).** A "Time Dilation" card in the Teleport panel beside
+  Move-Speed/Gravity: *as first shipped,* a "Player only" toggle (global `TimeDilation` vs pawn
+  `CustomTimeDilation`), 0–3×
   slider + % + presets (Freeze/¼×/½×/1×/2×) + Apply/Reset/↻ + badge/readout; new `IDumpService`
   `Get/Set/ResetTimeDilation` (+ `TimeDilationKnob`/`TimeDilationSetResult`/`TimeState` models) + VM
   commands + en.axaml strings + 6 VM tests (2459 C# green).
@@ -653,6 +655,7 @@ native-RE parts are exactly the reflection-invisible ones — cut them from v1.*
   resets the badge — the "state lives in the DLL, survives a UI reconnect" markers model. (2) disk preference:
   `TeleportUiOptions.TimeDilation`/`TimeTargetIsPawn` in `ui-options.json` pre-fill the last value+target
   across UI restarts (NOT auto-applied; live read-back wins). +2 VM tests + options round-trip.
+  *(Those two keys were renamed `WorldTimeDilation`/`PawnTimeDilation` at build 2207 with no migration.)*
   **L1 COMPLETE + LIVE-VERIFIED on Elliot (UE4.27, build 2151)** — log confirms `set_time_dilation target=pawn
   value=0.5` → `hold 0.5000 (rc=0)`, held 0.5/1.0/2.0/1.4688×, reset clean, `get_time_state` polled on connect.
   Per-pawn `CustomTimeDilation` exercised; global `WorldSettings::TimeDilation` wired+unit-covered but not yet
@@ -700,6 +703,65 @@ native-RE parts are exactly the reflection-invisible ones — cut them from v1.*
   cv 0.02 = a real ~3 Hz BP timer; `ProvideSingleActor` ~108 ms), Tick correctly excluded, stable across two
   windows. Native lambda/member-ptr timers bypass ProcessEvent (documented). *Parent: this eval; extended
   Linie/LivePEProfiler build 2109.*
+
+-----
+
+## MindsEye licensee fork — follow-ups (GObjects + GNames SHIPPED builds 2220/2238)
+
+Both halves are live-verified end-to-end, but **on game version 7.3.1 only** (PE hash
+`0863E3B90C993000`). Everything below was identified while shipping and deliberately not blocked on;
+full context + the re-derivation playbook is in [mindseye-fork-notes.md](mindseye-fork-notes.md).
+**Before touching any of these, check the PE hash** — if it moved, the constants come first.
+
+- **Wide `FNameEntry` payloads are not de-obfuscated** — Effort: **S-M** · Risk: low.
+  `Serie::GetString` applies the XOR only in the **ANSI** branch; the wide branch reads and
+  `EncodeUtf16`s the raw ciphertext, which `IsImplausibleWideName` then rejects → empty name.
+  `Genau::ObfChainOk` likewise bails on the first wide entry ("stop, do not judge"). The fork ships a
+  wide twin de-obfuscator (RVA `0x0178B540` on the solved build, `add r8,r8` — i.e. the same key,
+  applied over 2-byte units), so wide names **are** obfuscated and the key lookup already works for
+  them. Low practical impact (most FNames are ANSI) but it is a real hole: any wide name silently
+  resolves empty rather than wrong. Fix = mirror the ANSI XOR into the wide branch (per-byte over the
+  UTF-16 payload) + let `ObfChainOk` corroborate on wide entries instead of aborting.
+  *Parent: MindsEye GNames, dev-log 2026-07-19 (build 2238).*
+
+- **Process-lifetime caches that no rescan clears** — Effort: **S** · Risk: low.
+  Two function-local statics survive a full re-scan: (1) `Genau::TryObfuscatedPool`'s
+  `s_ctxTried`/`s_ctxCache` — `FindGNames`' reset block clears `g_nameChunksOffset` /
+  `g_namePayloadGap` / `g_nameKeyTableCtx` but **not** these, so **one failed AOB scan is sticky for
+  the whole process** and a rescan never retries the key-table resolve; (2)
+  `Flamme::IsExperimentalEnabled()` caches its answer, so toggling the UI experimental switch after
+  the DLL is loaded has **no effect until re-inject** (arguably correct — but it is undocumented in
+  the UI and reads as a broken toggle). Fix (1) by clearing the statics from the same reset block;
+  for (2) either re-read on each query or surface "re-inject required" next to the toggle.
+  *Parent: MindsEye GNames, dev-log 2026-07-19 (build 2238).*
+
+- **No test coverage for any of the fork-specific paths** — Effort: **M** · Risk: low.
+  `dll/tests/` holds only `dll_helpers_test.cpp` + `utf8_helpers_test.cpp`; nothing exercises the
+  preset-bound `LayoutPreset::itemHint` gate, `TryObfuscatedPool`'s acceptance rule, or
+  `Serie::LookupTagKey`'s open-hash probe. All three are **pure enough to unit-test without a game**
+  (fabricate a synthetic chunk/pool/key-table in a buffer), and two of them encode load-bearing
+  invariants a refactor could silently break: the item hint must stay **evidence-gated**
+  (`hGood>=8 && hBad*4<=hGood`) so it can never win on a 50%-aliased stride-16 read, and the pool
+  must be **REFUSED when the key table is unresolvable** even though block 0 decodes. Also worth a
+  regression test: the tag→key cache publishes value+flag in **one** `std::atomic<uint16_t>` — the
+  two-plain-stores version produced wrong keys across threads.
+  *Parent: MindsEye, dev-log 2026-07-19 (builds 2220 + 2238).*
+
+- **`find_anchors.py` from the re-derivation playbook is not committed** — Effort: **S** · Risk: low.
+  [mindseye-fork-notes.md](mindseye-fork-notes.md) step 0 tells the reader to run
+  `python find_anchors.py <exe>`, but `tools/pe/` only has `disasm_function.py` (which takes explicit
+  VAs — it neither parses `.pdata` nor searches for `__FILE__` anchors), `minidump_triage.py` and
+  `pe_imports_exports.py`. So the playbook's first two steps have to be re-scripted ad hoc, which is
+  exactly the friction the playbook exists to remove. Either commit the script under `tools/pe/` (with
+  a line in [tools/README.md](../tools/README.md)) or rewrite steps 0–2 against what is actually
+  committed. *Parent: MindsEye docs, commit `8ef4a9f`.*
+
+- **`GAP = 2` is hardcoded, so a second fork needs a code change** — Effort: **S** · Risk: low.
+  The obfuscated-payload gap is a `constexpr int GAP = 2` inside `TryObfuscatedPool` ("the only forked
+  geometry seen so far"). That is the honest call today — inventing a search over gaps would weaken
+  acceptance for zero known benefit — but note it as the first thing to generalise if a second
+  licensee fork with a different `FNameEntry` shape appears. Do **not** pre-emptively loosen it.
+  *Parent: MindsEye GNames, dev-log 2026-07-19 (build 2238).*
 
 -----
 

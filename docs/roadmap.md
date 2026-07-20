@@ -7,7 +7,36 @@ trail. Build number tags reflect when each row reached its current
 state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
-> build 2142 (PR #431, 2026-07-11).** Newer work lives in [dev-log.md](dev-log.md):
+> build 2246 (PR #448, 2026-07-20).** Newer work lives in [dev-log.md](dev-log.md):
+> - builds **2220 + 2238 (2026-07-19)** — **MindsEye licensee-fork support** (Build A Rocket
+>   Boy, UE 5.4.4). Two independent failures solved: **GObjects** was reported `OK` **on
+>   garbage** (the AOB found the real array but the preset was written one struct-level down,
+>   so the relaxed tier accepted an unrelated heap blob) → new `MindsEye-Extended` chunked
+>   preset + a **preset-bound `LayoutPreset::itemHint`** for its 32-byte `FUObjectItem` with
+>   `UObject*`@`+0x10` (evidence-gated, consulted *before* the shared stride sweep — it must
+>   never join `candidates[]` because 32/+0x10 aliases stride 16 perfectly and would steal
+>   TQ2 / Octopath) + an upper-bound-only sanity check on the relaxed tier. **GNames** had
+>   never been found for this title: the fork keeps the stock header but inserts a `u16` tag
+>   at `+0x02` and XOR-obfuscates the chars at `+0x04`, keyed **per tag** — we locate the
+>   fork's own key table statically and **read** it (never calling its de-obfuscator, whose
+>   SRW lock is taken before the probe). Experimental-gated end to end via the new
+>   `Flamme::IsExperimentalEnabled`; a title without the fingerprint runs byte-identical code.
+>   **LIVE-VERIFIED on game version 7.3.1 only** (PE hash `0863E3B90C993000`) — `Count=530638`,
+>   name sanity 10/10, full Live Walker descent. Re-derivation playbook:
+>   [mindseye-fork-notes.md](mindseye-fork-notes.md).
+> - builds **2207 + 2215 (2026-07-15)** — **Time Dilation is now DUAL-ROW**: independent
+>   **Whole world** (0–3×) and **Player pawn** (0–10×) levers held *simultaneously*, replacing
+>   the single slider + "Player only" toggle. UI-only — `Hemmung` already kept a per-target
+>   slot and `get_time_state` already returned both knobs. Effective pawn rate is
+>   **world × pawn**, so World ½× + Player 2× = bullet time; the Player row shows a live
+>   **Combined player speed** readout and the tooltip documents the **Player = 1 ÷ World**
+>   compensation. CE export ships two independently tickable records (Time: World / Time:
+>   Player). ⚠ Persisted option keys renamed with no migration; the world lever is still
+>   unit-tested only (never live-exercised).
+> - build **2166 (2026-07-13)** — **Auto Snapshot** (session-only periodic capture loop with a
+>   `max(interval − duration, 60)` gap and KeepRecent/FixedCount retention) + a **free-disk-space
+>   guard** (`min(%, GB)`, `0` disables that term) that blocks *all* captures, manual included.
+>   UI-only.
 > - build **2168 (2026-07-14)** — **`Solide` (ForceField)** — the honest subset of the
 >   "enemies can't detect you" eval (no universal detection bool). New DLL module (Hemmung
 >   sibling) holds a *discovered* reflected field (bool ON/OFF / ObjectProperty→null /
@@ -24,7 +53,8 @@ state.
 >   `FindInstancesByClass` fallback) + per-pawn `AActor::CustomTimeDilation` — via a write-on-drift
 >   re-assert worker; exports `UE5_Set/ResetTimeDilation`, Mimic `CMD_TIME=15`, pipe
 >   `set/reset_time_dilation`+`get_time_state`. **UI:** a Time Dilation card in the Teleport panel
->   (Player-only toggle, 0–3× slider + presets Freeze/¼×/½×/1×/2×) + `TimeDilationScriptGenerator`
+>   (*as first shipped:* a Player-only toggle + one 0–3× slider + presets Freeze/¼×/½×/1×/2× —
+>   **superseded at build 2207 by the dual-row card above**) + `TimeDilationScriptGenerator`
 >   CE Lua/.CT export (`CMD_TIME` SET/RESET) + persistence (live read-back on connect = markers model
 >   + disk `TeleportUiOptions`). **Discovery:** new `PropertyCategory.Timing` (Interesting Properties)
 >   + `TimeStructTypes` + function-side cooldown/dilation keywords. **LIVE-VERIFIED on The Adventures
@@ -670,12 +700,36 @@ Delete-cache button; a UE version override still wins over everything.
   UClasses use a `Joebill` prefix (`JoebillGameInstance`, `BP_JoebillGameMode_C`,
   `BP_JoebillPlayer_C`) — a city-builder / tycoon sim. PE hash `C200F9770A5F1000`.
   Pionero Games (publisher=- — Epic default copyright placeholder, no thumbprint).
+- **MindsEye** ✅ (Build A Rocket Boy, **UE 5.4.4 licensee fork**, 530,638 objects,
+  Steam, `version.dll` proxy, builds 2220 + 2238, 2026-07-19) — **⚠ verified on
+  game version 7.3.1 ONLY** (PE hash `0863E3B90C993000`; the exe carries no
+  game-version resource, so pin the build by that hash). The first title where the
+  tool reported **`GObjects=OK` on garbage** (`Count=509`, `named=0`) and the first
+  with **obfuscated FName payloads**. Only three things differ from stock UE 5.4:
+  reordered `FChunkedFixedUObjectArray` (preset `MindsEye-Extended`
+  `{0x28,0x10,0x24,0x20,0x14}`), a **32-byte `FUObjectItem` with `UObject*`@`+0x10`**
+  (preset-bound `itemHint` — it aliases stride 16 perfectly, so it must never enter
+  the shared sweep), and `FNameEntry` gaining a `u16` tag at `+0x02` with chars moved
+  to `+0x04` and single-byte XOR-obfuscated **per tag** (key read straight out of the
+  fork's own open-hash table; we never call its de-obfuscator). GWorld
+  `GWLD_ES2_6` ✅ and SparseDelegates `SPARSE_ES2_1` ✅ needed **no change** — both
+  still match uniquely. Result: `Count=530638, ItemSize=32`, name sanity **10/10**,
+  Live Walker descends `GWorld → PersistentLevel → StormWP →
+  EVMindsEyeGameInstance → LocalPlayers → LocalPlayer → BP_PlayerController_C`.
+  Experimental-gated (`Flamme::IsExperimentalEnabled`, same `experimental.json` the
+  UI writes) — a title without the fingerprint runs byte-identical code. **Not
+  recoverable, by design:** the game renamed its own non-engine symbols at build
+  time (21,635 generated 16-char lowercase identifiers sit verbatim in `.rdata`), so
+  game-specific class/property *names* are gone for every tool; engine symbols read
+  normally and value-based search is unaffected. Wide FName entries are not yet
+  de-obfuscated (known, low impact). Re-derivation playbook:
+  [mindseye-fork-notes.md](mindseye-fork-notes.md).
 
 GWorld success ratio: **100% of all tested games** — see the
 [test-games.md](test-games.md) GWorld Status Summary for the authoritative tally
-(**32 / 32** as of 2026-07-15, incl. Stellar Blade UE4.26-fork, Persona 3
-Reload via GWLD_GH_1 direct, and Pionero Capital Demo — stock UE5.7 Object@+0x08,
-GWLD_TQ_1 direct, dxgi proxy);
+(**33 / 33** as of 2026-07-19, incl. Stellar Blade UE4.26-fork, Persona 3
+Reload via GWLD_GH_1 direct, Pionero Capital Demo — stock UE5.7 Object@+0x08,
+GWLD_TQ_1 direct, dxgi proxy — and MindsEye, UE5.4.4 licensee fork, game v7.3.1 only);
 the list above itemises only a subset and is otherwise last-verified 2026-06-11.
 Satisfactory (modular DLL build): scan side OK — `Macht::AOBScanAllModules`
 falls through to `FactoryGameSteam-CoreUObject-Win64-Shipping.dll`
