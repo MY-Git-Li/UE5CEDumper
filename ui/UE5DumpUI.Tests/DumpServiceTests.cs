@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json.Nodes;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
@@ -53,19 +54,48 @@ public sealed class MockPipeClient : IPipeClient
 /// </summary>
 public sealed class MockLoggingService : ILoggingService
 {
-    public List<string> Messages { get; } = new();
-    public void Info(string message) => Messages.Add($"[INFO] {message}");
-    public void Warn(string message) => Messages.Add($"[WARN] {message}");
-    public void Error(string message) => Messages.Add($"[ERROR] {message}");
-    public void Error(string message, Exception ex) => Messages.Add($"[ERROR] {message}: {ex.Message}");
-    public void Debug(string message) => Messages.Add($"[DEBUG] {message}");
-    public void Info(string category, string message) => Messages.Add($"[INFO:{category}] {message}");
-    public void Warn(string category, string message) => Messages.Add($"[WARN:{category}] {message}");
-    public void Error(string category, string message) => Messages.Add($"[ERROR:{category}] {message}");
-    public void Error(string category, string message, Exception ex) => Messages.Add($"[ERROR:{category}] {message}: {ex.Message}");
-    public void Debug(string category, string message) => Messages.Add($"[DEBUG:{category}] {message}");
+    // Thread-safe by necessity, not by taste. The code under test logs from several
+    // threads at once (the capture's producer/consumer Task.Runs, the store cleanup),
+    // and a bare List<string>.Add racing with itself corrupts the backing array or
+    // throws IndexOutOfRangeException / ArgumentException from inside the logger. That
+    // exception then propagates out of _log.Info(...) into the caller's catch — for
+    // SnapshotViewModel.CaptureCoreAsync it lands in the handler that DELETES the
+    // partial snapshot, which is indistinguishable from a real capture failure. A test
+    // double must never be able to fail the thing it is observing.
+    private readonly object _gate = new();
+    private readonly List<string> _messages = new();
+
+    /// <summary>A point-in-time copy — safe to enumerate while the subject keeps logging.</summary>
+    public List<string> Messages { get { lock (_gate) return new List<string>(_messages); } }
+
+    private void Add(string line) { lock (_gate) _messages.Add(line); }
+
+    public void Info(string message) => Add($"[INFO] {message}");
+    public void Warn(string message) => Add($"[WARN] {message}");
+    public void Error(string message) => Add($"[ERROR] {message}");
+    public void Error(string message, Exception ex) => Add($"[ERROR] {message}: {Describe(ex)}");
+    public void Debug(string message) => Add($"[DEBUG] {message}");
+    public void Info(string category, string message) => Add($"[INFO:{category}] {message}");
+    public void Warn(string category, string message) => Add($"[WARN:{category}] {message}");
+    public void Error(string category, string message) => Add($"[ERROR:{category}] {message}");
+    public void Error(string category, string message, Exception ex) => Add($"[ERROR:{category}] {message}: {Describe(ex)}");
+    public void Debug(string category, string message) => Add($"[DEBUG:{category}] {message}");
     public void StartProcessMirror(string processName) { }
     public void StopProcessMirror() { }
+
+    // Type + message + a few frames. A bare ex.Message is enough for a SqliteException
+    // ("database is locked") but useless for, say, a NullReferenceException — and a
+    // CI-only failure gives you exactly one shot at the information.
+    private static string Describe(Exception ex)
+    {
+        var frames = (ex.StackTrace ?? "")
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => l.Length > 0)
+            .Take(3);
+        var inner = ex.InnerException is { } ie ? $" <- {ie.GetType().Name}: {ie.Message}" : "";
+        return $"{ex.GetType().Name}: {ex.Message}{inner} @ {string.Join(" / ", frames)}";
+    }
 }
 
 public class DumpServiceTests

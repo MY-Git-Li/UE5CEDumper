@@ -35,13 +35,14 @@ public class SnapshotViewModelTests : IDisposable
 
     private string Diag(string what, int got, SnapshotViewModel vm)
     {
-        var noisy = _lastLog.Messages
-            .Where(m => m.StartsWith("[WARN", StringComparison.Ordinal) ||
-                        m.StartsWith("[ERROR", StringComparison.Ordinal))
-            .ToList();
-        var tail = noisy.Count > 6 ? noisy.GetRange(noisy.Count - 6, 6) : noisy;
+        // ALL levels, not just WARN/ERROR: the INFO lines trace how far the capture got
+        // (chunk counts, "Finalising…", the completion summary), which is what tells us
+        // whether it died early or at the very end.
+        var all = _lastLog.Messages;
+        var tail = all.Count > 12 ? all.GetRange(all.Count - 12, 12) : all;
         return $"{what}, got {got}. status='{vm.StatusText}' error='{vm.ErrorMessage}' " +
-               $"capturing={vm.IsCapturing} warn/err[{noisy.Count}]: {string.Join(" | ", tail)}";
+               $"capturing={vm.IsCapturing} log[{all.Count}]:{Environment.NewLine}  " +
+               string.Join(Environment.NewLine + "  ", tail);
     }
 
     // Stub that streams 3 objects (4 fields) across two non-empty chunks, then a
