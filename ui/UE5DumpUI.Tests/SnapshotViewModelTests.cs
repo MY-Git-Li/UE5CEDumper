@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
@@ -23,6 +24,24 @@ public class SnapshotViewModelTests : IDisposable
     {
         try { if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true); }
         catch { /* best effort */ }
+    }
+
+    // The logger handed to the most recently built VM. The store swallows a failed
+    // capture (the outer catch deletes the partial row) and the VM only records the
+    // reason in StatusText / ErrorMessage / the log, so a bare "collection was empty"
+    // tells us nothing. Every store-shaped assertion in this class routes through
+    // Diag() so a CI-only flake names its own cause on the first occurrence.
+    private MockLoggingService _lastLog = new();
+
+    private string Diag(string what, int got, SnapshotViewModel vm)
+    {
+        var noisy = _lastLog.Messages
+            .Where(m => m.StartsWith("[WARN", StringComparison.Ordinal) ||
+                        m.StartsWith("[ERROR", StringComparison.Ordinal))
+            .ToList();
+        var tail = noisy.Count > 6 ? noisy.GetRange(noisy.Count - 6, 6) : noisy;
+        return $"{what}, got {got}. status='{vm.StatusText}' error='{vm.ErrorMessage}' " +
+               $"capturing={vm.IsCapturing} warn/err[{noisy.Count}]: {string.Join(" | ", tail)}";
     }
 
     // Stub that streams 3 objects (4 fields) across two non-empty chunks, then a
@@ -245,7 +264,8 @@ public class SnapshotViewModelTests : IDisposable
     public async Task Capture_StreamsAllChunks_PersistsWithCorrectCounts()
     {
         var dump = new CaptureStub();
-        var vm = new SnapshotViewModel(dump, _store, new MockLoggingService())
+        _lastLog = new MockLoggingService();
+        var vm = new SnapshotViewModel(dump, _store, _lastLog)
         {
             SelectedScope = "NumericNoByte",
             GameOnly = true,
@@ -263,7 +283,11 @@ public class SnapshotViewModelTests : IDisposable
         Assert.True(dump.LastAutoSkipNoise);   // Auto-skip noise default ON (source-level skip)
 
         var list = await _store.ListSnapshotsAsync(TestContext.Current.CancellationToken);
-        var saved = Assert.Single(list);
+        // A capture that threw is swallowed: the outer catch deletes the partial row and
+        // `finally` clears IsCapturing, so every assert above still passes and only the
+        // count betrays it. Report the VM's own explanation instead of "was empty".
+        Assert.True(list.Count == 1, Diag("expected 1 persisted snapshot", list.Count, vm));
+        var saved = list[0];
         Assert.Equal("run1", saved.Label);
         Assert.Equal("PEHASH", saved.PeHash);
         // GameSessionId = PeHash-ProcessCreationTime (build 1227+); the per-launch
@@ -681,7 +705,8 @@ public class SnapshotViewModelTests : IDisposable
         }, ct);
         await _store.FinalizeSnapshotAsync(id, 2, 5, ct);
 
-        var vm = new SnapshotViewModel(new CaptureStub(), _store, new MockLoggingService());
+        _lastLog = new MockLoggingService();
+        var vm = new SnapshotViewModel(new CaptureStub(), _store, _lastLog);
         vm.SetEngineState(new EngineState { PeHash = "GVM", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "T" });
         await vm.RefreshCommand.ExecuteAsync(null);   // deterministic load (don't rely on the fire-and-forget refresh)
         return vm;
@@ -706,9 +731,8 @@ public class SnapshotViewModelTests : IDisposable
         // GroupStatusText already distinguishes a store error from a cancellation from a
         // genuine zero-row match, so fail with it attached.
         Assert.True(vm.GroupCandidates.Count == 1,
-            $"expected 1 candidate, got {vm.GroupCandidates.Count}. " +
-            $"status='{vm.GroupStatusText}' error='{vm.ErrorMessage}' " +
-            $"snapshot={vm.GroupSnapshot?.Id.ToString() ?? "null"} matching={vm.IsGroupMatching}");
+            Diag("expected 1 candidate", vm.GroupCandidates.Count, vm) +
+            $" groupStatus='{vm.GroupStatusText}' snapshot={vm.GroupSnapshot?.Id.ToString() ?? "null"}");
         var c = vm.GroupCandidates[0];
         Assert.Equal(1, c.InstanceIndex);                  // only object 1 holds 24 AND 10
         Assert.All(c.Slots, s => Assert.True(s.Locked));
