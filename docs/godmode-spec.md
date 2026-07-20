@@ -28,7 +28,7 @@
 > purely value-based (HP number, like SEED appears to be) still need Value Search +
 > Freeze (a generic auto-HP-freeze, "T3", was considered and deferred by the user).
 > ⚠ In-game live-verify still pending (smoke checklist §9). This document is the design contract; the companion
-> **[godmode-implementation-plan.md](godmode-implementation-plan.md)** is the
+> **[godmode-implementation-plan.md](archive/godmode-implementation-plan.md) *(archived — the plan shipped at build 1251)*** is the
 > step-by-step build plan. Modeled on **[teleport-spec.md](teleport-spec.md)**
 > and the Debug Camera force on/off architecture (PR #264, build 1014): **all
 > logic DLL-side, exposed as C ABI exports + pipe commands + a Mimic mailbox
@@ -176,7 +176,7 @@ Deliverables for the user:
 | **FBoolProperty bit resolver** | `Ubel::FindField` + `DynOff::FBOOLPROP_FIELDSIZE`/`UBOOLPROP_FIELDSIZE` ([Grimoire.h:118,125](../dll/src/Grimoire.h)) | **`Wirbel::ResolveCursorBit` ([Wirbel.cpp:1091](../dll/src/Wirbel.cpp)) — the exact template** | read `[FieldSize,ByteOffset,ByteMask,FieldMask]`, compute `byteAddr`+`mask` |
 | SEH read / write | `Macht::ReadSafe` / `Macht::WriteBytes` ([Macht.h:28,49](../dll/src/Macht.h)) | `Wirbel::SetMouseCursor` ([Wirbel.cpp:1548-1552](../dll/src/Wirbel.cpp)) | read-modify-write the single bitfield byte |
 | Stateful toggle export/pipe/mailbox | `UE5_SetDebugCamera` ([Frieren.cpp:724](../dll/src/Frieren.cpp)) + `set_debug_camera` + `CMD_SET_DEBUG_CAMERA` | — | template for the export/pipe/mailbox + UI badge |
-| Cooperative cancel / shutdown | `Cancel` ([Cancel.h](../dll/src/Cancel.h)) + `RequestShutdown()` | — | stop the re-assert worker on disconnect / shutdown |
+| Cooperative cancel / shutdown | `Tot` ([Tot.h](../dll/src/Tot.h)) *(renamed from `Cancel` by the Frieren-naming migration)* + `RequestShutdown()` | — | stop the re-assert worker on disconnect / shutdown |
 | Global hotkeys (persisted) | `WindowsGlobalHotkeyService` / `IGlobalHotkeyService` | Teleport cursor hotkey | toggle GodMode with the game focused |
 | Discovery front-end | `PropertyScoringTable`, Interesting Properties / Property Search panels | — | find game-specific bools when the universal flag isn't enough (§11) |
 

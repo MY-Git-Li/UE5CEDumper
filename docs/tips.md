@@ -280,7 +280,7 @@ revert it.
    speed = world × pawn** readout, so *Whole world* also slowing the player is never
    a surprise — for a slow world but a normal-speed player, set **Player = 1 ÷ World**
    (World 0.5× → Player 2×).
-3. On each row, drag the slider (**0 – 3×**) or hit a preset
+3. On each row, drag the slider (**Whole world 0 – 3×**, **Player pawn 0 – 10×**) or hit a preset
    (**Freeze / ¼× / ½× / 1× / 2×**) → **Apply**. `1×` = normal, `0.5×` = half speed,
    `0` = frozen. **Reset** restores that lever's natural value and snaps its slider
    back to 1× (the other row is untouched); **↻ Refresh both** re-reads both levers'

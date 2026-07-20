@@ -1,6 +1,6 @@
 # GodMode — Implementation Plan (v1)
 
-> Companion to **[godmode-spec.md](godmode-spec.md)** (the design contract).
+> Companion to **[godmode-spec.md](../godmode-spec.md)** (the design contract).
 > This is the step-by-step build plan: ordered phases, exact files/symbols, and
 > a build/verify gate after each phase. **Scope = GodMode only** (`bCanBeDamaged`),
 > **re-assert loop in v1**, **Path B (self-contained `Solitar`)** — per the
@@ -45,7 +45,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Github\UE5CEDumper\build
 
 ### 1a. `Solitar.h`
 
-- Namespace `Solitar`, header comment per [naming-convention.md](naming-convention.md).
+- Namespace `Solitar`, header comment per [naming-convention.md](../naming-convention.md).
 - `enum ProtectResult` (`PR_OK`/`PR_ERR_NOT_INIT`/`PR_ERR_NO_PAWN`/`PR_ERR_REFLECT`/`PR_ERR_WRITE`) — spec §5.1.
 - Public API: `int32_t SetGodMode(bool)`, `int32_t GetGodMode()`,
   `struct State { int8_t godmode; bool resolvable; }`, `int32_t GetState(State&)`,
