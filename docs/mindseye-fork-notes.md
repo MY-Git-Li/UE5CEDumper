@@ -26,6 +26,15 @@
 > If the PE hash differs from `0863E3B90C993000`, treat every constant in this document as
 > **unverified** until re-checked.
 
+> **Purpose and scope.** These are interoperability notes for a debugging/inspection tool, written
+> against a **legally purchased copy** and intended for **single-player / offline use only**. The
+> goal is to locate Unreal Engine's own runtime structures — `GUObjectArray`, `FNamePool`, `GWorld` —
+> in a build whose layout differs from stock UE, exactly as this project already does for ~33 other
+> titles. Nothing here reproduces or redistributes any part of the game: no binaries, no assets, no
+> keys, no reconstructed source. The recorded values are *facts about a binary's layout*, not its
+> content. The game's pak/IoStore container encryption is deliberately **out of scope and untouched**
+> — this tool only reads the memory of a process the user is already lawfully running.
+
 **Read this first if MindsEye stops working after a game update.** Everything here was recovered
 offline from the shipped binary with capstone + the PE `.pdata` table — **no Ghidra** (a 145 MB
 `.text` costs hours to auto-analyse for information this recovers in minutes). The scripts are
