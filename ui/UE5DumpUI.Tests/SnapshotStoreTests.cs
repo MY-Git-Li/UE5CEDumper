@@ -475,6 +475,14 @@ public class SnapshotStoreTests : IDisposable
         // Sidecars are cleaned up too — no orphaned -wal/-shm left behind.
         Assert.Empty(Directory.GetFiles(dbDir, "snapshots.*.db-wal"));
         Assert.Empty(Directory.GetFiles(dbDir, "snapshots.*.db-shm"));
+
+        // The store is still USABLE for the same game afterwards. OpenAsync memoises
+        // "schema already built" per DB path to keep concurrent first-opens from racing,
+        // and a whole-FILE wipe (as opposed to a row purge) must invalidate that memo —
+        // otherwise this re-open skips CREATE TABLE and dies on "no such table: snapshots".
+        _store.SetActiveGame("WIPEAAAA");
+        await SeedSnapshotAsync("after-wipe", 1, ct);
+        Assert.Single(await _store.ListSnapshotsAsync(ct));
     }
 
     [Fact]
@@ -985,5 +993,58 @@ public class SnapshotStoreTests : IDisposable
         // The pivot index for the deleted snapshots is gone too (no rows linger).
         Assert.Empty(await _store.ListPivotClassesAsync(a, ct));
         Assert.Empty(await _store.ListPivotClassesAsync(b, ct));
+    }
+
+    // Regression for the CI-only Capture_StreamsAllChunks flake: concurrent FIRST opens
+    // of the same brand-new DB used to race inside OpenAsync. SnapshotViewModel reaches
+    // this shape for real — SetEngineState ends with a fire-and-forget `_ = RefreshAsync()`
+    // (its own OpenAsync on a background thread) while the user can press Capture at once,
+    // whose CreateSnapshotAsync/BeginCaptureSessionAsync open the same file. Three distinct
+    // races lived in that window, all of which throw out of the capture BEFORE the first
+    // chunk fetch (the observed `LastGameOnly == null` shape):
+    //   1. `PRAGMA journal_mode=WAL` ran FIRST in the pragma batch — before busy_timeout
+    //      was set — so it hit the default 0 ms timeout and returned SQLITE_BUSY at once.
+    //   2. EnsureSchemaAsync read `user_version` then DROPped + re-CREATEd; two openers
+    //      both saw 0, so one could DROP the tables the other had just created.
+    //   3. AddColumnIfMissingAsync is read-then-ALTER: both see is_usable missing, both
+    //      ALTER, and the loser gets "duplicate column name".
+    // Fresh dir per iteration — the race only exists on the very first open of a file.
+    [Fact]
+    public async Task ConcurrentFirstOpens_OnFreshDb_DoNotRace()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        for (int iter = 0; iter < 12; iter++)
+        {
+            var dir = Path.Combine(_tempDir, $"race{iter}");
+            Directory.CreateDirectory(dir);
+            var store = new SnapshotStore(new MockPlatformService(dir));
+            store.SetActiveGame($"PE{iter:D4}");
+
+            // Every one of these drives an independent OpenAsync on the same new file.
+            var ops = new List<Task>
+            {
+                Task.Run(() => store.ListSnapshotsAsync(ct), ct),
+                Task.Run(() => store.ListSnapshotsAsync(ct), ct),
+                Task.Run(() => store.CreateSnapshotAsync(
+                    new SnapshotMeta { Label = "a", CapturedAt = "t", PeHash = "PE", GameSessionId = "S", UeVersion = 504, Scope = "NumericNoByte" }, ct), ct),
+                Task.Run(async () => { await using var s = await store.BeginCaptureSessionAsync(ct); }, ct),
+                Task.Run(() => store.GetUsageAsync(ct), ct),
+            };
+
+            // Report the real exception: a bare Assert on WhenAll says only "one or more errors".
+            try { await Task.WhenAll(ops); }
+            catch (Exception)
+            {
+                var failed = ops.Where(t => t.IsFaulted)
+                                .SelectMany(t => t.Exception!.InnerExceptions)
+                                .Select(e => $"{e.GetType().Name}: {e.Message}")
+                                .ToList();
+                Assert.Fail($"iteration {iter}: {failed.Count} concurrent first-open(s) threw:{Environment.NewLine}  " +
+                            string.Join(Environment.NewLine + "  ", failed));
+            }
+
+            // The schema is actually usable afterwards (not just "no exception").
+            Assert.Single(await store.ListSnapshotsAsync(ct));
+        }
     }
 }

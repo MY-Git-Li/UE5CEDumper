@@ -20,6 +20,45 @@ builds ≤696 in
 
 -----
 
+## 2026-07-22 — Snapshot DB: concurrent first-open could silently DROP a just-captured snapshot (build 2252; dev, UI-only)
+
+**Data-loss fix, found by chasing a CI-only test flake.** `SnapshotStore.OpenAsync` ran
+`EnsureSchemaAsync` on **every** open with no mutual exclusion. That method reads
+`PRAGMA user_version` and, when it reads low, `DROP`s `snapshots`/`objects`/`fields` before
+re-`CREATE`ing them. Two connections opening the same **brand-new** DB both read `0`, so the
+slower one could DROP the tables — and the committed rows — the faster one had just written.
+No exception is raised on that path: the capture simply disappears.
+
+Reachable in the shipping app, not just tests: `SnapshotViewModel.SetEngineState` ends with a
+fire-and-forget `_ = RefreshAsync()` (its own open, on a thread-pool thread) while the user can
+press Capture immediately, whose `CreateSnapshotAsync` + `BeginCaptureSessionAsync` open the same
+file. Local machines always won the race; a loaded CI runner interleaved.
+
+Three distinct races lived in that window:
+
+1. `PRAGMA journal_mode=WAL` was **first** in the pragma batch — ahead of `busy_timeout=5000` —
+   so the pragma that needs a brief exclusive lock ran under the default **0 ms** timeout and
+   returned `SQLITE_BUSY` on the spot. `busy_timeout` now goes first.
+2. The `user_version` read → DROP → CREATE sequence above (the data-loss one).
+3. `AddColumnIfMissingAsync` is read-then-`ALTER`; a tie throws `duplicate column name: is_usable`.
+
+**Fix:** schema init now runs **at most once per (DB path, process)** behind a per-path
+`SemaphoreSlim`, with a double-checked `s_schemaReady` memo; only the *first* open of a file pays
+the gate, so the pipelined capture's producer/consumer connections still open concurrently. The
+memo is invalidated in `DeleteAllSnapshotDatabasesAsync` — a whole-**file** wipe (as opposed to a
+row purge) would otherwise leave the memo describing a file that no longer exists, and the next
+open would skip `CREATE TABLE` and die on `no such table: snapshots`.
+
+Regression cover: `SnapshotStoreTests.ConcurrentFirstOpens_OnFreshDb_DoNotRace` (12 iterations,
+fresh dir each — reproduced the row loss on the first run before the fix) and a re-open assertion
+appended to `DeleteAllSnapshotDatabases_RemovesEveryGameFileFromDisk` (verified to fail when the
+memo invalidation is removed). The CI-only symptom was
+`SnapshotViewModelTests.Capture_StreamsAllChunks_PersistsWithCorrectCounts` failing at
+`Assert.True(dump.LastGameOnly)` → `null`; that assert and its two neighbours now carry `Diag()`
+too, since the prior `Diag()` sat 8 lines later and printed nothing. Tests 2545 → 2546.
+
+-----
+
 ## 2026-07-19 — MindsEye: GNames solved — obfuscated FNameEntry payloads decoded from the fork's own key table (build 2238; dev, DLL needs re-inject)
 
 **LIVE-VERIFIED on MindsEye game version 7.3.1 ONLY** (PE hash `0863E3B90C993000`; the exe carries no
