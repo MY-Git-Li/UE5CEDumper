@@ -78,6 +78,17 @@ public static class Constants
     // Number of Live-Walker bookmark slots.
     public const int BookmarkSlotCount = 8;
 
+    // Per-game Teleport coordinate library — teleport-coords.<module>.json under
+    // %LOCALAPPDATA%\UE5CEDumper. Keyed by the EXE MODULE NAME, not the PE hash:
+    // bookmarks store offsets and should die on a game patch, but a hand-curated
+    // coordinate list must survive one. See docs/teleport-coord-library-spec.md D1.
+    public const string CoordLibraryFilePrefix = "teleport-coords";
+
+    // Soft warning threshold for a CE-Lua export (CE's AA-script EDITOR gets
+    // sluggish long before the pipe does: 4000 entries is ~480 KB, ~4.6% of the
+    // verified 10 MiB cap). Not a hard cap.
+    public const int CoordLibraryExportWarnCount = 2000;
+
     // Experimental Snapshot store — per-game SQLite DB under
     // %LOCALAPPDATA%\UE5CEDumper, named snapshots.<pe_hash>.db so each game's
     // snapshots stay isolated (no cross-game mixing / growth / corruption).

@@ -1160,6 +1160,33 @@
     <sys:String x:Key="str.Tip.TP.CoordFill">Read the current pose and fill the X/Y/Z (and Pitch/Yaw/Roll) boxes with it — a quick way to nudge from where you are.</sys:String>
     <sys:String x:Key="str.Tip.TP.CoordSetRot">When ticked, also restore the Pitch/Yaw/Roll below after the jump. Leave off to keep your current facing.</sys:String>
 
+    <!-- Coordinate Library (P1) — docs/teleport-coord-library-spec.md -->
+    <sys:String x:Key="str.TP.LibHeader">Coordinate Library</sys:String>
+    <sys:String x:Key="str.TP.LibHint">An unlimited, labelled list of positions saved per game. Separate from the 3 marker slots above: those live in the DLL and are hotkey-driven, this one is a curated list that persists across game patches.</sys:String>
+    <sys:String x:Key="str.TP.LibSaveCurrent">＋ Save current pos</sys:String>
+    <sys:String x:Key="str.TP.LibAddFields">＋ From fields</sys:String>
+    <sys:String x:Key="str.TP.LibDuplicate">Duplicate</sys:String>
+    <sys:String x:Key="str.TP.LibDelete">Delete</sys:String>
+    <sys:String x:Key="str.TP.LibClear">Clear all</sys:String>
+    <sys:String x:Key="str.TP.LibFilter">Filter:</sys:String>
+    <sys:String x:Key="str.TP.LibFilterPlaceholder">space = AND (label, group, map)</sys:String>
+    <sys:String x:Key="str.TP.LibGroup">Group:</sys:String>
+    <sys:String x:Key="str.TP.LibCurrentMapOnly">Current map only</sys:String>
+    <sys:String x:Key="str.TP.LibGo">Teleport</sys:String>
+    <sys:String x:Key="str.TP.LibForceGo">Force teleport</sys:String>
+    <sys:String x:Key="str.TP.LibToFields">→ Fields</sys:String>
+    <sys:String x:Key="str.TP.LibEditLabel">Label:</sys:String>
+    <sys:String x:Key="str.TP.LibEditGroup">Group:</sys:String>
+    <sys:String x:Key="str.TP.LibApplyEdit">Apply</sys:String>
+    <sys:String x:Key="str.TP.LibUpdateCoords">Update coords from current</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibSaveCurrent">Read the live pose and add it to the library, labelled after the current map.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibAddFields">Add whatever is currently typed in the "Teleport to Coordinates" boxes above as a new library entry.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibGo">Teleport to the selected entry. Refused when the entry was saved on a different map — the tool cannot LOAD another map, it can only move you within the one the game has open.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibForceGo">Teleport ignoring the map check. Only useful if the map name changed but the level is the same; jumping to another map's coordinates puts you outside the world.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibCurrentMapOnly">Hide entries saved on other maps. On by default — coordinates from different maps are often numerically close, so mixing them is how you end up under the floor.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibUpdateCoords">Overwrite the selected entry's coordinates (and map) with the live pose, keeping its label and group.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibClear">Delete every entry for this game, and its file. There is no undo.</sys:String>
+
     <sys:String x:Key="str.TP.CursorForceHeader">Force Mouse Cursor</sys:String>
     <sys:String x:Key="str.TP.CursorForceHint">Force the OS mouse cursor visible or hidden by writing the PlayerController's bShowMouseCursor. Handy when a game hides the cursor but you want Cursor Teleport. One-shot: a game that re-sets the flag every frame may revert it, and a captured input mode can still hide the cursor.</sys:String>
     <sys:String x:Key="str.TP.CursorStateLabel">State:</sys:String>

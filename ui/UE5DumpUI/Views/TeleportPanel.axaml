@@ -506,6 +506,133 @@
         </StackPanel>
       </Border>
 
+      <!-- ── Coordinate Library ──
+           Collapsed by default. The quick-jump menu takes a card's label from the
+           FIRST SemiBold TextBlock descendant of a Border that is a direct child of
+           ContentRoot, so the header TextBlock lives in the Expander's Header (which
+           is still the first SemiBold descendant of this Border).
+           The DataGrid MUST carry a MaxHeight: ContentRoot is a vertically unbounded
+           ScrollViewer, so an unconstrained grid would not virtualize and 4000 rows
+           would materialize at once. -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10">
+        <Expander IsExpanded="{Binding CoordLibraryExpanded, Mode=TwoWay}"
+                  Background="Transparent" BorderThickness="0" Padding="0">
+          <Expander.Header>
+            <TextBlock Text="{Binding CoordLibraryHeader}"
+                       Foreground="#DDDDDD" FontWeight="SemiBold"/>
+          </Expander.Header>
+          <StackPanel Spacing="8" Margin="0,8,0,0">
+            <TextBlock Text="{StaticResource str.TP.LibHint}"
+                       Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
+
+            <!-- Toolbar -->
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Button Content="{StaticResource str.TP.LibSaveCurrent}"
+                      Command="{Binding SaveCurrentPosToLibraryCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibSaveCurrent}"
+                      IsEnabled="{Binding CanOperate}" Classes="accent" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibAddFields}"
+                      Command="{Binding AddCoordFromFieldsCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibAddFields}" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibDuplicate}"
+                      Command="{Binding DuplicateCoordCommand}"
+                      IsEnabled="{Binding HasSelectedCoord}" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibDelete}"
+                      Command="{Binding DeleteCoordCommand}"
+                      IsEnabled="{Binding HasSelectedCoord}" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibClear}"
+                      Command="{Binding ClearCoordLibraryCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibClear}" Padding="10,4"/>
+            </StackPanel>
+
+            <!-- Filter row: space = AND + per-keyword memory (project MUST-rule) -->
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="{StaticResource str.TP.LibFilter}" Foreground="#999999"
+                         VerticalAlignment="Center"/>
+              <AutoCompleteBox Width="240"
+                               Text="{Binding CoordFilterText, Mode=TwoWay}"
+                               ItemsSource="{Binding CoordFilterHistory}"
+                               FilterMode="Contains"
+                               PlaceholderText="{StaticResource str.TP.LibFilterPlaceholder}"/>
+              <TextBlock Text="{StaticResource str.TP.LibGroup}" Foreground="#999999"
+                         VerticalAlignment="Center" Margin="6,0,0,0"/>
+              <ComboBox Width="150" ItemsSource="{Binding CoordGroups}"
+                        SelectedItem="{Binding CoordGroupFilter, Mode=TwoWay}"/>
+              <CheckBox Content="{StaticResource str.TP.LibCurrentMapOnly}"
+                        IsChecked="{Binding CoordCurrentMapOnly}"
+                        ToolTip.Tip="{StaticResource str.Tip.TP.LibCurrentMapOnly}"
+                        Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"
+                        Margin="6,0,0,0"/>
+            </StackPanel>
+
+            <DataGrid ItemsSource="{Binding CoordResults}"
+                      SelectedItem="{Binding SelectedCoord, Mode=TwoWay}"
+                      MaxHeight="260"
+                      IsReadOnly="True" CanUserResizeColumns="True"
+                      GridLinesVisibility="Horizontal" BorderThickness="0"
+                      Background="#1E1E1E" Foreground="#D4D4D4"
+                      FontFamily="Consolas, Menlo, monospace" FontSize="12">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Label" Binding="{Binding Label}"
+                                    Width="180" MinWidth="90" SortMemberPath="Label"/>
+                <DataGridTextColumn Header="Group" Binding="{Binding Group}"
+                                    Width="110" MinWidth="60" SortMemberPath="Group"/>
+                <DataGridTextColumn Header="Map" Binding="{Binding Map}"
+                                    Width="130" MinWidth="60" SortMemberPath="Map"/>
+                <DataGridTextColumn Header="X" Binding="{Binding XText}"
+                                    Width="90" SortMemberPath="Entry.X"/>
+                <DataGridTextColumn Header="Y" Binding="{Binding YText}"
+                                    Width="90" SortMemberPath="Entry.Y"/>
+                <DataGridTextColumn Header="Z" Binding="{Binding ZText}"
+                                    Width="80" SortMemberPath="Entry.Z"/>
+                <DataGridTextColumn Header="Yaw" Binding="{Binding YawText}"
+                                    Width="70" SortMemberPath="Entry.Yaw"/>
+                <DataGridTextColumn Header="Dist" Binding="{Binding DistanceText}"
+                                    Width="80" SortMemberPath="Distance"/>
+              </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Selected-entry editor + commit row -->
+            <StackPanel Orientation="Horizontal" Spacing="6"
+                        IsEnabled="{Binding HasSelectedCoord}">
+              <TextBlock Text="{StaticResource str.TP.LibEditLabel}" Foreground="#999999"
+                         VerticalAlignment="Center"/>
+              <TextBox Text="{Binding EditCoordLabel, Mode=TwoWay}" Width="180"/>
+              <TextBlock Text="{StaticResource str.TP.LibEditGroup}" Foreground="#999999"
+                         VerticalAlignment="Center" Margin="6,0,0,0"/>
+              <TextBox Text="{Binding EditCoordGroup, Mode=TwoWay}" Width="120"/>
+              <Button Content="{StaticResource str.TP.LibApplyEdit}"
+                      Command="{Binding ApplyCoordEditCommand}" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibUpdateCoords}"
+                      Command="{Binding UpdateCoordFromCurrentCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibUpdateCoords}"
+                      IsEnabled="{Binding CanOperate}" Padding="10,4"/>
+            </StackPanel>
+
+            <TextBlock Text="{Binding SelectedCoordSummary}" Foreground="#4EC9B0"
+                       FontSize="12" TextWrapping="Wrap"/>
+
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Button Content="{StaticResource str.TP.LibGo}"
+                      Command="{Binding TeleportToSelectedCoordCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibGo}"
+                      IsEnabled="{Binding CanOperate}" Classes="accent" Padding="14,4"/>
+              <Button Content="{StaticResource str.TP.LibForceGo}"
+                      Command="{Binding ForceTeleportToSelectedCoordCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibForceGo}"
+                      IsEnabled="{Binding CanOperate}" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibToFields}"
+                      Command="{Binding SendCoordToFieldsCommand}"
+                      IsEnabled="{Binding HasSelectedCoord}" Padding="10,4"/>
+            </StackPanel>
+
+            <TextBlock Text="{Binding CoordStatus}" Foreground="#CCCCCC"
+                       FontSize="12" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Expander>
+      </Border>
+
       <!-- ── Debug Camera (free-look) ── -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
               CornerRadius="4" Padding="10">

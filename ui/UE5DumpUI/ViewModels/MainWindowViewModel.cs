@@ -374,7 +374,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         IExperimentalGate? experimentalGate = null,
         ISnapshotStore? snapshotStore = null,
         IGlobalHotkeyService? globalHotkeys = null,
-        BookmarkStore? bookmarks = null)
+        BookmarkStore? bookmarks = null,
+        CoordinateLibraryStore? coordLibrary = null)
     {
         _pipeClient = pipeClient;
         _dump = dump;
@@ -411,7 +412,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         // signal is opt-in and no-ops (with a note) when it's null.
         DetectStats = new DetectStatsViewModel(dump, log, snapshotStore);
         Console = new ConsoleViewModel(dump, log);
-        Teleport = new TeleportViewModel(dump, log, platform, aobMaker, globalHotkeys, experimentalGate);
+        Teleport = new TeleportViewModel(dump, log, platform, aobMaker, globalHotkeys, experimentalGate, coordLibrary);
         if (snapshotStore != null)
         {
             Snapshot = new SnapshotViewModel(dump, snapshotStore, log, experimentalGate, platform);
@@ -621,6 +622,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 Spc?.SetEngineState(state);
                 Pivot?.SetEngineState(state);
                 Teleport.SetEngineState(state);
+                // Load this game's coordinate library. Keyed by MODULE NAME (not PE
+                // hash) so it survives a game patch. Idempotent -- clears in-memory
+                // first -- so calling it from both fan-out sites is safe.
+                Teleport.LoadCoordLibraryForGame(state.ModuleName);
 
                 _ = LiveWalker.CheckAobMakerAsync();
                 _ = Teleport.CheckAobMakerAsync();
@@ -2516,6 +2521,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         DetectStats.IsGWorldAvailable = state.HasGWorld;
         Teleport.SetConnected(true);   // refresh markers once the DLL is scanned
         Teleport.SetEngineState(state);
+        Teleport.LoadCoordLibraryForGame(state.ModuleName);
         Snapshot?.SetEngineState(state);
         Spc?.SetEngineState(state);
         Pivot?.SetEngineState(state);
