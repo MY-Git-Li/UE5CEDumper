@@ -20,6 +20,50 @@ builds ≤696 in
 
 -----
 
+## 2026-07-22 — CE-Lua escaping: closing long brackets of any level could break the AOBMaker push (build 2256; dev, UI-only)
+
+**Three latent bugs in the script emitters, all one root cause.** AOBMaker's CE plugin wraps
+the **entire** submitted script in a Lua long bracket at a **hardcoded** level —
+`mr.Script = [==[ … ]==]` (`AOBMaker/plugins/CEPlugin/src/pipe_server.cpp:857`) — and does
+**not** escape the script body (only `description`/`group` go through `EscapeLuaString`). Its
+`InjectTableFile` sibling is safe because it calls `PickLongBracketLevel` to pick a
+non-colliding level; `HandleCreateAAScript` does not. So the byte sequence `]==]` must not
+appear **anywhere** in an emitted script, in **any** Lua context — including inside a quoted
+string, where it is harmless to Lua itself.
+
+1. **`BakedScriptGenerator.EscapeLuaComment`** neutralised `]]` only. `]=]`, `]==]`, `]===]`…
+   passed straight through. Now scans for `]` + `=`* + `]` and pads after the leading `]`,
+   breaking a closing bracket of any level.
+2. **Pre-existing, found while fixing #1:** a trailing `]` in the escaped text fused with
+   `MarkUnparsed`'s own `]]` into `]]]`, closing the comment **one character early** and
+   leaving `] 0` as dangling syntax — `x]` produced `--[[unparsed:x]]] 0`. The old
+   `abc]]def` test never caught it because that input ends in a letter. Now padded.
+3. **Found during the audit — `BakedScriptGenerator.EscapeLua`** had the same hole and is
+   equally user-reachable: the string-param path (`:467`) emits the invoke param dialog's
+   free text as a Lua literal. Padding would corrupt the value, so the leading `]` becomes
+   the decimal escape `\093` — same runtime string, different source bytes. 3 digits because
+   `\ddd` greedily takes three (a following digit would fuse into `\931` > 255); by
+   construction the next char is always `=` or `]`, so that is belt-and-braces.
+   `FreezeScriptGenerator.EscapeLua` got the same case to keep its documented
+   *"mirrors BakedScriptGenerator's escape rules"* claim true.
+
+Reachability: `MarkUnparsed` (`InvokeParamDialog` → unparseable numeric/pointer/bool param)
+and the string-param literal are the **only two** places arbitrary user-typed text enters a
+generated script. Both are now covered. Deliberately **not** changed —
+`InvokeScriptGenerator.EscapeLua` and `StandaloneTrainerScriptGenerator` (which interpolates
+into Lua literals with *no* escaping at all): engine/const-derived inputs today, documented in
+`todo.md` to revisit if they ever take free text.
+
+**Verified 2026-07-22: nothing under `ui/` or `scripts/` emitted `]==]`**, so all three were
+latent, never active. 8 new tests (adversarial long-bracket inputs at both entry points, plus
+a regression guard that ordinary values escape unchanged); 2562 green.
+
+Surfaced by the Teleport Coordinate Library evaluation — see
+[teleport-coord-library-spec.md](teleport-coord-library-spec.md) §4, which turns the same
+finding into that feature's character-blocking rule.
+
+-----
+
 ## 2026-07-22 — Snapshot DB: concurrent first-open could silently DROP a just-captured snapshot (build 2252; dev, UI-only)
 
 **Data-loss fix, found by chasing a CI-only test flake.** `SnapshotStore.OpenAsync` ran

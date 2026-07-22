@@ -380,6 +380,88 @@ Open follow-ups (low priority):
 
 -----
 
+## Teleport Coordinate Library — evaluated (2026-07-22), not yet built
+
+Full design contract: **[teleport-coord-library-spec.md](teleport-coord-library-spec.md)**.
+Multi-agent investigated + adversarially verified against build 2252. User ask = an
+**unlimited, labelled+grouped, filterable coordinate list** (the 3 DLL marker slots and
+the one-shot "TP to coords" box don't cover a walkthrough author's thousands of chest
+coords across many maps), with pick→**confirm**→teleport, a collapsed-by-default card,
+CE-Lua export in **needs-DLL** and **no-DLL** flavours, and **copy-paste re-import** of a
+previously generated AA script. **Verdict: feasible, and the core needs ZERO DLL/pipe
+change** — `teleport_recall_marker` with x/y/z (`DumpService.cs:3107`) and mailbox
+`CMD_TELEPORT` op 13 (`Mimic.h:158`) already exist, so P1 is pure C#/AXAML. Explicitly
+**out of scope by user decision**: whether a coordinate survives a game patch.
+
+Decisions locked in the spec (§3): per-game file keyed by **exe module name, not PE hash**
+(a patch must not delete a hand-curated 4K list); **Map is a first-class field** and the
+default filter, because explicit-coord TP does **no** map check and the tool *cannot* send
+you to another map; dataset **embedded in the AA script** (4K entries ≈ 400 KB vs a
+verified **10 MiB** cap — the earlier "JSON escaping halves it" worry was measured at
+**+2.3-4.6 %** and refuted; the real constraint is the plugin's **5 s** read deadline);
+wire format = a fence-delimited **Lua table constructor**, one entry per line, so import is
+one regex per line and we never eval Lua.
+
+- **P1 — model + store + collapsible card + CRUD + Save-current-pos + Teleport-selected
+  (map guard) + filter** — Effort: **M** · Risk: low. UI-only; delivers R1-R4 (the bulk of
+  the value) on its own. Store = structural `BookmarkStore` clone with three deliberate
+  deviations: module-name key, **`DefaultIgnoreCondition` MUST NOT be `WhenWritingDefault`**
+  (a legitimately-saved `0.0` coordinate would be dropped and reload as 0 by accident), and
+  keep one `.bak` (hand-curated data; a crash-on-write losing the list is the worst failure
+  mode here). ⚠ Two implementation traps: `TeleportPanel` has **no DataGrid today** and its
+  `ContentRoot` is a vertically-unbounded `ScrollViewer` → **a DataGrid there will not
+  virtualize**, so the grid needs an explicit `MaxHeight` (`LiveWalkerPanel.axaml:805`
+  precedent); and the tab's right-click quick-jump menu takes the card's label from the
+  **first SemiBold TextBlock descendant** of a `Border` that is a **direct** child of
+  `ContentRoot` — verify that still resolves when the header lives in an `Expander.Header`.
+  Bound by two MUST-rules: keyword box = space-AND (`ObjectTreeFilter.MatchesAllTerms`) +
+  `KeywordSearchMemory` (`Schedule`, not `Commit` — purely client-side), and English-only
+  `str.TP.*` strings. *Parent: this eval.*
+
+- **P2 — Lua export, DLL flavour (generic picker form + embedded dataset + AOBMaker push)** —
+  Effort: **S** · Risk: low-med. Reference UI = `CrimsonDesert.CT` CheatEntry 357 ("open item
+  ID query GUI"), which proves a **6 508-entry × 3-list / 714 KB** dataset works in CE. Build
+  **only** from the verified control set — `createForm / createPanel / createLabel / createEdit /
+  createRadioGroup / createButton / createListView`; **`createListBox` and `createComboBox`
+  appear nowhere in this repo and are NOT verified** (project rule: never invent a CE Lua API).
+  Two RadioGroups: **Group** (`All` + top **8** by count; overflow stays reachable via `All`
+  + filter) and **Map scope** (`Current map` / `All maps`, read from `GET_POSE`'s map name at
+  `mailbox + 0x358`). Panel creation order is load-bearing (`alClient` control **last**).
+  Confirm-before-TP = two buttons (`Teleport` map-guarded / `Force teleport`) since no CE
+  yes/no dialog API is verified. Interactive form → hygiene close goes in `frm.OnClose` and
+  **every error path leaves the window open**. *Parent: this eval.*
+
+- **P3 — re-import a pasted AA script** — Effort: **S-M** · Risk: low. Locate the
+  `UE5CD-COORDS-BEGIN v1` fence, one regex per line, refuse unknown versions. ⚠ Must decode
+  **five** XML entities when the paste is the clipboard `.CT` form: `CheatTableBuilder.EscapeXml`
+  escapes 5 (`& < > " '`) but `CeXmlExportService.ExtractAssemblerScript` un-escapes only 3 —
+  a real, currently-latent asymmetry. Detect the XML form deterministically (`<?xml` /
+  `<AssemblerScript>`) so a raw-script paste isn't mangled. *Parent: this eval.*
+
+- **P4 — no-DLL flavour via `StandaloneTrainerScriptGenerator`** — Effort: **S** · Risk: med.
+  Raw write to `RootComponent.RelativeLocation` with baked offsets; rotation via the
+  already-baked `ctrlRotOff`. **No map name available** → the Map RadioGroup is omitted and
+  the guard degrades to a label. Carries the existing `AppendTpWeakNote` caveat (coords change
+  but the character may not visibly move). *Parent: this eval.*
+
+- **Character-blocking rule (applies to P1, needed before P2)** — Effort: **S** · Risk: low.
+  Block at UI input: **NUL** (the plugin compiles with `luaL_dostring` → `strlen` silently
+  truncates the chunk), **CR/LF** (one-entry-per-line format), other C0 controls (illegal in
+  XML 1.0, `EscapeXml` passes them through), and the literal **`]==]`** — `CreateAAScript`
+  wraps the whole script in `[==[ … ]==]` at a **hardcoded level 2** (`pipe_server.cpp:857`),
+  unlike `InjectTableFile` which picks a safe level. Everything else is allowed and handled by
+  escaping — **including CJK** (the JSON encoder is `UnsafeRelaxedJsonEscaping` precisely
+  because CE's Lua parser can't decode `\uXXXX`; the repo's ASCII-only rule covers generated
+  *comments*, not user data). *Parent: this eval.*
+
+- **Unrelated finding, worth doing anyway** — Effort: **S** · Risk: low.
+  `AobMakerBridgeService.WriteMessageAsync` (`:495-506`) has **no send-side size check**, and
+  the plugin's oversize path (`pipe_server.cpp:61`) returns *without writing a response*, so an
+  oversized push surfaces as a confusing "no response"/timeout instead of a size error. Add a
+  client-side pre-flight check against the 10 MiB cap. *Parent: this eval (§9.6).*
+
+-----
+
 ## Teleport — follow-ups (deferred / future research)
 
 Teleport shipped (Wirbel, build 1027-1043). Works where the possessed pawn is
