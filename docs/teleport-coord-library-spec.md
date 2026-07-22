@@ -1,11 +1,11 @@
 # Teleport Coordinate Library — design spec
 
-> **Status: EVALUATED, NOT BUILT** (2026-07-22, against build 2252).
-> Multi-agent investigated + adversarially verified. Open work is tracked in
-> [todo.md](todo.md) under *"Teleport Coordinate Library"*.
+> **Status: EVALUATED, NOT BUILT** (2026-07-22, against build 2256).
+> Multi-agent investigated + adversarially verified across two rounds. Open work
+> is tracked in [todo.md](todo.md) under *"Teleport Coordinate Library"*.
 > Parent contract: [teleport-spec.md](teleport-spec.md) (Wirbel markers / POV /
-> coord TP). This document only covers the **UI-side unlimited coordinate list**
-> and its CE-Lua export/import.
+> coord TP). This document covers the **UI-side unlimited coordinate list** and
+> its CE-Lua + CSV export/import.
 
 -----
 
@@ -21,21 +21,20 @@ is not enough for the real use case:
 > thousands of labelled positions, group them, filter them, pick one, confirm, and
 > only then teleport.
 
-Requirements, verbatim from the request:
-
 | # | Requirement |
 |---|---|
-| R1 | Remember effectively unlimited coordinate sets (~4K is past the human limit) |
+| R1 | Effectively unlimited coordinate sets (~4K is past the human limit) |
 | R2 | Per-entry **Label** + **Group**; editable in the UI; sorted by group+label in Lua |
 | R3 | Pick an entry, then **confirm**, then teleport (never one-click-fires) |
-| R4 | UI: *Save current pos* / *Edit pos list*, a **filter** to narrow the edit scope, in a **collapsible card, collapsed by default** |
+| R4 | UI: *Save current pos* / *Edit pos list*, a **filter**, in a **collapsible card, collapsed by default** |
 | R5 | Export to Lua: a **needs-proxy-DLL** flavour and a **no-DLL** flavour |
-| R6 | Export the editor's coordinate data as an **AA script via AOBMaker**; the Lua picks an entry and teleports; the Lua has its own filter |
-| R7 | **Re-import** a previously generated AA script (copy-paste the whole thing) so the user can round-trip: export → hand-edit → import → edit in UI → export |
+| R6 | Export the editor's data as an **AA script via AOBMaker**; the Lua picks an entry and teleports; the Lua has its own filter |
+| R7 | **Re-import** a previously generated AA script (copy-paste the whole thing) |
+| R8 | **CSV export** (format documented with samples) and **CSV import** |
 
-Explicitly **out of scope** (user decision, 2026-07-22): whether a saved coordinate
-is still valid after the game is patched. The tool stores and replays coordinates;
-it makes no claim about their continued validity.
+Explicitly **out of scope** (user decision): whether a saved coordinate is still
+valid after the game is patched. The tool stores and replays coordinates; it makes
+no claim about their continued validity.
 
 -----
 
@@ -43,23 +42,17 @@ it makes no claim about their continued validity.
 
 **Feasible. The core needs ZERO DLL / pipe changes.**
 
-The explicit-coordinate teleport already exists on both transports:
-
 * **Pipe** — `teleport_recall_marker` with `x/y/z` (+ optional `pitch/yaw/roll`)
   → [`DumpService.TeleportRecallExplicitAsync`](../ui/UE5DumpUI/Services/DumpService.cs) (`:3107`).
-  Note the command name is shared with slot recall; the presence of `x/y/z`
-  selects the explicit path.
-* **CE mailbox** — `CMD_TELEPORT = 8`, `op 13 = TP_OP_EXPLICIT`
-  (`dll/src/Mimic.h:158-160`), already emitted by
-  [`TeleportScriptGenerator`](../ui/UE5DumpUI/Services/TeleportScriptGenerator.cs)
-  `Action.Explicit`.
+* **CE mailbox** — `CMD_TELEPORT = 8`, `op 13 = TP_OP_EXPLICIT` (`dll/src/Mimic.h:158-160`),
+  already emitted by [`TeleportScriptGenerator`](../ui/UE5DumpUI/Services/TeleportScriptGenerator.cs).
 
 So the feature is **a persisted UI-side list plus a new caller of an existing
 primitive**. P1 is pure C#/AXAML.
 
 -----
 
-## 3. The five load-bearing decisions
+## 3. The load-bearing decisions
 
 ### D1 — Per-game file key: **exe module name, NOT PE hash**
 
@@ -67,165 +60,362 @@ primitive**. P1 is pure C#/AXAML.
 which changes on **every game patch**. Bookmarks *should* die on a patch — they
 store offsets. A hand-curated 4 000-entry chest list must **not**.
 
-**Decision:** key the file by a sanitised `EngineState.ModuleName`
-(`ui/UE5DumpUI/Models/EngineState.cs:33`, e.g. `MyGame-Win64-Shipping.exe`):
+Key the file by a sanitised `EngineState.ModuleName` (`EngineState.cs:33`):
 
 ```
 %LOCALAPPDATA%\UE5CEDumper\teleport-coords.{sanitizedModuleName}.json
 ```
 
-Per §1 the tool makes no validity claim after a patch — this decision is only
-about **not losing the user's data**. Provide an *"Import from file…"* action for
-the renamed-exe case.
+Per §1 the tool makes no validity claim after a patch — this is only about **not
+losing the user's data**. Provide *"Import from file…"* for the renamed-exe case.
 
 ### D2 — `Map` is a first-class field
 
-`teleport_get_pose` already returns the `UWorld` name
-(`TeleportPose.Map`), and the CE mailbox exposes it too: the `GET_POSE`
-output block puts a null-terminated map name at `paramsData[48..175]`
-(`dll/src/Mimic.h:42-45`) — i.e. `mailbox + 0x358` — so **both** the app and the
-generated Lua can know the current map.
+`teleport_get_pose` returns the `UWorld` name (`TeleportPose.Map`), and the CE
+mailbox exposes it too: the `GET_POSE` output block puts a null-terminated map
+name at `paramsData[48..175]` (`Mimic.h:42-45`) — i.e. `mailbox + 0x358`.
 
 The explicit-coordinate teleport path performs **no map check** (only slot recall
 returns `-7 MapMismatch`). Therefore:
 
 * Capture `Map` at save time, store it, show it as a column.
-* Default the list to **current map only**; entries from other maps are visibly
-  flagged and require an explicit **Force** action.
-* Be honest in the UI: **the tool cannot send you to another map.** An entry
-  becomes usable only once the game itself has loaded that map. Cross-map safety
-  is achieved by *filtering*, not by teleporting.
+* Default the list to **current map only**; other-map entries are flagged and
+  require an explicit **Force** action.
+* Compare map names **`OrdinalIgnoreCase`**, defined once. CSV import makes `Map`
+  user-authored whether we like it or not (`map01` vs `Map01`); an ordinal
+  comparison would flag every imported row cross-map and force 4 000 Force clicks.
+* Be honest in the UI: **the tool cannot send you to another map.** Cross-map
+  safety is achieved by *filtering*, not by teleporting.
 
-### D3 — Data channel: embed in the AA script (with a Table File escape hatch)
+### D3 — Every entry carries a `uid`
 
-Verified limits on the AOBMaker `CreateAAScript` path:
+An opaque string generated on Add, preserved by **all four** codecs (JSON, Lua,
+CSV, and both importers). Without it, merge-import has to fall back to coordinate
+equality — and Excel will have already rewritten the text, so nothing matches and
+a 4 000-row merge produces 8 000 rows.
 
-| Limit | Value | Source |
-|---|---|---|
-| Max JSON message | **10 MiB** hard reject | `AOBMaker/plugins/CEPlugin/src/pipe_server.cpp:61`; `PipeProtocol.cs:69`; mirrored `AobMakerBridgeService.cs:20` |
-| JSON escape expansion | **+2.3 % … +4.6 %** measured over our shipped scripts | `UnsafeRelaxedJsonEscaping` (only `\n` expands) — `AobMakerMessage.cs:114-135` |
-| Server read deadline | **5 000 ms total** for prefix + payload, 10 ms sleep per stall | `pipe_server.cpp:30,55,78` |
-| Our response timeout | **5 000 ms** (`CreateAAScript`) vs **15 000 ms** (`InjectTableFile`) | `AobMakerBridgeService.cs:19,35` |
-| `MemoryRecord.Script` itself | no size validation (only non-empty) | `pipe_server.cpp:784-791,857` |
+**It must NOT be called `id`.** AOBMaker's `CtIdRenumberService` classifies a
+script as an "ID-check script" purely by `RxIdField = ((?<![A-Za-z0-9_])id\s*=\s*)(\d+)`
+matching (`CtIdRenumberService.cs:216-224`), then rewrites those literals. A user
+who saves the CE table and runs *renumber CT IDs* would get every coord `id = N`
+silently rewritten. `uid` is safe — the `(?<![A-Za-z0-9_])` lookbehind is blocked
+by the leading `u`. **Add a unit test asserting the generated script contains no
+`id = <digits>`.**
 
-**4 000 entries ≈ 400 KB — roughly 4 % of the hard cap.** An earlier worry that
-JSON escaping "halves" the budget was measured and **refuted**. The binding
-constraint is the **5 s timeout**, not the 10 MiB cap, and 400 KB is far from it.
+Merge semantics: `uid` first → `(Label, Group, Map)` case-insensitive fallback →
+else append. Three outcomes (matched / ambiguous / new), mirroring AOBMaker's
+`CtRecordIndex` resolver.
 
-Real-world corroboration: `CrimsonDesert.CT` carries **6 508 entries × 3 lists =
-714 KB** of list data inside one .CT and CE handles it.
+### D4 — One canonical precision: **round at capture (3 dp), format shortest-round-trippable**
 
-**Decision:** embed the dataset in the AA script (R7 requires a self-contained,
-paste-able blob). Keep two escape hatches:
+Two reviewers reached opposite conclusions here; the synthesis satisfies both.
 
-* **Soft warn above ~2 000 entries** — for CE's AA-script *editor* UX, not for the
-  wire. No hard cap.
-* If a genuinely huge dataset ever appears, the **CE Table File** channel already
-  exists and is already used by us for helper Lua
-  (`IAobMakerBridge.InjectTableFileAsync`; plugin handler `pipe_server.cpp:1956`).
-  It picks a safe long-bracket level automatically and gets 15 s. Not needed for v1.
+* Coordinates are `double` end-to-end. A UE4 `float` widened to double is the
+  normal case: `67162.3984375`.
+* Every existing formatter in the teleport path is **lossy** — `"0.0###"`
+  (`TeleportScriptGenerator.cs:337`, duplicated in `MovementScriptGenerator.cs:255`
+  and `TimeDilationScriptGenerator.cs:172`) and `"0.000"` (`TeleportViewModel.cs:1246`).
+  Both wire formats are *also round-trip sources*, so a lossy format degrades the
+  library on every export→import cycle.
+* Bit-exact `"R"` alone is not the answer either: on an unrounded double it emits
+  `67162.39800000001`, the author "cleans" it, and a 4 000-row diff becomes noise.
 
-### D4 — Wire format: a Lua table constructor, one entry per line, fence-delimited
+**Round to 3 decimals at CAPTURE time, store the rounded double, then always
+format with `"R"` / `CultureInfo.InvariantCulture`.** Verified: the stored value is
+then the nearest double to a 3-decimal literal, so `"R"` emits exactly
+`67162.398` — clean text *and* bit-identical round-trip, idempotent on the second
+cycle. 0.001 uu is 10 µm; nothing in the teleport path is sensitive to it.
 
-Not a `--[[ ]]` comment block — a **real Lua table**, so the script needs no
-runtime parser and the format is directly hand-editable:
+| raw (UE float→double) | stored (round 3dp) | emitted `"R"` | reparse == stored |
+|---|---|---|---|
+| `67162.3984375` | `67162.398` | `67162.398` | ✅ |
+| `-20380.642578125` | `-20380.643` | `-20380.643` | ✅ |
+| `35.79132080078125` | `35.791` | `35.791` | ✅ |
+| `1.4210855e-14` (rotator noise) | `0.0` | `0.0` | ✅ |
 
-```lua
--- UE5CD-COORDS-BEGIN v1
-local COORDS = {
-{'Mountain','Fields','Map01',67162.398,-20380.643,35.791,347.71,31.98,0},
-{'Chest 1','Chest','Map01',87668.672,-24858.674,341.376,335.01,26.16,0},
-{'Boss','','Map02',89828.133,-15534.243,850.328,346.88,0.93,0},
-}
--- UE5CD-COORDS-END
-```
-
-Field order is fixed: `label, group, map, X, Y, Z, Pitch, Yaw, Roll`.
-Group may be empty (real-world data is ragged — the request's own sample has a row
-with no group). Numbers are always `CultureInfo.InvariantCulture`.
-
-**Import (R7)** = paste the entire AA script; we locate the fence and apply one
-regex per line. **We never evaluate or parse arbitrary Lua.**
-
-Two importer rules that fall out of verified code:
-
-1. **XML entity handling.** `CheatTableBuilder.EscapeXml` escapes five entities
-   (`& < > " '`) but `CeXmlExportService.ExtractAssemblerScript` un-escapes only
-   three (`&lt; &gt; &amp;`) — a real, currently-latent asymmetry. If the pasted
-   text is the **clipboard .CT XML fallback**, the importer must un-escape all
-   **five**. Detect the XML form deterministically (starts with `<?xml`, or
-   contains `<AssemblerScript>`); apply entity decoding only then, so a label
-   legitimately containing the literal text `&lt;` is not mangled in the raw-script
-   case.
-2. **Version tag is mandatory.** `v1` in the BEGIN fence. Refuse unknown versions
-   with a clear message rather than mis-parsing.
+Read back with `NumberStyles.Float` (**must** include `AllowExponent` — `"R"` goes
+scientific below 1e-5). Normalise negative zero to `0` on capture. The `0.0###` /
+`0.000` helpers **must not** be reused here.
 
 ### D5 — Two Lua flavours (R5)
 
-| | **Needs proxy DLL** (mailbox `CMD_TELEPORT` op 13) | **No DLL** (`StandaloneTrainerScriptGenerator` extension) |
+| | **Needs proxy DLL** (mailbox op 13) | **No DLL** (`StandaloneTrainerScriptGenerator`) |
 |---|---|---|
 | Teleport mechanism | engine invoke (clean, settles) | raw write to `RootComponent.RelativeLocation` |
-| Rotation | ✅ `hasRot` flag, mailbox `+0x358` | needs the already-baked `ctrlRotOff` |
-| Current map name | ✅ `GET_POSE` → `mailbox + 0x358` | ❌ unavailable → the Map RadioGroup is omitted and the map guard degrades to a label |
+| Rotation | ✅ `hasRot`, mailbox `+0x358` | needs the already-baked `ctrlRotOff` |
+| Current map name | ✅ `GET_POSE` → `mailbox + 0x358` | ❌ → Map RadioGroup omitted, guard degrades to a label |
 | Survives a game patch | ✅ | ❌ baked offsets go stale |
-| Known caveat | — | `AppendTpWeakNote` (`StandaloneTrainerScriptGenerator.cs:442-449`): on games that don't refresh the cached world transform the coords change but the character may not visibly move |
+| Known caveat | — | `AppendTpWeakNote` (`:442-449`): coords change but the character may not visibly move |
 
-**Recommend the DLL flavour as the default**, with the no-DLL flavour clearly
-labelled as degraded in its own script header.
+**Recommend the DLL flavour as the default.**
 
 -----
 
-## 4. Special characters — what to block in the UI
+## 4. Wire format: adapt AOBMaker's shape, own the namespace
 
-The request asked whether the UI should block characters up front. **Yes, and the
-list is short**, because D4 chose single-quoted Lua literals (escapable) over a raw
-long-bracket block.
+### 4.1 Why this changed
 
-### Hard block (reject at input; strip on import)
+The first draft used a **positional** Lua table (`{'Mountain','Fields','Map01',67162.398,…}`)
+parsed by one regex per line. Reviewing AOBMaker's `@AOBMAKER:AA_TOGGLE v1` block
+— which solves the identical problem and has a real, tested round-trip parser —
+showed the positional design loses on every axis that matters. One agent ran
+AOBMaker's shipped assembly as a probe harness; the tolerances below are
+**empirically verified**, not read off the source.
 
-| Input | Why | Evidence |
+| Axis | Positional (first draft) | Named-field (AA_TOGGLE) |
 |---|---|---|
-| `NUL` (U+0000) | The CE plugin compiles the script with `luaL_dostring`, which takes **no length** → `strlen` silently truncates the chunk at the NUL | `pipe_server.cpp:881`; `lauxlib.h:124-125` |
-| `CR` / `LF` | The wire format is strictly one entry per line | D4 |
-| All other C0 control chars | Illegal in XML 1.0 with no entity form; `EscapeXml` passes them through unchanged | `CheatTableBuilder.cs:230-250` |
-| The literal substring `]==]` | `CreateAAScript` wraps the **whole** script in `[==[ … ]==]` at a **hardcoded level 2**, so this sequence terminates the wrapper early and breaks the push. (`InjectTableFile` is safe — it calls `PickLongBracketLevel`; `CreateAAScript` does not.) | `pipe_server.cpp:857` vs `:1946-1954` |
+| Identify field 6 of 9 while hand-editing | comma-counting | `yaw=` is self-labelling |
+| Reordered fields | **silently wrong data** | fine (independent per-key regex) |
+| Field added in v2, parsed by a v1 build | **breaks** | ignored, rest still parses |
+| Trailing / missing comma, entry split over lines | breaks (line-oriented) | fine (brace-balanced) |
+| `--` comment line inserted between entries | dropped row | skipped correctly |
+| Diff of two exports | column-shift noise | one key changes |
+| Bytes @ 4 000 entries | ~74 B/entry ⇒ **296 KB** | ~120 B/entry ⇒ **480 KB** |
 
-Verified 2026-07-22: **nothing under `ui/` or `scripts/` currently emits `]==]`**,
-so this is a new-input hazard only. (A pre-existing latent instance of the same
-class lives in `BakedScriptGenerator.EscapeLuaComment`, which neutralises `]]` but
-not `]==]` — tracked separately, out of scope here.)
+The only axis positional wins is size — and 480 KB is **4.6 %** of the verified
+10 MiB pipe cap, nowhere near the binding 5 s timeout. **Robustness wins.**
 
-### Allowed, handled by escaping — do NOT block
+### 4.2 What the coord library needs that AA_TOGGLE does not
 
-| Input | Handling |
+The user's framing: *一個是拿來跑 script，一個是要用來產生 list + 跑 script.*
+
+AA_TOGGLE's data is **iterated once** to toggle records. Ours must additionally
+**drive a generated list UI** — a `ListView` plus two `RadioGroup`s (§6). That
+means our block needs things AA_TOGGLE has no use for:
+
+* **Facet fields** (`group`, `map`) that are grouped/counted at generation time to
+  build the RadioGroups, not just displayed.
+* **A search key** — every text field must be concatenable for the filter.
+* **Numeric fields with a precision contract** (D4). AA_TOGGLE has only `id` +
+  `desc`, so precision never arises.
+* **A stable `uid`** (D3) — AA_TOGGLE re-resolves against live CE records each
+  run, so it needs no identity of its own.
+* **A second wire format** (CSV) that must round-trip to the same model.
+
+Conversely AA_TOGGLE needs a `CONFIG` block (process/module name, step delay,
+attach behaviour) that we do not — our runtime config is a handful of constants.
+
+### 4.3 The format
+
+```lua
+-- @UE5CD:COORDS v1
+-- Edit the rows below (or re-import this whole script into UE5CEDumper).
+-- Field order does not matter. Unknown keys are ignored. uid links a row to the
+-- library across edits -- keep it if you want an edit to UPDATE rather than ADD.
+local COORDS = {
+  { uid="k3f9", label="Mountain", group="Fields", map="Map01", x=67162.398, y=-20380.643, z=35.791, pitch=347.71, yaw=31.98, roll=0 },
+  { uid="k3fa", label="Chest 1",  group="Chest",  map="Map01", x=87668.672, y=-24858.674, z=341.376, pitch=335.01, yaw=26.16, roll=0 },
+  { uid="k3fb", label="Boss",     group="",       map="Map02", x=89828.133, y=-15534.243, z=850.328, pitch=346.88, yaw=0.93, roll=0 },
+}
+-- @UE5CD:END
+
+---- GENERATED CODE (do not edit below) ----
+```
+
+**Namespace: `@UE5CD:`, never `@AOBMAKER:`.** The read relationship between the
+two projects is **one-way**: UE5CEDumper only ever *writes* into CE
+(`IAobMakerBridge` has no read/list operation), while AOBMaker *reads* `.CT` files
+and will parse our `<AssemblerScript>` bodies. Sharing the namespace buys nothing
+and costs a concrete failure: AOBMaker's end marker is the **feature-less, shared**
+`-- @AOBMAKER:END`, matched by unanchored `IndexOf` (`AaToggleLuaGenerator.cs:22-24,167-172`).
+A coord block pasted inside an AA Toggle script would make AOBMaker slice from
+`AA_TOGGLE v1` to *our* `END`, parse zero entries, and **silently untick every
+record in the tree**.
+
+The `---- GENERATED CODE (do not edit below) ----` separator is copied **verbatim**
+— it is inert (a valid Lua comment), never parsed, and it is already the author's
+muscle memory across both tools.
+
+### 4.4 Parser contract
+
+Copy AA_TOGGLE's *mechanism* — brace-balanced scan + per-key anchored regex, **not**
+a line-oriented regex and **not** a Lua evaluator:
+
+1. Locate the fence with `^--\s*@UE5CD:COORDS\s+v(\d+)\s*$` (multiline, **version
+   captured**) and `^--\s*@UE5CD:END\s*$`.
+2. Branch on the captured integer: `1` → parse; `>1` → *"This block was written by
+   a newer UE5CEDumper (format v{n}); this build understands v1."*
+3. Locate `local COORDS = {`, brace-balance to the matching `}`, split into
+   top-level `{ … }` groups, then pull each field with
+   `(?<![A-Za-z0-9_])key\s*=\s*…`.
+
+Four AOBMaker defects to **not** inherit:
+
+| Defect | Evidence | What we do instead |
+|---|---|---|
+| Version baked into the marker literal → a `v2` block is indistinguishable from *no block*; the UI says "no markers found" | `AaToggleLuaGenerator.cs:167`; its `Version` const is dead code | capture `v(\d+)`, report unsupported-version distinctly |
+| Markers matched anywhere, including inside a string literal | probe: marker inline in `print("…")` parsed | anchor to line start (`^--`, multiline) |
+| **100 % silent failure** — no throw, no diagnostic, ever | `TryParseConfig` returns `null` or an empty list | per-row report (§5.3) |
+| Single-quoted values silently ignored → defaults | probe: `name='x'` → `name` fell back to default | accept **both** quote styles; unparseable value = a *reported* row error, never a silent default |
+
+### 4.5 Character policy — escape, don't block
+
+> **Superseded 2026-07-22 (commit `002891e`).** An earlier draft hard-blocked the
+> literal `]==]`. That commit made the shared escapers neutralise closing long
+> brackets of **any** level (`BakedScriptGenerator.EscapeLua` emits `\093`;
+> `EscapeLuaComment` pads). The repo's convention is **escape, not block** —
+> "strip on import" silently mutates user data.
+
+**Hard-block (reject at input, report on import) — only what cannot be escaped:**
+
+| Input | Why |
 |---|---|
-| `'` and `\` | Lua-escaped by an `EscapeLua`-class helper on emit; un-escaped on import |
-| `"` `<` `>` `&` | XML-entity-escaped on the .CT / clipboard path; five-entity decode on import (see D4) |
-| **CJK / non-ASCII** | **Fine.** The AOBMaker JSON encoder is `UnsafeRelaxedJsonEscaping` precisely because the CE plugin's Lua JSON parser cannot decode `\uXXXX` (`docs/aobmaker-integration.md:42,412`), so non-ASCII crosses the wire as literal UTF-8. `CrimsonDesert.CT`'s 6 508-entry `ItemID-zh_tw.` list proves CE renders CJK in a ListView. **The repo's ASCII-only rule applies to generated *comments*, not to user data.** |
+| `NUL` (U+0000) | The CE plugin compiles with `luaL_dostring`, which takes no length → `strlen` truncates the chunk (`pipe_server.cpp:881`) |
+| `CR` / `LF` | A raw newline inside a Lua single-quoted literal is a **compile error**. Reachable from CSV: Excel's Alt+Enter writes a quoted `"Chest 3\r\n(upper floor)"`, which an RFC-4180-correct reader accepts |
+| Other C0 controls | Illegal in XML 1.0 with no entity form; `EscapeXml` passes them through unchanged |
 
-### Additional UI constraints
+**Everything else is escaped, not blocked** — including `]==]`, `'`, `"`, `\`,
+`<`, `>`, `&`, and **CJK**. (The AOBMaker JSON encoder is `UnsafeRelaxedJsonEscaping`
+precisely because CE's Lua parser can't decode `\uXXXX`; Crimson Desert ships a
+6 508-entry zh-TW dropdown CE renders fine. The repo's ASCII-only rule covers
+generated **comments**, not user data.)
 
-* `Label` ≤ 64 chars, `Group` ≤ 32 chars — keeps the ListView readable and the
-  script compact. Trim leading/trailing whitespace.
-* `Map` is engine-derived (`UWorld` name), never user-typed; apply the same
-  control-char strip defensively.
-* The **new generator must not use `--[[ ]]` long-bracket comments at all** — use
-  `--` line comments, so `]==]` can only ever enter via user text.
+**This table is a property of the `CoordEntry` model, enforced at EVERY ingress**
+(UI edit, Lua import, CSV import) — not a property of one wire format.
+
+**One shared escaper.** There are already four divergent private `EscapeLua`
+implementations (`BakedScriptGenerator.cs:582`, `FreezeScriptGenerator.cs:217`,
+`InvokeScriptGenerator.cs:555`, plus `EscapeLuaComment`), and §6 models the picker
+form on `InvokeScriptGenerator` — whose copy is the **weakest** (no `\r`, no `\t`,
+no `]` handling). Promote one `CeLuaHygiene.EscapeLuaString` + the fence constants
+into `CeLuaHygiene`, which is already the single source of truth for
+`CloseCall` / `AttributionUrl` / `AppendDebugPreamble`.
+
+Length caps: `Label` ≤ 64, `Group` ≤ 32. Trim surrounding whitespace.
+
+### 4.6 Size budget
+
+Verified limits on the `CreateAAScript` path:
+
+| Limit | Value | Source |
+|---|---|---|
+| Max JSON message | **10 MiB**, hard reject | `pipe_server.cpp:61`; `PipeProtocol.cs:69` |
+| JSON escape expansion | **+2.3 … 4.6 %** measured | `UnsafeRelaxedJsonEscaping` — only `\n` expands |
+| Server read deadline | **5 000 ms** total, 10 ms sleep per stall | `pipe_server.cpp:30,55,78` |
+| Our response timeout | **5 000 ms** vs **15 000 ms** for `InjectTableFile` | `AobMakerBridgeService.cs:19,35` |
+
+4 000 named-field entries ≈ **480 KB**, ~4.6 % of the cap. Corroborated:
+`CrimsonDesert.CT` carries 6 508 entries × 3 lists = **714 KB** in one `.CT`.
+Soft-warn above ~2 000 entries for CE's *editor* UX only; no hard cap. If a truly
+huge dataset ever appears, the **CE Table File** channel already exists and is
+already used by us for helper Lua (`InjectTableFileAsync`; it picks a safe
+long-bracket level automatically and gets 15 s).
 
 -----
 
-## 5. The generated Lua picker (R6)
+## 5. CSV (R8)
+
+### 5.1 Format
+
+* **RFC 4180.** Comma-delimited. Quote any field containing the delimiter, `"`,
+  or leading/trailing whitespace; escape `"` by doubling. **Mandatory** — §4.5
+  permits `,` in a Label, and one unquoted comma shifts every subsequent column.
+* **Header row is authoritative.** Columns are matched **by name**, so reordered
+  and extra columns are handled and a v2 column is backward-compatible — the same
+  property that made the named-field Lua win.
+* **Split positionally with NO `RemoveEmptyEntries`**, then hard-validate the
+  column count. The repo's only existing delimited reader, `BugItGoParser.cs:66-68`,
+  uses `RemoveEmptyEntries | TrimEntries` — the obvious template, and wrong here:
+  an empty `Group` (a real case — see the Boss sample) collapses 9 fields to 8 and
+  shifts `Map`→`Group`, `X`→`Map`, silently.
+* **Encoding: UTF-8 WITH BOM** — a deliberate, documented exception to the house
+  rule (`DumpAllService.cs:99-103` pins `UTF8Encoding(false)`). Without a BOM,
+  double-clicking a CJK export on a zh-TW machine hands Excel the ANSI codepage and
+  every label is mojibake. Read with `detectEncodingFromByteOrderMarks: true`
+  (`DumpJsonlReader.cs:36` precedent).
+* **Write `\n`** (per `DumpAllService`); **accept** CRLF and LF, trimming a trailing
+  `\r` before any ordinal header comparison — Excel writes CRLF.
+* **Sniff the delimiter** from the header among `, ; \t`. When it is `;`, accept
+  comma as the decimal separator (a de-DE/fr-FR Excel re-save produces
+  `Boss;;Map02;89828,133;…`).
+* Numbers per **D4**: `"R"` + `InvariantCulture` on write, `NumberStyles.Float`
+  (with `AllowExponent`) on read.
+* **Formula-injection armouring.** On export, prefix a single `'` to any
+  `Label`/`Group` whose first character is `= + - @`; on import, strip exactly one
+  leading `'` from those columns. Round-trip transparent. Without it, a label
+  `=Boss Arena` displays as `#NAME?`, and Excel saves the *displayed* text — the
+  label is destroyed with no error anywhere. The security variant
+  (`=cmd|'/c calc'!A1`) is not mitigated by quoting.
+
+### 5.2 Samples — including the hard cases
+
+The three clean rows are not the interesting part; these are what an implementation
+must actually survive.
+
+```csv
+uid,label,group,map,x,y,z,pitch,yaw,roll
+k3f9,Mountain,Fields,Map01,67162.398,-20380.643,35.791,347.71,31.98,0
+k3fa,Chest 1,Chest,Map01,87668.672,-24858.674,341.376,335.01,26.16,0
+k3fb,Boss,,Map02,89828.133,-15534.243,850.328,346.88,0.93,0
+k3fc,"Chest, big one",Chest,Map02,1.5,-2.25,0,0,0,0
+k3fd,"He said ""hi""",Other,Map02,0,0,0,0,0,0
+k3fe,寶箱 3（上層）,寶箱,Map03,-4096.5,8192.25,120,0,180,0
+k3ff,'=Boss Arena,Other,Map03,10,20,30,0,0,0
+k400,'1-2,Zones,Map03,1e-05,-0.0,100000,0,0,0
+```
+
+Row by row: an **empty group**; an **embedded comma** (quoted); an **embedded
+quote** (doubled); a **CJK label with full-width parens**; a **formula-armoured**
+label (`'` stripped on import → `=Boss Arena`); and a label Excel would eat
+(`1-2` → a date) plus a **scientific-notation** coordinate that `"R"` legitimately
+emits below 1e-5.
+
+### 5.3 Import is a two-stage, consented operation
+
+This is the single highest-value decision in the CSV design. **Never apply an
+import in one shot.**
+
+Some corruptions are **unfixable on our side**: Excel silently coerces `1-2` and
+`3/4` to dates, `0012` to `12`, `1E5` to `100000`, and writes back the *displayed*
+text. Quoting does not help. No validator can detect it, because the result is
+perfectly valid CSV.
+
+So the only real defence is to make changes **visible before they commit**:
+
+* **Stage 1 — parse + report.** Scan the whole file with resync-on-error. Produce
+  per-bad-line diagnostics (1-based file line, column name, raw text, reason) and
+  a **diff against the current library**: added / changed / removed / mutated
+  (trimmed, truncated, control-char stripped). Show cell-level changes:
+  `row 812 Group: 1-2 → 2001/1/2`.
+* **Stage 2 — commit or cancel.** *"Import 3 998, skip 2, update 14, add 27?"*
+* Write `teleport-coords.{module}.preimport.bak` **before** the commit, and offer
+  session-scoped Undo. A botched Replace is one click deep, and this is
+  hand-curated data.
+
+Partial success without a report is exactly the silent-drop bug the repo already
+ships in `DumpJsonlReader.cs:38-53` — and the worst property of AOBMaker's parsers.
+Do not reproduce it.
+
+**Export the model, never the view.** Always the full library, never the filtered
+grid and never the computed `Distance` column. A filtered export must be a
+separate, explicitly labelled action that states the count — otherwise a user
+filters to one map, exports, re-imports with Replace, and loses everything else.
+
+### 5.4 "Samples embedded" — pinned reading
+
+Sample rows live **in this spec** and in a copyable *"Format help"* block in the
+export dialog, plus an **"Export sample CSV / template"** action for users starting
+from scratch. The **exported data file carries only** the header + data rows.
+
+Comment lines inside the file are rejected because they do not survive a spreadsheet:
+the moment the author sorts by Label, `#` rows scatter into the middle of the data,
+and a comment check that runs before quote handling would eat a legitimate label
+like `#3 side room`.
+
+-----
+
+## 6. The generated Lua picker (R6)
 
 ### Verified CE Lua API surface
 
-The project rule is **never invent a CE Lua API**. Two sources of truth:
+Project rule: **never invent a CE Lua API.**
 
 *Already emitted by us* (`InvokeScriptGenerator.cs:235-305`): `createForm`,
 `createLabel`, `createEdit`, `createButton`, `createTimer`.
 **`createListBox` and `createComboBox` appear nowhere in this repo and are NOT verified.**
 
 *Verified working in `CrimsonDesert.CT` "open item ID query GUI"* (CheatEntry 357,
-`:9306-9650`) — the reference the request points at:
+`:9306-9650`) — the reference:
 
 | Control | Verified members |
 |---|---|
@@ -238,204 +428,196 @@ The project rule is **never invent a CE Lua API**. Two sources of truth:
 | `createListView` | `.Align .ViewStyle('vsReport') .RowSelect .ReadOnly .MultiSelect .SelCount .Selected` · `.Columns.add().Caption`, `.Columns[i].Width` (0-based) · `.Items.beginUpdate()/.clear()/.add()/.endUpdate()/.Count/[i]` · row `.Caption`, `.SubItems.add(str)`, `.Selected` · `.OnDblClick`, `.OnKeyDown(sender,key,shift)` |
 | globals | `synchronize(fn)`, `showMessage`, `writeToClipboard`, `caFree`, `syntaxcheck` |
 
-**Design accordingly: `createListView` + `createRadioGroup` only. No ListBox, no
+**Build only from that set: `createListView` + `createRadioGroup`. No ListBox, no
 ComboBox, no CheckBox.**
 
-### Layout rules stolen from the reference
+### Layout rules from the reference
 
-* **Panel creation order is load-bearing**: `alTop` panels stack in creation
-  order and the `alClient` control **must be created last**
-  (`CrimsonDesert.CT:9428,9519`). Order: `pnlTop` → `pnlStatus` → `pnlBottom` → `lv`.
+* **Panel creation order is load-bearing**: `alTop` panels stack in creation order
+  and the `alClient` control **must be created last** (`:9428,9519`). Order:
+  `pnlTop` → `pnlStatus` → `pnlBottom` → `lv`.
 * Re-open guard: `if frm ~= nil and not frm.Destroyed then frm.show(); frm.BringToFront(); return end`.
 * A status label doubles as the live match counter.
-* Display cap **2 000 rows** with a *"Matched N (showing first 2000) — type more to
-  narrow"* message (`:9552`). Note this is the reference's *hardcoded guess*; no
-  measurement of where a CE ListView actually stutters exists.
+* Display cap **2 000 rows** with *"Matched N (showing first 2000) — type more to
+  narrow"* (`:9552`). Note this is the reference's **hardcoded guess**; no
+  measurement of where a CE ListView stutters exists.
 
 ### Two facets, two RadioGroups
 
-The reference's `sources` (EN/TW/JA) act like the request's **Group**, hard-capped
-at 1–3 (`:9354`). We have two facets, and both map onto the verified control:
+The reference's `sources` (EN/TW/JA) act like our **Group**, hard-capped at 1–3
+(`:9354`). We have two facets:
 
-* **RadioGroup A — Group.** Items = `All` + the **top N groups by entry count** in
-  the exported set. **N = 8** (2 rows × 4 columns) is the recommended cap.
-  Overflow groups are *not lost*: every entry is still reachable via `All`, and
-  the group name is part of the search key, so typing it filters. Warn at export
-  time when groups were folded.
-* **RadioGroup B — Map scope.** `Current map` / `All maps`. DLL flavour only
-  (needs `GET_POSE`); omitted in the no-DLL flavour.
+* **RadioGroup A — Group.** `All` + the **top 8 groups by entry count**. Overflow
+  groups are not lost: reachable via `All`, and the group name is in the search
+  key. Warn at export time when groups were folded.
+* **RadioGroup B — Map scope.** `Current map` / `All maps`. DLL flavour only.
 
 ### Filter
 
-The reference uses a plain case-insensitive substring over
-`lower(id .. ' ' .. desc)` with `string.find(..., 1, true)` and no debounce.
-**We mirror the app's MUST-rule instead: whitespace-separated terms combined with
-AND**, matched against `lower(label .. ' ' .. group .. ' ' .. map)`. It is a few
-lines of Lua and keeps app and script semantics identical.
+The reference uses a plain case-insensitive substring over `lower(id .. ' ' .. desc)`
+with no debounce. **We mirror the app's MUST-rule instead: whitespace-separated
+terms combined with AND**, over `lower(label .. ' ' .. group .. ' ' .. map)`. A few
+lines of Lua, and app/script semantics stay identical.
 
 Rows are **pre-sorted at generation time** (Group asc, then Label natural-sort so
 `Chest 2` precedes `Chest 10`), so the Lua never sorts.
 
 ### Confirm-before-teleport (R3)
 
-No CE yes/no dialog API is verified, so use two buttons instead — which also
-matches the existing marker Force semantics:
+No CE yes/no dialog API is verified, so use two buttons — which also matches the
+existing marker Force semantics:
 
-* **`Teleport`** — refuses with `showMessage` when the selected entry's map ≠ the
-  current map (DLL flavour), otherwise fires `CMD_TELEPORT` op 13.
+* **`Teleport`** — refuses with `showMessage` when the entry's map ≠ current map
+  (compared `OrdinalIgnoreCase`, D2), otherwise fires `CMD_TELEPORT` op 13.
 * **`Force teleport`** — ignores the map guard.
-* `OnDblClick` = same as `Teleport` (guarded), never Force.
+* `OnDblClick` = `Teleport` (guarded), never Force.
 
 ### Hygiene
 
-This is an **interactive** form, so it must not use the momentary auto-close path.
-Follow `InvokeScriptGenerator`'s form shape: the untick + `CeLuaHygiene.CloseCall`
-go in `frm.OnClose`, and **every error path must leave the window open**
-(project MUST-rule, `CLAUDE.md` → *CE Lua output hygiene*). Emit the
+Interactive form → **not** the momentary auto-close path. Follow
+`InvokeScriptGenerator`'s shape: untick + `CeLuaHygiene.CloseCall` in `frm.OnClose`,
+and **every error path leaves the window open** (`CLAUDE.md` MUST-rule). Emit
 `CeLuaHygiene.AppendDebugPreamble` in every `{$lua}` block that uses `DEBUG`/`dbg`.
 
 -----
 
-## 6. App-side UI (R2 / R4)
+## 7. App-side UI (R2 / R4)
 
 ### Placement
 
 A new card immediately **below the existing "TP to coords" card**
 (`TeleportPanel.axaml:466-507`), which gains a **`＋ Add to library`** button.
 
-The Teleport tab's right-click quick-jump menu is built **dynamically** from the
-visual tree, so no code-behind change is needed — but it imposes three hard
-structural requirements on the card:
+The tab's right-click quick-jump menu is built **dynamically** from the visual
+tree — no code-behind change needed, but three hard structural requirements:
 
-1. It must be a **direct child** of the `ContentRoot` StackPanel.
-2. It must be a **`Border`** (other element types are skipped).
-3. Its label comes from the **first `FontWeight="SemiBold"` TextBlock descendant**.
+1. Direct child of the `ContentRoot` StackPanel.
+2. Must be a **`Border`** (other element types are skipped).
+3. Label = the **first `FontWeight="SemiBold"` TextBlock descendant**.
 
-Card chrome must match verbatim:
-`Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="4" Padding="10"`,
-inserted before `TeleportPanel.axaml:1287` (the status strip).
+Chrome verbatim: `Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+CornerRadius="4" Padding="10"`, inserted before the status strip.
 
-⚠ **Verify at implementation time:** the card is a `Border` wrapping an
-`Expander`. Confirm that the SemiBold header TextBlock placed in the Expander's
-`Header` is still reached by the jump menu's first-SemiBold-descendant walk —
-otherwise the menu shows a wrong label.
+⚠ **Verify at implementation time:** the card is a `Border` wrapping an `Expander`.
+Confirm the SemiBold header in the `Expander.Header` is still reached by the
+first-SemiBold-descendant walk, or the menu shows a wrong label.
 
 ### Collapsible, collapsed by default
 
-Use the VM-bound `IsExpanded` dialect (SnapshotPanel / SpcPanel / LiveWalkerPanel),
+VM-bound `IsExpanded` dialect (Snapshot / Spc / LiveWalker panels),
 `[ObservableProperty] bool` defaulted to **false**. The VM may force it open after
-a *Save current pos* (existing precedent). No panel in the repo persists
-`IsExpanded` across sessions today; if that is wanted it needs a new
-`UiOptionsSettings` field.
+a *Save current pos*. No panel persists `IsExpanded` across sessions today; if
+wanted, that needs a new `UiOptionsSettings` field.
 
 ### Contents
 
 * **Toolbar** — `Save current pos` · `Add` · `Edit` · `Duplicate` · `Delete` ·
-  **`Teleport selected`** · `Export ▾` · `Import` · `Clear all`
+  **`Teleport selected`** · `Export ▾` (Lua DLL / Lua no-DLL / CSV / sample CSV) ·
+  `Import ▾` (Lua script / CSV) · `Clear all`
 * **Filter row** — keyword `AutoCompleteBox` + Group combo + `Current map only`
 * **Grid** — Label / Group / Map / X / Y / Z / Pitch / Yaw / Roll / Distance
 * **Selection preview** — `Chest 2 — Map01 — 1,204 uu away`. Distance is free: the
   panel already polls `get_pose` every ~2 s.
-* **Commit** — single click only selects; `Teleport selected` fires; a map
-  mismatch raises a confirm. Reuse `TeleportToCoordsAsync`'s existing shape
-  (`IsConnected` guard, `TeleportCodes.Describe` on failure, `Tier == 2` raw-write
-  warning). `Save current pos` reuses `FillCoordsFromCurrentAsync`'s
-  `TeleportGetPoseAsync` + `ApplyPoseAndMovement` path.
+* **Commit** — single click selects; `Teleport selected` fires; map mismatch raises
+  a confirm. Reuse `TeleportToCoordsAsync`'s shape (`IsConnected` guard,
+  `TeleportCodes.Describe`, `Tier == 2` raw-write warning). `Save current pos`
+  reuses `FillCoordsFromCurrentAsync`'s `TeleportGetPoseAsync` + `ApplyPoseAndMovement`.
 
 ### ⚠ DataGrid virtualization
 
-`TeleportPanel` has **no DataGrid today**, and its `ContentRoot` sits in a
-vertically-unbounded `ScrollViewer` — **a DataGrid there will not virtualize**.
-With 4 000 rows that is a hard perf problem. The grid **must** carry an explicit
-`MaxHeight` (`LiveWalkerPanel.axaml:805` uses `MaxHeight="280"` as precedent).
-Also note `ContentRoot` swallows `RequestBringIntoView`, so `BringIntoView()` will
-not work — scroll via `Scroller.Offset`.
+`TeleportPanel` has **no DataGrid today**, and `ContentRoot` sits in a vertically
+unbounded `ScrollViewer` — **a DataGrid there will not virtualize**. With 4 000 rows
+that is a hard perf problem. The grid **must** carry an explicit `MaxHeight`
+(`LiveWalkerPanel.axaml:805` uses `280`). `ContentRoot` also swallows
+`RequestBringIntoView`, so `BringIntoView()` will not work — scroll via
+`Scroller.Offset`.
 
-### Non-negotiable project rules this card must follow
+### Non-negotiable project rules
 
 * **Keyword box** — space = AND via `ObjectTreeFilter.SplitTerms` +
-  `MatchesAllTerms(terms, params string?[])` (never one `.Contains` over a
-  concatenated string) **and** per-keyword memory via `KeywordSearchMemory`
-  (field + `XxxHistory` property + ctor probe `() => (FilterText, Results.Count > 0)`
-  + `Schedule(value)` in the generated `OnFilterTextChanged`). This is a purely
-  client-side list, so `Schedule` — not `Commit` — is correct. `AutoCompleteBox`
-  with `PlaceholderText` (not `Watermark`) and `Text="{Binding …, Mode=TwoWay}"`.
+  `MatchesAllTerms(terms, params string?[])`, **and** per-keyword memory via
+  `KeywordSearchMemory` (field + `XxxHistory` + ctor probe + `Schedule(value)`).
+  Client-side list ⇒ `Schedule`, not `Commit`. `AutoCompleteBox` with
+  `PlaceholderText` and `Text="{Binding …, Mode=TwoWay}"`.
 * **UI strings** — English only, new `str.TP.*` keys in `Resources/Strings/en.axaml`.
-* **Grid sorting** — per-column `SortMemberPath` pointing at the underlying model
-  property (universal in this repo), so a formatted string still sorts numerically.
+* **Grid sorting** — per-column `SortMemberPath` at the underlying model property.
 * **AOT** — source-gen JSON only.
 
 -----
 
-## 7. Store
+## 8. Store
 
-Structural clone of `BookmarkStore` (`ui/UE5DumpUI/Services/BookmarkStore.cs`):
-sync, `_ioLock`-guarded, source-gen JSON, atomic temp+rename, swallow-and-log with
-empty defaults on missing/corrupt, `Delete()` as the clear-all primitive.
-
-Deviations, each deliberate:
+Structural clone of `BookmarkStore`: sync, `_ioLock`-guarded, source-gen JSON,
+atomic temp+rename, swallow-and-log with empty defaults, `Delete()` as clear-all.
 
 | Aspect | Decision |
 |---|---|
 | File key | **exe module name**, not PE hash (D1) |
-| `DefaultIgnoreCondition` | **MUST NOT** be `WhenWritingDefault`. Follow the `BookmarkFile` / `UiOptionsSettings` dialect. A legitimately-saved coordinate of exactly `0.0` (or `Pitch/Yaw/Roll = 0`) would otherwise be dropped from the JSON and silently reload as 0 *by accident rather than by record*. |
-| Backup | Keep one `.bak` alongside the atomic rename. This is hand-curated user data — a crash-on-write losing a 4 000-entry list is by far the worst failure mode in this feature, and it is the one thing `BookmarkStore` does not defend against. |
-| Model | `public sealed class`, plain get/set POCOs, explicit `Version` int (v1), `List<CoordEntry>` |
-| Context | `internal partial class CoordinateLibraryJsonContext : JsonSerializerContext` in `ui/UE5DumpUI/Models/` (never in `Services/`), matching the 7 existing contexts |
-| Wiring | Construct in `App.axaml.cs` next to the other stores → trailing optional ctor param on `MainWindowViewModel` → trailing optional param on `TeleportViewModel` (which takes **no** store today, so `null` in headless tests) |
+| `DefaultIgnoreCondition` | **MUST NOT** be `WhenWritingDefault`. Follow the `BookmarkFile` / `UiOptionsSettings` dialect — a legitimately-saved coordinate of exactly `0.0` would otherwise be dropped and reload as 0 *by accident rather than by record* |
+| Backups | `.bak` alongside the atomic rename, **plus** `.preimport.bak` before any import commits (§5.3) |
+| Model | `public sealed class`, plain get/set POCOs, `Version` int (v1), `List<CoordEntry>`, each with `uid` (D3) |
+| Context | `internal partial class CoordinateLibraryJsonContext : JsonSerializerContext` in `Models/` (never `Services/`) |
+| Wiring | `App.axaml.cs` → trailing optional ctor param on `MainWindowViewModel` → trailing optional param on `TeleportViewModel` (which takes no store today) |
 
 **Load hook.** `TeleportViewModel.SetEngineState` (`:226`) is a one-line stash that
-does **not** capture identity today. Mirror `LiveWalkerViewModel`: capture the key
-inside `SetEngineState`, but perform the disk load from a **separate public
-`LoadCoordLibraryForGame(...)`** called explicitly by `MainWindowViewModel` — so
-the load is not a hidden side effect.
+does not capture identity. Mirror `LiveWalkerViewModel`: capture the key in
+`SetEngineState`, but load from a **separate public `LoadCoordLibraryForGame(...)`**
+called explicitly by `MainWindowViewModel` — so the load is not a hidden side effect.
 
 ⚠ `MainWindowViewModel` has **two** engine-state fan-out sites and they are not
-symmetric: `:2502-2521` (`ApplyEngineState`) performs the bookmark load, `:613-623`
-(connect path) does not. Determine which are reachable and wire deliberately.
+symmetric: `:2502-2521` (`ApplyEngineState`) performs the bookmark load; `:613-623`
+(connect path) does not. Wire deliberately.
+
+**One codec seam.** Put the JSON, Lua, and CSV codecs behind one `CoordEntry` with a
+**Generate → Parse → Generate byte-stability test for each**. AOBMaker wrote that
+test only for `AUTO_REFRESH`, and `AA_TOGGLE` drifted out of idempotence as a
+direct result.
 
 -----
 
-## 8. Phasing
+## 9. Phasing
 
 | Phase | Content | Effort | Risk |
 |---|---|---|---|
-| **P1** | Model + store + collapsible card + CRUD + `Save current pos` + `Teleport selected` with map guard + filter | **M** | low — UI only, no DLL change |
-| **P2** | Lua export, DLL flavour: generic picker form + embedded dataset + AOBMaker push, clipboard `.CT` XML fallback | **S** | low–med — CE API surface is verified but untested by us |
-| **P3** | Re-import (R7): fence locator + per-line regex + five-entity XML decode + merge/replace dialog | **S–M** | low |
-| **P4** | No-DLL flavour via `StandaloneTrainerScriptGenerator` (degraded map guard) | **S** | med — raw-write TP is inherently weaker |
-| **P5** (opt) | TSV/CSV import-export; `TP to selected` / `next` / `prev` global hotkeys | **S** | low |
+| **P1** | Model (+`uid`, D4 precision) + store + collapsible card + CRUD + `Save current pos` + `Teleport selected` with map guard + filter | **M** | low — UI only |
+| **P2** | CSV export + two-stage import with diff preview (§5) | **M** | low-med — the preview is most of the work, and it is the point |
+| **P3** | Lua export, DLL flavour: `@UE5CD:COORDS v1` block + generic picker form + AOBMaker push, clipboard `.CT` XML fallback | **S-M** | low-med |
+| **P4** | Lua re-import (R7): fence + version capture + brace-balanced parser, sharing P2's report/preview | **S** | low |
+| **P5** | No-DLL flavour via `StandaloneTrainerScriptGenerator` (degraded map guard) | **S** | med |
 
-P1 alone delivers R1–R4 — the bulk of the value. P2–P4 are the CE integration.
+P2 before P3 is deliberate: CSV is the format users will actually curate 4 000 rows
+in, and the import-report machinery it forces is reused by P4.
 
 -----
 
-## 9. Open questions for implementation time
+## 10. Open questions for implementation time
 
-1. **Quick-jump label** — does the menu's first-SemiBold-descendant walk reach a
-   TextBlock inside an `Expander.Header`? (§6)
+1. **Quick-jump label** — does the first-SemiBold-descendant walk reach a TextBlock
+   inside an `Expander.Header`? (§7)
 2. **ListView throughput** — the reference's 2 000-row display cap is an unverified
-   guess. Measure where `lv.Items.add()` actually stutters before treating 2 000
-   as meaningful.
-3. **Which `MainWindowViewModel` fan-out sites are reachable** for the store load. (§7)
-4. **Experimental gating** — five Teleport cards are gated on
-   `ExperimentalEnabled`. A coordinate bookmark list is not combat-affecting, so
-   it likely should **not** be gated; confirm.
-5. **CE Lua `readString`** — the DLL-flavour picker needs to read the map name from
-   `mailbox + 0x358`. Confirm `readString` against CE's own API reference before use.
+   guess. Measure before treating it as meaningful.
+3. **Which `MainWindowViewModel` fan-out sites are reachable** for the store load. (§8)
+4. **Experimental gating** — five Teleport cards are gated on `ExperimentalEnabled`.
+   A coordinate bookmark list is not combat-affecting, so it likely should **not**
+   be gated; confirm.
+5. **CE Lua `readString`** — the DLL-flavour picker reads the map name from
+   `mailbox + 0x358`. Confirm against CE's API reference before use.
 6. **Client-side pre-flight size check** — `AobMakerBridgeService.WriteMessageAsync`
-   (`:495-506`) has **no** send-side size cap, and the plugin's oversize path
-   (`pipe_server.cpp:61`) returns without writing a response, so an oversized push
-   surfaces as a confusing *timeout* rather than a size error. Worth adding
-   regardless of this feature.
+   (`:495-506`) has **no** send-side cap, and the plugin's oversize path
+   (`pipe_server.cpp:61`) returns *without writing a response*, so an oversized push
+   surfaces as a confusing *timeout*. Worth adding regardless of this feature.
 
 -----
 
-## 10. Cross-references
+## 11. Cross-references
 
 * [teleport-spec.md](teleport-spec.md) — Wirbel markers, POV, coord TP, the `CMD_TELEPORT` op table
 * [aobmaker-integration.md](aobmaker-integration.md) — the CE-plugin pipe bridge
 * [export-formats.md](export-formats.md) — CE XML / CSX export rules
 * [ui-spec.md](ui-spec.md) — Avalonia stack + AOT constraints
-* `CLAUDE.md` → *CE Lua output hygiene* and *Keyword search boxes* — both are
-  MUST-rules this feature is bound by
+* `CLAUDE.md` → *CE Lua output hygiene* and *Keyword search boxes* — MUST-rules this
+  feature is bound by
+* **Reference tables** (external, `D:\Github\Mydev-Cheat-Engine-Tables`):
+  `Crimson Desert\CrimsonDesert.CT` CheatEntry 357 (the picker-form UI reference) and
+  `Kyoto Xanadu\kyoto_xanadu.CT` lines 1-90 (the `@AOBMAKER:AA_TOGGLE v1` round-trip
+  reference)
