@@ -33,14 +33,18 @@ public class SnapshotViewModelTests : IDisposable
     // Diag() so a CI-only flake names its own cause on the first occurrence.
     private MockLoggingService _lastLog = new();
 
-    private string Diag(string what, int got, SnapshotViewModel vm)
+    // `got` is object? (not int) so the pre-store asserts — which report a bool?/string —
+    // can route through the same diagnosis. Putting Diag ONLY on the persisted-count assert
+    // was not enough: the 2026-07-22 CI failure surfaced 8 lines earlier, at the first
+    // stub-recorded flag, and printed nothing.
+    private string Diag(string what, object? got, SnapshotViewModel vm)
     {
         // ALL levels, not just WARN/ERROR: the INFO lines trace how far the capture got
         // (chunk counts, "Finalising…", the completion summary), which is what tells us
         // whether it died early or at the very end.
         var all = _lastLog.Messages;
         var tail = all.Count > 12 ? all.GetRange(all.Count - 12, 12) : all;
-        return $"{what}, got {got}. status='{vm.StatusText}' error='{vm.ErrorMessage}' " +
+        return $"{what}, got {got?.ToString() ?? "null"}. status='{vm.StatusText}' error='{vm.ErrorMessage}' " +
                $"capturing={vm.IsCapturing} log[{all.Count}]:{Environment.NewLine}  " +
                string.Join(Environment.NewLine + "  ", tail);
     }
@@ -279,9 +283,14 @@ public class SnapshotViewModelTests : IDisposable
 
         Assert.False(vm.IsCapturing);
         Assert.Equal("NumericNoByte", dump.LastDataType);
-        Assert.True(dump.LastGameOnly);
-        Assert.False(dump.LastNativeC);   // Native-C default OFF (P3)
-        Assert.True(dump.LastAutoSkipNoise);   // Auto-skip noise default ON (source-level skip)
+        // These four are written by CaptureStub.SnapshotChunkAsync, so a NULL here means the
+        // first chunk fetch never happened — the capture threw between BeginSnapshotAsync
+        // (proven to have run by LastDataType above) and the producer's first fetch, i.e. in
+        // CreateSnapshotAsync / BeginCaptureSessionAsync. That is the shape the CI-only flake
+        // took on 2026-07-22, so these carry Diag() too — not just the store assert below.
+        Assert.True(dump.LastGameOnly, Diag("chunk fetch never ran (LastGameOnly)", dump.LastGameOnly, vm));
+        Assert.False(dump.LastNativeC, Diag("Native-C default OFF (P3)", dump.LastNativeC, vm));
+        Assert.True(dump.LastAutoSkipNoise, Diag("auto-skip noise default ON", dump.LastAutoSkipNoise, vm));
 
         var list = await _store.ListSnapshotsAsync(TestContext.Current.CancellationToken);
         // A capture that threw is swallowed: the outer catch deletes the partial row and

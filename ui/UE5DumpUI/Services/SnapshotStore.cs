@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -27,6 +27,30 @@ public sealed class SnapshotStore : ISnapshotStore
     // the bundled native e_sqlite3 is registered under Native AOT.
     private static readonly object s_initLock = new();
     private static bool s_initialised;
+
+    // Per-DB-path gate for the ONE-TIME schema init. EnsureSchemaAsync is NOT safe to
+    // run concurrently against itself on the same file, and the damage is silent:
+    //   - it reads PRAGMA user_version, and on a stale/zero version DROPs snapshots +
+    //     objects + fields before re-CREATEing them. Two openers on a brand-new DB both
+    //     read 0, so the slower one can DROP the tables — and the rows — the faster one
+    //     already committed. That is DATA LOSS, not just a lock error: no exception is
+    //     raised, the capture just disappears.
+    //   - AddColumnIfMissingAsync is read-then-ALTER, so a tie throws "duplicate column".
+    // SnapshotViewModel reaches this shape for real: SetEngineState ends with a
+    // fire-and-forget `_ = RefreshAsync()` (its own open, on a thread-pool thread) while
+    // the user can hit Capture immediately, whose CreateSnapshotAsync +
+    // BeginCaptureSessionAsync open the same file.
+    //
+    // So: run the schema init at most once per (path, process), under a gate, and let
+    // every later open skip it. Only the FIRST open of a file pays the gate — the
+    // capture's producer/consumer connections still open concurrently, which the
+    // pipelined capture depends on. Single-instance UI (Mutex) + single-process tests
+    // mean a process-wide gate covers every writer; the busy_timeout below is what
+    // guards the (unsupported) cross-process case.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> s_schemaGates =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> s_schemaReady =
+        new(StringComparer.OrdinalIgnoreCase);
 
     // Defensive input cap for the two pivot fetch paths: a pathologically large
     // class shouldn't pull an unbounded row set into memory. Far above any realistic
@@ -81,9 +105,16 @@ public sealed class SnapshotStore : ISnapshotStore
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
     {
         var conn = new SqliteConnection(ConnectionString);
+        var dbPath = DatabasePath;
         try
         {
             await conn.OpenAsync(ct);
+            // busy_timeout goes FIRST, before journal_mode. Switching a DB into WAL needs a
+            // brief exclusive lock, and with the default 0 ms timeout a concurrent opener
+            // makes it fail on the spot with SQLITE_BUSY — the pragma batch was setting the
+            // timeout AFTER the pragma that needed it. Ordering it first turns that instant
+            // failure into a bounded wait.
+            //
             // busy_timeout: WAL allows concurrent readers, but a reader that opens while a
             // writer/checkpoint holds the read-mark lock would otherwise busy-spin the -shm
             // lock byte (LockFile/UnlockFile thousands/sec, low CPU) until Microsoft.Data.Sqlite's
@@ -100,8 +131,8 @@ public sealed class SnapshotStore : ISnapshotStore
             // sort spills to OUR HEAP instead of a temp FILE, re-creating the OOM the bounded-SQL
             // path exists to prevent. temp_store=DEFAULT restores the compile-time default (FILE);
             // cache_size=-2000 restores the ~2MB default ceiling.
-            await ExecAsync(conn, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA temp_store=DEFAULT; PRAGMA cache_size=-2000;", ct);
-            await EnsureSchemaAsync(conn, ct);
+            await ExecAsync(conn, "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=DEFAULT; PRAGMA cache_size=-2000;", ct);
+            await EnsureSchemaOnceAsync(conn, dbPath, ct);
             return conn;
         }
         catch
@@ -155,6 +186,35 @@ public sealed class SnapshotStore : ISnapshotStore
     /// the DB. Bump this on any incompatible change: an older DB is dropped +
     /// recreated on open (experimental captures recapture in ~2 min; no migration).</summary>
     private const long SchemaVersion = 4;
+
+    /// <summary>Run <see cref="EnsureSchemaAsync"/> at most once per (DB path, process),
+    /// serialised against every other opener of the same file. See the s_schemaGates
+    /// comment for why concurrent schema init silently destroys committed rows.</summary>
+    private static async Task EnsureSchemaOnceAsync(SqliteConnection conn, string dbPath, CancellationToken ct)
+    {
+        if (s_schemaReady.ContainsKey(dbPath)) return;
+        var gate = s_schemaGates.GetOrAdd(dbPath, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            // Re-check under the gate: the opener we queued behind may have just built it.
+            if (s_schemaReady.ContainsKey(dbPath)) return;
+            await EnsureSchemaAsync(conn, ct);
+            // Only mark ready on success — a throw/cancel must leave the next open to retry.
+            s_schemaReady[dbPath] = true;
+        }
+        finally { gate.Release(); }
+    }
+
+    /// <summary>Forget the "schema already built" memo for every DB (or one path), so the
+    /// next open rebuilds it. MUST be called whenever the .db FILES are deleted rather than
+    /// truncated — otherwise the memo outlives the file it describes and the next open skips
+    /// schema creation, leaving "no such table: snapshots".</summary>
+    private static void InvalidateSchemaMemo(string? dbPath = null)
+    {
+        if (dbPath == null) s_schemaReady.Clear();
+        else s_schemaReady.TryRemove(dbPath, out _);
+    }
 
     private static async Task EnsureSchemaAsync(SqliteConnection conn, CancellationToken ct)
     {
@@ -2437,6 +2497,11 @@ public sealed class SnapshotStore : ISnapshotStore
             // Evict ALL idle pooled connections (every connection string), so the per-game
             // .db files aren't locked by a pooled handle left behind by a list read / capture.
             SqliteConnection.ClearAllPools();
+            // The files are about to go away, so the "schema already built" memo describes
+            // nothing — drop it or the next open skips CREATE TABLE and hits "no such table".
+            // Cleared up-front: a file we fail to delete is re-ensured harmlessly (the memo
+            // is only ever an optimisation), whereas a missed clear is a broken store.
+            InvalidateSchemaMemo();
 
             int deleted = 0, skipped = 0;
             // Order matters only for tidiness: drop sidecars/denylists alongside each .db.
