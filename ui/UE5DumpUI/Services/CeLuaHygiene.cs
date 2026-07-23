@@ -58,6 +58,54 @@ public static class CeLuaHygiene
           .Append("local function dbg(...) if DEBUG ~= 0 then print(...) end end\n");
     }
 
+    /// <summary>
+    /// Escape arbitrary text for a Lua SINGLE-quoted literal. The one escaper new
+    /// code should call — there are four divergent private copies in this repo
+    /// (BakedScriptGenerator, FreezeScriptGenerator, InvokeScriptGenerator, plus
+    /// EscapeLuaComment) and the weakest of them, InvokeScriptGenerator's, handles
+    /// neither <c>\r</c> nor <c>\t</c> nor <c>]</c>.
+    ///
+    /// Handles backslash, single quote, LF, CR, TAB — and any closing long bracket
+    /// (<c>]]</c>, <c>]=]</c>, <c>]==]</c>, …). That last one is not about Lua: the
+    /// AOBMaker CE plugin wraps the WHOLE submitted script in <c>[==[ … ]==]</c> at a
+    /// hardcoded level and does not escape the body, so the byte sequence must not
+    /// appear anywhere in an emitted script — even inside a quoted string, where Lua
+    /// itself would be perfectly happy. The leading <c>]</c> becomes the decimal
+    /// escape <c>\093</c>: same runtime value, different source bytes. Three digits
+    /// because <c>\ddd</c> greedily takes three (by construction the next emitted
+    /// char here is <c>=</c> or <c>]</c>, never a digit, so it is belt-and-braces).
+    ///
+    /// A NUL cannot be escaped at all — <c>luaL_dostring</c> measures with
+    /// <c>strlen</c> — so callers must reject it upstream (see
+    /// <see cref="Models.CoordText.HasBlockedChars"/>).
+    /// </summary>
+    public static string EscapeLuaString(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var sb = new StringBuilder(s!.Length + 8);
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            switch (c)
+            {
+                case '\\': sb.Append("\\\\"); break;
+                case '\'': sb.Append("\\'");  break;
+                case '\n': sb.Append("\\n");  break;
+                case '\r': sb.Append("\\r");  break;
+                case '\t': sb.Append("\\t");  break;
+                case ']':
+                {
+                    int j = i + 1;
+                    while (j < s.Length && s[j] == '=') j++;
+                    sb.Append(j < s.Length && s[j] == ']' ? "\\093" : "]");
+                    break;
+                }
+                default: sb.Append(c); break;
+            }
+        }
+        return sb.ToString();
+    }
+
     /// <summary>Emit the success-path close: closes the Lua Engine window unless
     /// <c>DEBUG</c> is on. Pass <paramref name="extraCondition"/> to gate on an
     /// additional Lua boolean expression (e.g. <c>"not hadError"</c>, <c>"ok"</c>)

@@ -3523,6 +3523,89 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         CoordStatus = "Import cancelled — nothing was changed.";
     }
 
+    // ── CE Lua export (P3) — spec §4 / §6 ───────────────────────────────
+
+    /// <summary>
+    /// Emit the library as a self-contained AA script (fenced data block + picker
+    /// form) and deliver it: AOBMaker push when connected, else the paste-able CE
+    /// memory-record XML on the clipboard.
+    ///
+    /// Exports the WHOLE library, never the filtered grid — the script has its own
+    /// filter, so exporting a subset would only lose data silently.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportCoordLuaAsync()
+    {
+        if (_coordAll.Count == 0)
+        {
+            CoordStatus = "Nothing to export — the library is empty.";
+            return;
+        }
+        try
+        {
+            ClearError();
+            var script = CoordLibraryScriptGenerator.Generate(_coordAll, out var folded);
+
+            var notes = new StringBuilder();
+            if (folded.Count > 0)
+            {
+                // Honest about what the picker's radio buttons dropped: the entries
+                // are still there and still findable by typing the group name.
+                notes.Append($" {folded.Count} group(s) had no radio button " +
+                             $"({string.Join(", ", folded.Take(3))}" +
+                             (folded.Count > 3 ? ", …" : "") +
+                             ") — those entries are still listed under All and match the filter box.");
+            }
+            if (_coordAll.Count > Constants.CoordLibraryExportWarnCount)
+            {
+                notes.Append($" {_coordAll.Count} entries makes a large script — CE's AA " +
+                             "editor gets sluggish well before the pipe does.");
+            }
+
+            bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
+            if (available && await _aobMaker!.CreateAAScriptAsync(
+                    CoordLibraryScriptGenerator.RecordDescription, script,
+                    autoActivate: false, group: CeGroupDll))
+            {
+                CoordStatus = $"Pushed {_coordAll.Count} entries to Cheat Engine via AOBMaker — " +
+                              "enable the record in-game to open the picker." + notes;
+                _log.Info($"Coordinate library -> CE via AOBMaker ({_coordAll.Count} entries)");
+                return;
+            }
+
+            await _platform.CopyToClipboardAsync(
+                CheatTableBuilder.WrapAaScriptXml(
+                    CoordLibraryScriptGenerator.RecordDescription, script));
+            CoordStatus = (available
+                ? "AOBMaker refused the push — copied the record as CE XML instead. "
+                : "AOBMaker not connected — copied the record as CE XML to the clipboard. ")
+                + "Paste into Cheat Engine's address list (right-click → Paste), then enable it."
+                + notes;
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord Lua export failed", ex); }
+    }
+
+    /// <summary>Save the same script to a .lua file, for users who prefer a file.</summary>
+    [RelayCommand]
+    private async Task SaveCoordLuaAsync()
+    {
+        if (_coordAll.Count == 0)
+        {
+            CoordStatus = "Nothing to export — the library is empty.";
+            return;
+        }
+        try
+        {
+            var name = string.IsNullOrEmpty(_activeCoordKey) ? "teleport-coords" : _activeCoordKey;
+            var path = await _platform.ShowSaveFileDialogAsync($"{name}.lua", "Lua script", "lua");
+            if (string.IsNullOrEmpty(path)) return;
+            var script = CoordLibraryScriptGenerator.Generate(_coordAll, out _);
+            File.WriteAllText(path!, script, new UTF8Encoding(false));
+            CoordStatus = $"Wrote {_coordAll.Count} entries to {path}.";
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord Lua save failed", ex); }
+    }
+
     // ── Force mouse cursor on/off (shared with Lua via set_mouse_cursor) ─
 
     /// <summary>Map the DLL tri-state (1=on, 0=off, -1=unknown) onto the badge.</summary>

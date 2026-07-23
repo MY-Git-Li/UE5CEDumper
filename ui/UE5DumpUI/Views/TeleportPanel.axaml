@@ -641,6 +641,12 @@
               <Button Content="{StaticResource str.TP.LibImportCsv}"
                       Command="{Binding PreviewCoordCsvImportCommand}"
                       ToolTip.Tip="{StaticResource str.Tip.TP.LibImportCsv}" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibExportLua}"
+                      Command="{Binding ExportCoordLuaCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibExportLua}" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibSaveLua}"
+                      Command="{Binding SaveCoordLuaCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibSaveLua}" Padding="10,4"/>
               <CheckBox Content="{StaticResource str.TP.LibImportReplace}"
                         IsChecked="{Binding CoordImportReplace}"
                         ToolTip.Tip="{StaticResource str.Tip.TP.LibImportReplace}"

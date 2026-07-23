@@ -105,7 +105,7 @@ public class CoordTextPolicyTests
     [InlineData("\0")]        // luaL_dostring measures with strlen -> truncates the chunk
     [InlineData("a\r\nb")]    // raw newline in a Lua single-quoted literal = compile error
     [InlineData("a\tb")]
-    [InlineData("ab")]
+    [InlineData("a\u0001b")]  // any other C0 control
     public void HasBlockedChars_DetectsUnescapableInput(string s)
         => Assert.True(CoordText.HasBlockedChars(s));
 
