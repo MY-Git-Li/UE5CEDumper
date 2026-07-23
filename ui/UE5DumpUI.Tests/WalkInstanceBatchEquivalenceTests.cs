@@ -117,6 +117,10 @@ public class WalkInstanceBatchEquivalenceTests
         public void StopProcessMirror() { }
     }
 
+    /// <summary>The runner's per-test token — every awaited call that takes one gets it,
+    /// so a cancelled run stops here instead of at the next checkpoint (xUnit1051).</summary>
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
     private static void AssertSame(InstanceWalkResult a, InstanceWalkResult b, string because)
     {
         Assert.Equal(a.Address, b.Address);
@@ -156,11 +160,11 @@ public class WalkInstanceBatchEquivalenceTests
         var singleFx = new Fixture();
         var single = new List<InstanceWalkResult>();
         foreach (var a in addrs)
-            single.Add(await singleFx.Service.WalkInstanceAsync(a, "0xC1A55"));
+            single.Add(await singleFx.Service.WalkInstanceAsync(a, "0xC1A55", ct: Ct));
 
         var batchFx = new Fixture();
         var batched = await batchFx.Service.WalkInstanceBatchAsync(
-            addrs.Select(a => (a, (string?)"0xC1A55")).ToList());
+            addrs.Select(a => (a, (string?)"0xC1A55")).ToList(), ct: Ct);
 
         Assert.Equal(single.Count, batched.Count);
         for (int i = 0; i < single.Count; i++)
@@ -178,7 +182,7 @@ public class WalkInstanceBatchEquivalenceTests
         // stale / props_size present, is_definition absent — the optional keys are
         // where an independently-written batch encoder diverges first.
         var r = (await new Fixture().Service.WalkInstanceBatchAsync(
-            new[] { ("0xA1", (string?)null) }))[0];
+            new[] { ("0xA1", (string?)null) }, ct: Ct))[0];
         Assert.True(r.IsStale);
         Assert.Equal(512, r.PropertiesSize);
         Assert.False(r.IsDefinition);
@@ -189,7 +193,7 @@ public class WalkInstanceBatchEquivalenceTests
     {
         var addrs = Enumerable.Range(0, 7).Select(i => $"0x{i:X}").ToList();
         var batched = await new Fixture().Service.WalkInstanceBatchAsync(
-            addrs.Select(a => (a, (string?)null)).ToList());
+            addrs.Select(a => (a, (string?)null)).ToList(), ct: Ct);
 
         Assert.Equal(addrs.Count, batched.Count);
         for (int i = 0; i < addrs.Count; i++)
@@ -206,7 +210,7 @@ public class WalkInstanceBatchEquivalenceTests
         var addrs = new[] { "0xA1", "0xB2", "0xC3" };
 
         var batched = await fx.Service.WalkInstanceBatchAsync(
-            addrs.Select(a => (a, (string?)null)).ToList());
+            addrs.Select(a => (a, (string?)null)).ToList(), ct: Ct);
 
         Assert.Equal(3, batched.Count);
         Assert.Equal(3, fx.SingleCalls);              // fell back
@@ -224,7 +228,7 @@ public class WalkInstanceBatchEquivalenceTests
         var addrs = new[] { "0xA1", "0xB2", "0xC3" };
 
         var batched = await fx.Service.WalkInstanceBatchAsync(
-            addrs.Select(a => (a, (string?)null)).ToList());
+            addrs.Select(a => (a, (string?)null)).ToList(), ct: Ct);
 
         Assert.Equal(3, batched.Count);
         Assert.Equal(3, fx.SingleCalls);
@@ -240,7 +244,7 @@ public class WalkInstanceBatchEquivalenceTests
         var fx = new Fixture();
 
         var batched = await fx.Service.WalkInstanceBatchAsync(
-            addrs.Select(a => (a, (string?)null)).ToList());
+            addrs.Select(a => (a, (string?)null)).ToList(), ct: Ct);
 
         Assert.Equal(n, batched.Count);
         Assert.Equal(3, fx.BatchCalls);              // 200 + 200 + 37
@@ -253,7 +257,7 @@ public class WalkInstanceBatchEquivalenceTests
     {
         var fx = new Fixture();
         var batched = await fx.Service.WalkInstanceBatchAsync(
-            Array.Empty<(string, string?)>());
+            Array.Empty<(string, string?)>(), ct: Ct);
         Assert.Empty(batched);
         Assert.Empty(fx.Commands);
     }
