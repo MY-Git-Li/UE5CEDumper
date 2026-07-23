@@ -1346,19 +1346,18 @@ Full table and reasoning in [multipipe-eval.md](multipipe-eval.md) §10.
 Copy CE XML issued **20,357** of them: **0.088 ms in the DLL vs 0.208 ms of round-trip overhead —
 2.4x the work is overhead.** Batching it at the established ~200/call chunk (as
 `search_properties_batch` / `walk_class_batch` already do) would collapse 24,178 round-trips to
-~121. **✅ MEASURED (build 2327) — batching is worth it. Effort M · Risk low-med.** Three Copy CE XML runs
-on SEED (UE 4.27) split as **dll 27-30% / ipc 59-73% / ui 0-10%** — per call a very stable
-`dll 0.08 / ipc 0.16-0.21 / ui 0-0.03 ms`. **IPC is ~2x the actual DLL work and is exactly what
-batching removes**; UI-side per-result work is negligible, so the export tree building is not the
-cost. Projected at ~200/call: **2.4-3.5x** (5,548 ms -> ~2,275 ms; 20,357 round-trips -> 102).
-Table + caveats in [multipipe-eval.md](multipipe-eval.md) §10.4 — treat the projection as an UPPER
-bound (it assumes batching adds nothing, and `dll` at ~0.08 ms/call is a hard floor).
+~121. **✅ SHIPPED build 2329 — `walk_instance_batch`.** The measurement said dll 27-30% / **ipc 59-73%** /
+ui 0-10%, i.e. per-call round-trip overhead roughly 2x the actual walk, so the calls were collapsed
+(chunk ~200). Built to the `walk_class_batch` precedent with all three safety layers: a DLL handler
+that is a trivial loop over the single-call path, a shared serialiser/deserialiser pair, and an
+equivalence test comparing both paths field-for-field. The CE export now walks breadth-first per
+level. A failed batch — or a short/long reply, which would otherwise mis-pair results with addresses
+— replays the chunk as single calls.
 
-Follow the `walk_class_batch` / `search_properties_batch` precedent **including their safety net**:
-a DLL-side batch that is a trivial `for` loop over the single-call path, one shared serialiser
-between single and batch dispatch, and an equivalence test proving byte-identical output. That net
-exists because a silently dropped field in a CE export is invisible until someone needs it months
-later.
+**Still open: confirm the actual speed-up.** Projection was 2.4-3.5x but is an UPPER bound (it
+assumes batching adds nothing, while a larger payload costs something on both sides). The next live
+Copy CE XML prints its own `split dll / ipc / ui` line — compare against the build-2327 baseline in
+[multipipe-eval.md](multipipe-eval.md) §10.4. Effort **0** (read only).
 
 *Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
 (dev-log build 2156) already holds the cadence half.*

@@ -452,22 +452,36 @@ public sealed class DumpService : IDumpService
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
+        return DeserializeInstanceWalk(res);
+    }
 
+    /// <summary>
+    /// Shared deserialiser for one instance-walk object — used by BOTH
+    /// <see cref="WalkInstanceAsync"/> and <see cref="WalkInstanceBatchAsync"/>.
+    ///
+    /// <para>Counterpart to the DLL's <c>EncodeInstanceWalkToJson</c>: one emitter
+    /// on that side, one parser on this side, so the single and batch paths cannot
+    /// disagree about a field. (Layer 2 of the walk_class_batch safety net — the
+    /// export it feeds is a large file-shaped artefact where a silently dropped
+    /// field is invisible until someone needs it months later.)</para>
+    /// </summary>
+    internal static InstanceWalkResult DeserializeInstanceWalk(JsonObject o)
+    {
         var result = new InstanceWalkResult
         {
-            Address = res["addr"]?.GetValue<string>() ?? "",
-            Name = res["name"]?.GetValue<string>() ?? "",
-            ClassName = res["class"]?.GetValue<string>() ?? "",
-            ClassAddr = res["class_addr"]?.GetValue<string>() ?? "",
-            OuterAddr = res["outer"]?.GetValue<string>() ?? "",
-            OuterName = res["outer_name"]?.GetValue<string>() ?? "",
-            OuterClassName = res["outer_class"]?.GetValue<string>() ?? "",
-            IsDefinition = res["is_definition"]?.GetValue<bool>() ?? false,
-            IsStale = res["stale"]?.GetValue<bool>() ?? false,
-            PropertiesSize = res["props_size"]?.GetValue<int>() ?? 0,
+            Address = o["addr"]?.GetValue<string>() ?? "",
+            Name = o["name"]?.GetValue<string>() ?? "",
+            ClassName = o["class"]?.GetValue<string>() ?? "",
+            ClassAddr = o["class_addr"]?.GetValue<string>() ?? "",
+            OuterAddr = o["outer"]?.GetValue<string>() ?? "",
+            OuterName = o["outer_name"]?.GetValue<string>() ?? "",
+            OuterClassName = o["outer_class"]?.GetValue<string>() ?? "",
+            IsDefinition = o["is_definition"]?.GetValue<bool>() ?? false,
+            IsStale = o["stale"]?.GetValue<bool>() ?? false,
+            PropertiesSize = o["props_size"]?.GetValue<int>() ?? 0,
         };
 
-        if (res["fields"] is JsonArray fields)
+        if (o["fields"] is JsonArray fields)
         {
             foreach (var f in fields)
             {
@@ -477,6 +491,87 @@ public sealed class DumpService : IDumpService
         }
 
         return result;
+    }
+
+    /// <summary>Chunk size for <see cref="WalkInstanceBatchAsync"/> — the same ~200
+    /// the other batched fan-outs use. Bounds the JSON payload on both sides and
+    /// keeps progress/cancellation granularity at roughly one update per chunk.</summary>
+    public const int WalkInstanceBatchChunk = 200;
+
+    public async Task<IReadOnlyList<InstanceWalkResult>> WalkInstanceBatchAsync(
+        IReadOnlyList<(string Addr, string? ClassAddr)> items,
+        int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false,
+        CancellationToken ct = default)
+    {
+        var all = new List<InstanceWalkResult>(items.Count);
+        for (int start = 0; start < items.Count; start += WalkInstanceBatchChunk)
+        {
+            ct.ThrowIfCancellationRequested();
+            int len = Math.Min(WalkInstanceBatchChunk, items.Count - start);
+
+            var arr = new JsonArray();
+            for (int i = start; i < start + len; i++)
+            {
+                var it = new JsonObject { ["addr"] = items[i].Addr };
+                if (!string.IsNullOrEmpty(items[i].ClassAddr)) it["class_addr"] = items[i].ClassAddr;
+                arr.Add(it);
+            }
+
+            var req = new JsonObject { ["cmd"] = "walk_instance_batch", ["items"] = arr };
+            if (arrayLimit != 64) req["array_limit"] = arrayLimit;
+            if (previewLimit != 2) req["preview_limit"] = previewLimit;
+            if (fillGaps) req["fill_gaps"] = true;
+
+            List<InstanceWalkResult>? chunk = null;
+            try
+            {
+                var res = await _pipe.SendAsync(req, ct);
+                CheckResponse(res);
+                if (res["instances"] is JsonArray got)
+                {
+                    // A short/long reply means the batch and the request disagree —
+                    // treat it as a batch failure and replay singly rather than
+                    // silently mis-pairing results with their requested addresses.
+                    if (got.Count == len)
+                    {
+                        chunk = new List<InstanceWalkResult>(len);
+                        foreach (var e in got)
+                            chunk.Add(e is JsonObject eo
+                                ? DeserializeInstanceWalk(eo)
+                                : new InstanceWalkResult());
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;   // a real user cancel, not a batch failure
+            }
+            catch (Exception ex)
+            {
+                _log.Warn(Constants.LogCatPipe,
+                    $"walk_instance_batch chunk failed ({ex.Message}) — replaying {len} single calls");
+            }
+
+            if (chunk == null)
+            {
+                // Per-chunk fallback (the walk_class_batch precedent): an older DLL
+                // that doesn't know the command, or any batch-level failure, degrades
+                // to the single path rather than losing the chunk. Each single call
+                // can fail independently, exactly as before batching existed.
+                chunk = new List<InstanceWalkResult>(len);
+                for (int i = start; i < start + len; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    try { chunk.Add(await WalkInstanceAsync(items[i].Addr, items[i].ClassAddr,
+                                                            arrayLimit, previewLimit, fillGaps, ct)); }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch { chunk.Add(new InstanceWalkResult()); }
+                }
+            }
+
+            all.AddRange(chunk);
+        }
+        return all;
     }
 
     public async Task<WorldWalkResult> WalkWorldAsync(int actorLimit = 200, int arrayLimit = 64, CancellationToken ct = default)

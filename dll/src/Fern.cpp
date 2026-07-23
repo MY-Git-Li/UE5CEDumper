@@ -1521,6 +1521,38 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             return Renge::MakeResponse(id, data).dump();
         }
 
+        // EncodeInstanceWalkToJson — shared serialiser used by both
+        // walk_instance (single) and walk_instance_batch. Same contract as
+        // EncodeClassInfoToJson below: centralising the emit guarantees the two
+        // pipe paths produce byte-identical instance objects, so the CE export
+        // can switch to the batch without a field silently changing shape.
+        // (Layer 2 of the walk_class_batch safety net.)
+        auto EncodeInstanceWalkToJson = [&](const Ubel::InstanceWalkResult& result) -> json {
+            json data;
+            data["addr"]       = Renge::AddrToStr(result.addr);
+            data["name"]       = result.name;
+            data["class"]      = result.className;
+            data["class_addr"] = Renge::AddrToStr(result.classAddr);
+            data["outer"]      = Renge::AddrToStr(result.outerAddr);
+            data["outer_name"] = result.outerName;
+            data["outer_class"]= result.outerClassName;
+            // Optional keys stay OPTIONAL — emitting them unconditionally would
+            // change the single-call wire shape and break byte-equivalence.
+            if (result.isDefinition)
+                data["is_definition"] = true;
+            if (result.isStale)
+                data["stale"] = true;
+            if (result.propsSize > 0)
+                data["props_size"] = result.propsSize;
+
+            json fields = json::array();
+            for (const auto& fv : result.fields) {
+                fields.push_back(SerializeField(fv));
+            }
+            data["fields"] = fields;
+            return data;
+        };
+
         // EncodeClassInfoToJson — shared serialiser used by both
         // walk_class (single) and walk_class_batch. Centralising the
         // emit logic guarantees the two pipe paths produce byte-
@@ -1774,26 +1806,63 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
 
             auto result = Ubel::WalkInstance(addr, classAddr, arrayLimit, previewLimit, fillGaps);
 
-            json data;
-            data["addr"]       = Renge::AddrToStr(result.addr);
-            data["name"]       = result.name;
-            data["class"]      = result.className;
-            data["class_addr"] = Renge::AddrToStr(result.classAddr);
-            data["outer"]      = Renge::AddrToStr(result.outerAddr);
-            data["outer_name"] = result.outerName;
-            data["outer_class"]= result.outerClassName;
-            if (result.isDefinition)
-                data["is_definition"] = true;
-            if (result.isStale)
-                data["stale"] = true;
-            if (result.propsSize > 0)
-                data["props_size"] = result.propsSize;
+            // Shared serialiser — walk_instance_batch emits the SAME function, so
+            // single and batch responses cannot drift field-by-field.
+            return Renge::MakeResponse(id, EncodeInstanceWalkToJson(result)).dump();
+        }
 
-            json fields = json::array();
-            for (const auto& fv : result.fields) {
-                fields.push_back(SerializeField(fv));
+        // ── walk_instance_batch: N instance walks in ONE round-trip ──
+        //
+        // MEASURED justification (build 2327, multipipe-eval.md §10.4): a Copy CE
+        // XML issued 20,357 single walk_instance calls, and the split was
+        // dll 30% / ipc 59-73% / ui ~0%. The per-call IPC (0.16-0.21 ms) is roughly
+        // TWICE the actual walk (0.08 ms) and is pure round-trip overhead — exactly
+        // what collapsing N calls into one removes.
+        //
+        // Deliberately a trivial loop over the single-call path: that is a
+        // STRUCTURAL guarantee of equivalence (layer 1 of the walk_class_batch
+        // safety net), not a promise. Any cleverness here would have to be proven
+        // instead of being true by construction.
+        if (cmd == Renge::CMD_WALK_INSTANCE_BATCH) {
+            if (!request.contains("items") || !request["items"].is_array()) {
+                return Renge::MakeError(id, "Missing or non-array 'items'").dump();
             }
-            data["fields"] = fields;
+            // Per-batch defaults; each item may override.
+            int32_t defArrayLimit   = request.value("array_limit", 64);
+            int32_t defPreviewLimit = request.value("preview_limit", 2);
+            bool    defFillGaps     = request.value("fill_gaps", false);
+
+            json arr = json::array();
+            for (const auto& item : request["items"]) {
+                // A malformed element must not abort the batch — the UI's fallback
+                // replays a failed chunk as single calls, and losing the whole
+                // chunk's good entries would defeat that.
+                if (!item.is_object()) { arr.push_back(json::object()); continue; }
+
+                uintptr_t a = 0;
+                std::string as = item.value("addr", "");
+                if (as.empty() || !Renge::TryStrToAddr(as, a)) {
+                    arr.push_back(json::object());
+                    continue;
+                }
+                uintptr_t ca = 0;
+                std::string cas = item.value("class_addr", "");
+                if (!cas.empty()) Renge::TryStrToAddr(cas, ca);
+
+                auto r = Ubel::WalkInstance(a, ca,
+                                            item.value("array_limit",   defArrayLimit),
+                                            item.value("preview_limit", defPreviewLimit),
+                                            item.value("fill_gaps",     defFillGaps));
+                arr.push_back(EncodeInstanceWalkToJson(r));
+
+                // Same cooperative-cancel contract as every other bulk loop: a
+                // disconnect mid-batch returns what is done rather than walking on.
+                if (Tot::Requested()) break;
+            }
+
+            json data;
+            data["instances"] = arr;
+            data["count"]     = static_cast<int>(arr.size());
             return Renge::MakeResponse(id, data).dump();
         }
 

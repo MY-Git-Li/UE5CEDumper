@@ -1350,6 +1350,36 @@ Error codes:
 - `-5` = game-thread dispatch timeout (5s) — game may be paused or unresponsive
 - `-7` = hook not active, fell back to direct call (may have succeeded but on wrong thread)
 
+### walk_instance_batch
+
+N instance walks in ONE round-trip. **Measured justification** ([multipipe-eval.md](multipipe-eval.md)
+§10.4): a Copy CE XML issued **20,357** single `walk_instance` calls, splitting as
+dll 30% / **ipc 59-73%** / ui ~0%. Per call the round-trip overhead (0.16-0.21 ms) is roughly
+**twice** the actual walk (0.08 ms) — so collapsing the calls, not changing the dispatch model, is
+the lever. Chunk at ~200 (what the UI does).
+
+The DLL implementation is a **trivial loop over the single-call path**, and both share one
+serialiser, so each element is byte-identical to a `walk_instance` response.
+
+```jsonc
+// Request — per-item class_addr optional; array_limit / preview_limit / fill_gaps
+// may be set per batch (defaults) and overridden per item.
+{ "id": 7, "cmd": "walk_instance_batch",
+  "items": [ { "addr": "1F2A3B40", "class_addr": "1C0DE000" },
+             { "addr": "1F2A3C80" } ],
+  "array_limit": 64 }
+
+// Response — "instances" is positionally aligned with "items".
+{ "id": 7, "ok": true, "count": 2,
+  "instances": [ { /* exactly a walk_instance payload */ }, { ... } ] }
+```
+
+A malformed item yields an empty object in its slot rather than aborting the batch, and the loop
+honours the same cooperative cancel as every other bulk command. **The UI replays a chunk as single
+calls** whenever the batch fails *or* returns the wrong number of rows — a short reply would
+otherwise mis-pair results with addresses, which in a CE export is a wrong pointer chain that looks
+perfectly valid.
+
 ### get_diagnostics / reset_diagnostics
 
 Self-health telemetry (`Sense`). Read-only and safe to poll. Exists to answer the

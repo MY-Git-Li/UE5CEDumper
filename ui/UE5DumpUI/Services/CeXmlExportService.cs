@@ -400,34 +400,62 @@ public static class CeXmlExportService
     {
         if (remainingDepth <= 0) return;
 
+        // Collect this LEVEL's pointer targets first, then walk them in ONE batched
+        // call, then recurse. Previously each field was a separate round-trip, which
+        // is where a Copy CE XML's 20,357 walk_instance calls came from — and the
+        // measured split (multipipe-eval.md §10.4) showed 59-73% of that export's
+        // wall-clock was pure round-trip overhead, ~2x the actual walking.
+        //
+        // Breadth-first per level is what makes batching possible at all: every
+        // target at one depth is independent, so they can be requested together.
+        // The visited/resolved guards stay HERE (not inside the batch) so cycle
+        // protection and dedup behave exactly as before.
+        var pending = new List<(string Addr, string? ClassAddr)>();
         foreach (var field in fields)
         {
             if (!IsObjectPropertyType(field.TypeName)) continue;
             if (string.IsNullOrEmpty(field.PtrAddress) || field.PtrAddress == "0x0") continue;
             if (resolved.ContainsKey(field.PtrAddress)) continue;
             if (!visited.Add(field.PtrAddress)) continue; // cycle protection
+            pending.Add((field.PtrAddress, field.PtrClassAddr));
+        }
+        if (pending.Count == 0) return;
+
+        IReadOnlyList<InstanceWalkResult> walked;
+        try
+        {
+            walked = await dump.WalkInstanceBatchAsync(pending, arrayLimit);
+        }
+        catch
+        {
+            // Whole-batch failure is already handled per-chunk inside the service;
+            // reaching here means something broader went wrong. Same behaviour as
+            // before: skip the branch, pointers fall back to flat hex leaves.
+            return;
+        }
+
+        for (int i = 0; i < pending.Count && i < walked.Count; i++)
+        {
+            var result = walked[i];
+            if (result.Fields.Count == 0) continue;   // reclaimed / bad target
 
             try
             {
-                var result = await dump.WalkInstanceAsync(field.PtrAddress, field.PtrClassAddr, arrayLimit);
-                if (result.Fields.Count > 0)
+                resolved[pending[i].Addr] = result.Fields;
+
+                // Cascade struct resolution so the drilled target's
+                // StructProperty children expand to real sub-fields,
+                // not empty GroupHeader placeholders.
+                if (resolvedStructs != null)
                 {
-                    resolved[field.PtrAddress] = result.Fields;
-
-                    // Cascade struct resolution so the drilled target's
-                    // StructProperty children expand to real sub-fields,
-                    // not empty GroupHeader placeholders.
-                    if (resolvedStructs != null)
-                    {
-                        await ResolveStructFieldsIntoAsync(
-                            dump, result.Fields, resolvedStructs, arrayLimit);
-                    }
-
-                    // Recurse one level deeper for nested pointers in the resolved target
-                    await ResolvePointerInstancesRecursiveAsync(
-                        dump, result.Fields, resolved, remainingDepth - 1,
-                        arrayLimit, visited, resolvedStructs);
+                    await ResolveStructFieldsIntoAsync(
+                        dump, result.Fields, resolvedStructs, arrayLimit);
                 }
+
+                // Recurse one level deeper for nested pointers in the resolved target
+                await ResolvePointerInstancesRecursiveAsync(
+                    dump, result.Fields, resolved, remainingDepth - 1,
+                    arrayLimit, visited, resolvedStructs);
             }
             catch
             {

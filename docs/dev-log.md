@@ -20,6 +20,44 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — `walk_instance_batch`: act on the measurement (build 2329; dev, DLL + UI)
+
+Implements what §10.4 concluded. A Copy CE XML issued **20,357** single `walk_instance` calls whose
+cost split as dll 30% / **ipc 59-73%** / ui ~0% — per call, 0.16-0.21 ms of round-trip overhead
+carrying 0.08 ms of actual work. Collapsing the calls is the lever.
+
+**Built to the `walk_class_batch` precedent, all three safety layers:**
+- **Layer 1 — structural.** The DLL handler is a trivial `for` loop over `Ubel::WalkInstance`, the
+  same function the single command calls. Equivalence is true by construction, not by promise.
+- **Layer 2 — shared serialiser.** New `EncodeInstanceWalkToJson` on the DLL side (the single
+  command's inline emit was extracted into it) and `DumpService.DeserializeInstanceWalk` on the UI
+  side. One emitter, one parser, so the two paths cannot disagree about a field — including the
+  **optional** keys (`is_definition` / `stale` / `props_size`), which is where an independently
+  written batch encoder diverges first.
+- **Layer 3 — equivalence test.** `WalkInstanceBatchEquivalenceTests` runs the same fixture through
+  both paths and compares field-for-field, and covers chunk splitting, ordering, and both
+  degradation paths.
+
+**The export walks breadth-first per level now.** `ResolvePointerInstancesRecursiveAsync` collects
+every pointer target at one depth, walks them in one batched call, then recurses. That restructuring
+is what makes batching possible at all — targets at one depth are independent. The `visited` /
+`resolved` guards deliberately stay outside the batch so cycle protection and dedup behave exactly
+as before.
+
+**Two failure modes, both degrading rather than losing data:**
+- A batch that throws — including an **older DLL that doesn't know the command** — replays that
+  chunk as single calls. Each can then fail independently, exactly as before batching existed.
+- **A short or long reply also falls back.** Consuming N-1 rows positionally would silently attach
+  one instance's fields to a *different* address — in a CE export that is a wrong pointer chain that
+  looks perfectly valid. There is a test for precisely this.
+
+**Verification:** all 4 proxies + DLL build clean; 2907 tests green (+7). **Not verified: the actual
+speed-up** — the projection is 2.4-3.5×, but it is an upper bound (it assumes batching adds nothing,
+while a larger payload costs something on both sides). The next live Copy CE XML will print its own
+`split dll / ipc / ui` line and settle it.
+
+-----
+
 ## 2026-07-23 — MEASURED: IPC is 59-73% of a heavy export; batch `walk_instance` (build 2327; docs)
 
 The decomposition built earlier today, read on real data. Three Copy CE XML runs on **SEED BATTLE

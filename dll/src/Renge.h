@@ -28,6 +28,11 @@ constexpr const char* CMD_WALK_CLASS_BATCH = "walk_class_batch";
 constexpr const char* CMD_READ_MEM         = "read_mem";
 constexpr const char* CMD_WRITE_MEM        = "write_mem";
 constexpr const char* CMD_WALK_INSTANCE    = "walk_instance";
+// N instance walks in ONE round-trip. MEASURED justification in
+// multipipe-eval.md §10.4: a Copy CE XML issued 20,357 single walk_instance
+// calls at 0.08 ms of real work carrying 0.16-0.21 ms of pure round-trip
+// overhead. Same trivial-loop-over-the-single-path shape as walk_class_batch.
+constexpr const char* CMD_WALK_INSTANCE_BATCH = "walk_instance_batch";
 constexpr const char* CMD_WALK_WORLD       = "walk_world";
 constexpr const char* CMD_FIND_INSTANCES   = "find_instances";
 constexpr const char* CMD_FIND_BY_ADDRESS  = "find_by_address";
