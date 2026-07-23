@@ -1,9 +1,12 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 
@@ -63,7 +66,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 
     public TeleportViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
         IAobMakerBridge? aobMaker = null, IGlobalHotkeyService? globalHotkeys = null,
-        IExperimentalGate? experimentalGate = null)
+        IExperimentalGate? experimentalGate = null,
+        CoordinateLibraryStore? coordStore = null)
     {
         _dump = dump;
         _log = log;
@@ -71,6 +75,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         _aobMaker = aobMaker;
         _globalHotkeys = globalHotkeys;
         _experimentalGate = experimentalGate;
+        _coordStore = coordStore;
+        _coordFilterMemory = new KeywordSearchMemory(
+            () => (CoordFilterText, CoordResults.Count > 0));
+        CoordGroups.Add(CoordAllGroups);
         for (int i = 0; i < 3; i++)
             Markers.Add(new TeleportMarkerRow { Slot = i });
 
@@ -2820,6 +2828,948 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         finally { IsBusy = false; }
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    //  Coordinate Library (P1) — docs/teleport-coord-library-spec.md
+    //
+    //  An unlimited, labelled + grouped list of positions, persisted PER GAME
+    //  by exe module name. Separate from the 3 DLL marker slots by design: those
+    //  live in the DLL, are hotkey-driven and survive a UI restart; this is a
+    //  UI-side curated list. Teleporting reuses the existing explicit-coordinate
+    //  path, so nothing DLL-side changes.
+    // ══════════════════════════════════════════════════════════════════
+
+    /// <summary>Every entry for the active game (the model). The grid binds to
+    /// <see cref="CoordResults"/>, which is this filtered.</summary>
+    private readonly List<CoordEntry> _coordAll = new();
+
+    /// <summary>Filtered + sorted rows shown in the grid.</summary>
+    public ObservableCollection<CoordRow> CoordResults { get; } = new();
+
+    /// <summary>Group names offered by the Group filter combo ("(all)" first).</summary>
+    public ObservableCollection<string> CoordGroups { get; } = new();
+
+    /// <summary>Per-session remembered filter keywords (LRU) for the box's
+    /// AutoCompleteBox suggestions. The match count is client-side and synchronous,
+    /// so Schedule (not Commit) is the correct hook.</summary>
+    private readonly KeywordSearchMemory _coordFilterMemory;
+    public ObservableCollection<string> CoordFilterHistory => _coordFilterMemory.History;
+
+    private readonly CoordinateLibraryStore? _coordStore;
+    private string _activeCoordKey = "";
+    private bool _suppressCoordPersist;
+
+    /// <summary>Card open/closed. Collapsed by default (R4).</summary>
+    [ObservableProperty] private bool _coordLibraryExpanded;
+
+    [ObservableProperty] private string _coordFilterText = "";
+    [ObservableProperty] private string _coordGroupFilter = CoordAllGroups;
+    [ObservableProperty] private bool _coordCurrentMapOnly = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelectedCoord))]
+    [NotifyPropertyChangedFor(nameof(SelectedCoordSummary))]
+    private CoordRow? _selectedCoord;
+
+    [ObservableProperty] private string _coordStatus = "";
+
+    /// <summary>Extra height (uu) added to Z at teleport time so landing exactly on
+    /// the captured floor plane does not drop the character through it. 0 = off.
+    /// Library-wide, persisted, and baked into the Lua export (the picker teleports
+    /// on its own, so it needs the value); deliberately absent from the CSV.</summary>
+    [ObservableProperty] private double _coordZTolerance;
+    [ObservableProperty] private string _editCoordLabel = "";
+    [ObservableProperty] private string _editCoordGroup = "";
+
+    /// <summary>Sentinel shown in the Group combo for "don't filter by group".</summary>
+    public const string CoordAllGroups = "(all)";
+
+    public bool HasSelectedCoord => SelectedCoord != null;
+
+    /// <summary>"Coordinate Library (12 of 340)" — the card header.</summary>
+    public string CoordLibraryHeader =>
+        _coordAll.Count == CoordResults.Count
+            ? $"Coordinate Library ({_coordAll.Count})"
+            : $"Coordinate Library ({CoordResults.Count} of {_coordAll.Count})";
+
+    /// <summary>"Chest 2 — Map01 — 1,204 uu away", or a cross-map warning.</summary>
+    public string SelectedCoordSummary
+    {
+        get
+        {
+            var row = SelectedCoord;
+            if (row == null) return "";
+            var e = row.Entry;
+            var where = string.IsNullOrEmpty(e.Map) ? "(no map)" : e.Map;
+            if (!IsSameMap(e.Map, PoseMap))
+                return $"{e.Label} — {where} — ⚠ different map (you are on '{PoseMap}')";
+            return row.HasDistance
+                ? $"{e.Label} — {where} — {row.Distance:N0} uu away"
+                : $"{e.Label} — {where}";
+        }
+    }
+
+    /// <summary>Live pose as raw doubles (the Pose* properties are display strings).
+    /// Kept purely so the library's per-row distance has numbers to work with.</summary>
+    private double _liveX, _liveY, _liveZ;
+    private bool _hasLivePose;
+
+    /// <summary>Map names are compared case-insensitively everywhere: CSV import
+    /// makes Map user-authored ("map01" vs "Map01"), and an ordinal comparison would
+    /// flag every imported row cross-map. See spec §3 D2.</summary>
+    internal static bool IsSameMap(string? a, string? b) =>
+        string.Equals(a ?? "", b ?? "", StringComparison.OrdinalIgnoreCase);
+
+    partial void OnCoordFilterTextChanged(string value)
+    {
+        ApplyCoordFilter();
+        _coordFilterMemory.Schedule(value);
+    }
+    partial void OnCoordGroupFilterChanged(string value) => ApplyCoordFilter();
+    partial void OnCoordZToleranceChanged(double value) => PersistCoordLibrary();
+    partial void OnCoordCurrentMapOnlyChanged(bool value) => ApplyCoordFilter();
+
+    partial void OnSelectedCoordChanged(CoordRow? value)
+    {
+        EditCoordLabel = value?.Entry.Label ?? "";
+        EditCoordGroup = value?.Entry.Group ?? "";
+    }
+
+    /// <summary>
+    /// Load the library for a game. Called explicitly by MainWindowViewModel AFTER
+    /// SetEngineState, so the disk load is never a hidden side effect of pushing
+    /// engine state (the LiveWalkerViewModel bookmark precedent).
+    /// </summary>
+    public void LoadCoordLibraryForGame(string? moduleName)
+    {
+        // Drop any un-applied import preview FIRST, before the no-store early-out: it
+        // was diffed against the PREVIOUS game's library, so applying it here would
+        // write those rows into this game's file. The card may even be hidden
+        // (experimental gate off) while this fires, so the stale preview would not be
+        // visible to cancel. Whether a store exists is irrelevant to that.
+        if (_pendingImport != null || _pendingChanges != null)
+        {
+            _pendingImport = null;
+            _pendingChanges = null;
+            CoordImportPreview = "";
+            OnPropertyChanged(nameof(HasPendingCoordImport));
+        }
+
+        if (_coordStore == null) return;
+        _activeCoordKey = CoordinateLibraryStore.KeyFor(moduleName);
+        _suppressCoordPersist = true;
+        try
+        {
+            _coordAll.Clear();
+            SelectedCoord = null;
+            if (!string.IsNullOrEmpty(_activeCoordKey))
+            {
+                var file = _coordStore.Load(_activeCoordKey);
+                foreach (var e in file.Entries) _coordAll.Add(e);
+                CoordZTolerance = file.ZTolerance;
+                _log.Info($"Coordinate library: loaded {_coordAll.Count} entries for '{_activeCoordKey}'");
+            }
+            RebuildCoordGroups();
+            ApplyCoordFilter();
+        }
+        finally { _suppressCoordPersist = false; }
+    }
+
+    private void PersistCoordLibrary()
+    {
+        if (_coordStore == null || _suppressCoordPersist) return;
+        if (string.IsNullOrEmpty(_activeCoordKey)) return;
+        _coordStore.Save(_activeCoordKey, new CoordinateLibraryFile
+        {
+            Module = _activeCoordKey,
+            Entries = _coordAll.ToList(),
+            ZTolerance = CoordZTolerance,
+        });
+    }
+
+    /// <summary>All entries, newest-first insertion order preserved. Exposed for the
+    /// export/import codecs (P2+) and for tests.</summary>
+    public IReadOnlyList<CoordEntry> CoordEntries => _coordAll;
+
+    private void RebuildCoordGroups()
+    {
+        var keep = CoordGroupFilter;
+        CoordGroups.Clear();
+        CoordGroups.Add(CoordAllGroups);
+        foreach (var g in _coordAll
+                     .Select(e => e.Group)
+                     .Where(g => !string.IsNullOrEmpty(g))
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(g => g, StringComparer.OrdinalIgnoreCase))
+        {
+            CoordGroups.Add(g);
+        }
+        // Keep the user's selection if it still exists, else fall back to "(all)".
+        CoordGroupFilter = CoordGroups.Contains(keep, StringComparer.OrdinalIgnoreCase)
+            ? keep : CoordAllGroups;
+    }
+
+    /// <summary>
+    /// Rebuild <see cref="CoordResults"/> from the model. Sort is Group asc, then
+    /// Label NATURAL-ascending so "Chest 2" precedes "Chest 10". Ordering is
+    /// controlled by insertion order (the repo's VM-side sort convention) — the grid
+    /// preserves it.
+    /// </summary>
+    private void ApplyCoordFilter()
+    {
+        var keepUid = SelectedCoord?.Entry.Uid;
+        CoordResults.Clear();
+
+        var terms = ObjectTreeFilter.SplitTerms(CoordFilterText);
+        bool byGroup = !string.Equals(CoordGroupFilter, CoordAllGroups, StringComparison.Ordinal)
+                       && !string.IsNullOrEmpty(CoordGroupFilter);
+
+        var matched = new List<CoordEntry>();
+        foreach (var e in _coordAll)
+        {
+            if (CoordCurrentMapOnly && !string.IsNullOrEmpty(PoseMap)
+                && !IsSameMap(e.Map, PoseMap))
+            {
+                continue;
+            }
+            if (byGroup && !string.Equals(e.Group, CoordGroupFilter, StringComparison.OrdinalIgnoreCase))
+                continue;
+            // space = AND, term-level AND / field-level OR (project MUST-rule).
+            if (terms.Length > 0 && !ObjectTreeFilter.MatchesAllTerms(terms, e.Label, e.Group, e.Map))
+                continue;
+            matched.Add(e);
+        }
+
+        matched.Sort(CompareForDisplay);
+        foreach (var e in matched)
+            CoordResults.Add(new CoordRow(e, IsSameMap(e.Map, PoseMap)));
+
+        UpdateCoordDistances();
+
+        if (keepUid != null)
+            SelectedCoord = CoordResults.FirstOrDefault(r => r.Entry.Uid == keepUid);
+
+        OnPropertyChanged(nameof(CoordLibraryHeader));
+    }
+
+    private static int CompareForDisplay(CoordEntry a, CoordEntry b)
+    {
+        int g = string.Compare(a.Group, b.Group, StringComparison.OrdinalIgnoreCase);
+        return g != 0 ? g : NaturalCompare(a.Label, b.Label);
+    }
+
+    /// <summary>Natural (human) ordering so "Chest 2" sorts before "Chest 10".
+    /// Digit runs compare numerically, everything else case-insensitively.</summary>
+    internal static int NaturalCompare(string? x, string? y)
+    {
+        string a = x ?? "", b = y ?? "";
+        int i = 0, j = 0;
+        while (i < a.Length && j < b.Length)
+        {
+            if (char.IsDigit(a[i]) && char.IsDigit(b[j]))
+            {
+                int si = i, sj = j;
+                while (i < a.Length && char.IsDigit(a[i])) i++;
+                while (j < b.Length && char.IsDigit(b[j])) j++;
+                var da = a.AsSpan(si, i - si).TrimStart('0');
+                var db = b.AsSpan(sj, j - sj).TrimStart('0');
+                if (da.Length != db.Length) return da.Length - db.Length;
+                int c = da.SequenceCompareTo(db);
+                if (c != 0) return c;
+            }
+            else
+            {
+                int c = char.ToUpperInvariant(a[i]).CompareTo(char.ToUpperInvariant(b[j]));
+                if (c != 0) return c;
+                i++; j++;
+            }
+        }
+        return (a.Length - i) - (b.Length - j);
+    }
+
+    /// <summary>Refresh the per-row distance from the last known pose. Free — the
+    /// panel already polls get_pose every ~2 s.</summary>
+    private void UpdateCoordDistances()
+    {
+        foreach (var row in CoordResults)
+            row.SetDistanceFrom(_liveX, _liveY, _liveZ, _hasLivePose);
+        OnPropertyChanged(nameof(SelectedCoordSummary));
+    }
+
+    // ── CRUD ────────────────────────────────────────────────────────────
+
+    /// <summary>Capture the live pose as a new library entry.</summary>
+    [RelayCommand]
+    private async Task SaveCurrentPosToLibraryAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var p = await _dump.TeleportGetPoseAsync();
+            if (p.Code != TeleportCodes.Ok)
+            {
+                CoordStatus = TeleportCodes.Describe(p.Code);
+                return;
+            }
+            ApplyPoseAndMovement(p);
+            var entry = FromPose(p, NextCoordLabel(p.Map));
+            AddCoordEntry(entry);
+            CoordStatus = $"Saved '{entry.Label}' ({CoordPrecision.Text(entry.X)}, " +
+                          $"{CoordPrecision.Text(entry.Y)}, {CoordPrecision.Text(entry.Z)}).";
+            CoordLibraryExpanded = true;
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord library save-current failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Build an entry from a pose, applying the capture-time rounding that
+    /// makes every wire format round-trip bit-exactly (spec D4).</summary>
+    internal static CoordEntry FromPose(TeleportPose p, string label) => new()
+    {
+        Uid = NewCoordUid(),
+        Label = label,
+        Group = "",
+        Map = p.Map ?? "",
+        X = CoordPrecision.Round(p.X),
+        Y = CoordPrecision.Round(p.Y),
+        Z = CoordPrecision.Round(p.Z),
+        Pitch = CoordPrecision.Round(p.Pitch),
+        Yaw = CoordPrecision.Round(p.Yaw),
+        Roll = CoordPrecision.Round(p.Roll),
+    };
+
+    /// <summary>Short opaque id. Not a GUID — it is emitted into Lua and CSV and read
+    /// by humans, so keep it short. Collision-checked against the live library.</summary>
+    private static string NewCoordUid()
+    {
+        Span<char> buf = stackalloc char[6];
+        var rnd = Random.Shared;
+        const string alphabet = "abcdefghijkmnpqrstuvwxyz23456789";  // no l/o/0/1
+        for (int i = 0; i < buf.Length; i++) buf[i] = alphabet[rnd.Next(alphabet.Length)];
+        return new string(buf);
+    }
+
+    private string UniqueUid()
+    {
+        for (int attempt = 0; attempt < 32; attempt++)
+        {
+            var uid = NewCoordUid();
+            if (!_coordAll.Any(e => string.Equals(e.Uid, uid, StringComparison.Ordinal)))
+                return uid;
+        }
+        return Guid.NewGuid().ToString("N")[..12];   // pathological fallback
+    }
+
+    private string NextCoordLabel(string? map)
+    {
+        var baseName = string.IsNullOrEmpty(map) ? "Position" : map!;
+        for (int n = 1; ; n++)
+        {
+            var candidate = $"{baseName} {n}";
+            if (!_coordAll.Any(e => string.Equals(e.Label, candidate, StringComparison.OrdinalIgnoreCase)))
+                return candidate;
+        }
+    }
+
+    /// <summary>Insert an entry, assigning a unique uid and normalising its text.</summary>
+    private void AddCoordEntry(CoordEntry entry)
+    {
+        entry.Uid = string.IsNullOrEmpty(entry.Uid) ? UniqueUid() : entry.Uid;
+        entry.Label = CoordText.Normalize(entry.Label, CoordText.MaxLabelLength);
+        entry.Group = CoordText.Normalize(entry.Group, CoordText.MaxGroupLength);
+        _coordAll.Add(entry);
+        PersistCoordLibrary();
+        RebuildCoordGroups();
+        ApplyCoordFilter();
+        SelectedCoord = CoordResults.FirstOrDefault(r => r.Entry.Uid == entry.Uid);
+    }
+
+    /// <summary>Add an entry from the "TP to coords" fields (manual entry).</summary>
+    [RelayCommand]
+    private void AddCoordFromFields()
+    {
+        var entry = new CoordEntry
+        {
+            Label = NextCoordLabel(PoseMap),
+            Map = PoseMap,
+            X = CoordPrecision.Round(CoordX),
+            Y = CoordPrecision.Round(CoordY),
+            Z = CoordPrecision.Round(CoordZ),
+            Pitch = CoordPrecision.Round(CoordPitch),
+            Yaw = CoordPrecision.Round(CoordYaw),
+            Roll = CoordPrecision.Round(CoordRoll),
+        };
+        AddCoordEntry(entry);
+        CoordStatus = $"Added '{entry.Label}' from the coordinate fields.";
+        CoordLibraryExpanded = true;
+    }
+
+    /// <summary>Apply the Label/Group editor to the selected entry.</summary>
+    [RelayCommand]
+    private void ApplyCoordEdit()
+    {
+        var row = SelectedCoord;
+        if (row == null) return;
+
+        var label = CoordText.Normalize(EditCoordLabel, CoordText.MaxLabelLength);
+        if (label.Length == 0)
+        {
+            CoordStatus = "Label cannot be empty.";
+            return;
+        }
+        bool mutated = CoordText.HasBlockedChars(EditCoordLabel) ||
+                       CoordText.HasBlockedChars(EditCoordGroup);
+
+        row.Entry.Label = label;
+        row.Entry.Group = CoordText.Normalize(EditCoordGroup, CoordText.MaxGroupLength);
+        PersistCoordLibrary();
+        RebuildCoordGroups();
+        ApplyCoordFilter();
+        CoordStatus = mutated
+            ? $"Updated '{label}' (control characters were removed)."
+            : $"Updated '{label}'.";
+    }
+
+    /// <summary>Re-capture the selected entry's coordinates from the live pose.</summary>
+    [RelayCommand]
+    private async Task UpdateCoordFromCurrentAsync()
+    {
+        var row = SelectedCoord;
+        if (row == null || !IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var p = await _dump.TeleportGetPoseAsync();
+            if (p.Code != TeleportCodes.Ok)
+            {
+                CoordStatus = TeleportCodes.Describe(p.Code);
+                return;
+            }
+            ApplyPoseAndMovement(p);
+            var e = row.Entry;
+            e.Map = p.Map ?? "";
+            e.X = CoordPrecision.Round(p.X);
+            e.Y = CoordPrecision.Round(p.Y);
+            e.Z = CoordPrecision.Round(p.Z);
+            e.Pitch = CoordPrecision.Round(p.Pitch);
+            e.Yaw = CoordPrecision.Round(p.Yaw);
+            e.Roll = CoordPrecision.Round(p.Roll);
+            PersistCoordLibrary();
+            ApplyCoordFilter();
+            CoordStatus = $"'{e.Label}' updated to the current position.";
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord library update-from-current failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    [RelayCommand]
+    private void DuplicateCoord()
+    {
+        var row = SelectedCoord;
+        if (row == null) return;
+        var copy = row.Entry.Clone();
+        copy.Uid = "";
+        copy.Label = CoordText.Normalize(row.Entry.Label + " (copy)", CoordText.MaxLabelLength);
+        AddCoordEntry(copy);
+        CoordStatus = $"Duplicated as '{copy.Label}'.";
+    }
+
+    [RelayCommand]
+    private void DeleteCoord()
+    {
+        var row = SelectedCoord;
+        if (row == null) return;
+        _coordAll.RemoveAll(e => string.Equals(e.Uid, row.Entry.Uid, StringComparison.Ordinal));
+        SelectedCoord = null;
+        PersistCoordLibrary();
+        RebuildCoordGroups();
+        ApplyCoordFilter();
+        CoordStatus = $"Deleted '{row.Entry.Label}'.";
+    }
+
+    /// <summary>Wipe the whole library for this game (file included).</summary>
+    [RelayCommand]
+    private void ClearCoordLibrary()
+    {
+        int n = _coordAll.Count;
+        _coordAll.Clear();
+        SelectedCoord = null;
+        _coordStore?.Delete(_activeCoordKey);
+        RebuildCoordGroups();
+        ApplyCoordFilter();
+        CoordStatus = $"Cleared {n} entr{(n == 1 ? "y" : "ies")}.";
+    }
+
+    // ── Teleport ────────────────────────────────────────────────────────
+
+    /// <summary>Teleport to the selected entry, refusing a cross-map jump.</summary>
+    [RelayCommand]
+    private Task TeleportToSelectedCoordAsync() => TeleportToCoordRowAsync(force: false);
+
+    /// <summary>Teleport to the selected entry ignoring the map guard.</summary>
+    [RelayCommand]
+    private Task ForceTeleportToSelectedCoordAsync() => TeleportToCoordRowAsync(force: true);
+
+    /// <summary>
+    /// Pull the live map name so the guard compares against reality rather than the
+    /// last poll. Cheap, and safe to call from any explicit user action. Leaves
+    /// <see cref="PoseMap"/> untouched when the DLL cannot answer, so the guard
+    /// degrades to "last known" instead of to "no map at all".
+    /// </summary>
+    private async Task RefreshCurrentMapAsync()
+    {
+        try
+        {
+            var p = await _dump.TeleportGetPoseAsync();
+            if (p.Code == TeleportCodes.Ok) ApplyPoseAndMovement(p);
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Coordinate library: could not refresh the current map: {ex.Message}");
+        }
+    }
+
+    private async Task TeleportToCoordRowAsync(bool force)
+    {
+        var row = SelectedCoord;
+        if (row == null || !IsConnected) return;
+        var e = row.Entry;
+
+        try
+        {
+            IsBusy = true;
+            ClearError();
+
+            // Read the map AT CHECK TIME. PoseMap is only refreshed by the panel's
+            // ~2s poll, which the user can switch off (and which does not exist at all
+            // for the generated Lua picker) -- so relying on it meant the guard could
+            // fire on a map you had already left. One extra round-trip on an explicit
+            // button press is a fair price for a guard that is actually correct.
+            await RefreshCurrentMapAsync();
+
+            // The explicit-coordinate path does NO map check DLL-side (only slot recall
+            // returns -7), so the guard has to live here. And the tool cannot LOAD a map:
+            // an entry only becomes usable once the game itself is on that map.
+            if (!force && !string.IsNullOrEmpty(PoseMap) && !IsSameMap(e.Map, PoseMap))
+            {
+                CoordStatus = $"'{e.Label}' was saved on '{e.Map}' but you are on " +
+                              $"'{PoseMap}'. Use Force to override — note this cannot " +
+                              "load the other map, it only moves you within the current one.";
+                return;
+            }
+
+            // Tolerance is applied HERE, not stored: the entry keeps the exact floor
+            // it was captured on, and only the arrival is lifted.
+            var r = await _dump.TeleportRecallExplicitAsync(
+                e.X, e.Y, e.Z + CoordZTolerance, e.Pitch, e.Yaw, e.Roll);
+            if (r.Code != TeleportCodes.Ok)
+            {
+                CoordStatus = $"Teleport to '{e.Label}': {TeleportCodes.Describe(r.Code)}";
+                return;
+            }
+            var lift = CoordZTolerance != 0
+                ? $" (+{CoordPrecision.Text(CoordZTolerance)} uu Z tolerance)"
+                : "";
+            CoordStatus = r.Tier == 2
+                ? $"Teleported to '{e.Label}'{lift} (raw write — the game may snap back)."
+                : $"Teleported to '{e.Label}'{lift}.";
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord library teleport failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Copy the selected entry's coordinates into the "TP to coords" fields.</summary>
+    [RelayCommand]
+    private void SendCoordToFields()
+    {
+        var row = SelectedCoord;
+        if (row == null) return;
+        var e = row.Entry;
+        CoordX = e.X; CoordY = e.Y; CoordZ = e.Z;
+        CoordPitch = e.Pitch; CoordYaw = e.Yaw; CoordRoll = e.Roll;
+        CoordSetRotation = true;
+        CoordStatus = $"'{e.Label}' copied into the coordinate fields.";
+    }
+
+    // ── CSV round-trip (P2) — spec §5 ───────────────────────────────────
+
+    /// <summary>Pending import, held between stage 1 (parse + preview) and stage 2
+    /// (commit). Null when no import is awaiting confirmation.</summary>
+    private List<CoordEntry>? _pendingImport;
+    private List<CoordChange>? _pendingChanges;
+
+    /// <summary>Z tolerance carried by a pending LUA import (the CSV has none), applied
+    /// only when the import is committed.</summary>
+    private double? _pendingImportZTolerance;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPendingCoordImport))]
+    private string _coordImportPreview = "";
+
+    /// <summary>Replace (delete anything not in the file) vs merge (add + update only).</summary>
+    [ObservableProperty] private bool _coordImportReplace;
+
+    public bool HasPendingCoordImport => _pendingImport != null;
+
+    /// <summary>Export the WHOLE library — never the filtered grid. A user who filters
+    /// to one map, exports, then re-imports with Replace would otherwise lose
+    /// everything else.</summary>
+    [RelayCommand]
+    private async Task ExportCoordCsvAsync()
+    {
+        if (_coordAll.Count == 0)
+        {
+            CoordStatus = "Nothing to export — the library is empty.";
+            return;
+        }
+        try
+        {
+            var name = string.IsNullOrEmpty(_activeCoordKey) ? "teleport-coords" : _activeCoordKey;
+            var path = await _platform.ShowSaveFileDialogAsync($"{name}.csv", "CSV file", "csv");
+            if (string.IsNullOrEmpty(path)) return;
+            CoordCsvCodec.WriteFile(path!, _coordAll);
+            CoordStatus = $"Exported {_coordAll.Count} entr{(_coordAll.Count == 1 ? "y" : "ies")} to {path}.";
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord CSV export failed", ex); }
+    }
+
+    /// <summary>Write a header + three illustrative rows, for starting from scratch.</summary>
+    [RelayCommand]
+    private async Task ExportCoordCsvTemplateAsync()
+    {
+        try
+        {
+            var path = await _platform.ShowSaveFileDialogAsync(
+                "teleport-coords-template.csv", "CSV file", "csv");
+            if (string.IsNullOrEmpty(path)) return;
+            File.WriteAllText(path!, CoordCsvCodec.SampleTemplate(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            CoordStatus = $"Wrote a sample CSV to {path}.";
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord CSV template failed", ex); }
+    }
+
+    /// <summary>
+    /// Stage 1 of the import: parse the file and show what WOULD change. Nothing is
+    /// written. This is the only defence against the corruptions we cannot detect —
+    /// Excel silently coerces "1-2" to a date and "0012" to "12" and writes back the
+    /// displayed text, producing perfectly valid CSV.
+    /// </summary>
+    [RelayCommand]
+    private async Task PreviewCoordCsvImportAsync()
+    {
+        try
+        {
+            var path = await _platform.ShowOpenFileDialogAsync("CSV file", "csv");
+            if (string.IsNullOrEmpty(path)) return;
+
+            var parsed = CoordCsvCodec.ParseFile(path!);
+            BuildImportPreview(parsed, System.IO.Path.GetFileName(path!));
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord CSV preview failed", ex); }
+    }
+
+    /// <summary>Shared by the CSV importer and (P4) the Lua importer.</summary>
+    internal void BuildImportPreview(CoordCsvParseResult parsed, string sourceName)
+    {
+        if (!parsed.HasEntries)
+        {
+            _pendingImport = null;
+            _pendingChanges = null;
+            CoordImportPreview = parsed.Issues.Count > 0
+                ? $"Nothing importable from {sourceName}:\n" + FormatIssues(parsed.Issues)
+                : $"Nothing importable from {sourceName}.";
+            OnPropertyChanged(nameof(HasPendingCoordImport));
+            return;
+        }
+
+        _pendingImportZTolerance = parsed.ZTolerance;
+        var changes = CoordCsvCodec.Diff(_coordAll, parsed.Entries, CoordImportReplace);
+        _pendingImport = parsed.Entries;
+        _pendingChanges = changes;
+
+        var sb = new StringBuilder();
+        sb.Append($"{sourceName}: {parsed.Entries.Count} row(s) read");
+        if (parsed.Delimiter != ',') sb.Append($" (delimiter '{parsed.Delimiter}')");
+        sb.Append(" — ").Append(CoordCsvCodec.SummarizeDiff(changes)).Append('.');
+
+        var changed = changes.Where(c => c.Kind == CoordChangeKind.Changed).Take(20).ToList();
+        if (changed.Count > 0)
+        {
+            sb.Append("\nChanges:");
+            foreach (var c in changed)
+                sb.Append($"\n  {c.Label}: {string.Join("; ", c.FieldDiffs.Take(4))}");
+            int more = changes.Count(c => c.Kind == CoordChangeKind.Changed) - changed.Count;
+            if (more > 0) sb.Append($"\n  …and {more} more changed.");
+        }
+        if (parsed.Issues.Count > 0)
+            sb.Append("\nSkipped / adjusted:\n").Append(FormatIssues(parsed.Issues));
+
+        sb.Append("\nPress Apply to commit (a .preimport.bak is written first).");
+        CoordImportPreview = sb.ToString();
+        OnPropertyChanged(nameof(HasPendingCoordImport));
+    }
+
+    private static string FormatIssues(IReadOnlyList<CoordCsvIssue> issues)
+    {
+        var shown = issues.Take(15).Select(i => "  " + i);
+        var text = string.Join("\n", shown);
+        return issues.Count > 15 ? text + $"\n  …and {issues.Count - 15} more." : text;
+    }
+
+    /// <summary>Stage 2: commit the previewed import.</summary>
+    [RelayCommand]
+    private void ApplyCoordImport()
+    {
+        if (_pendingImport == null || _pendingChanges == null) return;
+
+        var bak = _coordStore?.SavePreImportBackup(_activeCoordKey) ?? "";
+
+        if (CoordImportReplace)
+        {
+            _coordAll.Clear();
+            foreach (var e in _pendingImport)
+            {
+                if (string.IsNullOrEmpty(e.Uid)) e.Uid = UniqueUid();
+                _coordAll.Add(e);
+            }
+        }
+        else
+        {
+            foreach (var change in _pendingChanges)
+            {
+                switch (change.Kind)
+                {
+                    case CoordChangeKind.Added:
+                        var add = change.Incoming!;
+                        if (string.IsNullOrEmpty(add.Uid)) add.Uid = UniqueUid();
+                        _coordAll.Add(add);
+                        break;
+                    case CoordChangeKind.Changed:
+                        var target = change.Existing!;
+                        var src = change.Incoming!;
+                        target.Label = src.Label; target.Group = src.Group; target.Map = src.Map;
+                        target.X = src.X; target.Y = src.Y; target.Z = src.Z;
+                        target.Pitch = src.Pitch; target.Yaw = src.Yaw; target.Roll = src.Roll;
+                        break;
+                }
+            }
+        }
+
+        if (_pendingImportZTolerance.HasValue)
+        {
+            CoordZTolerance = _pendingImportZTolerance.Value;
+            _pendingImportZTolerance = null;
+        }
+
+        int n = _pendingImport.Count;
+        _pendingImport = null;
+        _pendingChanges = null;
+        CoordImportPreview = "";
+        SelectedCoord = null;
+        PersistCoordLibrary();
+        RebuildCoordGroups();
+        ApplyCoordFilter();
+        OnPropertyChanged(nameof(HasPendingCoordImport));
+        CoordStatus = string.IsNullOrEmpty(bak)
+            ? $"Imported {n} entr{(n == 1 ? "y" : "ies")}."
+            : $"Imported {n} entr{(n == 1 ? "y" : "ies")}. Previous library backed up to " +
+              $"{System.IO.Path.GetFileName(bak)}.";
+        CoordLibraryExpanded = true;
+    }
+
+    /// <summary>Discard a previewed import without touching anything.</summary>
+    [RelayCommand]
+    private void CancelCoordImport()
+    {
+        _pendingImport = null;
+        _pendingChanges = null;
+        CoordImportPreview = "";
+        OnPropertyChanged(nameof(HasPendingCoordImport));
+        CoordStatus = "Import cancelled — nothing was changed.";
+    }
+
+    // ── CE Lua export (P3) — spec §4 / §6 ───────────────────────────────
+
+    /// <summary>
+    /// Emit the library as a self-contained AA script (fenced data block + picker
+    /// form) and deliver it: AOBMaker push when connected, else the paste-able CE
+    /// memory-record XML on the clipboard.
+    ///
+    /// Exports the WHOLE library, never the filtered grid — the script has its own
+    /// filter, so exporting a subset would only lose data silently.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportCoordLuaAsync()
+    {
+        if (_coordAll.Count == 0)
+        {
+            CoordStatus = "Nothing to export — the library is empty.";
+            return;
+        }
+        try
+        {
+            ClearError();
+            var script = CoordLibraryScriptGenerator.Generate(
+                _coordAll, CoordLibraryScriptGenerator.Flavour.Dll, CoordZTolerance, out var folded);
+
+            var notes = new StringBuilder();
+            if (folded.Count > 0)
+            {
+                // Honest about what the picker's radio buttons dropped: the entries
+                // are still there and still findable by typing the group name.
+                notes.Append($" {folded.Count} group(s) had no radio button " +
+                             $"({string.Join(", ", folded.Take(3))}" +
+                             (folded.Count > 3 ? ", …" : "") +
+                             ") — those entries are still listed under All and match the filter box.");
+            }
+            if (_coordAll.Count > Constants.CoordLibraryExportWarnCount)
+            {
+                notes.Append($" {_coordAll.Count} entries makes a large script — CE's AA " +
+                             "editor gets sluggish well before the pipe does.");
+            }
+
+            bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
+            if (available && await _aobMaker!.CreateAAScriptAsync(
+                    CoordLibraryScriptGenerator.RecordDescription, script,
+                    autoActivate: false, group: CeGroupDll))
+            {
+                CoordStatus = $"Pushed {_coordAll.Count} entries to Cheat Engine via AOBMaker — " +
+                              "enable the record in-game to open the picker." + notes;
+                _log.Info($"Coordinate library -> CE via AOBMaker ({_coordAll.Count} entries)");
+                return;
+            }
+
+            await _platform.CopyToClipboardAsync(
+                CheatTableBuilder.WrapAaScriptXml(
+                    CoordLibraryScriptGenerator.RecordDescription, script));
+            CoordStatus = (available
+                ? "AOBMaker refused the push — copied the record as CE XML instead. "
+                : "AOBMaker not connected — copied the record as CE XML to the clipboard. ")
+                + "Paste into Cheat Engine's address list (right-click → Paste), then enable it."
+                + notes;
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord Lua export failed", ex); }
+    }
+
+    /// <summary>
+    /// Stage 1 of the Lua re-import (R7): paste a previously generated AA script and
+    /// see what it WOULD change. Shares the CSV preview/commit path, so both formats
+    /// get the same per-line diagnostics, cell-level diff and .preimport.bak.
+    /// </summary>
+    /// <summary>Where the user pastes a whole generated AA script. Only our own
+    /// fenced region is parsed — the surrounding Lua is ignored, never evaluated.</summary>
+    [ObservableProperty] private string _coordLuaPasteText = "";
+
+    [RelayCommand]
+    private void PreviewCoordLuaImport()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(CoordLuaPasteText))
+            {
+                CoordStatus = "Paste a generated script into the box first.";
+                return;
+            }
+            BuildImportPreview(CoordLuaParser.Parse(CoordLuaPasteText), "pasted script");
+            CoordLibraryExpanded = true;
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord Lua import preview failed", ex); }
+    }
+
+    /// <summary>Same, but from a .lua / .CT file on disk.</summary>
+    [RelayCommand]
+    private async Task PreviewCoordLuaFileImportAsync()
+    {
+        try
+        {
+            var path = await _platform.ShowOpenFileDialogAsync("Lua script", "lua");
+            if (string.IsNullOrEmpty(path)) return;
+            BuildImportPreview(CoordLuaParser.Parse(File.ReadAllText(path!)),
+                               System.IO.Path.GetFileName(path!));
+            CoordLibraryExpanded = true;
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord Lua file import failed", ex); }
+    }
+
+    /// <summary>
+    /// Emit the NO-DLL flavour: the same data block and picker, but teleport is a raw
+    /// write through the standalone trainer's baked offsets.
+    ///
+    /// <b>Gated on AOBMaker with NO clipboard/disk fallback — by design</b>, matching
+    /// <see cref="ExportTrainerCommand"/>. The reason is specific to this flavour: the
+    /// emitted script calls <c>UE5T_pawn</c> / <c>UE5T_deref</c> / <c>UE5T_wrv</c> and
+    /// reads <c>UE5T.rootOff</c>, all of which are defined by the standalone trainer's
+    /// "Setup" record — which itself can only be delivered by an AOBMaker push. Handing
+    /// the user a clipboard blob with no way to obtain its dependencies would produce a
+    /// record that can never work, and whose failure ("attempt to call a nil value")
+    /// looks like a bug in the script rather than a missing prerequisite.
+    ///
+    /// The DLL flavour keeps its clipboard fallback because it depends only on
+    /// UE5Dumper.dll being injected, which the user can arrange independently.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportCoordLuaNoDllAsync()
+    {
+        if (_coordAll.Count == 0)
+        {
+            CoordStatus = "Nothing to export — the library is empty.";
+            return;
+        }
+        if (_aobMaker == null || !_aobMaker.IsAvailable)
+        {
+            CoordStatus = "AOBMaker plugin not detected — cannot push the no-DLL picker into CE. " +
+                          "It needs the standalone trainer's Setup record, which only AOBMaker can " +
+                          "deliver, so there is deliberately no clipboard fallback for this one. " +
+                          "Use 'Push to CE' (the DLL flavour) instead, or start CE with the AOBMaker plugin.";
+            return;
+        }
+        try
+        {
+            ClearError();
+            var script = CoordLibraryScriptGenerator.Generate(
+                _coordAll, CoordLibraryScriptGenerator.Flavour.NoDll, CoordZTolerance, out _);
+
+            bool sent = await _aobMaker.CreateAAScriptAsync(
+                CoordLibraryScriptGenerator.NoDllRecordDescription, script,
+                autoActivate: false, group: CeGroupTrainer);
+            IsAobMakerAvailable = _aobMaker.IsAvailable;
+
+            CoordStatus = sent
+                ? $"Pushed the no-DLL picker ({_coordAll.Count} entries) to Cheat Engine. " +
+                  "Enable 'UE5 Trainer: Setup' first — this flavour uses its baked offsets, " +
+                  "has no map guard, and goes stale when the game is patched."
+                : "⚠ AOBMaker pipe dropped mid-push (CE closed?) — nothing was added.";
+            if (sent)
+                _log.Info($"Coordinate library (no-DLL) -> CE via AOBMaker ({_coordAll.Count} entries)");
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord Lua (no-DLL) export failed", ex); }
+    }
+
+    /// <summary>Save the same script to a .lua file, for users who prefer a file.</summary>
+    [RelayCommand]
+    private async Task SaveCoordLuaAsync()
+    {
+        if (_coordAll.Count == 0)
+        {
+            CoordStatus = "Nothing to export — the library is empty.";
+            return;
+        }
+        try
+        {
+            var name = string.IsNullOrEmpty(_activeCoordKey) ? "teleport-coords" : _activeCoordKey;
+            var path = await _platform.ShowSaveFileDialogAsync($"{name}.lua", "Lua script", "lua");
+            if (string.IsNullOrEmpty(path)) return;
+            var script = CoordLibraryScriptGenerator.Generate(
+                _coordAll, CoordLibraryScriptGenerator.Flavour.Dll, CoordZTolerance, out _);
+            File.WriteAllText(path!, script, new UTF8Encoding(false));
+            CoordStatus = $"Wrote {_coordAll.Count} entries to {path}.";
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord Lua save failed", ex); }
+    }
+
     // ── Force mouse cursor on/off (shared with Lua via set_mouse_cursor) ─
 
     /// <summary>Map the DLL tri-state (1=on, 0=off, -1=unknown) onto the badge.</summary>
@@ -2973,6 +3923,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 // otherwise keep writing game memory with no visible way to stop it. (M9)
                 if (StealthState == StealthHoldingState) _ = ResetStealthCommand.ExecuteAsync(null);
             }
+            // The Coordinate Library holds no live game-side state, so there is
+            // nothing to force off -- but an un-applied import preview must not
+            // survive behind a hidden card, where the user can neither see it nor
+            // cancel it. The library itself stays on disk; only the pending diff goes.
+            if (HasPendingCoordImport) CancelCoordImportCommand.Execute(null);
             UnregisterExperimentalHotkeys();
         }
     }
@@ -3366,14 +4321,24 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 
     private void ApplyPose(TeleportPose p)
     {
+        // Raw doubles kept alongside the formatted display strings: the coordinate
+        // library's per-row distance needs numbers, and this poll is already running.
+        _liveX = p.X; _liveY = p.Y; _liveZ = p.Z; _hasLivePose = true;
+
         PoseX = p.X.ToString("0.000", CultureInfo.InvariantCulture);
         PoseY = p.Y.ToString("0.000", CultureInfo.InvariantCulture);
         PoseZ = p.Z.ToString("0.000", CultureInfo.InvariantCulture);
         PosePitch = p.Pitch.ToString("0.00", CultureInfo.InvariantCulture);
         PoseYaw = p.Yaw.ToString("0.00", CultureInfo.InvariantCulture);
         PoseRoll = p.Roll.ToString("0.00", CultureInfo.InvariantCulture);
+        bool mapChanged = !IsSameMap(PoseMap, p.Map);
         PoseMap = p.Map;
         PoseSource = p.Source;
+
+        // A map change re-filters the coordinate library (the "current map only"
+        // default); otherwise just refresh the distances in place.
+        if (mapChanged) ApplyCoordFilter();
+        else UpdateCoordDistances();
     }
 
     // Pose PLUS the movement/pawn readout — only for teleport_get_pose results,
@@ -3416,6 +4381,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 
     private void ClearPoseDisplay()
     {
+        _hasLivePose = false;
         PoseX = PoseY = PoseZ = "—";
         PosePitch = PoseYaw = PoseRoll = "—";
         PoseMap = PoseSource = "";
@@ -3484,6 +4450,65 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 }
 
 /// <summary>One marker slot row in the Teleport panel.</summary>
+/// <summary>
+/// One grid row over a <see cref="CoordEntry"/>. The entry itself stays a plain
+/// POCO (it is what the JSON/CSV/Lua codecs serialize); this wrapper adds only the
+/// display-side state the grid needs — the live distance and the cross-map flag.
+/// </summary>
+public partial class CoordRow : ObservableObject
+{
+    public CoordRow(CoordEntry entry, bool onCurrentMap)
+    {
+        Entry = entry;
+        _onCurrentMap = onCurrentMap;
+    }
+
+    public CoordEntry Entry { get; }
+
+    public string Label => Entry.Label;
+    public string Group => Entry.Group;
+    public string Map => Entry.Map;
+
+    // Display strings use the same canonical text as every wire format, so what the
+    // grid shows is exactly what an export writes (spec D4).
+    public string XText => CoordPrecision.Text(Entry.X);
+    public string YText => CoordPrecision.Text(Entry.Y);
+    public string ZText => CoordPrecision.Text(Entry.Z);
+    public string PitchText => CoordPrecision.Text(Entry.Pitch);
+    public string YawText => CoordPrecision.Text(Entry.Yaw);
+    public string RollText => CoordPrecision.Text(Entry.Roll);
+
+    /// <summary>False when the entry belongs to another map — the grid flags it and
+    /// plain Teleport refuses it.</summary>
+    [ObservableProperty] private bool _onCurrentMap;
+
+    /// <summary>3D distance from the player, or 0 when no pose is known.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DistanceText))]
+    private double _distance;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DistanceText))]
+    private bool _hasDistance;
+
+    public string DistanceText => HasDistance ? $"{Distance:N0}" : "—";
+
+    /// <summary>Recompute the distance from a live pose. Only meaningful on the same
+    /// map — a cross-map "distance" is a meaningless number, so it is suppressed.</summary>
+    public void SetDistanceFrom(double x, double y, double z, bool hasPose)
+    {
+        if (!hasPose || !OnCurrentMap)
+        {
+            HasDistance = false;
+            Distance = 0;
+            return;
+        }
+        double dx = Entry.X - x, dy = Entry.Y - y, dz = Entry.Z - z;
+        Distance = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        HasDistance = true;
+    }
+}
+
 public partial class TeleportMarkerRow : ObservableObject
 {
     [ObservableProperty] private int _slot;

@@ -22,6 +22,7 @@ public class App : Application
     private SnapshotStore? _snapshotStore;
     private UiOptionsStore? _uiOptions;
     private BookmarkStore? _bookmarkStore;
+    private CoordinateLibraryStore? _coordLibraryStore;
 
     public override void Initialize()
     {
@@ -61,6 +62,7 @@ public class App : Application
             _snapshotStore = new SnapshotStore(_platform, _logging);
             _uiOptions = new UiOptionsStore(_platform, _logging);
             _bookmarkStore = new BookmarkStore(_platform, _logging);
+            _coordLibraryStore = new CoordinateLibraryStore(_platform, _logging);
 
             _logging.Info(Constants.LogCatInit, "UE5DumpUI starting...");
             _logging.Info(Constants.LogCatInit, $"Version:   {typeof(App).Assembly.GetName().Version}");

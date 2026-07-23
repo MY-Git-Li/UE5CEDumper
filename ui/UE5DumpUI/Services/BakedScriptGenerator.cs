@@ -571,18 +571,77 @@ public static class BakedScriptGenerator
         _                => typeName.Replace("Property", ""),
     };
 
-    /// <summary>Escape a string for embedding in a Lua single-quoted literal.</summary>
+    /// <summary>Escape a string for embedding in a Lua single-quoted literal.
+    /// Also breaks any closing long bracket (<c>]]</c>, <c>]=]</c>, <c>]==]</c>, …):
+    /// harmless to Lua inside a quoted string, but AOBMaker's CE plugin wraps the
+    /// WHOLE script in <c>[==[ … ]==]</c>, so the byte sequence must not appear
+    /// ANYWHERE in the emitted text. Unlike a comment we cannot pad with a space
+    /// here (that would change the string's value), so the leading <c>]</c> is
+    /// emitted as a decimal escape instead -- same value, different source bytes.
+    /// Reached with user text via the string-param path in <see cref="FormatValue"/>.</summary>
     public static string EscapeLua(string s)
-        => s.Replace("\\", "\\\\")
-            .Replace("'", "\\'")
-            .Replace("\n", "\\n")
-            .Replace("\r", "\\r");
+    {
+        if (string.IsNullOrEmpty(s)) return s ?? "";
+        var sb = new StringBuilder(s.Length + 8);
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            switch (c)
+            {
+                case '\\': sb.Append("\\\\"); break;
+                case '\'': sb.Append("\\'");  break;
+                case '\n': sb.Append("\\n");  break;
+                case '\r': sb.Append("\\r");  break;
+                case ']':
+                {
+                    int j = i + 1;
+                    while (j < s.Length && s[j] == '=') j++;
+                    // 3 digits, not "\93": Lua's \ddd escape greedily takes up to
+                    // three digits, so a following digit would fuse into it (\931
+                    // > 255 -> error). By construction the next emitted char here
+                    // is always '=' or ']', never a digit -- the padded form is
+                    // belt-and-braces against a future change to this rule.
+                    sb.Append(j < s.Length && s[j] == ']' ? "\\093" : "]");
+                    break;
+                }
+                default: sb.Append(c); break;
+            }
+        }
+        return sb.ToString();
+    }
 
     /// <summary>Escape for embedding in a Lua block comment <c>--[[...]]</c>.
-    /// The only sequence we have to break is a closing <c>]]</c> in the input;
-    /// we pad it with a space so it can't terminate the comment early.</summary>
+    /// Breaks EVERY closing long bracket -- <c>]]</c>, <c>]=]</c>, <c>]==]</c>, any
+    /// level -- by padding after the opening <c>]</c>, so none can terminate a
+    /// long bracket early.
+    ///
+    /// Level 2 (<c>]==]</c>) matters as much as level 0 even though our own comment
+    /// is level 0: AOBMaker's CE plugin wraps the WHOLE submitted script in
+    /// <c>[==[ ... ]==]</c> at a HARDCODED level (pipe_server.cpp HandleCreateAAScript),
+    /// unlike its InjectTableFile handler which picks a non-colliding level. A user
+    /// typing <c>]==]</c> into an unparseable param would otherwise terminate that
+    /// wrapper and break the CreateAAScript push. This is the widest free-text
+    /// channel into any generated script (InvokeParamDialog -> MarkUnparsed).</summary>
     private static string EscapeLuaComment(string s)
-        => s.Replace("]]", "] ]");
+    {
+        if (string.IsNullOrEmpty(s)) return s ?? "";
+        var sb = new StringBuilder(s.Length + 8);
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            sb.Append(c);
+            if (c != ']') continue;
+            // Look ahead for ']' '='* ']' -- a closing long bracket of any level.
+            int j = i + 1;
+            while (j < s.Length && s[j] == '=') j++;
+            if (j < s.Length && s[j] == ']')
+                sb.Append(' ');   // split it; the '='* run is copied by later iterations
+        }
+        // A trailing ']' would fuse with MarkUnparsed's own "]]" into "]]]", closing
+        // the comment ONE CHAR EARLY and leaving "] 0" as dangling syntax. Pad it.
+        if (sb.Length > 0 && sb[sb.Length - 1] == ']') sb.Append(' ');
+        return sb.ToString();
+    }
 
     /// <summary>Append a line with LF-only ending (no CR) for CE compatibility.</summary>
     private static void Line(StringBuilder sb, string text = "")

@@ -2037,4 +2037,87 @@ public class TeleportViewModelTests
         Assert.False(new TeleportPose { PawnAddr = "0X0" }.HasPawnAddr);
         Assert.True(new TeleportPose { PawnAddr = "0x7FF00010" }.HasPawnAddr);
     }
+
+    // ── Coordinate Library: experimental gating + pending-import lifecycle ──
+
+    [Fact]
+    public void CoordLibrary_card_is_hidden_until_the_experimental_gate_is_on()
+    {
+        // The card binds IsVisible to ExperimentalEnabled: it writes the pawn
+        // position live and emits CE scripts that do the same.
+        var gate = new FakeExperimentalGate(enabled: false);
+        var vm = CreateVm(new FakeDumpService(), out _, experimentalGate: gate);
+
+        Assert.False(vm.ExperimentalEnabled);
+
+        gate.IsEnabled = true;
+        Assert.True(vm.ExperimentalEnabled);
+    }
+
+    [Fact]
+    public void CoordLibrary_pending_import_is_cancelled_when_the_gate_is_switched_off()
+    {
+        // A previewed-but-unapplied import must not survive behind a hidden card,
+        // where the user can neither see it nor cancel it.
+        var gate = new FakeExperimentalGate(enabled: true);
+        var vm = CreateVm(new FakeDumpService(), out _, experimentalGate: gate);
+
+        vm.BuildImportPreview(
+            CoordCsvCodec.Parse("label,map,x,y,z\nChest 1,Map01,1,2,3\n"), "test.csv");
+        Assert.True(vm.HasPendingCoordImport);
+
+        gate.IsEnabled = false;
+
+        Assert.False(vm.HasPendingCoordImport);
+        Assert.Equal("", vm.CoordImportPreview);
+    }
+
+    [Fact]
+    public void CoordLibrary_pending_import_is_dropped_when_the_game_changes()
+    {
+        // The diff was computed against the PREVIOUS game's library, so applying it
+        // after a game switch would write those rows into the new game's file. This
+        // fires even while the card is hidden, so the stale preview is invisible.
+        var vm = CreateVm(new FakeDumpService(), out _,
+                          experimentalGate: new FakeExperimentalGate(enabled: true));
+
+        vm.BuildImportPreview(
+            CoordCsvCodec.Parse("label,map,x,y,z\nChest 1,Map01,1,2,3\n"), "test.csv");
+        Assert.True(vm.HasPendingCoordImport);
+
+        vm.LoadCoordLibraryForGame("OtherGame-Win64-Shipping.exe");
+
+        Assert.False(vm.HasPendingCoordImport);
+    }
+
+    [Fact]
+    public async Task CoordLibrary_noDll_export_refuses_without_AOBMaker()
+    {
+        // Matches the Standalone Trainer export: gated on AOBMaker with NO
+        // clipboard fallback, by design. The emitted script calls UE5T_* helpers
+        // defined by that trainer's Setup record, which only an AOBMaker push can
+        // deliver -- a clipboard blob would be a record that can never work, whose
+        // failure reads as a bug in the script rather than a missing prerequisite.
+        var vm = CreateVm(new FakeDumpService(), out var platform,
+                          experimentalGate: new FakeExperimentalGate(enabled: true));
+        vm.LoadCoordLibraryForGame("Game.exe");
+        // Add via the fields, not Save-current-pos: the latter needs a live pipe.
+        vm.CoordX = 1; vm.CoordY = 2; vm.CoordZ = 3;
+        vm.AddCoordFromFieldsCommand.Execute(null);
+        Assert.NotEmpty(vm.CoordEntries);
+
+        await vm.ExportCoordLuaNoDllCommand.ExecuteAsync(null);
+
+        Assert.Contains("AOBMaker", vm.CoordStatus);
+        Assert.Null(platform.LastClipboard);      // no fallback, deliberately
+    }
+
+    [Fact]
+    public void CoordLibrary_load_without_a_store_is_a_no_op()
+    {
+        // Headless tests construct the VM with no store; it must not throw.
+        var vm = CreateVm(new FakeDumpService(), out _);
+        vm.LoadCoordLibraryForGame("Game.exe");
+        Assert.Empty(vm.CoordEntries);
+    }
 }

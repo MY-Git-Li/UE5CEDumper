@@ -218,8 +218,9 @@ public static class FreezeScriptGenerator
     {
         if (string.IsNullOrEmpty(s)) return "";
         var sb = new StringBuilder(s.Length + 8);
-        foreach (var ch in s)
+        for (int i = 0; i < s.Length; i++)
         {
+            char ch = s[i];
             switch (ch)
             {
                 case '\\': sb.Append("\\\\"); break;
@@ -227,6 +228,17 @@ public static class FreezeScriptGenerator
                 case '\n': sb.Append("\\n"); break;
                 case '\r': sb.Append("\\r"); break;
                 case '\t': sb.Append("\\t"); break;
+                case ']':
+                {
+                    // See BakedScriptGenerator.EscapeLua: a closing long bracket of
+                    // any level would terminate AOBMaker's [==[ ... ]==] wrapper
+                    // around the whole script. Inputs here are engine-derived today,
+                    // but the escapers are documented mirrors -- keep them mirrors.
+                    int j = i + 1;
+                    while (j < s.Length && s[j] == '=') j++;
+                    sb.Append(j < s.Length && s[j] == ']' ? "\\093" : "]");
+                    break;
+                }
                 default:   sb.Append(ch);    break;
             }
         }

@@ -1019,6 +1019,95 @@ public class InvokeScriptTests
         Assert.DoesNotContain("--[[unparsed:abc]]def", script);
     }
 
+    [Theory]
+    [InlineData("abc]==]def")]     // level 2 -- AOBMaker's own wrapper level
+    [InlineData("]==]")]
+    [InlineData("]]")]
+    [InlineData("]=]")]
+    [InlineData("]===]")]
+    [InlineData("]]]")]
+    [InlineData("]=]=]")]
+    [InlineData("--[==[ x ]==]")]
+    public void BakedGenerate_UnparseableWithLongBracketClose_NeverEmitsAobMakerWrapperTerminator(
+        string adversarial)
+    {
+        // AOBMaker's CE plugin wraps the WHOLE submitted script in [==[ ... ]==]
+        // at a HARDCODED level (pipe_server.cpp HandleCreateAAScript) and does
+        // NOT escape the script body -- unlike its InjectTableFile handler,
+        // which picks a non-colliding level. A "]==]" reaching it from user free
+        // text terminates that wrapper early and breaks the CreateAAScript push.
+        // MarkUnparsed is the widest free-text channel into a generated script.
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 4,
+            new[] { new BakedParamValue("X", "IntProperty", 4, 0, adversarial) });
+
+        // The AOBMaker-critical invariant: never emit its wrapper's terminator.
+        Assert.DoesNotContain("]==]", script);
+
+        // And the marker's OWN comment must still close in the right place: the
+        // first "]]" after the marker has to be MarkUnparsed's, with only " 0"
+        // after it. A trailing ']' in the escaped text used to fuse into "]]]"
+        // and close one char early, orphaning "] 0".
+        int marker = script.IndexOf("--[[unparsed:", StringComparison.Ordinal);
+        Assert.True(marker >= 0, "unparsed marker missing");
+        int close = script.IndexOf("]]", marker + "--[[unparsed:".Length,
+                                   StringComparison.Ordinal);
+        Assert.True(close > 0, "unparsed comment never closes");
+        Assert.StartsWith(" 0", script.Substring(close + 2));
+    }
+
+    [Theory]
+    [InlineData("a]==]b")]
+    [InlineData("]==]")]
+    [InlineData("]]")]
+    [InlineData("]=]")]
+    public void BakedGenerate_StringParamWithLongBracketClose_EscapedNotEmittedRaw(
+        string adversarial)
+    {
+        // The string-param path is the user-reachable twin of MarkUnparsed: the
+        // value is emitted as a Lua single-quoted literal. Quoting makes it safe
+        // for LUA, but not for AOBMaker -- its plugin wraps the whole script in
+        // [==[ ... ]==], so the byte sequence must not survive anywhere.
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 16,
+            new[] { new BakedParamValue("Name", "StrProperty", 16, 0, adversarial) });
+
+        Assert.DoesNotContain("]==]", script);
+        // Escaped as a 3-digit decimal escape, so the runtime VALUE is unchanged.
+        Assert.Contains("\\093", script);
+    }
+
+    [Theory]
+    [InlineData("]]1",  @"'\093]1'")]      // only the LEADING ']' is escaped
+    [InlineData("]=]2", @"'\093=]2'")]
+    [InlineData("]]",   @"'\093]'")]
+    public void BakedGenerate_StringParamBracketEscape_EscapesOnlyTheLeadingBracket(
+        string input, string expectedLiteral)
+    {
+        // Only the ']' that OPENS a closing long bracket is escaped; the run's
+        // own '=' / ']' stay literal. That also makes the \ddd escape inherently
+        // digit-safe: the char after "\093" is always '=' or ']', never a digit
+        // (a digit would otherwise fuse into the escape as \0931 > 255).
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 16,
+            new[] { new BakedParamValue("Name", "StrProperty", 16, 0, input) });
+
+        Assert.Contains(expectedLiteral, script);
+        Assert.DoesNotContain("]==]", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_StringParamWithoutBrackets_EscapingUnchanged()
+    {
+        // Regression guard: the ']' handling must not disturb ordinary values.
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 16,
+            new[] { new BakedParamValue("Name", "StrProperty", 16, 0, @"a'b\c]d") });
+
+        Assert.Contains(@"'a\'b\\c]d'", script);   // lone ']' stays literal
+        Assert.DoesNotContain("\\093", script);
+    }
+
     // ==================================================================
     // BakedScriptGenerator.MapToHelperType -- type mapping table
     // ==================================================================

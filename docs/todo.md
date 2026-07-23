@@ -380,6 +380,63 @@ Open follow-ups (low priority):
 
 -----
 
+## Teleport Coordinate Library — P1-P5 SHIPPED (builds 2257-2267), needs in-game verification
+
+Design contract: **[teleport-coord-library-spec.md](teleport-coord-library-spec.md)**.
+Write-up: [dev-log.md](dev-log.md) 2026-07-23. All five phases are on `dev`, 2777 tests green,
+**zero DLL/pipe change**. What remains is verification that unit tests structurally cannot do.
+
+- **VERIFY IN-GAME — the teleport itself** — Effort: **S** · Risk: low.
+  Save current pos → move → Teleport selected → land back. Then the map guard: save on map A, load
+  map B, confirm plain Teleport refuses and Force is the only way through. Watch for `Tier == 2`
+  (raw-write fallback) in the status line — the game may snap the pawn back, which is expected and
+  already surfaced. *Parent: P1.*
+
+- **VERIFY IN CE — the emitted picker (both flavours)** — Effort: **M** · Risk: med.
+  **Nothing has executed a single line of the emitted Lua.** Push to CE → enable the record → the
+  form should open with the ListView filled, the filter narrowing on space-AND, both RadioGroups
+  live, Teleport working and Force bypassing the map guard. Highest-risk items, in order:
+  (a) the CE control/property set — verified from `CrimsonDesert.CT` CheatEntry 357, not from CE's
+  own docs, so `lv.ItemIndex`, `readString(mb + params + 48, 127, false)` and
+  `rgGroup.Items.add` are the ones most likely to be wrong;
+  (b) panel creation order actually producing the intended layout;
+  (c) the no-DLL flavour's raw write, which additionally needs "UE5 Trainer: Setup" enabled first
+  and has the known may-not-visibly-move caveat. *Parent: P3 + P5.*
+
+- **VERIFY — CSV against a real spreadsheet** — Effort: **S** · Risk: low.
+  Export → open in Excel (check CJK renders, i.e. the BOM did its job) → edit a label → save →
+  re-import and confirm the two-stage preview shows the change *before* committing. Deliberately
+  try a group named `1-2` and a label starting `=` — the first should show up in the diff as an
+  Excel date mangling, the second should survive the armouring round trip. *Parent: P2.*
+
+- **VERIFY — the quick-jump menu label** — Effort: **S** · Risk: low.
+  The tab's right-click menu takes a card's label from the first `SemiBold` TextBlock descendant of
+  a direct-child `Border`. The new card puts that TextBlock inside an `Expander.Header`; confirm the
+  walk still resolves "Coordinate Library" rather than a wrong label. Spec §7 flags this. *Parent: P1.*
+
+- **VERIFY — DataGrid behaviour at scale** — Effort: **S** · Risk: med.
+  The grid carries `MaxHeight="260"` precisely because `ContentRoot` is a vertically unbounded
+  ScrollViewer and an unconstrained DataGrid would not virtualize. Load ~4 000 entries (import a
+  generated CSV) and confirm scrolling and filtering stay responsive. Also measure where CE's
+  ListView actually stutters — the picker's 2 000-row display cap is inherited from the reference
+  table as an unverified guess. *Parent: P1 + P3.*
+
+- **VERIFY — experimental gating** (DECIDED + implemented, build 2269) — Effort: **S** · Risk: low.
+  The card is now gated on `ExperimentalEnabled` like the other five. Confirm the whole card
+  appears/disappears with the System-tab checkbox, that it is absent from the tab's right-click
+  quick-jump menu while hidden (the code-behind skips a card that is not `IsEffectivelyVisible`),
+  and that toggling the gate off mid-preview clears a pending CSV/Lua import. *Parent: user call
+  2026-07-23; spec §10.4.*
+
+- **Unrelated finding, worth doing anyway** — Effort: **S** · Risk: low.
+  `AobMakerBridgeService.WriteMessageAsync` (`:495-506`) has **no send-side size check**, and the
+  plugin's oversize path (`pipe_server.cpp:61`) returns *without writing a response*, so an oversized
+  push surfaces as a confusing "no response"/timeout instead of a size error. Add a client-side
+  pre-flight check against the 10 MiB cap. A 4 000-entry library is ~480 KB so this is not urgent for
+  the coordinate library, but it is the failure mode a user would hit first. *Parent: spec §10.6.*
+
+-----
+
 ## Teleport — follow-ups (deferred / future research)
 
 Teleport shipped (Wirbel, build 1027-1043). Works where the possessed pawn is
