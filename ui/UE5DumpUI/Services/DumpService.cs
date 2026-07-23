@@ -514,7 +514,13 @@ public sealed class DumpService : IDumpService
             {
                 var it = new JsonObject { ["addr"] = items[i].Addr };
                 if (!string.IsNullOrEmpty(items[i].ClassAddr)) it["class_addr"] = items[i].ClassAddr;
-                arr.Add(it);
+                // (JsonNode) cast is REQUIRED, not cosmetic: without it overload
+                // resolution picks JsonArray.Add<T>, which carries
+                // RequiresUnreferencedCode + RequiresDynamicCode and fails the
+                // Native-AOT publish (IL2026 / IL3050). The cast selects the
+                // non-generic IList<JsonNode?>.Add. Same reason as every other
+                // JsonArray.Add in this file.
+                arr.Add((JsonNode)it);
             }
 
             var req = new JsonObject { ["cmd"] = "walk_instance_batch", ["items"] = arr };
