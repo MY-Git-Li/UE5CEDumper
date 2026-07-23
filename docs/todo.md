@@ -1102,39 +1102,62 @@ time-control evals above.*
 
 -----
 
-## 4th proxy DLL — winmm.dll — EVALUATED (2026-07-23), NOT BUILT — **prerequisite now CLEARED**
+## 4th proxy DLL — winmm.dll — RE-MEASURED n=24 (2026-07-23) — **WON'T DO for coverage**
 
-**Verdict: winmm.dll is the right 4th target. Its hard prerequisite — our own `timeBeginPeriod` call
-being statically linked in the shared object library — was fixed separately in build 2301, so the
-proxy itself is now unblocked and is plain (if mechanical) work.**
+**Verdict reversed by data. At n=24 real UE games, winmm and dxgi both cover 100% — winmm reaches
+exactly ZERO games that dxgi does not, and no installed UE game is unreachable by the current three
+proxies. Do not build it for coverage.** One narrow trigger survives (slot contention, below); the
+hard prerequisite is already done (build 2301), so if that trigger ever fires the work is unblocked
+and purely mechanical.
 
-**Measured — PE import + delay-import table of 7 installed UE Shipping exes (2026-07-23):**
+**⚠ The earlier n=7 recommendation was wrong, and it is worth knowing why.** That sample silently
+included **non-UE games** — Nioh3 (Team Ninja), Crimson Desert (BlackSpace), Atelier Yumia (KT) —
+because it globbed a Steam library rather than gating on UE markers. Nioh3 was the single row that
+made winmm look uniquely valuable ("imports neither dxgi nor version"), and it is not a UE game at
+all, so it never bore on this decision.
 
-| Game | version | dinput8 | dxgi | **winmm** | dsound |
-|---|:-:|:-:|:-:|:-:|:-:|
-| DQ7R | – | – | ✅ | ✅ | ✅ |
-| EVERSPACE 2 | ✅ | – | ✅ | ✅ | ✅ |
-| P3R | – | – | ✅ | ✅ | ✅ |
-| FF7 Rebirth (`ff7rebirth_.exe`) | – | – | ✅ | ✅ | ✅ |
-| Atelier Yumia | ✅ | ✅ | ✅ | ✅ | – |
-| **Nioh3** | – | ✅ | **–** | ✅ | – |
-| Crimson Desert | – | – | ✅ | ✅ | – |
-| **total** | 2/7 | 2/7 | 6/7 | **7/7** | 4/7 |
+**Measured — every installed UE game, n=24 (`scripts/analysis/scan_proxy_imports.py`):**
 
-- **winmm is the only 7/7 target**, and **Nioh3 imports neither dxgi nor version** — the exact gap
-  the current three leave open (dinput8 only). That single row is the case for building it.
+| Module | Coverage | Note |
+|---|---|---|
+| **dxgi.dll** | **24/24 (100%)** | every UE game, static or delay import |
+| **winmm.dll** | **24/24 (100%)** | identical set — **adds nothing over dxgi** |
+| d3d11 / d3d12 | 24/24 | (not hijack candidates; sanity check that the scan saw real games) |
+| dsound.dll | 23/24 | |
+| xinput1_3 | 17/24 | |
+| version.dll | 7/24 | **but see below — this number does NOT measure version's viability** |
+| dinput8.dll | 2/24 | genuinely weak |
+
+**Games importing none of {version, dinput8, dxgi}: 0.** The current three already reach everything.
+
+- **The version.dll 7/24 is not a coverage figure.** Per `ProxyImportAnalyzer`'s own class remarks,
+  version.dll is loaded *dynamically* by almost every Windows process, so its absence from an import
+  table says nothing about whether the proxy works. It remains the safe universal default; the 29%
+  is only how often it happens to be a *static* import.
 - **KnownDLLs verified on this host** (Win11 26200): `winmm` / `dsound` / `dxgi` / `version` /
   `dinput8` are **all absent** ⇒ all app-dir-hijackable. `IMM32` / `MSVCRT` / `gdiplus` / `SHCORE` /
   `PSAPI` / `SHLWAPI` **are** listed ⇒ permanently non-viable, exclude from any future selection.
-- **P3R already ships its own `version.dll` in `Binaries\Win64\`** — a live example of the version
-  slot being occupied by a mod loader, which is an independent reason to want a 4th flavour.
-- **Trap:** `ff7rebirth.exe` (launcher) has an empty import table; the real game is
-  `ff7rebirth_.exe`. `ProxyImportAnalyzer`'s "flattened top-level exe" pattern must survive the
-  launcher/real-exe pair.
 - **Export counts (measured):** version 17 · dinput8 6 · dxgi 20 · **winmm 181 (180 named)** ·
-  dsound 12. winmm is 9× dxgi but the *same shape* — do **not** hand-write; **generate** the `.def`
-  + trampoline `.asm` from the real DLL's export table (and re-generate dxgi's from the same script
-  to kill hand-maintenance drift).
+  dsound 12. If winmm is ever built: do **not** hand-write it — **generate** the `.def` + trampoline
+  `.asm` from the real DLL's export table (and re-generate dxgi's from the same script to kill
+  hand-maintenance drift).
+
+**The one surviving trigger: slot contention, not coverage.** A proxy only helps if its filename is
+*free*. Two real cases: **ReShade** commonly installs itself as `dxgi.dll` (or `d3d11.dll`), and
+**P3R already ships its own `version.dll`** in `Binaries\Win64\`. A user with ReShade on dxgi *and*
+something on version has only dinput8 left, which is 2/24. **Build winmm if, and only if, that
+combination shows up in practice** — it would then be a genuinely free 100%-coverage slot. Until
+then it is M-effort for a case nobody has reported.
+
+**🐞 Found while measuring — `ProxyImportAnalyzer` misreads modular UE builds.** `ReadProxyImports`
+is handed `game.ExePath` only. In a **modular** build (Satisfactory) that exe is a ~264 KB bootstrap
+stub and the engine lives in `*-Win64-Shipping.dll` modules, so the analyzer sees no dxgi/dinput8 and
+the Suggested-proxy column claims `version · default · no dxgi/dinput8` — when a dxgi proxy would in
+fact load fine (`D3D12RHI` imports it). **Severity LOW**: the analyzer's design deliberately treats
+imports as advisory context that never overrides the version default, so the harm is a misleading
+hint string, not a wrong deployment. Fix shape: when the main exe imports none of
+`{dxgi, d3d11, d3d12}`, union in the imports of the sibling `*-Win64-Shipping.dll` modules — the same
+fallback `scan_proxy_imports.py` now uses. Effort **S** · Risk low.
 
 **✅ CLEARED (build 2301) — the BLOCKER: we called winmm ourselves, from the shared object library.**
 Kept here because it is the single most important thing to understand before touching this idea, and
@@ -1210,9 +1233,10 @@ hardcoded `version` + `winmm` pair — add the 4th flavour to **both** or the gu
 covering it (shipped build 2291; the `.CT` half is in-game verified, the `Methode.cpp` CE-plugin half
 is only reachable via CE's *Inject && Connect* menu item and has not been exercised).
 
-Effort **M** · Risk low (the prerequisite is done). **Prereq before committing:** re-run the import
-measurement across the 30+ titles in [test-games.md](test-games.md) using the repo's own
-`ProxyImportAnalyzer` — n=7 is too small to lock a decision on, and the tooling already exists.
+Effort **M** · Risk low (the prerequisite is done) — **but do not spend it without the slot-contention
+trigger above.** The census that would have justified it has now been run (n=24) and says no; re-run
+`scripts/analysis/scan_proxy_imports.py` if the installed set changes substantially before
+revisiting.
 
 *Parent: the 3-proxy set (version/dinput8/dxgi; project-dll-loading-and-proxies).*
 

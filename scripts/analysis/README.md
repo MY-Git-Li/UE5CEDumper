@@ -16,6 +16,19 @@ Two scripts share the same dump corpus:
   changes. Saves cheat-table maintainers from binary-searching offsets
   by hand when a patch silently breaks their working table.
 
+A third script needs no dump corpus at all — it reads installed games directly:
+
+- **`scan_proxy_imports.py`** — proxy-viability census. Walks every installed
+  UE game and reports which hijackable system DLLs (`version` / `dinput8` /
+  `dxgi` / `winmm` / `dsound` / `xinput*`) each one imports, then summarises
+  coverage and lists any game the current proxy set cannot reach. **Run this
+  before adding a new proxy flavour** — it is what turned the winmm proposal
+  from "clear win" into "adds nothing" (see the 4th-proxy section in
+  [todo.md](../../docs/todo.md)). Handles three traps a naive per-exe scan gets
+  wrong: non-UE games in the same library, modular UE builds whose bootstrap exe
+  imports nothing (union over `*-Win64-Shipping.dll` instead), and
+  launcher/real-exe pairs. Edit `ROOTS` to match the machine.
+
 ## Workflow: cross-game calibration (`analyze_dumps.py`)
 
 1. Launch a UE4/5 game, attach UE5DumpUI as usual.
