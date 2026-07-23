@@ -3464,6 +3464,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     int n = resolvedStructs.Count + resolvedInstances.Count;
                     if (n - lastShown >= 16) { lastShown = n; StatusText = $"Resolving… {n} objects"; }
                 },
+                // Lean payload: this resolve feeds a CE XML export, which reads
+                // structure (name/offset/type/drill-down) and never a live VALUE.
+                // Measured at ~24-38% fewer bytes (multipipe-eval.md 10.6), which is
+                // the payload-proportional IPC + UI parse that batching cannot touch.
+                lean: true,
                 ct: cts.Token);
 
             var rootBc = breadcrumbsForXml[0];
@@ -3784,6 +3789,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     int n = resolvedStructs.Count + resolvedInstances.Count;
                     if (n - lastShown >= 16) { lastShown = n; StatusText = $"Resolving… {n} objects"; }
                 },
+                // Lean payload: this resolve feeds a CE XML export, which reads
+                // structure (name/offset/type/drill-down) and never a live VALUE.
+                // Measured at ~24-38% fewer bytes (multipipe-eval.md 10.6), which is
+                // the payload-proportional IPC + UI parse that batching cannot touch.
+                lean: true,
                 ct: cts.Token);
 
             var rootBc = breadcrumbsForXml[0];

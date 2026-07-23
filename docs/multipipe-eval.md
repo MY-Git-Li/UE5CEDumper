@@ -547,3 +547,121 @@ of "batching adds something".
 (parse). **The next lever is BYTES, not messages** - trimming fields the export never reads would
 attack both the payload-proportional IPC and the UI parse cost at once. Unquantified: nobody has
 measured what fraction of a `walk_instance` payload the CE export actually consumes.
+
+
+### 10.6 MEASURED (build 2339) - what fraction of a `walk_instance` payload the export reads
+
+§10.5 ended on "the next lever is BYTES" and named the gap: nobody had measured how much of a
+`walk_instance` payload the CE export actually consumes. `scripts/analysis/walk_payload_audit.py`
+measures it - byte-accounting every JSON key of every sampled response against a
+key-by-key classification of what `CeXmlExportService` / `CsxExportService` really read
+(the tags cite the consuming line, so the verdicts are re-derivable, not asserted).
+
+Sample: the UI pipe logs of real Copy CE XML runs on **SEED BATTLE DESTINY REMASTERED (UE 4.27)** -
+the same game as §10.4/§10.5, so the numbers compose. 6,778 `walk_instance`/`walk_instance_batch`
+responses, 14,263 instances, 27,002 complete field objects, 6.8 MB accounted out of 113 MB that
+crossed the pipe.
+
+| scope | share of sample | used | csx-only | **unused** | structural |
+|---|---:|---:|---:|---:|---:|
+| `field` (per-field keys) | 52.7% | 60.9% | 18.6% | **16.7%** | 3.8% |
+| `elem` (inline array elements) | 20.3% | 43.9% | - | **44.6%** | 11.5% |
+| `instance` (per-instance header) | 20.4% | 0.0% | - | **99.0%** | 1.0% |
+| `envelope` (per response) | 6.0% | 61.9% | - | 16.8% | 21.3% |
+
+**The per-instance header is 100% dead weight for an export.** The exporter touches
+`result.Fields` and nothing else, so `name` / `class` / `class_addr` / `outer` / `outer_name` /
+`outer_class` / `props_size` / `stale` - and even `addr`, since a batch reply is positional - are
+paid for and thrown away.
+
+**The single biggest droppable key is a value nobody reads.** Ranked by bytes: `elem.h`
+(9.0% - `ArrayElementValue.Hex`), `field.hex` (9.8%, read only by CSX), `field.value` (5.7%),
+`field.array_inner_addr` (3.0%, a `read_array_elements` handle no exporter uses). The pattern is
+consistent: CE XML output is **structural** (description + offset + CE type + drill-down), so every
+decoded VALUE the walk carries is dead for it. The only values that ARE read are inside container
+elements, where they become row labels and DropDownList pairs.
+
+**Verdict: a lean walk mode could drop roughly a quarter to two-fifths of the bytes.** Weighting
+only the scopes that scale with payload (`field` + `elem`, 73% of the sample): **~24% unused
+outright, ~38% with `hex` gone if CSX opts out too.** Per-instance headers and the redundant
+envelope `count` add a couple of points on top.
+
+**Sampling caveat, stated because it moves the headline.** `PipeClient.LogBody` caps a logged body
+at 1024 chars, so coverage is 6.2% of the 113 MB that crossed the pipe and the sample is *prefixes*.
+Only whole `"key": value` pairs and whole field objects are counted, so nothing is half-counted -
+but a response's envelope and its first instance header are always inside the prefix while the
+field array is cut, which inflates those two scopes (the report shows 1.9 fields/instance sampled;
+real classes have far more). That is why the whole-payload line reads a flattering 39% and the
+per-scope table is the reading to trust. To settle it exactly: set `UE5DUMP_PIPE_LOG_FULL=1`
+(uncaps the body log), do one Copy CE XML, re-run the script - rotation keeps the last ~32 MiB as
+complete, unbiased payloads.
+
+**What a lean mode would be.** A request flag (`lean: true`) that suppresses the export-dead keys:
+the whole instance header bar the fields, `hex` / `value` / `str_value` / `enum_value` / `enum_name`
+/ `ptr_name` / `array_inner_addr` per field, and `h` per array element. It attacks both remaining
+costs at once - the payload-proportional IPC (~1,066 ms of §10.5's residual) and the UI parse
+(653 ms) - and unlike batching it has no round-trip arithmetic to overshoot on: bytes removed are
+bytes not sent. Precondition: CSX and the Live Walker must NOT get the lean payload (they read
+`hex`, `value`, `bool_mask`, `bool_byte_offset`), so the flag belongs to the CE XML export path
+only, and the equivalence test must prove a lean walk and a full walk produce the same XML.
+
+### 10.7 SHIPPED (build 2351) - `lean: true`
+
+Built exactly as §10.6 specified. The full drop list is in
+[pipe-protocol.md](pipe-protocol.md) under `walk_instance`.
+
+- **DLL:** `SerializeField(fv, lean)` / `EncodeInstanceWalkToJson(result, lean)` gate the dead
+  keys; `walk_instance` and `walk_instance_batch` read `lean` (batch-level default, per-item
+  override). **Subtractive only** - a lean object is the full object minus keys, so no client
+  needs a new parsing branch and an older DLL that ignores the flag stays correct.
+- **UI:** `lean` threaded through `IDumpService.WalkInstance(Batch)Async` and the three shared CE
+  XML resolvers. The **default stays full-fat** because `CsxExportService` calls the same
+  `ResolveDrilldownAsync` and genuinely reads `hex` / `bool_mask` / `bool_byte_offset`; only the
+  three CE XML callers (Live Walker Copy CE XML + Copy CE Field, Instance Finder) pass `lean: true`.
+  The Live Walker GRID is untouched - it loads fields for display, values included.
+- **Test:** `WalkInstanceLeanTests` runs the same export twice, over full and over lean payloads,
+  and asserts **byte-identical XML** - plus the wire flag (absent unless asked, survives the
+  batch->single fallback) and that the shared resolver does not lean by default. Mutation-checked:
+  blanking a key the exporter *does* read (`ptr_class`) fails the equivalence assert, so the test
+  has teeth rather than passing vacuously.
+
+### 10.8 IN-GAME VERIFIED (build 2353) - -41.0% payload, and the XML is unchanged
+
+One Copy CE XML of the same object on SEED, before (DLL 2338, full) and after (DLL 2353, lean).
+`"lean":true` confirmed on the wire in the DLL's own request log.
+
+**Correctness first.** Both exports are 149,621 lines and 18,758 records (4,432 groups / 14,326
+leaves). **15 lines differ, and every one is a per-session runtime value**: the root object's heap
+address, and 14 `DropDownList` entries whose FName ComparisonIndex moved - the NAME half of each
+pair is identical. Nothing structural moved: same records, offsets, CE types, descriptions.
+
+**Payload - the measurement the flag exists for**, taken from the UI pipe log's response lengths
+over the *same* 134 `walk_instance_batch` responses:
+
+| | responses | payload | per response |
+|---|---:|---:|---:|
+| before (full) | 134 | 1,982,875 B | 14,798 B |
+| after (lean) | 134 | 1,168,944 B | **8,723 B** |
+| | | **-41.0%** | |
+
+§10.6 predicted ~38% for the payload-scaling scopes plus a near-100%-dead instance header. The
+prediction held.
+
+**Wall-clock - honestly, this export was too small to attribute.** PERF records: wall 487.6 ->
+364.2 / 310.8 ms, `dll` 146.7 -> 116.2 / 118.6 ms (**-20%, consistent across both runs** - fewer
+keys to serialise is real DLL work removed), `ui` 133.9 -> 31.8 / 0.0 ms, but **`ipc` did not move**
+(207.0 -> 216.2 / 212.9 ms). Per call that is 1.556 -> 1.601 / 1.625 ms while the bytes per call
+nearly halved.
+
+**That is a finding, not a disappointment: at ~15 KB per response and 134 calls, IPC is dominated by
+FIXED per-call cost, not by bytes.** §10.5's "~1,066 ms is payload-proportional" was decomposed from
+a 20,357-call export; nothing here contradicts it, but nothing here confirms it either. The two
+runs also come from different game sessions, and the before-run carries first-run `ui` cost, so the
+1.34-1.57x wall figure is not a claim. **To settle the wall-clock, repeat on the big export target**
+(the ~20k-call object of §10.4/§10.5), where the payload is two orders of magnitude larger.
+
+**Flatten sanity (same session).** The flatten export keeps **14,326 leaves - exactly the
+non-flatten count** - with an identical per-type mix (4 Bytes 12,386 / Byte 1,698 / String 224 /
+8 Bytes 2). Only wrappers collapsed: groups 4,432 -> 2,168, entries 18,758 -> 16,494 (-2,264 each,
+i.e. every removed entry was a group). 4,792 leaves gained their parent's label as a
+`"parent (off) > leaf (off)"` prefix; 9,534 kept their description verbatim. No leaf gained or lost.

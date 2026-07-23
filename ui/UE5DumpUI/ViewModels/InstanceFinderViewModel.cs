@@ -673,8 +673,10 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
 
             // Pre-resolve StructProperty inner fields via DLL
             StatusText = "Resolving struct fields...";
+            // lean: this resolve feeds GenerateInstanceXml (a CE XML export), which
+            // reads structure only — see the LEAN contract in Fern.cpp / §10.6.
             var resolvedStructs = await CeXmlExportService.ResolveStructFieldsAsync(
-                _dump, new List<LiveFieldValue>(Fields), arrayLimit: ArrayLimit);
+                _dump, new List<LiveFieldValue>(Fields), arrayLimit: ArrayLimit, lean: true);
 
             // Compute root address in user-selected format
             var rootAddress = AddressHelper.FormatAddress(

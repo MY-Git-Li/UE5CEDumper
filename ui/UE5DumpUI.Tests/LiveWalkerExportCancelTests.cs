@@ -26,7 +26,8 @@ public class LiveWalkerExportCancelTests
         public Func<Exception> Make = () => new OperationCanceledException();
 
         public override Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null,
-            int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default)
+            int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, bool lean = false,
+            CancellationToken ct = default)
         {
             BeforeThrow?.Invoke();
             throw Make();

@@ -943,22 +943,33 @@ static void FillPointerSnapshot(json& data) {
 // ============================================================
 // SerializeField — Convert a LiveFieldValue to JSON.
 // Shared by walk_instance and walk_datatable_rows handlers.
+//
+// `lean` omits the keys a CE XML export provably never reads — see the LEAN
+// contract on EncodeInstanceWalkToJson below. It only ever REMOVES keys; every
+// key it still emits is byte-identical to the full shape, which is what makes
+// "lean and full produce the same XML" testable rather than hoped for.
 // ============================================================
-static json SerializeField(const Ubel::LiveFieldValue& fv) {
+static json SerializeField(const Ubel::LiveFieldValue& fv, bool lean = false) {
     json fj;
     fj["name"]   = fv.name;
     fj["type"]   = fv.typeName;
     fj["offset"] = fv.offset;
     fj["size"]   = fv.size;
 
-    if (!fv.hexValue.empty())   fj["hex"]   = fv.hexValue;
-    if (!fv.typedValue.empty())  fj["value"] = fv.typedValue;
-    if (fv.guessed)              fj["guessed"] = true;
+    // hex/value are the single biggest droppable pair (measured ~15% of the
+    // payload): a CE record is structural (description + offset + CE type), so
+    // the live VALUE never reaches the XML.
+    if (!lean && !fv.hexValue.empty())    fj["hex"]   = fv.hexValue;
+    if (!lean && !fv.typedValue.empty())  fj["value"] = fv.typedValue;
+    if (fv.guessed)                       fj["guessed"] = true;
 
     // ObjectProperty: pointer info
     if (fv.ptrValue != 0) {
         fj["ptr"]       = Renge::AddrToStr(fv.ptrValue);
-        fj["ptr_name"]  = fv.ptrName;
+        // ptr_name is display-only; the export labels a pointer leaf with the
+        // pointed-to CLASS, never its object name.
+        if (!lean)
+            fj["ptr_name"]  = fv.ptrName;
         fj["ptr_class"] = fv.ptrClassName;
         if (fv.ptrClassAddr)
             fj["ptr_class_addr"] = Renge::AddrToStr(fv.ptrClassAddr);
@@ -967,8 +978,11 @@ static json SerializeField(const Ubel::LiveFieldValue& fv) {
     // BoolProperty: bit field info
     if (fv.boolBitIndex >= 0) {
         fj["bool_bit"] = fv.boolBitIndex;
-        fj["bool_mask"] = fv.boolFieldMask;
-        fj["bool_byte_offset"] = fv.boolByteOffset;
+        // mask + byte offset are CSX-only (description text / Binary bit leaf).
+        if (!lean) {
+            fj["bool_mask"] = fv.boolFieldMask;
+            fj["bool_byte_offset"] = fv.boolByteOffset;
+        }
     }
 
     // ArrayProperty: element count + inner type info + inline elements
@@ -991,7 +1005,9 @@ static json SerializeField(const Ubel::LiveFieldValue& fv) {
                 fj["soft_top_level_asset_path"] = fv.softArrayIsTopLevelAssetPath;
             }
         }
-        if (fv.arrayInnerFFieldAddr != 0)
+        // array_inner_addr is the Inner FProperty* handle for a follow-up
+        // read_array_elements call — no exporter reads it.
+        if (!lean && fv.arrayInnerFFieldAddr != 0)
             fj["array_inner_addr"] = Renge::AddrToStr(fv.arrayInnerFFieldAddr);
         // Phase B/D: inline element values (scalar or pointer)
         if (!fv.arrayElements.empty()) {
@@ -1000,7 +1016,9 @@ static json SerializeField(const Ubel::LiveFieldValue& fv) {
                 json ej;
                 ej["i"] = e.index;
                 ej["v"] = e.value;
-                ej["h"] = e.hex;
+                // Per-element raw hex: the largest single unused key measured
+                // (~9% of a whole export payload). Element LABELS come from "v".
+                if (!lean) ej["h"] = e.hex;
                 if (!e.enumName.empty())
                     ej["en"] = e.enumName;
                 if (e.rawIntValue != 0 || !e.enumName.empty())
@@ -1008,15 +1026,20 @@ static json SerializeField(const Ubel::LiveFieldValue& fv) {
                 // Phase D: pointer element fields
                 if (e.ptrAddr != 0) {
                     ej["pa"] = Renge::AddrToStr(e.ptrAddr);
-                    ej["pn"] = e.ptrName;
+                    if (!lean) ej["pn"] = e.ptrName;   // display-only, as above
                     ej["pc"] = e.ptrClassName;
                 }
                 // Phase F: struct sub-fields
                 if (!e.structFields.empty()) {
                     json sfs = json::array();
                     for (const auto& sf : e.structFields) {
-                        json sfj = {{"n", sf.name}, {"t", sf.typeName},
-                                    {"o", sf.offset}, {"s", sf.size}, {"v", sf.value}};
+                        // "v" (the sub-field's VALUE) is display-only: a CE
+                        // sub-leaf is built from n/t/o/s.
+                        json sfj = lean
+                            ? json{{"n", sf.name}, {"t", sf.typeName},
+                                   {"o", sf.offset}, {"s", sf.size}}
+                            : json{{"n", sf.name}, {"t", sf.typeName},
+                                   {"o", sf.offset}, {"s", sf.size}, {"v", sf.value}};
                         // Pointer resolution for ObjectProperty sub-fields
                         if (sf.ptrAddr != 0) {
                             sfj["pa"] = Renge::AddrToStr(sf.ptrAddr);
@@ -1069,7 +1092,9 @@ static json SerializeField(const Ubel::LiveFieldValue& fv) {
                 ej["i"] = e.index;
                 ej["k"] = e.key;
                 ej["v"] = e.value;
-                if (!e.keyHex.empty())   ej["kh"] = e.keyHex;
+                // kh is display-only; vh is NOT (the export parses it as a
+                // little-endian int for the value DropDownList).
+                if (!lean && !e.keyHex.empty()) ej["kh"] = e.keyHex;
                 if (!e.valueHex.empty()) ej["vh"] = e.valueHex;
                 if (!e.keyPtrName.empty())   ej["kn"] = e.keyPtrName;
                 if (e.keyPtrAddr != 0)       ej["ka"] = Renge::AddrToStr(e.keyPtrAddr);
@@ -1100,7 +1125,7 @@ static json SerializeField(const Ubel::LiveFieldValue& fv) {
                 json ej;
                 ej["i"] = e.index;
                 ej["k"] = e.key;
-                if (!e.keyHex.empty()) ej["kh"] = e.keyHex;
+                if (!lean && !e.keyHex.empty()) ej["kh"] = e.keyHex;   // display-only
                 if (!e.keyPtrName.empty()) ej["kn"] = e.keyPtrName;
                 if (e.keyPtrAddr != 0)    ej["ka"] = Renge::AddrToStr(e.keyPtrAddr);
                 if (!e.keyPtrClassName.empty()) ej["kc"] = e.keyPtrClassName;
@@ -1117,8 +1142,10 @@ static json SerializeField(const Ubel::LiveFieldValue& fv) {
         fj["struct_type"]       = fv.structTypeName;
     }
 
-    // EnumProperty / ByteProperty-with-enum: resolved name, value, and full entries
-    if (!fv.enumName.empty()) {
+    // EnumProperty / ByteProperty-with-enum: resolved name, value, and full entries.
+    // The resolved name/value are display-only — the export's DropDownList is
+    // built from enum_entries + enum_addr, which lean keeps.
+    if (!lean && !fv.enumName.empty()) {
         fj["enum_name"]  = fv.enumName;
         fj["enum_value"] = fv.enumValue;
     }
@@ -1130,8 +1157,9 @@ static json SerializeField(const Ubel::LiveFieldValue& fv) {
         fj["enum_entries"] = enumEntries;
     }
 
-    // StrProperty: decoded string value
-    if (!fv.strValue.empty()) {
+    // StrProperty: decoded string value. The export emits an FString leaf
+    // structurally (pointer deref + Unicode/CodePage flags), never the text.
+    if (!lean && !fv.strValue.empty()) {
         fj["str_value"] = fv.strValue;
     }
 
@@ -1527,27 +1555,39 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
         // pipe paths produce byte-identical instance objects, so the CE export
         // can switch to the batch without a field silently changing shape.
         // (Layer 2 of the walk_class_batch safety net.)
-        auto EncodeInstanceWalkToJson = [&](const Ubel::InstanceWalkResult& result) -> json {
+        // LEAN contract (build 2351, measured in multipipe-eval.md §10.6):
+        // `lean: true` omits the keys a CE XML export provably never reads. It
+        // is subtractive ONLY — a lean object is the full object minus keys, so
+        // the UI parser needs no new branch (a missing key already falls back to
+        // its default) and an older DLL that ignores the flag simply returns the
+        // full shape. The header below is 99% dead weight for an export: the
+        // exporter reads `fields` and nothing else, and a batch reply is
+        // positional, so even `addr` is redundant. `addr` and `stale` are kept
+        // anyway — identity for logs/debugging, and the freed-slot signal.
+        auto EncodeInstanceWalkToJson = [&](const Ubel::InstanceWalkResult& result,
+                                            bool lean = false) -> json {
             json data;
             data["addr"]       = Renge::AddrToStr(result.addr);
-            data["name"]       = result.name;
-            data["class"]      = result.className;
-            data["class_addr"] = Renge::AddrToStr(result.classAddr);
-            data["outer"]      = Renge::AddrToStr(result.outerAddr);
-            data["outer_name"] = result.outerName;
-            data["outer_class"]= result.outerClassName;
+            if (!lean) {
+                data["name"]       = result.name;
+                data["class"]      = result.className;
+                data["class_addr"] = Renge::AddrToStr(result.classAddr);
+                data["outer"]      = Renge::AddrToStr(result.outerAddr);
+                data["outer_name"] = result.outerName;
+                data["outer_class"]= result.outerClassName;
+            }
             // Optional keys stay OPTIONAL — emitting them unconditionally would
             // change the single-call wire shape and break byte-equivalence.
-            if (result.isDefinition)
+            if (!lean && result.isDefinition)
                 data["is_definition"] = true;
             if (result.isStale)
                 data["stale"] = true;
-            if (result.propsSize > 0)
+            if (!lean && result.propsSize > 0)
                 data["props_size"] = result.propsSize;
 
             json fields = json::array();
             for (const auto& fv : result.fields) {
-                fields.push_back(SerializeField(fv));
+                fields.push_back(SerializeField(fv, lean));
             }
             data["fields"] = fields;
             return data;
@@ -1803,12 +1843,13 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             int32_t arrayLimit = request.value("array_limit", 64);
             int32_t previewLimit = request.value("preview_limit", 2);
             bool fillGaps = request.value("fill_gaps", false);
+            bool lean = request.value("lean", false);
 
             auto result = Ubel::WalkInstance(addr, classAddr, arrayLimit, previewLimit, fillGaps);
 
             // Shared serialiser — walk_instance_batch emits the SAME function, so
             // single and batch responses cannot drift field-by-field.
-            return Renge::MakeResponse(id, EncodeInstanceWalkToJson(result)).dump();
+            return Renge::MakeResponse(id, EncodeInstanceWalkToJson(result, lean)).dump();
         }
 
         // ── walk_instance_batch: N instance walks in ONE round-trip ──
@@ -1831,6 +1872,7 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             int32_t defArrayLimit   = request.value("array_limit", 64);
             int32_t defPreviewLimit = request.value("preview_limit", 2);
             bool    defFillGaps     = request.value("fill_gaps", false);
+            bool    defLean         = request.value("lean", false);
 
             json arr = json::array();
             for (const auto& item : request["items"]) {
@@ -1853,7 +1895,7 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                                             item.value("array_limit",   defArrayLimit),
                                             item.value("preview_limit", defPreviewLimit),
                                             item.value("fill_gaps",     defFillGaps));
-                arr.push_back(EncodeInstanceWalkToJson(r));
+                arr.push_back(EncodeInstanceWalkToJson(r, item.value("lean", defLean)));
 
                 // Same cooperative-cancel contract as every other bulk loop: a
                 // disconnect mid-batch returns what is done rather than walking on.

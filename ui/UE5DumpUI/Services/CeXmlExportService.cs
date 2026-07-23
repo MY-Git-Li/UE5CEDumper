@@ -378,14 +378,15 @@ public static class CeXmlExportService
         IReadOnlyList<LiveFieldValue> fields,
         int depth,
         int arrayLimit = 64,
-        Dictionary<string, List<LiveFieldValue>>? resolvedStructs = null)
+        Dictionary<string, List<LiveFieldValue>>? resolvedStructs = null,
+        bool lean = false)
     {
         var resolved = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
         if (depth <= 0) return resolved;
 
         var visited = new HashSet<string>(StringComparer.Ordinal);
         await ResolvePointerInstancesRecursiveAsync(
-            dump, fields, resolved, depth, arrayLimit, visited, resolvedStructs);
+            dump, fields, resolved, depth, arrayLimit, visited, resolvedStructs, lean);
         return resolved;
     }
 
@@ -396,7 +397,8 @@ public static class CeXmlExportService
         int remainingDepth,
         int arrayLimit,
         HashSet<string> visited,
-        Dictionary<string, List<LiveFieldValue>>? resolvedStructs)
+        Dictionary<string, List<LiveFieldValue>>? resolvedStructs,
+        bool lean)
     {
         if (remainingDepth <= 0) return;
 
@@ -424,7 +426,7 @@ public static class CeXmlExportService
         IReadOnlyList<InstanceWalkResult> walked;
         try
         {
-            walked = await dump.WalkInstanceBatchAsync(pending, arrayLimit);
+            walked = await dump.WalkInstanceBatchAsync(pending, arrayLimit, lean: lean);
         }
         catch
         {
@@ -449,13 +451,13 @@ public static class CeXmlExportService
                 if (resolvedStructs != null)
                 {
                     await ResolveStructFieldsIntoAsync(
-                        dump, result.Fields, resolvedStructs, arrayLimit);
+                        dump, result.Fields, resolvedStructs, arrayLimit, lean);
                 }
 
                 // Recurse one level deeper for nested pointers in the resolved target
                 await ResolvePointerInstancesRecursiveAsync(
                     dump, result.Fields, resolved, remainingDepth - 1,
-                    arrayLimit, visited, resolvedStructs);
+                    arrayLimit, visited, resolvedStructs, lean);
             }
             catch
             {
@@ -506,11 +508,12 @@ public static class CeXmlExportService
         int depth,
         int arrayLimit = 64,
         Action? onWalk = null,
+        bool lean = false,
         CancellationToken ct = default)
     {
         var visited = new HashSet<string>(StringComparer.Ordinal);
         await ResolveDrilldownRecAsync(dump, fields, resolvedStructs, resolvedInstances,
-            depth, arrayLimit, visited, onWalk, ct);
+            depth, arrayLimit, visited, onWalk, lean, ct);
     }
 
     private static async Task ResolveDrilldownRecAsync(
@@ -522,6 +525,7 @@ public static class CeXmlExportService
         int arrayLimit,
         HashSet<string> visited,
         Action? onWalk,
+        bool lean,
         CancellationToken ct)
     {
         // Abort promptly between pipe round-trips when the user cancels the export.
@@ -530,7 +534,7 @@ public static class CeXmlExportService
         // (1) Structs at this level — flatten nested (depth-free, MaxStructDepth-bound),
         //     then descend into each resolved struct's own fields (still depth-free) so
         //     containers/pointers INSIDE the struct are reached.
-        await ResolveStructFieldsIntoAsync(dump, fields, resolvedStructs, arrayLimit, ct);
+        await ResolveStructFieldsIntoAsync(dump, fields, resolvedStructs, arrayLimit, lean, ct);
         onWalk?.Invoke();
         foreach (var f in fields)
         {
@@ -539,7 +543,7 @@ public static class CeXmlExportService
             if (!resolvedStructs.TryGetValue(f.StructDataAddr, out var sub)) continue;
             if (!visited.Add("S:" + f.StructDataAddr)) continue;
             await ResolveDrilldownRecAsync(dump, sub, resolvedStructs, resolvedInstances,
-                depth, arrayLimit, visited, onWalk, ct);
+                depth, arrayLimit, visited, onWalk, lean, ct);
         }
 
         if (depth <= 0) return;
@@ -552,7 +556,7 @@ public static class CeXmlExportService
             if (resolvedInstances.ContainsKey(f.PtrAddress)) continue;
             if (!visited.Add("P:" + f.PtrAddress)) continue;
             await WalkAndRecurseAsync(dump, f.PtrAddress, f.PtrClassAddr, resolvedStructs,
-                resolvedInstances, depth - 1, arrayLimit, visited, onWalk, ct);
+                resolvedInstances, depth - 1, arrayLimit, visited, onWalk, lean, ct);
         }
 
         // (3) Container element VALUES (struct + object) — cost 1 level.
@@ -568,14 +572,14 @@ public static class CeXmlExportService
                 .ToList();
             if (structVals.Count > 0)
             {
-                await ResolveStructFieldsIntoAsync(dump, structVals, resolvedStructs, arrayLimit, ct);
+                await ResolveStructFieldsIntoAsync(dump, structVals, resolvedStructs, arrayLimit, lean, ct);
                 onWalk?.Invoke();
                 foreach (var sv in structVals)
                 {
                     if (!resolvedStructs.TryGetValue(sv.StructDataAddr, out var sub)) continue;
                     if (!visited.Add("S:" + sv.StructDataAddr)) continue;
                     await ResolveDrilldownRecAsync(dump, sub, resolvedStructs, resolvedInstances,
-                        depth - 1, arrayLimit, visited, onWalk, ct);
+                        depth - 1, arrayLimit, visited, onWalk, lean, ct);
                 }
             }
 
@@ -586,7 +590,7 @@ public static class CeXmlExportService
                 if (resolvedInstances.ContainsKey(ov.PtrAddress)) continue;
                 if (!visited.Add("P:" + ov.PtrAddress)) continue;
                 await WalkAndRecurseAsync(dump, ov.PtrAddress, ov.PtrClassAddr, resolvedStructs,
-                    resolvedInstances, depth - 1, arrayLimit, visited, onWalk, ct);
+                    resolvedInstances, depth - 1, arrayLimit, visited, onWalk, lean, ct);
             }
         }
     }
@@ -595,17 +599,18 @@ public static class CeXmlExportService
         IDumpService dump, string ptrAddr, string ptrClassAddr,
         Dictionary<string, List<LiveFieldValue>> resolvedStructs,
         Dictionary<string, List<LiveFieldValue>> resolvedInstances,
-        int depth, int arrayLimit, HashSet<string> visited, Action? onWalk, CancellationToken ct)
+        int depth, int arrayLimit, HashSet<string> visited, Action? onWalk, bool lean,
+        CancellationToken ct)
     {
         try
         {
-            var r = await dump.WalkInstanceAsync(ptrAddr, ptrClassAddr, arrayLimit, ct: ct);
+            var r = await dump.WalkInstanceAsync(ptrAddr, ptrClassAddr, arrayLimit, lean: lean, ct: ct);
             if (r.Fields.Count > 0)
             {
                 resolvedInstances[ptrAddr] = r.Fields;
                 onWalk?.Invoke();
                 await ResolveDrilldownRecAsync(dump, r.Fields, resolvedStructs,
-                    resolvedInstances, depth, arrayLimit, visited, onWalk, ct);
+                    resolvedInstances, depth, arrayLimit, visited, onWalk, lean, ct);
             }
         }
         // Let a cancel abort the whole export; only real pipe/target failures fall through
@@ -772,10 +777,11 @@ public static class CeXmlExportService
     /// a StructProperty at offset 0x30, but their StructDataAddr differs).
     /// </summary>
     public static async Task<Dictionary<string, List<LiveFieldValue>>> ResolveStructFieldsAsync(
-        IDumpService dump, IReadOnlyList<LiveFieldValue> fields, int arrayLimit = 64)
+        IDumpService dump, IReadOnlyList<LiveFieldValue> fields, int arrayLimit = 64,
+        bool lean = false)
     {
         var result = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
-        await ResolveStructFieldsIntoAsync(dump, fields, result, arrayLimit);
+        await ResolveStructFieldsIntoAsync(dump, fields, result, arrayLimit, lean);
         return result;
     }
 
@@ -820,6 +826,7 @@ public static class CeXmlExportService
         IDumpService dump,
         IReadOnlyList<(string Addr, string ClassAddr)> roots,
         int arrayLimit,
+        bool lean,
         CancellationToken ct)
     {
         var cache = new Dictionary<string, InstanceWalkResult>(StringComparer.Ordinal);
@@ -849,7 +856,7 @@ public static class CeXmlExportService
             IReadOnlyList<InstanceWalkResult> walked;
             try
             {
-                walked = await dump.WalkInstanceBatchAsync(todo, arrayLimit, ct: ct);
+                walked = await dump.WalkInstanceBatchAsync(todo, arrayLimit, lean: lean, ct: ct);
             }
             catch (OperationCanceledException) { throw; }
             catch
@@ -877,6 +884,7 @@ public static class CeXmlExportService
         IReadOnlyList<LiveFieldValue> fields,
         Dictionary<string, List<LiveFieldValue>> resolved,
         int arrayLimit,
+        bool lean = false,
         CancellationToken ct = default)
     {
         // Collect this call's struct roots and prefetch the whole tree with batched
@@ -894,7 +902,7 @@ public static class CeXmlExportService
             if (isStructRoot) roots.Add((field.StructDataAddr, field.StructClassAddr));
         }
         var prefetch = roots.Count > 0
-            ? await PrefetchStructTreeAsync(dump, roots, arrayLimit, ct)
+            ? await PrefetchStructTreeAsync(dump, roots, arrayLimit, lean, ct)
             : null;
 
         foreach (var field in fields)
@@ -919,7 +927,7 @@ public static class CeXmlExportService
             try
             {
                 await ResolveStructRecursiveAsync(dump, field.StructDataAddr, field.StructClassAddr,
-                    "", 0, subResolved, 0, arrayLimit, ct, prefetch);
+                    "", 0, subResolved, 0, arrayLimit, lean, ct, prefetch);
             }
             // A cancel unwinds the whole export; only genuine failures leave the struct
             // empty (emit falls back to a placeholder). OperationCanceledException covers
@@ -937,7 +945,7 @@ public static class CeXmlExportService
     private static async Task ResolveStructRecursiveAsync(
         IDumpService dump, string dataAddr, string classAddr,
         string namePrefix, int baseOffset, List<LiveFieldValue> output, int depth,
-        int arrayLimit = 64, CancellationToken ct = default,
+        int arrayLimit = 64, bool lean = false, CancellationToken ct = default,
         Dictionary<string, InstanceWalkResult>? prefetch = null)
     {
         if (depth >= MaxStructDepth) return;
@@ -950,7 +958,7 @@ public static class CeXmlExportService
         if (prefetch != null && prefetch.TryGetValue(StructCacheKey(dataAddr, classAddr), out var cached))
             walkResult = cached;
         else
-            walkResult = await dump.WalkInstanceAsync(dataAddr, classAddr, arrayLimit: arrayLimit, ct: ct);
+            walkResult = await dump.WalkInstanceAsync(dataAddr, classAddr, arrayLimit: arrayLimit, lean: lean, ct: ct);
 
         foreach (var f in walkResult.Fields)
         {
@@ -964,7 +972,7 @@ public static class CeXmlExportService
             {
                 // Nested struct — recurse and flatten into the same list
                 await ResolveStructRecursiveAsync(dump, f.StructDataAddr, f.StructClassAddr,
-                    displayName, absOffset, output, depth + 1, arrayLimit, ct, prefetch);
+                    displayName, absOffset, output, depth + 1, arrayLimit, lean, ct, prefetch);
             }
             else if (f.IsPointerNavigation)
             {

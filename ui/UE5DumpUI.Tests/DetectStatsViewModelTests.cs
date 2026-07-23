@@ -50,7 +50,7 @@ public class DetectStatsViewModelTests
 
         public override Task<InstanceWalkResult> WalkInstanceAsync(
             string addr, string? classAddr = null, int arrayLimit = 64, int previewLimit = 2,
-            bool fillGaps = false, CancellationToken ct = default)
+            bool fillGaps = false, bool lean = false, CancellationToken ct = default)
         {
             var fields = WalkByAddr.TryGetValue(addr, out var f) ? f : new List<LiveFieldValue>();
             return Task.FromResult(new InstanceWalkResult { Address = addr, Fields = fields });

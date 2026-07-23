@@ -20,6 +20,54 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 - MEASURED then SHIPPED: the lean walk payload (builds 2339 / 2351)
+
+Build 2335 ended with "the next lever is BYTES, not messages" and an admitted blank: nobody had
+measured how much of a `walk_instance` payload the CE export actually consumes. Two steps closed it.
+
+**Measured first (build 2339).** `scripts/analysis/walk_payload_audit.py` byte-accounts every JSON
+key of the `walk_instance` / `walk_instance_batch` responses in a UI pipe log against a key-by-key
+map of what `CeXmlExportService` / `CsxExportService` really read (each verdict cites its consuming
+line). On a real Copy CE XML on SEED - 6,778 responses, 14,263 instances, 27,002 complete field
+objects:
+
+| scope | share | used | csx-only | **unused** |
+|---|---:|---:|---:|---:|
+| `field` | 52.7% | 60.9% | 18.6% | **16.7%** |
+| `elem` (inline array elements) | 20.3% | 43.9% | - | **44.6%** |
+| `instance` (per-instance header) | 20.4% | 0% | - | **99.0%** |
+
+The exporter reads `result.Fields` and nothing else, so the whole per-instance header is dead
+weight; and the biggest single droppable key is `elements[].h` (element raw hex, ~9% of the entire
+payload). Because CE XML output is **structural** - description + offset + CE type + drill-down -
+every decoded VALUE the walk carries is dead for it. Full table in
+[multipipe-eval.md](multipipe-eval.md) section 10.6.
+
+**Then shipped (build 2351).** `lean: true` on `walk_instance` / `walk_instance_batch` omits exactly
+those keys (drop list in [pipe-protocol.md](pipe-protocol.md)). Three properties make it cheap to
+trust: it is **subtractive only** (a lean object is the full object minus keys, so no client needs a
+new parsing branch and an older DLL that ignores the flag stays correct); the **default stays
+full-fat** because `CsxExportService` calls the same `ResolveDrilldownAsync` and genuinely reads
+`hex` / `bool_mask` / `bool_byte_offset`, so only the three CE XML callers opt in; and
+`WalkInstanceLeanTests` runs the same export over full and lean payloads demanding **byte-identical
+XML** - mutation-checked, so it fails when a key the exporter really reads is dropped.
+
+**In-game verified (build 2353, SEED).** Same object, before (DLL 2338) vs after (DLL 2353):
+**payload 1,982,875 -> 1,168,944 bytes across the same 134 batch responses, -41.0%** - section
+10.6's prediction held. The XML is unchanged: 149,621 lines and 14,326 leaves both sides, with 15
+differing lines that are all per-session values (the root heap address, and 14 DropDownList entries
+whose FName ComparisonIndex moved while the name half stayed identical). DLL serialise time fell
+20% (146.7 -> 116-119 ms) consistently across both runs.
+
+**The wall-clock is still not claimed.** `ipc` did not move (207 -> 213-216 ms) despite the bytes
+nearly halving - at ~15 KB per response over 134 calls, IPC is dominated by fixed per-call cost, so
+this export is simply too small to attribute. Build 2335's lesson applies to its own successor:
+repeat on the ~20k-call export before quoting a speed-up. Also of note from the audit tooling:
+`UE5DUMP_PIPE_LOG_FULL=1` uncaps `PipeClient`'s 1024-char body log so the audit can sample whole
+payloads instead of prefixes.
+
+-----
+
 ## 2026-07-23 - RESULT: struct-tree batching is 1.71x, and the IPC cost model was wrong (build 2335)
 
 `top:` names `walk_instance_batch` - the acceptance criterion - and the same Copy CE XML on SEED

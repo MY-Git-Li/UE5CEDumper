@@ -1368,10 +1368,41 @@ ms for the same reason. Full table in [multipipe-eval.md](multipipe-eval.md) sec
 
 **Next lever, if anyone wants more: BYTES, not messages.** Remaining 3,437 ms = dll 1,506 (real
 work) + ipc 1,278 (mostly payload) + ui 653 (parse). Trimming fields the CE export never reads would
-hit the payload-proportional IPC *and* the parse cost together. **Unquantified** - nobody has
-measured what fraction of a `walk_instance` payload the export actually consumes; measure that
-before committing. Note also that raising the batch chunk would achieve nothing: average batch size
-is ~16.6 (fan-out-limited), not near the 200 cap.
+hit the payload-proportional IPC *and* the parse cost together. Note also that raising the batch
+chunk would achieve nothing: average batch size is ~16.6 (fan-out-limited), not near the 200 cap.
+
+**✅ MEASURED (build 2339) — `scripts/analysis/walk_payload_audit.py`.** Byte-accounted a real
+Copy CE XML on SEED against a key-by-key map of what the exporters read (full table in
+[multipipe-eval.md](multipipe-eval.md) section 10.6):
+
+- Per-field keys (52.7% of the sample): **60.9% used / 18.6% CSX-only / 16.7% unused.**
+- Inline array elements (20.3%): **43.9% used / 44.6% unused** — `elem.h` (element raw hex) alone
+  is 9.0% of the whole payload and no exporter reads it.
+- The per-instance header (`name` / `class` / `outer_*` / `props_size` / even `addr`) is **99%
+  dead** — the export touches `result.Fields` and nothing else.
+- Verdict: **~24% of the payload-scaling bytes are droppable outright, ~38% if CSX opts out of
+  `hex` too.** Biggest single items: `elem.h`, `field.hex` (CSX-only), `field.value`,
+  `field.array_inner_addr`.
+
+**✅ SHIPPED (build 2351) — `lean: true`.** `walk_instance` / `walk_instance_batch` take a `lean`
+flag that omits exactly those keys (drop list in [pipe-protocol.md](pipe-protocol.md); design notes
+in [multipipe-eval.md](multipipe-eval.md) section 10.7). Subtractive only, so an older DLL that
+ignores it stays correct. Wired to the CE XML export path ONLY — CSX shares the same
+`ResolveDrilldownAsync` and genuinely reads `hex` / `bool_mask` / `bool_byte_offset`, so the default
+stays full-fat. `WalkInstanceLeanTests` proves lean and full payloads produce **byte-identical XML**
+(mutation-checked: blanking a key the exporter does read fails it).
+
+**✅ IN-GAME VERIFIED (build 2353, SEED).** Same object exported before (DLL 2338) and after
+(DLL 2353): **payload 1,982,875 -> 1,168,944 bytes over the same 134 batch responses = -41.0%**,
+matching section 10.6's prediction. The XML is unchanged — 149,621 lines / 14,326 leaves both
+sides, 15 differing lines and every one a per-session value (root address + FName ComparisonIndex,
+name half identical). DLL serialise time -20% (146.7 -> 116-119 ms), consistent across both runs.
+
+**Still open — the wall-clock.** On this export `ipc` did NOT move (207 -> 213-216 ms) even though
+the bytes nearly halved: at ~15 KB/response and 134 calls, IPC is dominated by fixed per-call cost.
+Repeat on the ~20k-call export target of section 10.4/10.5 before claiming any speed-up. While at
+it, re-run the payload audit with `UE5DUMP_PIPE_LOG_FULL=1` for an untruncated sample — the
+1024-char body-log cap makes the whole-payload split read a flattering 39%.
 
 *Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
 (dev-log build 2156) already holds the cadence half.*

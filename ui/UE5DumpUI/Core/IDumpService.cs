@@ -67,7 +67,14 @@ public interface IDumpService
     Task UnwatchAsync(string addr, CancellationToken ct = default);
 
     // --- Live Data Walker ---
-    Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null, int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default);
+    /// <param name="lean">Ask the DLL to omit the keys a CE XML export never reads
+    /// (per-instance header, every decoded VALUE — <c>hex</c> / <c>value</c> /
+    /// <c>str_value</c> / element hex …). Measured at ~24-38% of the payload
+    /// (multipipe-eval.md §10.6), and it costs the UI parse too, so batching's
+    /// residual payload-proportional IPC shrinks with it. <b>Only for the CE XML
+    /// export path</b> — CSX and the Live Walker grid DO read those keys. Older
+    /// DLLs ignore the flag and return the full shape, which is still correct.</param>
+    Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null, int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, bool lean = false, CancellationToken ct = default);
 
     /// <summary>
     /// Walk N instances in as few round-trips as possible (chunked at ~200).
@@ -83,10 +90,12 @@ public interface IDumpService
     /// command — is replayed as single calls, so behaviour degrades rather than
     /// losing data.</para>
     /// </summary>
+    /// <param name="lean">See <see cref="WalkInstanceAsync"/> — same contract, and
+    /// the same "CE XML export only" restriction.</param>
     Task<IReadOnlyList<InstanceWalkResult>> WalkInstanceBatchAsync(
         IReadOnlyList<(string Addr, string? ClassAddr)> items,
         int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false,
-        CancellationToken ct = default);
+        bool lean = false, CancellationToken ct = default);
     Task<WorldWalkResult> WalkWorldAsync(int actorLimit = 200, int arrayLimit = 64, CancellationToken ct = default);
     // newestFirst: scan GObjects from the high (most-recently-allocated) end so
     // the newest runtime spawns survive the limit cap (catch a just-spawned
