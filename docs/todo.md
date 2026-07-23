@@ -380,100 +380,57 @@ Open follow-ups (low priority):
 
 -----
 
-## Teleport Coordinate Library — evaluated (2026-07-22, round 2), not yet built
+## Teleport Coordinate Library — P1-P5 SHIPPED (builds 2257-2267), needs in-game verification
 
-Full design contract: **[teleport-coord-library-spec.md](teleport-coord-library-spec.md)**.
-Two multi-agent rounds, adversarially verified against build 2256 (round 2 additionally ran
-AOBMaker's shipped parser assembly as a probe harness, so its tolerances below are *empirical*).
-User ask = an **unlimited, labelled+grouped, filterable coordinate list** (the 3 DLL marker slots
-and the one-shot "TP to coords" box don't cover a walkthrough author's thousands of chest coords
-across many maps), with pick→**confirm**→teleport, a collapsed-by-default card, CE-Lua export in
-**needs-DLL** / **no-DLL** flavours, **copy-paste re-import** of a generated AA script, and
-**CSV export+import**. **Verdict: feasible, core needs ZERO DLL/pipe change** —
-`teleport_recall_marker` with x/y/z (`DumpService.cs:3107`) and mailbox `CMD_TELEPORT` op 13
-(`Mimic.h:158`) already exist. **Out of scope by user decision**: whether a coordinate survives
-a game patch.
+Design contract: **[teleport-coord-library-spec.md](teleport-coord-library-spec.md)**.
+Write-up: [dev-log.md](dev-log.md) 2026-07-23. All five phases are on `dev`, 2777 tests green,
+**zero DLL/pipe change**. What remains is verification that unit tests structurally cannot do.
 
-**Round 2 reversed two round-1 decisions.** (a) The wire format moved from a *positional* Lua
-tuple to **named-field records**, modelled on AOBMaker's `@AOBMAKER:AA_TOGGLE v1` block
-(`kyoto_xanadu.CT:1-90`) — positional loses on field reorder, v2 field addition, trailing comma,
-inserted comment line, and diff readability, and wins only on size (296 KB vs 480 KB at 4 000
-entries, both ≈4 % of the verified 10 MiB cap). (b) `]==]` is **no longer hard-blocked** — commit
-`002891e` made the shared escapers neutralise closing long brackets of any level, so the repo
-convention is **escape-not-block**; "strip on import" would silently mutate user data.
+- **VERIFY IN-GAME — the teleport itself** — Effort: **S** · Risk: low.
+  Save current pos → move → Teleport selected → land back. Then the map guard: save on map A, load
+  map B, confirm plain Teleport refuses and Force is the only way through. Watch for `Tier == 2`
+  (raw-write fallback) in the status line — the game may snap the pawn back, which is expected and
+  already surfaced. *Parent: P1.*
 
-Locked decisions (spec §3-§5): per-game file keyed by **exe module name, not PE hash**; **Map is
-a first-class field** compared **`OrdinalIgnoreCase`** (CSV import makes it user-authored);
-every entry carries a **`uid`** — *never* named `id`, because AOBMaker's `CtIdRenumberService`
-classifies a script as an ID-check script on `RxIdField` alone and would silently renumber
-`id = N` in any `.CT` the user later renumbers; **one canonical precision** = round to 3 dp at
-capture, then format `"R"`/Invariant (verified: gives bit-exact round-trip *and* clean
-`67162.398` text, idempotent — resolving the two reviewers' opposite recommendations); namespace
-**`-- @UE5CD:COORDS v1` / `-- @UE5CD:END`**, never `@AOBMAKER:`.
+- **VERIFY IN CE — the emitted picker (both flavours)** — Effort: **M** · Risk: med.
+  **Nothing has executed a single line of the emitted Lua.** Push to CE → enable the record → the
+  form should open with the ListView filled, the filter narrowing on space-AND, both RadioGroups
+  live, Teleport working and Force bypassing the map guard. Highest-risk items, in order:
+  (a) the CE control/property set — verified from `CrimsonDesert.CT` CheatEntry 357, not from CE's
+  own docs, so `lv.ItemIndex`, `readString(mb + params + 48, 127, false)` and
+  `rgGroup.Items.add` are the ones most likely to be wrong;
+  (b) panel creation order actually producing the intended layout;
+  (c) the no-DLL flavour's raw write, which additionally needs "UE5 Trainer: Setup" enabled first
+  and has the known may-not-visibly-move caveat. *Parent: P3 + P5.*
 
-- **P1 — model (+`uid`, precision rule) + store + collapsible card + CRUD + Save-current-pos +
-  Teleport-selected (map guard) + filter** — Effort: **M** · Risk: low. UI-only. Store = structural
-  `BookmarkStore` clone with deliberate deviations: module-name key, **`DefaultIgnoreCondition`
-  MUST NOT be `WhenWritingDefault`** (a legitimately-saved `0.0` coordinate would be dropped and
-  reload as 0 by accident), and `.bak` + `.preimport.bak` (hand-curated data; a botched import is
-  the worst failure mode). ⚠ Two traps: `TeleportPanel` has **no DataGrid today** and its
-  `ContentRoot` is a vertically-unbounded `ScrollViewer` → **a DataGrid there will not virtualize**,
-  so the grid needs an explicit `MaxHeight` (`LiveWalkerPanel.axaml:805` precedent); and the tab's
-  quick-jump menu takes the card label from the **first SemiBold TextBlock descendant** of a
-  `Border` that is a **direct** child of `ContentRoot` — verify that still resolves through an
-  `Expander.Header`. Bound by the space-AND + `KeywordSearchMemory` MUST-rule and English-only
-  `str.TP.*` strings. *Parent: this eval.*
+- **VERIFY — CSV against a real spreadsheet** — Effort: **S** · Risk: low.
+  Export → open in Excel (check CJK renders, i.e. the BOM did its job) → edit a label → save →
+  re-import and confirm the two-stage preview shows the change *before* committing. Deliberately
+  try a group named `1-2` and a label starting `=` — the first should show up in the diff as an
+  Excel date mangling, the second should survive the armouring round trip. *Parent: P2.*
 
-- **P2 — CSV export + TWO-STAGE import with diff preview** — Effort: **M** · Risk: low-med.
-  Scheduled **before** the Lua export on purpose: CSV is what users will actually curate 4 000 rows
-  in, and the import-report machinery it forces is reused by P4. RFC 4180 quoting is **mandatory**
-  (one unquoted comma in a label shifts every column); split positionally with **no
-  `RemoveEmptyEntries`** — the repo's only delimited reader (`BugItGoParser.cs:66-68`) uses it and
-  would collapse an empty Group from 9 fields to 8, silently shifting `Map`→`Group`, `X`→`Map`;
-  **UTF-8 WITH BOM** as a documented exception to the house BOM-less rule (`DumpAllService.cs:99-103`)
-  because a BOM-less CJK export opens as mojibake in Excel on a zh-TW box; write `\n`, accept CRLF;
-  sniff the delimiter among `, ; \t` and accept comma-decimals when it is `;` (a de-DE Excel re-save);
-  **formula-injection armouring** (prefix `'` to a Label/Group starting `= + - @` on export, strip one
-  on import) — otherwise `=Boss Arena` displays `#NAME?` and Excel saves the *displayed* text,
-  destroying the label with no error. The two-stage import is the point: Excel silently coerces `1-2`
-  → a date and `0012` → `12` and no validator can detect it, so stage 1 reports per-line diagnostics
-  **plus a cell-level diff** against the current library, stage 2 commits after a
-  "import 3998, skip 2, update 14" consent. Explicitly do NOT reproduce the silent-partial-parse in
-  `DumpJsonlReader.cs:38-53`. Export the **model, never the view** (never the filtered grid, never the
-  computed Distance column). *Parent: this eval §5.*
+- **VERIFY — the quick-jump menu label** — Effort: **S** · Risk: low.
+  The tab's right-click menu takes a card's label from the first `SemiBold` TextBlock descendant of
+  a direct-child `Border`. The new card puts that TextBlock inside an `Expander.Header`; confirm the
+  walk still resolves "Coordinate Library" rather than a wrong label. Spec §7 flags this. *Parent: P1.*
 
-- **P3 — Lua export, DLL flavour** — Effort: **S-M** · Risk: low-med. `@UE5CD:COORDS v1` named-field
-  block + the verbatim `---- GENERATED CODE (do not edit below) ----` separator + a generic picker
-  form. Build **only** from the verified CE control set — `createForm / createPanel / createLabel /
-  createEdit / createRadioGroup / createButton / createListView` (`CrimsonDesert.CT` CheatEntry 357);
-  **`createListBox` and `createComboBox` appear nowhere in this repo and are NOT verified**. Two
-  RadioGroups: Group (`All` + top **8** by count) and Map scope (`Current map` / `All maps`, read from
-  `GET_POSE`'s map name at `mailbox + 0x358`). Panel creation order is load-bearing (`alClient` **last**).
-  Confirm-before-TP = two buttons (`Teleport` map-guarded / `Force teleport`) — no CE yes/no dialog API
-  is verified. Interactive form → hygiene close in `frm.OnClose`, **every error path leaves the window
-  open**. Also promote **one** `CeLuaHygiene.EscapeLuaString` + the fence constants into `CeLuaHygiene`
-  rather than adding a 5th private escaper — §6 models the picker on `InvokeScriptGenerator`, whose
-  copy is the weakest (no `\r`, no `\t`, no `]` handling). *Parent: this eval §4/§6.*
+- **VERIFY — DataGrid behaviour at scale** — Effort: **S** · Risk: med.
+  The grid carries `MaxHeight="260"` precisely because `ContentRoot` is a vertically unbounded
+  ScrollViewer and an unconstrained DataGrid would not virtualize. Load ~4 000 entries (import a
+  generated CSV) and confirm scrolling and filtering stay responsive. Also measure where CE's
+  ListView actually stutters — the picker's 2 000-row display cap is inherited from the reference
+  table as an unverified guess. *Parent: P1 + P3.*
 
-- **P4 — Lua re-import (R7)** — Effort: **S** · Risk: low. Brace-balanced scan + per-key anchored
-  regex (AOBMaker's mechanism), sharing P2's report/preview. Four AOBMaker defects to **not** inherit,
-  each empirically confirmed against its shipped assembly: version baked into the marker literal (a
-  `v2` block is indistinguishable from *no block* → capture `v(\d+)` instead); markers matched anywhere
-  including inside a string literal (→ anchor `^--`); **100 % silent failure**, no throw or diagnostic
-  ever; and single-quoted values silently ignored → defaults. Also must XML-decode **five** entities when
-  the paste is the clipboard `.CT` form — `CheatTableBuilder.EscapeXml` escapes 5 but
-  `CeXmlExportService.ExtractAssemblerScript` un-escapes only 3. *Parent: this eval §4.4.*
-
-- **P5 — no-DLL flavour via `StandaloneTrainerScriptGenerator`** — Effort: **S** · Risk: med. Raw write
-  to `RootComponent.RelativeLocation`; rotation via the already-baked `ctrlRotOff`. **No map name
-  available** → Map RadioGroup omitted, guard degrades to a label. Carries the existing
-  `AppendTpWeakNote` caveat. *Parent: this eval.*
+- **Experimental gating — decide** — Effort: **S** · Risk: low.
+  Five Teleport cards are gated on `ExperimentalEnabled`. A coordinate bookmark list is not
+  combat-affecting so it currently is NOT gated; confirm that is what you want. *Parent: spec §10.4.*
 
 - **Unrelated finding, worth doing anyway** — Effort: **S** · Risk: low.
   `AobMakerBridgeService.WriteMessageAsync` (`:495-506`) has **no send-side size check**, and the
   plugin's oversize path (`pipe_server.cpp:61`) returns *without writing a response*, so an oversized
   push surfaces as a confusing "no response"/timeout instead of a size error. Add a client-side
-  pre-flight check against the 10 MiB cap. *Parent: this eval §10.6.*
+  pre-flight check against the 10 MiB cap. A 4 000-entry library is ~480 KB so this is not urgent for
+  the coordinate library, but it is the failure mode a user would hit first. *Parent: spec §10.6.*
 
 -----
 

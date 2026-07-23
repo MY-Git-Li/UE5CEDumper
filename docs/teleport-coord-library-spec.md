@@ -1,8 +1,15 @@
 # Teleport Coordinate Library — design spec
 
-> **Status: EVALUATED, NOT BUILT** (2026-07-22, against build 2256).
-> Multi-agent investigated + adversarially verified across two rounds. Open work
-> is tracked in [todo.md](todo.md) under *"Teleport Coordinate Library"*.
+> **Status: P1-P5 SHIPPED** (builds 2257-2267, `dev`, 2777 tests green) —
+> **not yet verified in-game**. Designed 2026-07-22 across two adversarially
+> verified multi-agent rounds; built 2026-07-23. Remaining verification work is in
+> [todo.md](todo.md) under *"Teleport Coordinate Library"*; the shipping write-up
+> is in [dev-log.md](dev-log.md).
+>
+> This document is the **design contract**, kept as written. Where the
+> implementation had to correct it, the text says so inline (see §5.2 on
+> precision) — nothing here is aspirational any more except the open questions
+> in §10.
 > Parent contract: [teleport-spec.md](teleport-spec.md) (Wirbel markers / POV /
 > coord TP). This document covers the **UI-side unlimited coordinate list** and
 > its CE-Lua + CSV export/import.

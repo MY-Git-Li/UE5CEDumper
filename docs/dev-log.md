@@ -20,6 +20,88 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — Teleport Coordinate Library: unlimited labelled positions, CSV + CE-Lua round trip (builds 2257-2267; dev, UI-only)
+
+**P1-P5 all shipped, 2777 tests green, ZERO DLL/pipe change.** An unlimited, labelled +
+grouped, filterable list of positions persisted per game, with pick→confirm→teleport, CSV
+export/import, and a CE-Lua picker in both needs-DLL and no-DLL flavours. The 3 DLL marker
+slots are untouched and stay what they were (DLL-side, hotkey-driven); this is a separate
+curated UI-side list. Teleport reuses the existing explicit-coordinate path — `teleport_recall_marker`
+with x/y/z (`DumpService.cs:3107`) and mailbox `CMD_TELEPORT` op 13 — so nothing DLL-side moved.
+
+Design contract: [teleport-coord-library-spec.md](teleport-coord-library-spec.md).
+
+**P1 (2257)** — `CoordEntry` + `CoordinateLibraryStore` + a collapsed-by-default Expander card
+below "Teleport to Coordinates". Three deliberate deviations from the `BookmarkStore` pattern
+it otherwise clones: keyed by **exe module name, not PE hash** (bookmarks hold offsets and
+*should* die on a game patch; a hand-curated 4 000-entry list must not); the JSON context omits
+`WhenWritingDefault` so a legitimately-saved `0.0` coordinate is written rather than reloading as
+0 *by accident*; and it keeps a rolling `.bak` that `Load` falls back to on a corrupt main file.
+Entries carry an opaque **`uid`, never `id`** — AOBMaker's `CtIdRenumberService` classifies a
+script as an ID-check script on `RxIdField` alone and would silently renumber `id = N` literals in
+any `.CT` the user later renumbers.
+
+**Precision (D4)** resolves two reviewers' opposite recommendations: round to **3 dp at capture**,
+then format shortest-round-trippable. The stored double is then the nearest double to a 3-decimal
+literal, so the text is a clean `67162.398` **and** the round trip is bit-exact and idempotent —
+neither the lossy `0.0###`/`0.000` helpers nor a bare `"R"` on an unrounded double achieves both.
+It also denoises rotator values like `1.4210855e-14` to a clean 0.
+
+**P2 (2260)** — CSV, scheduled *before* the Lua export because it is what users actually curate
+4 000 rows in, and its import-report machinery is reused by P4. The repo had **no** CSV reader or
+writer, so every rule is stated: RFC 4180 quoting (one unquoted comma in a label shifts every later
+column); split positionally with **no `RemoveEmptyEntries`** (the obvious template, `BugItGoParser`,
+uses it and would collapse an empty Group from 10 fields to 9, shifting Map→Group and X→Map);
+**UTF-8 WITH BOM**, a documented exception to the house BOM-less rule because a BOM-less CJK export
+opens as mojibake in Excel on a zh-TW box; delimiter sniffing with comma-decimals when it is `;`;
+and formula-injection armouring (`=Boss Arena` displays `#NAME?` and Excel saves the *displayed*
+text, destroying the label with no error).
+
+**Import is two-stage and that is the point.** Excel silently coerces `1-2` to a date and `0012` to
+`12` and writes back the displayed text, producing perfectly valid CSV no validator can reject. So
+stage 1 parses with per-line diagnostics and a **cell-level diff** against the current library;
+stage 2 commits after an explicit Apply, writing a `.preimport.bak` first. Merge identity is
+uid-first then `(Label, Group, Map)` case-insensitively, **never** the coordinates — a spreadsheet
+rewrites coordinate text, so coordinate matching would fail on every row and turn a 4 000-row merge
+into 8 000. Export writes the **model, never the view**.
+
+**P3 (2263)** — `-- @UE5CD:COORDS v1` … `-- @UE5CD:END`, named-field records, plus AOBMaker's
+`---- GENERATED CODE (do not edit below) ----` separator verbatim. Shape adapted from
+`@AOBMAKER:AA_TOGGLE v1` but deliberately in **our** namespace: AOBMaker's end marker is the
+feature-less shared `-- @AOBMAKER:END` matched by unanchored `IndexOf`, so a block of ours pasted
+into an AA Toggle script would make AOBMaker slice from its own start marker to our END, parse zero
+entries, and **silently untick every record in the tree**. Escaping moved into one
+`CeLuaHygiene.EscapeLuaString` rather than adding a fifth private copy. The picker is built only
+from CE controls verified in the wild (`CrimsonDesert.CT` CheatEntry 357) — **`createListBox` and
+`createComboBox` appear nowhere in this repo and were not used**. Confirm-before-teleport is two
+buttons (no CE yes/no API is verified); interactive, so the untick lives on `OnClose`, never the
+momentary auto-close.
+
+**P4 (2265)** — brace-balanced re-import, tolerating reordered fields, missing commas, entries split
+over lines, inserted comments and unknown keys from a newer build. Four AOBMaker parser defects
+deliberately **not** inherited (each confirmed by running its shipped assembly): version baked into
+the marker literal so a v2 block reads as "no block"; unanchored marker matching that hits inside
+string literals; **100 % silent failure**; and single-quoted values silently ignored. The `.CT`
+clipboard form decodes all **five** entities `CheatTableBuilder.EscapeXml` emits — `ExtractAssemblerScript`
+reverses only three — but only when the paste really is XML.
+
+**P5 (2267)** — the no-DLL flavour, added by threading a `Flavour` through the same generator. Both
+flavours emit the **byte-identical** data block (asserted) so the round trip cannot drift. It is
+honest about what it gives up: no map guard (the map name is only readable through the DLL), the
+existing weak-raw-write caveat, staleness on a game patch, and a runtime `UE5T_ready` guard.
+
+**Three bugs caught by the tests as they were written**, each a silent-corruption class:
+CSV `Write` did not round, so an entry built by any path other than a pose capture broke
+`Write → Parse → Write`; the Lua parser treated a key *present with a non-numeric value*
+(`x=oops`) as absent and imported it as 0 with no diagnostic; and the first draft of the picker
+hand-wrote mailbox offsets and got all but one wrong (they now come from `CeMailboxLayout`, with a
+test).
+
+**NOT yet verified in-game.** Nothing here has executed a line of the emitted Lua, and the teleport
+itself needs a live game. The CSV path has not met a real spreadsheet.
+
+-----
+
 ## 2026-07-22 — CE-Lua escaping: closing long brackets of any level could break the AOBMaker push (build 2256; dev, UI-only)
 
 **Three latent bugs in the script emitters, all one root cause.** AOBMaker's CE plugin wraps
