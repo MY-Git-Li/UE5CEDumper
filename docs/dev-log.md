@@ -20,6 +20,43 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — MEASURED: IPC is 59-73% of a heavy export; batch `walk_instance` (build 2327; docs)
+
+The decomposition built earlier today, read on real data. Three Copy CE XML runs on **SEED BATTLE
+DESTINY REMASTERED (UE 4.27)**:
+
+| run | wall | dll | ipc | ui | calls | per call (dll / ipc / ui) |
+|---|---:|---:|---:|---:|---:|---|
+| A | 5,548.3 ms | 1,689.5 (30.5%) | **3,290.0 (59.3%)** | 568.8 (10.3%) | 20,357 | 0.083 / 0.162 / 0.028 ms |
+| B | 555.1 ms | 157.7 (28.4%) | **406.3 (73.2%)** | 0.0 (0%) | 1,901 | 0.083 / 0.214 / 0.000 ms |
+| C | 614.6 ms | 165.9 (27.0%) | **411.8 (67.0%)** | 36.9 (6.0%) | 2,108 | 0.079 / 0.195 / 0.018 ms |
+
+**IPC is the cost — 59-73% of wall-clock, roughly 2× the actual DLL work — and it is exactly the
+part batching removes.** The per-call figures barely move across a 10× spread in operation size,
+which is what a fixed per-round-trip overhead looks like. UI-side per-result work is negligible
+(0.000-0.028 ms/call), so the export tree building is *not* where the time goes — worth knowing,
+because that was the other plausible suspect.
+
+Projected at the established ~200/call chunk: **2.4-3.5×** (A: 5,548 → ~2,275 ms, 20,357 round-trips
+→ 102).
+
+**Treat that as an upper bound.** It assumes batching removes IPC proportionally and adds nothing,
+whereas real batching serialises a larger payload and parses a bigger document — some of which
+reappears in `dll` and `ui`. `ui` in run B hit the zero floor (transport ≥ wall), so it is
+"negligible, at or below the measurement floor", not precisely quantified. And `dll` at ~0.08 ms/call
+is untouched by batching: run A cannot go below its 1,689 ms of actual walking.
+
+**This settles multipipe Phase 1 harder than the first measurement did.** Phase 1 targets the `dll`
+share (27-30%); the cost is `ipc` (59-73%). It would have been aimed at the smaller half of the
+wrong problem — and it had already been built and reverted once on that premise.
+
+Recommendation recorded in [multipipe-eval.md](multipipe-eval.md) §10.4 and [todo.md](todo.md):
+**batch `walk_instance`**, following the `walk_class_batch` / `search_properties_batch` precedent
+*including* their three-layer equivalence safety net, because a silently dropped field in a CE
+export is invisible until someone needs it months later.
+
+-----
+
 ## 2026-07-23 — Decompose the per-call overhead: dll / ipc / ui (build 2327; dev, UI-only)
 
 Build 2324 proved the dispatcher is not the bottleneck and pointed at `walk_instance`'s **20,357

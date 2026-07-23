@@ -453,3 +453,52 @@ with fixed costs amortising — but the split must be measured before promising 
 - **Phase 2 — unchanged** (still speculative, still gated on the concurrency-safety prerequisites).
 - **New candidate, better founded than Phase 1: `walk_instance` batching.** Measure the
   latency/UI-work split first.
+
+### 10.4 MEASURED (build 2327) — the split, and what batching would actually recover
+
+§10.2 identified `walk_instance`'s round-trip count as the lever but could not say how much of the
+0.208 ms/call overhead batching would recover. `PipeTransportStats` now separates it. Three Copy CE
+XML runs on **SEED BATTLE DESTINY REMASTERED (UE 4.27)**:
+
+| run | wall | dll | ipc | ui | dll % | **ipc %** | ui % | calls |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| A | 5,548.3 ms | 1,689.5 | 3,290.0 | 568.8 | 30.5% | **59.3%** | 10.3% | 20,357 |
+| B | 555.1 ms | 157.7 | 406.3 | 0.0 | 28.4% | **73.2%** | 0.0% | 1,901 |
+| C | 614.6 ms | 165.9 | 411.8 | 36.9 | 27.0% | **67.0%** | 6.0% | 2,108 |
+
+Per call, strikingly consistent across a 10× spread in operation size:
+
+| | dll | ipc | ui |
+|---|---:|---:|---:|
+| A | 0.083 ms | 0.162 ms | 0.028 ms |
+| B | 0.083 ms | 0.214 ms | 0.000 ms |
+| C | 0.079 ms | 0.195 ms | 0.018 ms |
+
+**IPC is the cost — 59–73% of wall-clock, roughly 2× the actual DLL work — and it is exactly the
+part batching removes.** UI-side per-result work is negligible (0.000–0.028 ms/call), so the export
+tree building is not where the time goes.
+
+Projected at the established ~200/call chunk:
+
+| run | now | batched | speed-up | round-trips |
+|---|---:|---:|---:|---|
+| A | 5,548 ms | ~2,275 ms | **2.4×** | 20,357 → 102 |
+| B | 555 ms | ~160 ms | **3.5×** | 1,901 → 10 |
+| C | 615 ms | ~205 ms | **3.0×** | 2,108 → 11 |
+
+**Three caveats on that projection, all pushing the same way — treat it as an upper bound:**
+
+- It assumes batching removes IPC proportionally and **adds nothing**. Real batching serialises a
+  larger payload and parses a bigger JSON document; some of that reappears in `dll` and `ui`.
+- `ui = wall − transport`, and run B hit the zero floor (transport ≥ wall). So `ui` is "negligible,
+  at or below the measurement floor" rather than precisely quantified.
+- `dll` is unaffected by batching and is a hard floor at ~0.08 ms/call — run A cannot go below its
+  1,689 ms of actual walking without optimising the walk itself.
+
+**This also settles Phase 1 more firmly than §10.1 did.** Phase 1 targets the `dll` share (27–30%);
+the cost is `ipc` (59–73%). It would have been aimed at the smaller half of the wrong problem.
+
+**Recommendation: batch `walk_instance`.** Effort **M**, risk **low-med**, following the
+`walk_class_batch` / `search_properties_batch` precedent — including their safety net: a DLL-side
+batch that is a trivial `for` loop over the single-call path, one shared serialiser between single
+and batch dispatch, and an equivalence test proving byte-identical output.
