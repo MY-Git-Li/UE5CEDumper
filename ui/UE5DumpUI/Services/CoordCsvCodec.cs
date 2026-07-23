@@ -66,6 +66,11 @@ public sealed class CoordCsvParseResult
     public char Delimiter { get; set; } = ',';
 
     public bool HasEntries => Entries.Count > 0;
+
+    /// <summary>Z tolerance carried by a LUA block (null when the block predates the
+    /// field, or when the source is a CSV, which has no such column by design). A null
+    /// leaves the user's current setting alone rather than zeroing it.</summary>
+    public double? ZTolerance { get; set; }
 }
 
 /// <summary>

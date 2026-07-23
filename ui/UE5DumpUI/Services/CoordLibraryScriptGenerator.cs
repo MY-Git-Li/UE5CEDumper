@@ -86,7 +86,12 @@ public static class CoordLibraryScriptGenerator
     /// <param name="entries">Entries to bake. Pre-sorted here, so the Lua never sorts.</param>
     /// <param name="foldedGroups">Receives group names that did NOT get a radio button.</param>
     public static string Generate(IEnumerable<CoordEntry> entries, out List<string> foldedGroups)
-        => Generate(entries, Flavour.Dll, out foldedGroups);
+        => Generate(entries, Flavour.Dll, 0, out foldedGroups);
+
+    /// <inheritdoc cref="Generate(IEnumerable{CoordEntry}, Flavour, double, out List{string})"/>
+    public static string Generate(
+        IEnumerable<CoordEntry> entries, Flavour flavour, out List<string> foldedGroups)
+        => Generate(entries, flavour, 0, out foldedGroups);
 
     /// <summary>
     /// Build the script for a specific <see cref="Flavour"/>. Both flavours share the
@@ -94,8 +99,11 @@ public static class CoordLibraryScriptGenerator
     /// the map handling differ. Sharing matters: a divergent data block would break
     /// the round trip for one of the two.
     /// </summary>
+    /// <param name="zTolerance">Extra height added to Z at teleport time (0 = off).
+    /// Baked into the fenced block, so it survives the round trip.</param>
     public static string Generate(
-        IEnumerable<CoordEntry> entries, Flavour flavour, out List<string> foldedGroups)
+        IEnumerable<CoordEntry> entries, Flavour flavour, double zTolerance,
+        out List<string> foldedGroups)
     {
         var list = entries?.ToList() ?? new List<CoordEntry>();
 
@@ -141,7 +149,7 @@ public static class CoordLibraryScriptGenerator
             Line(sb, "-- Requires 'UE5 Trainer: Setup' to have been enabled first.");
         }
         Line(sb);
-        AppendDataBlock(sb, list, shownGroups);
+        AppendDataBlock(sb, list, shownGroups, zTolerance);
         Line(sb);
         Line(sb, GeneratedSeparator);
         Line(sb);
@@ -159,7 +167,7 @@ public static class CoordLibraryScriptGenerator
     // ── The fenced, hand-editable data block ────────────────────────────
 
     private static void AppendDataBlock(
-        StringBuilder sb, List<CoordEntry> list, List<string> shownGroups)
+        StringBuilder sb, List<CoordEntry> list, List<string> shownGroups, double zTolerance)
     {
         Line(sb, MarkerStart);
         Line(sb, "-- Edit the rows below, or paste this whole script back into UE5CEDumper");
@@ -183,6 +191,11 @@ public static class CoordLibraryScriptGenerator
               .Append(" },\n");
         }
         Line(sb, "}");
+        Line(sb);
+        Line(sb, "-- Extra height added to Z on arrival (0 = off). A saved position sits");
+        Line(sb, "-- exactly on the floor it was captured on, and landing on that plane can");
+        Line(sb, "-- drop you through it; a few units of clearance avoids that.");
+        Line(sb, $"local Z_TOLERANCE = {Num(zTolerance)}");
         Line(sb);
         Line(sb, "local GROUPS = {");
         foreach (var g in shownGroups)
@@ -256,7 +269,7 @@ public static class CoordLibraryScriptGenerator
             Line(sb, $"  local code, err = call({OpExplicit}, function(pd)");
             Line(sb, "    writeDouble(pd + 0,  e.x)");
             Line(sb, "    writeDouble(pd + 8,  e.y)");
-            Line(sb, "    writeDouble(pd + 16, e.z)");
+            Line(sb, "    writeDouble(pd + 16, e.z + Z_TOLERANCE)");
             Line(sb, "    writeDouble(pd + 24, e.pitch)");
             Line(sb, "    writeDouble(pd + 32, e.yaw)");
             Line(sb, "    writeDouble(pd + 40, e.roll)");
@@ -288,7 +301,7 @@ public static class CoordLibraryScriptGenerator
             Line(sb, "  local a = rc + UE5T.relLocOff");
             Line(sb, "  UE5T_wrv(a, e.x)");
             Line(sb, "  UE5T_wrv(a + UE5T.vecWidth, e.y)");
-            Line(sb, "  UE5T_wrv(a + 2 * UE5T.vecWidth, e.z)");
+            Line(sb, "  UE5T_wrv(a + 2 * UE5T.vecWidth, e.z + Z_TOLERANCE)");
             Line(sb, "  -- Rotation via the Controller back-ref, when Setup resolved it.");
             Line(sb, "  if UE5T.controllerOff and UE5T.controllerOff >= 0");
             Line(sb, "     and UE5T.ctrlRotOff and UE5T.ctrlRotOff >= 0 then");
@@ -335,7 +348,7 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "end");
         Line(sb);
         Line(sb, "synchronize(function()");
-        Line(sb, "  local mapNow = currentMap()");
+        Line(sb, "  local mapNow = currentMap()   -- refreshed in go(); see there");
         Line(sb);
         Line(sb, $"  {formVar} = createForm(false)");
         Line(sb, $"  {formVar}.Caption = 'UE5CEDumper -- Coordinate Library'");
@@ -536,6 +549,14 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  local function go(force)");
         Line(sb, "    local e = selected()");
         Line(sb, "    if e == nil then lblCount.Caption = 'Select an entry first.'; return end");
+        Line(sb, "    -- Re-read the map HERE. It was previously captured once when the window");
+        Line(sb, "    -- opened, so after the game changed level the guard compared against a");
+        Line(sb, "    -- map you had already left. There is no UI polling this for us.");
+        Line(sb, "    local fresh = currentMap()");
+        Line(sb, "    if fresh ~= nil and fresh ~= '' and fresh ~= mapNow then");
+        Line(sb, "      mapNow = fresh");
+        Line(sb, "      rebuild()   -- the 'current map only' filter was stale too");
+        Line(sb, "    end");
         Line(sb, "    if (not force) and mapNow ~= nil and mapNow ~= ''");
         Line(sb, "       and string.lower(e.map) ~= string.lower(mapNow) then");
         Line(sb, "      showMessage('\"' .. e.label .. '\" was saved on \"' .. e.map ..");

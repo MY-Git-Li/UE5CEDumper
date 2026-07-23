@@ -104,6 +104,14 @@ public static class CoordLuaParser
         var block = text[(start.Index + start.Length)..end.Index];
         int blockOffset = start.Index + start.Length;
 
+        // Optional: absent in blocks written before the field existed, which is why a
+        // missing value leaves the user's current setting alone rather than zeroing it.
+        var zt = Regex.Match(block,
+            @"(?<![A-Za-z0-9_])Z_TOLERANCE[ 	]*=[ 	]*(-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)",
+            RegexOptions.CultureInvariant);
+        if (zt.Success && CoordPrecision.TryParse(zt.Groups[1].Value, out var ztv))
+            result.ZTolerance = CoordPrecision.Round(ztv);
+
         var table = s_coordsTable.Match(block);
         if (!table.Success)
         {

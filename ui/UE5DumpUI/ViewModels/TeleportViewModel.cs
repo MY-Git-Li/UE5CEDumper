@@ -2871,6 +2871,12 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     private CoordRow? _selectedCoord;
 
     [ObservableProperty] private string _coordStatus = "";
+
+    /// <summary>Extra height (uu) added to Z at teleport time so landing exactly on
+    /// the captured floor plane does not drop the character through it. 0 = off.
+    /// Library-wide, persisted, and baked into the Lua export (the picker teleports
+    /// on its own, so it needs the value); deliberately absent from the CSV.</summary>
+    [ObservableProperty] private double _coordZTolerance;
     [ObservableProperty] private string _editCoordLabel = "";
     [ObservableProperty] private string _editCoordGroup = "";
 
@@ -2919,6 +2925,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         _coordFilterMemory.Schedule(value);
     }
     partial void OnCoordGroupFilterChanged(string value) => ApplyCoordFilter();
+    partial void OnCoordZToleranceChanged(double value) => PersistCoordLibrary();
     partial void OnCoordCurrentMapOnlyChanged(bool value) => ApplyCoordFilter();
 
     partial void OnSelectedCoordChanged(CoordRow? value)
@@ -2958,6 +2965,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             {
                 var file = _coordStore.Load(_activeCoordKey);
                 foreach (var e in file.Entries) _coordAll.Add(e);
+                CoordZTolerance = file.ZTolerance;
                 _log.Info($"Coordinate library: loaded {_coordAll.Count} entries for '{_activeCoordKey}'");
             }
             RebuildCoordGroups();
@@ -2970,8 +2978,12 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     {
         if (_coordStore == null || _suppressCoordPersist) return;
         if (string.IsNullOrEmpty(_activeCoordKey)) return;
-        _coordStore.Save(_activeCoordKey,
-            new CoordinateLibraryFile { Module = _activeCoordKey, Entries = _coordAll.ToList() });
+        _coordStore.Save(_activeCoordKey, new CoordinateLibraryFile
+        {
+            Module = _activeCoordKey,
+            Entries = _coordAll.ToList(),
+            ZTolerance = CoordZTolerance,
+        });
     }
 
     /// <summary>All entries, newest-first insertion order preserved. Exposed for the
@@ -3300,37 +3312,69 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private Task ForceTeleportToSelectedCoordAsync() => TeleportToCoordRowAsync(force: true);
 
+    /// <summary>
+    /// Pull the live map name so the guard compares against reality rather than the
+    /// last poll. Cheap, and safe to call from any explicit user action. Leaves
+    /// <see cref="PoseMap"/> untouched when the DLL cannot answer, so the guard
+    /// degrades to "last known" instead of to "no map at all".
+    /// </summary>
+    private async Task RefreshCurrentMapAsync()
+    {
+        try
+        {
+            var p = await _dump.TeleportGetPoseAsync();
+            if (p.Code == TeleportCodes.Ok) ApplyPoseAndMovement(p);
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Coordinate library: could not refresh the current map: {ex.Message}");
+        }
+    }
+
     private async Task TeleportToCoordRowAsync(bool force)
     {
         var row = SelectedCoord;
         if (row == null || !IsConnected) return;
         var e = row.Entry;
 
-        // The explicit-coordinate path does NO map check DLL-side (only slot recall
-        // returns -7), so the guard has to live here. And the tool cannot LOAD a map:
-        // an entry only becomes usable once the game itself is on that map.
-        if (!force && !string.IsNullOrEmpty(PoseMap) && !IsSameMap(e.Map, PoseMap))
-        {
-            CoordStatus = $"'{e.Label}' was saved on '{e.Map}' but you are on " +
-                          $"'{PoseMap}'. Use Force to override — note this cannot " +
-                          "load the other map, it only moves you within the current one.";
-            return;
-        }
-
         try
         {
             IsBusy = true;
             ClearError();
+
+            // Read the map AT CHECK TIME. PoseMap is only refreshed by the panel's
+            // ~2s poll, which the user can switch off (and which does not exist at all
+            // for the generated Lua picker) -- so relying on it meant the guard could
+            // fire on a map you had already left. One extra round-trip on an explicit
+            // button press is a fair price for a guard that is actually correct.
+            await RefreshCurrentMapAsync();
+
+            // The explicit-coordinate path does NO map check DLL-side (only slot recall
+            // returns -7), so the guard has to live here. And the tool cannot LOAD a map:
+            // an entry only becomes usable once the game itself is on that map.
+            if (!force && !string.IsNullOrEmpty(PoseMap) && !IsSameMap(e.Map, PoseMap))
+            {
+                CoordStatus = $"'{e.Label}' was saved on '{e.Map}' but you are on " +
+                              $"'{PoseMap}'. Use Force to override — note this cannot " +
+                              "load the other map, it only moves you within the current one.";
+                return;
+            }
+
+            // Tolerance is applied HERE, not stored: the entry keeps the exact floor
+            // it was captured on, and only the arrival is lifted.
             var r = await _dump.TeleportRecallExplicitAsync(
-                e.X, e.Y, e.Z, e.Pitch, e.Yaw, e.Roll);
+                e.X, e.Y, e.Z + CoordZTolerance, e.Pitch, e.Yaw, e.Roll);
             if (r.Code != TeleportCodes.Ok)
             {
                 CoordStatus = $"Teleport to '{e.Label}': {TeleportCodes.Describe(r.Code)}";
                 return;
             }
+            var lift = CoordZTolerance != 0
+                ? $" (+{CoordPrecision.Text(CoordZTolerance)} uu Z tolerance)"
+                : "";
             CoordStatus = r.Tier == 2
-                ? $"Teleported to '{e.Label}' (raw write — the game may snap back)."
-                : $"Teleported to '{e.Label}'.";
+                ? $"Teleported to '{e.Label}'{lift} (raw write — the game may snap back)."
+                : $"Teleported to '{e.Label}'{lift}.";
         }
         catch (Exception ex) { SetError(ex); _log.Error("Coord library teleport failed", ex); }
         finally { IsBusy = false; }
@@ -3355,6 +3399,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// (commit). Null when no import is awaiting confirmation.</summary>
     private List<CoordEntry>? _pendingImport;
     private List<CoordChange>? _pendingChanges;
+
+    /// <summary>Z tolerance carried by a pending LUA import (the CSV has none), applied
+    /// only when the import is committed.</summary>
+    private double? _pendingImportZTolerance;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasPendingCoordImport))]
@@ -3437,6 +3485,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        _pendingImportZTolerance = parsed.ZTolerance;
         var changes = CoordCsvCodec.Diff(_coordAll, parsed.Entries, CoordImportReplace);
         _pendingImport = parsed.Entries;
         _pendingChanges = changes;
@@ -3509,6 +3558,12 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             }
         }
 
+        if (_pendingImportZTolerance.HasValue)
+        {
+            CoordZTolerance = _pendingImportZTolerance.Value;
+            _pendingImportZTolerance = null;
+        }
+
         int n = _pendingImport.Count;
         _pendingImport = null;
         _pendingChanges = null;
@@ -3557,7 +3612,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         try
         {
             ClearError();
-            var script = CoordLibraryScriptGenerator.Generate(_coordAll, out var folded);
+            var script = CoordLibraryScriptGenerator.Generate(
+                _coordAll, CoordLibraryScriptGenerator.Flavour.Dll, CoordZTolerance, out var folded);
 
             var notes = new StringBuilder();
             if (folded.Count > 0)
@@ -3674,7 +3730,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         {
             ClearError();
             var script = CoordLibraryScriptGenerator.Generate(
-                _coordAll, CoordLibraryScriptGenerator.Flavour.NoDll, out _);
+                _coordAll, CoordLibraryScriptGenerator.Flavour.NoDll, CoordZTolerance, out _);
 
             bool sent = await _aobMaker.CreateAAScriptAsync(
                 CoordLibraryScriptGenerator.NoDllRecordDescription, script,
@@ -3706,7 +3762,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             var name = string.IsNullOrEmpty(_activeCoordKey) ? "teleport-coords" : _activeCoordKey;
             var path = await _platform.ShowSaveFileDialogAsync($"{name}.lua", "Lua script", "lua");
             if (string.IsNullOrEmpty(path)) return;
-            var script = CoordLibraryScriptGenerator.Generate(_coordAll, out _);
+            var script = CoordLibraryScriptGenerator.Generate(
+                _coordAll, CoordLibraryScriptGenerator.Flavour.Dll, CoordZTolerance, out _);
             File.WriteAllText(path!, script, new UTF8Encoding(false));
             CoordStatus = $"Wrote {_coordAll.Count} entries to {path}.";
         }

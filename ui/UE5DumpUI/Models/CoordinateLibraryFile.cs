@@ -26,6 +26,22 @@ public sealed class CoordinateLibraryFile
     public string Module { get; set; } = "";
 
     public List<CoordEntry> Entries { get; set; } = new();
+
+    /// <summary>
+    /// Extra height (uu) added to Z at TELEPORT time — never baked into a stored
+    /// entry. A saved position sits exactly on the floor it was captured on, and
+    /// landing on that exact plane can drop the character through it, so a few units
+    /// of clearance is the difference between arriving and falling.
+    ///
+    /// Library-wide rather than per-entry: it is a property of how the GAME resolves
+    /// a teleport, not of any one place. That is also why it is absent from the CSV
+    /// (a per-row column would imply per-row meaning) but present in the Lua export,
+    /// whose picker performs the teleport itself and therefore needs the value.
+    ///
+    /// 0 = off, which is the default: silently moving someone's saved coordinates
+    /// would be worse than the problem it solves.
+    /// </summary>
+    public double ZTolerance { get; set; }
 }
 
 /// <summary>

@@ -427,6 +427,70 @@ public class CoordLibraryScriptTests
         Assert.Empty(folded);
     }
 
+    // ── Z tolerance ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void Generate_BakesZToleranceIntoTheFencedBlock()
+    {
+        // It lives INSIDE the fence so it survives the round trip: the picker
+        // teleports on its own, so it needs the value the app was using.
+        var s = CoordLibraryScriptGenerator.Generate(
+            new[] { E("A") }, CoordLibraryScriptGenerator.Flavour.Dll, 25, out _);
+        int fenceStart = s.IndexOf(CoordLibraryScriptGenerator.MarkerStart, StringComparison.Ordinal);
+        int fenceEnd = s.IndexOf(CoordLibraryScriptGenerator.MarkerEnd, StringComparison.Ordinal);
+        var fence = s[fenceStart..fenceEnd];
+        Assert.Contains("local Z_TOLERANCE = 25", fence);
+    }
+
+    [Fact]
+    public void Generate_AppliesZToleranceToTheTeleportNotTheStoredValue()
+    {
+        var s = CoordLibraryScriptGenerator.Generate(
+            new[] { E("A", x: 1, y: 2, z: 3) }, CoordLibraryScriptGenerator.Flavour.Dll,
+            25, out _);
+        // The entry keeps its captured Z ...
+        Assert.Contains("z=3", s);
+        // ... and only the arrival is lifted.
+        Assert.Contains("writeDouble(pd + 16, e.z + Z_TOLERANCE)", s);
+    }
+
+    [Fact]
+    public void Generate_ZeroToleranceIsStillEmittedSoTheRoundTripIsExplicit()
+    {
+        var s = Gen(E("A"));
+        Assert.Contains("local Z_TOLERANCE = 0", s);
+    }
+
+    [Fact]
+    public void GenerateThenParse_RoundTripsZTolerance()
+    {
+        var s = CoordLibraryScriptGenerator.Generate(
+            new[] { E("A") }, CoordLibraryScriptGenerator.Flavour.Dll, 12.5, out _);
+        var parsed = CoordLuaParser.Parse(s);
+        Assert.Equal(12.5, parsed.ZTolerance);
+    }
+
+    [Fact]
+    public void Parse_BlockWithoutZTolerance_LeavesItNullNotZero()
+    {
+        // A block written before the field existed must not silently RESET the
+        // user's setting to 0 -- null means "not carried", which the VM ignores.
+        var parsed = CoordLuaParser.Parse(
+            "-- @UE5CD:COORDS v1\nlocal COORDS = {\n" +
+            "  { label='A', map='M', x=1, y=2, z=3 },\n}\n-- @UE5CD:END\n");
+        Assert.Single(parsed.Entries);
+        Assert.Null(parsed.ZTolerance);
+    }
+
+    [Fact]
+    public void CsvParse_NeverCarriesZTolerance()
+    {
+        // By design: a per-row column would imply per-row meaning.
+        var parsed = CoordCsvCodec.Parse("label,map,x,y,z\nA,M,1,2,3\n");
+        Assert.Null(parsed.ZTolerance);
+        Assert.DoesNotContain("olerance", CoordCsvCodec.Write(new[] { E("A") }));
+    }
+
     // ── Numeric contract ─────────────────────────────────────────────────
 
     [Fact]

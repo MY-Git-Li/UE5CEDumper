@@ -268,7 +268,32 @@ public class CoordLibraryNoDllScriptTests
         Assert.Contains("local a = rc + UE5T.relLocOff", s);
         Assert.Contains("UE5T_wrv(a, e.x)", s);
         Assert.Contains("UE5T_wrv(a + UE5T.vecWidth, e.y)", s);
-        Assert.Contains("UE5T_wrv(a + 2 * UE5T.vecWidth, e.z)", s);
+        // Z is the ONE deliberate divergence: the Z-tolerance lift. Everything else --
+        // helper, deref chain, base, stride -- is byte-identical to TP Recall.
+        Assert.Contains("UE5T_wrv(a + 2 * UE5T.vecWidth, e.z + Z_TOLERANCE)", s);
+    }
+
+    [Fact]
+    public void NoDllScript_AppliesZToleranceToTheRawWrite()
+    {
+        var s = CoordLibraryScriptGenerator.Generate(
+            new[] { E("A") }, CoordLibraryScriptGenerator.Flavour.NoDll, 20, out _);
+        Assert.Contains("local Z_TOLERANCE = 20", s);
+        Assert.Contains("UE5T_wrv(a + 2 * UE5T.vecWidth, e.z + Z_TOLERANCE)", s);
+    }
+
+    [Fact]
+    public void BothFlavours_RereadTheMapAtTeleportTimeNotAtFormOpen()
+    {
+        // The map was captured once when the window opened, so after the game
+        // changed level the guard compared against a map already left. There is no
+        // UI poll behind the generated picker to fix it up.
+        foreach (var s in new[] { Dll(E("A")), NoDll(E("A")) })
+        {
+            int go = s.IndexOf("local function go(force)", StringComparison.Ordinal);
+            Assert.True(go > 0);
+            Assert.Contains("local fresh = currentMap()", s[go..]);
+        }
     }
 
     [Fact]

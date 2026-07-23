@@ -567,6 +567,11 @@
                         ToolTip.Tip="{StaticResource str.Tip.TP.LibCurrentMapOnly}"
                         Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"
                         Margin="6,0,0,0"/>
+              <TextBlock Text="{StaticResource str.TP.LibZTol}" Foreground="#999999"
+                         VerticalAlignment="Center" Margin="10,0,0,0"/>
+              <NumericUpDown Value="{Binding CoordZTolerance}" Increment="5" Width="110"
+                             FormatString="0.###" Minimum="0"
+                             ToolTip.Tip="{StaticResource str.Tip.TP.LibZTol}"/>
             </StackPanel>
 
             <DataGrid ItemsSource="{Binding CoordResults}"

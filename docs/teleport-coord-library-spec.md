@@ -92,6 +92,12 @@ returns `-7 MapMismatch`). Therefore:
 * Compare map names **`OrdinalIgnoreCase`**, defined once. CSV import makes `Map`
   user-authored whether we like it or not (`map01` vs `Map01`); an ordinal
   comparison would flag every imported row cross-map and force 4 000 Force clicks.
+* **Read the map AT CHECK TIME, never from a cache.** The panel's ~2 s pose poll is
+  optional (the user can switch `Auto` off) and does not exist at all behind the
+  generated Lua picker, so a cached value meant the guard could fire on a map the
+  player had already left. The UI re-reads the pose on the teleport action; the Lua
+  picker re-reads it inside its own `go()` — it previously captured the map once when
+  the window opened and never again.
 * Be honest in the UI: **the tool cannot send you to another map.** Cross-map
   safety is achieved by *filtering*, not by teleporting.
 
@@ -144,6 +150,24 @@ cycle. 0.001 uu is 10 µm; nothing in the teleport path is sensitive to it.
 Read back with `NumberStyles.Float` (**must** include `AllowExponent` — `"R"` goes
 scientific below 1e-5). Normalise negative zero to `0` on capture. The `0.0###` /
 `0.000` helpers **must not** be reused here.
+
+### D4b — `Z tolerance`: applied at teleport, never stored
+
+A saved position sits exactly on the floor plane it was captured on, and arriving on
+that plane can drop the character straight through it. `Z tolerance` (uu) is added to
+Z **at teleport time only** — the entry keeps its exact captured Z, so the value
+stays a faithful record of where the user stood.
+
+**Library-wide, not per-entry**: it describes how the *game* resolves an arrival, not
+a property of any one place. That is also exactly why it is **in the Lua export but
+not the CSV** — the generated picker teleports on its own and therefore needs the
+value, whereas a CSV column would imply per-row meaning. It lives inside the fenced
+block as `local Z_TOLERANCE = n`, so it round-trips with the coordinates.
+
+A block written before the field existed parses to `null`, **not 0**, and the
+importer then leaves the user's current setting alone rather than silently resetting
+it. Default is 0 (off): silently moving someone's saved coordinates would be worse
+than the problem it solves.
 
 ### D5 — Two Lua flavours (R5)
 
