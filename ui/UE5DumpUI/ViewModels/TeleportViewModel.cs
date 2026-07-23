@@ -3640,9 +3640,19 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// Emit the NO-DLL flavour: the same data block and picker, but teleport is a raw
-    /// write through the standalone trainer's baked offsets. Depends on the trainer's
-    /// "Setup" record having been enabled first, and is weaker than the DLL path —
-    /// both facts are stated in the emitted script's own header.
+    /// write through the standalone trainer's baked offsets.
+    ///
+    /// <b>Gated on AOBMaker with NO clipboard/disk fallback — by design</b>, matching
+    /// <see cref="ExportTrainerCommand"/>. The reason is specific to this flavour: the
+    /// emitted script calls <c>UE5T_pawn</c> / <c>UE5T_deref</c> / <c>UE5T_wrv</c> and
+    /// reads <c>UE5T.rootOff</c>, all of which are defined by the standalone trainer's
+    /// "Setup" record — which itself can only be delivered by an AOBMaker push. Handing
+    /// the user a clipboard blob with no way to obtain its dependencies would produce a
+    /// record that can never work, and whose failure ("attempt to call a nil value")
+    /// looks like a bug in the script rather than a missing prerequisite.
+    ///
+    /// The DLL flavour keeps its clipboard fallback because it depends only on
+    /// UE5Dumper.dll being injected, which the user can arrange independently.
     /// </summary>
     [RelayCommand]
     private async Task ExportCoordLuaNoDllAsync()
@@ -3652,32 +3662,32 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             CoordStatus = "Nothing to export — the library is empty.";
             return;
         }
+        if (_aobMaker == null || !_aobMaker.IsAvailable)
+        {
+            CoordStatus = "AOBMaker plugin not detected — cannot push the no-DLL picker into CE. " +
+                          "It needs the standalone trainer's Setup record, which only AOBMaker can " +
+                          "deliver, so there is deliberately no clipboard fallback for this one. " +
+                          "Use 'Push to CE' (the DLL flavour) instead, or start CE with the AOBMaker plugin.";
+            return;
+        }
         try
         {
             ClearError();
             var script = CoordLibraryScriptGenerator.Generate(
                 _coordAll, CoordLibraryScriptGenerator.Flavour.NoDll, out _);
-            const string note = " Enable 'UE5 Trainer: Setup' first — this flavour uses its " +
-                                "baked offsets, has no map guard, and goes stale when the game is patched.";
 
-            bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
-            if (available && await _aobMaker!.CreateAAScriptAsync(
-                    CoordLibraryScriptGenerator.NoDllRecordDescription, script,
-                    autoActivate: false, group: CeGroupTrainer))
-            {
-                CoordStatus = $"Pushed the no-DLL picker ({_coordAll.Count} entries) to " +
-                              "Cheat Engine via AOBMaker." + note;
+            bool sent = await _aobMaker.CreateAAScriptAsync(
+                CoordLibraryScriptGenerator.NoDllRecordDescription, script,
+                autoActivate: false, group: CeGroupTrainer);
+            IsAobMakerAvailable = _aobMaker.IsAvailable;
+
+            CoordStatus = sent
+                ? $"Pushed the no-DLL picker ({_coordAll.Count} entries) to Cheat Engine. " +
+                  "Enable 'UE5 Trainer: Setup' first — this flavour uses its baked offsets, " +
+                  "has no map guard, and goes stale when the game is patched."
+                : "⚠ AOBMaker pipe dropped mid-push (CE closed?) — nothing was added.";
+            if (sent)
                 _log.Info($"Coordinate library (no-DLL) -> CE via AOBMaker ({_coordAll.Count} entries)");
-                return;
-            }
-
-            await _platform.CopyToClipboardAsync(
-                CheatTableBuilder.WrapAaScriptXml(
-                    CoordLibraryScriptGenerator.NoDllRecordDescription, script));
-            CoordStatus = (available
-                ? "AOBMaker refused the push — copied the no-DLL record as CE XML instead. "
-                : "AOBMaker not connected — copied the no-DLL record as CE XML to the clipboard. ")
-                + "Paste into Cheat Engine's address list, then enable it." + note;
         }
         catch (Exception ex) { SetError(ex); _log.Error("Coord Lua (no-DLL) export failed", ex); }
     }

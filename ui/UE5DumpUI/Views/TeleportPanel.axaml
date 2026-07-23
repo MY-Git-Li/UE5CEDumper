@@ -650,8 +650,12 @@
               <Button Content="{StaticResource str.TP.LibSaveLua}"
                       Command="{Binding SaveCoordLuaCommand}"
                       ToolTip.Tip="{StaticResource str.Tip.TP.LibSaveLua}" Padding="10,4"/>
+              <!-- Gated on AOBMaker with no clipboard fallback, matching the
+                   Standalone Trainer export: the emitted script depends on that
+                   trainer's Setup record, which only an AOBMaker push can deliver. -->
               <Button Content="{StaticResource str.TP.LibExportLuaNoDll}"
                       Command="{Binding ExportCoordLuaNoDllCommand}"
+                      IsEnabled="{Binding IsAobMakerAvailable}"
                       ToolTip.Tip="{StaticResource str.Tip.TP.LibExportLuaNoDll}" Padding="10,4"/>
               <CheckBox Content="{StaticResource str.TP.LibImportReplace}"
                         IsChecked="{Binding CoordImportReplace}"

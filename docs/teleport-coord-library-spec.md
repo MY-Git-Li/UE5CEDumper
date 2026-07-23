@@ -157,6 +157,18 @@ scientific below 1e-5). Normalise negative zero to `0` on capture. The `0.0###` 
 
 **Recommend the DLL flavour as the default.**
 
+**Delivery differs, and deliberately so.** The DLL flavour pushes via AOBMaker with
+a clipboard `.CT`-XML fallback. The no-DLL flavour is **gated on AOBMaker with no
+fallback at all**, matching `ExportTrainerCommand` ("Gated on AOBMaker — no
+clipboard/disk fallback by design"). The reason is specific: the emitted script
+calls `UE5T_pawn` / `UE5T_deref` / `UE5T_wrv` and reads `UE5T.rootOff`, all defined
+by the Standalone Trainer's **Setup** record — which itself can only be delivered by
+an AOBMaker push. A clipboard blob would hand the user a record that can never work,
+failing with `attempt to call a nil value`, which reads as a bug in the script rather
+than a missing prerequisite. The DLL flavour keeps its fallback because it depends
+only on UE5Dumper.dll being injected, which the user can arrange independently.
+The button is `IsEnabled="{Binding IsAobMakerAvailable}"`, again matching the trainer.
+
 -----
 
 ## 4. Wire format: adapt AOBMaker's shape, own the namespace

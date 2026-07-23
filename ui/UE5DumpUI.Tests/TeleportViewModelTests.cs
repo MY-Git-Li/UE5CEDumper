@@ -2091,6 +2091,28 @@ public class TeleportViewModelTests
     }
 
     [Fact]
+    public async Task CoordLibrary_noDll_export_refuses_without_AOBMaker()
+    {
+        // Matches the Standalone Trainer export: gated on AOBMaker with NO
+        // clipboard fallback, by design. The emitted script calls UE5T_* helpers
+        // defined by that trainer's Setup record, which only an AOBMaker push can
+        // deliver -- a clipboard blob would be a record that can never work, whose
+        // failure reads as a bug in the script rather than a missing prerequisite.
+        var vm = CreateVm(new FakeDumpService(), out var platform,
+                          experimentalGate: new FakeExperimentalGate(enabled: true));
+        vm.LoadCoordLibraryForGame("Game.exe");
+        // Add via the fields, not Save-current-pos: the latter needs a live pipe.
+        vm.CoordX = 1; vm.CoordY = 2; vm.CoordZ = 3;
+        vm.AddCoordFromFieldsCommand.Execute(null);
+        Assert.NotEmpty(vm.CoordEntries);
+
+        await vm.ExportCoordLuaNoDllCommand.ExecuteAsync(null);
+
+        Assert.Contains("AOBMaker", vm.CoordStatus);
+        Assert.Null(platform.LastClipboard);      // no fallback, deliberately
+    }
+
+    [Fact]
     public void CoordLibrary_load_without_a_store_is_a_no_op()
     {
         // Headless tests construct the VM with no store; it must not throw.
