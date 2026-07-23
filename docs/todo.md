@@ -1324,9 +1324,16 @@ that does not bear on the dispatch question — and the dispatch question is the
 decision. Worth doing if a re-assert worker is ever suspected of burning game-thread time. Effort
 **S-M** · Risk low.
 
-**Also open: use the numbers.** The point of Tier 1 is to decide multipipe Phase 1. Attach to a game
-that lags, run a heavy scan, and read `busy_percent` + the top command. High busy% ⇒ build Phase 1;
-low ⇒ the lag is elsewhere and Phase 1 would not help. Effort **0** (measure only).
+**✅ Automatic PERF records — DONE (build 2320).** `Services/DiagnosticsProbe.cs` brackets **Copy CE
+XML / Copy CE Field / Value Scan (First & Next) / Snapshot capture** with two `get_diagnostics`
+snapshots and logs the delta as a `PERF` line in the `view` log. Better than the manual measurement
+session it replaces: a deliberate test only covers the scenario somebody thought of, and only if they
+remembered to reset first — this accumulates evidence from real use.
+
+**Still open: read the numbers.** The point of Tier 1 is to decide multipipe Phase 1. Now that every
+heavy operation self-records, just use the tool normally on a game that lags and grep the `view` log
+for `PERF`. **High `dispatcher busy %` ⇒ build Phase 1; low ⇒ the lag is elsewhere** (UI thread,
+serialisation, or the game thread) **and Phase 1 would not help.** Effort **0** (read only).
 
 *Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
 (dev-log build 2156) already holds the cadence half.*

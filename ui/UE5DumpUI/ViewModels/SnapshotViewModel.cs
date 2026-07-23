@@ -576,6 +576,13 @@ public partial class SnapshotViewModel : ViewModelBase
         if (!CanCapture) return CaptureOutcome.NotReady;
         ClearError();
 
+        // Record what this heavy operation costs the DLL dispatcher. Automatic
+        // rather than a measurement session: the evidence then accumulates from
+        // real use instead of only the scenario somebody thought to test. Labelled
+        // manual vs auto because the auto loop's cadence is its own question.
+        await using var _perf = await Services.DiagnosticsProbe.BeginAsync(
+            _dump, _log, isAuto ? "Snapshot capture (auto)" : "Snapshot capture");
+
         // Free-disk-space guard — refuse ALL captures (manual + auto) when the DB
         // drive is below the required free space, so a multi-GB capture can't fill it.
         if (!DiskGuardPasses())

@@ -20,6 +20,46 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — Automatic PERF records around every heavy operation (build 2320; dev, UI-only)
+
+The user's idea, and better than the manual measurement session it replaces: a deliberate test run
+only ever covers the scenario somebody thought to try, and only if they remembered to reset the
+counters first. Recording every real **Copy CE XML / Copy CE Field / Value Scan (First & Next) /
+Snapshot capture** instead means the evidence for the multipipe Phase 1 decision accumulates from
+actual use — including the combinations nobody would think to test.
+
+New `Services/DiagnosticsProbe.cs` brackets each operation with two `get_diagnostics` snapshots and
+writes one `PERF` line to the `view` log:
+
+```
+PERF Value Scan (First): wall 2,340.0 ms · dispatcher busy 1,980 ms (84.6%) · 7 dispatches
+   · top: value_scan_begin 1900ms/1x max 1900ms, get_object_list 80ms/6x max 32ms
+```
+
+Design decisions that make the line trustworthy:
+- **Deltas, not absolutes.** Absolute totals answer "what has this session done"; the question is
+  what *this* operation cost. Wall-clock is measured locally rather than from the DLL's uptime, so a
+  `reset_diagnostics` landing mid-operation cannot produce a negative duration — every figure is
+  floored at zero and there is a test that fires a mid-operation reset.
+- **The probe excludes its own calls.** The opening snapshot is itself a dispatch that lands in the
+  closing one; without the filter every measurement would list the measurement.
+- **`await using`**, so the closing sample happens even when the operation throws or is cancelled.
+- **Never affects the operation.** No connection, an older DLL that doesn't know the command, a
+  mid-operation disconnect — all swallowed, and `BeginAsync` returns a working no-op probe rather
+  than null so call sites need no null handling. A diagnostic that breaks what it measures is worse
+  than no diagnostic.
+- **`MaxMs` is reported, not differenced** — it is a running high-water mark, so a delta would be
+  meaningless.
+
+Cost is two pipe round-trips (~0-125 ms each) around operations that run for seconds, so it is on
+unconditionally rather than behind a flag.
+
+**Verification:** 2893 tests green (+11), covering the delta arithmetic, the self-call exclusion, the
+mid-operation-reset floor, and the zero-length-operation divisor guard. **Not verified: the lines
+against a real heavy operation** — that is the point of the feature, and the next thing to look at.
+
+-----
+
 ## 2026-07-23 — winmm.dll proxy: the spare slot (build 2317; dev, DLL + UI)
 
 The 4th proxy. **Built on the slot-contention trigger, not the coverage one** — the n=24 census

@@ -718,6 +718,12 @@ public partial class ValueSearchViewModel : ViewModelBase
     {
         if (IsScanning) return;
 
+        // Record what this heavy operation costs the DLL dispatcher. Automatic
+        // rather than a measurement session: the evidence then accumulates from
+        // real use instead of only the scenario somebody thought to test. Degrades
+        // to a no-op when not connected; never affects the operation.
+        await using var _perf = await Services.DiagnosticsProbe.BeginAsync(_dump, _log, "Value Scan (First)");
+
         if (!IsFirstScanType(SelectedScanType))
         {
             ErrorMessage = "First Scan supports targeted predicates only (Exact / " +
@@ -804,6 +810,12 @@ public partial class ValueSearchViewModel : ViewModelBase
     private async Task NextScanAsync()
     {
         if (IsScanning || !HasSession) return;
+
+        // Record what this heavy operation costs the DLL dispatcher. Automatic
+        // rather than a measurement session: the evidence then accumulates from
+        // real use instead of only the scenario somebody thought to test. Degrades
+        // to a no-op when not connected; never affects the operation.
+        await using var _perf = await Services.DiagnosticsProbe.BeginAsync(_dump, _log, "Value Scan (Next)");
 
         bool needsValue = !IsPrevValueScanType(SelectedScanType);
         if (needsValue && string.IsNullOrWhiteSpace(Value))
