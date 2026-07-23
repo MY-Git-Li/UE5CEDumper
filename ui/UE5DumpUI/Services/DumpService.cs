@@ -2472,19 +2472,22 @@ public sealed class DumpService : IDumpService
             foreach (var item in arr)
             {
                 if (item is not JsonObject obj) continue;
+                // JsonNum, not GetValue<T>: diagnostics must degrade, never throw.
+                // One out-of-range field (a UINT64_MAX sentinel) previously blanked
+                // the entire card. See JsonNum's remarks.
                 cmds.Add(new DiagnosticsCommandEntry
                 {
                     Cmd     = obj["cmd"]?.GetValue<string>() ?? "",
-                    Count   = obj["count"]?.GetValue<long>() ?? 0L,
-                    TotalMs = obj["total_ms"]?.GetValue<long>() ?? 0L,
-                    MaxMs   = obj["max_ms"]?.GetValue<long>() ?? 0L,
-                    LastMs  = obj["last_ms"]?.GetValue<long>() ?? 0L,
-                    AvgMs   = obj["avg_ms"]?.GetValue<double>() ?? 0.0,
+                    Count   = JsonNum.L(obj["count"]),
+                    TotalMs = JsonNum.L(obj["total_ms"]),
+                    MaxMs   = JsonNum.L(obj["max_ms"]),
+                    LastMs  = JsonNum.L(obj["last_ms"]),
+                    AvgMs   = JsonNum.D(obj["avg_ms"]),
                 });
             }
         }
 
-        long totalBusy = res["total_busy_ms"]?.GetValue<long>() ?? 0L;
+        long totalBusy = JsonNum.L(res["total_busy_ms"]);
         // Share-of-busy is derived here rather than on the wire: the DLL already
         // sends the total, and a percentage computed client-side can't disagree
         // with the rows it is computed from.
@@ -2496,27 +2499,30 @@ public sealed class DumpService : IDumpService
 
         return new DiagnosticsResult
         {
-            UptimeMs        = res["uptime_ms"]?.GetValue<long>() ?? 0L,
-            TotalDispatches = res["total_dispatches"]?.GetValue<long>() ?? 0L,
+            UptimeMs        = JsonNum.L(res["uptime_ms"]),
+            TotalDispatches = JsonNum.L(res["total_dispatches"]),
             TotalBusyMs     = totalBusy,
-            BusyPercent     = res["busy_percent"]?.GetValue<double>() ?? 0.0,
-            GObjectsCount   = res["gobjects_count"]?.GetValue<int>() ?? 0,
+            BusyPercent     = JsonNum.D(res["busy_percent"]),
+            GObjectsCount   = JsonNum.I(res["gobjects_count"]),
             Process = new DiagnosticsProcess
             {
-                WorkingSetBytes = p?["working_set_bytes"]?.GetValue<long>() ?? 0L,
-                PrivateBytes    = p?["private_bytes"]?.GetValue<long>() ?? 0L,
-                PeakWorkingSet  = p?["peak_working_set"]?.GetValue<long>() ?? 0L,
-                HandleCount     = p?["handle_count"]?.GetValue<int>() ?? 0,
-                ThreadCount     = p?["thread_count"]?.GetValue<int>() ?? 0,
-                CpuPercent      = p?["cpu_percent"]?.GetValue<double>() ?? -1.0,
+                WorkingSetBytes = JsonNum.L(p?["working_set_bytes"]),
+                PrivateBytes    = JsonNum.L(p?["private_bytes"]),
+                PeakWorkingSet  = JsonNum.L(p?["peak_working_set"]),
+                HandleCount     = JsonNum.I(p?["handle_count"]),
+                ThreadCount     = JsonNum.I(p?["thread_count"]),
+                CpuPercent      = JsonNum.D(p?["cpu_percent"], -1.0),
             },
             GameThread = new DiagnosticsGameThread
             {
-                HookActive      = g?["hook_active"]?.GetValue<bool>() ?? false,
-                HookFireCount   = g?["hook_fire_count"]?.GetValue<long>() ?? 0L,
-                MsSinceLastFire = g?["ms_since_last_fire"]?.GetValue<long>() ?? 0L,
-                Responsive      = g?["responsive"]?.GetValue<bool>() ?? false,
-                InvokeTimeoutMs = g?["invoke_timeout_ms"]?.GetValue<int>() ?? 0,
+                HookActive      = JsonNum.B(g?["hook_active"]),
+                HookFireCount   = JsonNum.L(g?["hook_fire_count"]),
+                // -1 = never fired. A pre-fix DLL sends UINT64_MAX here, which
+                // JsonNum saturates to long.MaxValue — also > 0, so it still reads
+                // as "unknown" rather than as a plausible age.
+                MsSinceLastFire = JsonNum.L(g?["ms_since_last_fire"], -1L),
+                Responsive      = JsonNum.B(g?["responsive"]),
+                InvokeTimeoutMs = JsonNum.I(g?["invoke_timeout_ms"]),
             },
             Commands = cmds,
         };

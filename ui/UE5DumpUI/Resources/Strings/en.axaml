@@ -430,7 +430,9 @@
     <sys:String x:Key="str.System.Diag.ResetTip">Clear the counters and restart the uptime clock, so the next measurement covers one deliberate action instead of the whole session. Counters also reset automatically when the last client disconnects.</sys:String>
     <sys:String x:Key="str.System.Diag.Summary">{0} dispatches over {1}s — dispatcher busy {2}% of wall-clock · GObjects {3:N0}</sys:String>
     <sys:String x:Key="str.System.Diag.Process">Process: working set {0} · private {1} · CPU {2} · {3} threads · {4} handles</sys:String>
-    <sys:String x:Key="str.System.Diag.GameThread">Game thread: PE hook {0} · {1} · last fire {2} ms ago · {3:N0} fires</sys:String>
+    <sys:String x:Key="str.System.Diag.GameThread">Game thread: PE hook {0} · {1} · {2} · {3:N0} fires</sys:String>
+    <sys:String x:Key="str.System.Diag.LastFire">last fire {0:N0} ms ago</sys:String>
+    <sys:String x:Key="str.System.Diag.NeverFired">never fired (hook installs on first invoke)</sys:String>
     <sys:String x:Key="str.System.Diag.Responsive">responsive</sys:String>
     <sys:String x:Key="str.System.Diag.Stalled">STALLED</sys:String>
     <sys:String x:Key="str.System.Diag.NotConnected">Diagnostics need a live DLL connection.</sys:String>

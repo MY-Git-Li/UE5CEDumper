@@ -20,6 +20,40 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — Diagnostics fix: a UINT64_MAX sentinel on the wire blanked the whole card (build 2311; dev, DLL + UI)
+
+First live run of the new Diagnostics card failed outright with *"An element of type 'Number'
+cannot be converted to a 'System.Int64'"*.
+
+**Root cause.** `Stark::MsSinceLastHookFire()` returns `UINT64_MAX` for "the PE hook never fired —
+liveness unknown", and build 2308 put that straight on the pipe. 18446744073709551615 does not fit
+an `Int64`, so `GetValue<long>()` threw and took the entire panel with it. **"Never fired" is the
+NORMAL state on a fresh connection** — the hook installs lazily on the first invoke — so this was
+the default path, not an edge case.
+
+**Why it took longer than it should have:** `System.Text.Json` emits the *identical* message for
+out-of-range and for fractional values, and names neither. That sends you hunting for a decimal
+point. The raw payload settled it in one grep — the UI's own pipe log had
+`"ms_since_last_fire":18446744073709551615` sitting there the whole time. Recorded in
+[lessons-learned.md](lessons-learned.md): grab the payload before theorising.
+
+**Two fixes, because either alone would be insufficient.**
+- **Wire boundary (DLL).** The sentinel is now mapped to `-1` before serialising. An in-process
+  `UINT64_MAX` convention is fine; the wire is a narrower type system and sentinels must land in the
+  range the other side can parse.
+- **Reader (UI).** New `Services/JsonNum.cs` — saturating, non-throwing `L/I/D/B` reads, now used
+  throughout the diagnostics parse. **Telemetry must degrade, never throw:** one odd field is worth
+  a wrong number in one cell, not a blank panel the user opened to debug something else. `JsonNum.D`
+  also collapses non-finite values, since a `NaN` reaching a format string prints "NaN%" at the user.
+  A pre-fix DLL still works — `UINT64_MAX` saturates to `long.MaxValue`, which `HasFired` reads as
+  "unknown" rather than as a plausible age.
+
+**UI:** the card now prints *"never fired (hook installs on first invoke)"* instead of a nonsense
+age. **Tests:** +17, including the verbatim failing payload from the log and both causes of that
+ambiguous STJ message pinned separately. 2875 green.
+
+-----
+
 ## 2026-07-23 — Diagnostics (`Sense`): measure what the pipe traffic actually costs (build 2308; dev, DLL + UI)
 
 Tier 1 + Tier 2 of the performance-counter evaluation. Exists for one reason:

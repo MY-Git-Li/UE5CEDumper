@@ -45,9 +45,17 @@ public sealed class DiagnosticsGameThread
 {
     public bool HookActive        { get; init; }
     public long HookFireCount     { get; init; }
-    public long MsSinceLastFire   { get; init; }
+    /// <summary>Age of the last ProcessEvent fire. <b>-1 = never fired</b>
+    /// (liveness unknown) — the DLL's <c>UINT64_MAX</c> sentinel, mapped to a
+    /// value that fits a signed 64-bit integer at the wire boundary. A very large
+    /// positive value means the same thing and came from a pre-fix DLL.</summary>
+    public long MsSinceLastFire   { get; init; } = -1;
     public bool Responsive        { get; init; }
     public int  InvokeTimeoutMs   { get; init; }
+
+    /// <summary>True when the hook has actually fired at least once, so
+    /// <see cref="MsSinceLastFire"/> is a real age worth showing.</summary>
+    public bool HasFired => MsSinceLastFire >= 0 && HookFireCount > 0;
 }
 
 /// <summary>

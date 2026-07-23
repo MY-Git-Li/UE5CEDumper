@@ -68,6 +68,35 @@ public class DiagnosticsModelTests
     }
 
     [Fact]
+    public void HasFired_is_false_for_the_never_fired_sentinel()
+    {
+        // The PE hook installs lazily on the first invoke, so "never fired" is the
+        // NORMAL state on a fresh connection. -1 is the DLL's UINT64_MAX sentinel
+        // mapped into signed range at the wire boundary; a huge positive value is
+        // the same thing arriving from a pre-fix DLL.
+        Assert.False(new DiagnosticsGameThread().HasFired);
+        Assert.False(new DiagnosticsGameThread { MsSinceLastFire = -1 }.HasFired);
+        Assert.False(new DiagnosticsGameThread
+        {
+            MsSinceLastFire = long.MaxValue, HookFireCount = 0
+        }.HasFired);
+    }
+
+    [Fact]
+    public void HasFired_is_true_only_with_a_real_age_and_a_real_count()
+    {
+        Assert.True(new DiagnosticsGameThread
+        {
+            MsSinceLastFire = 16, HookFireCount = 918273
+        }.HasFired);
+        // An age without any fires is incoherent — don't present it as live.
+        Assert.False(new DiagnosticsGameThread
+        {
+            MsSinceLastFire = 16, HookFireCount = 0
+        }.HasFired);
+    }
+
+    [Fact]
     public void Result_defaults_are_safe_to_bind_before_the_first_fetch()
     {
         // The panel binds these before any snapshot arrives.

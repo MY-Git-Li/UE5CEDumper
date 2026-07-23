@@ -3163,7 +3163,15 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             json gt;
             gt["hook_active"]           = Stark::IsHookActive();
             gt["hook_fire_count"]       = Stark::GetHookFireCount();
-            gt["ms_since_last_fire"]    = Stark::MsSinceLastHookFire();
+            // MsSinceLastHookFire returns UINT64_MAX for "never fired — liveness
+            // unknown". Do NOT put that on the wire: it exceeds int64 and every
+            // JSON reader with a signed integer type chokes on it (System.Text.Json
+            // reports it identically to a fractional value, which sends you looking
+            // in the wrong place). -1 is the same "unknown" in a range everyone can
+            // parse.
+            const uint64_t msSinceFire = Stark::MsSinceLastHookFire();
+            gt["ms_since_last_fire"]    = (msSinceFire == UINT64_MAX)
+                                            ? int64_t(-1) : int64_t(msSinceFire);
             gt["responsive"]            = Stark::IsGameThreadResponsive();
             gt["invoke_timeout_ms"]     = Stark::GetInvokeTimeoutMs();
             data["game_thread"] = gt;

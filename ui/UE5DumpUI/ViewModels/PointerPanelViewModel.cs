@@ -985,12 +985,17 @@ public partial class PointerPanelViewModel : ViewModelBase
                 d.Process.ThreadCount,
                 d.Process.HandleCount);
 
+            // The PE hook is installed lazily by the first invoke, so "never fired"
+            // is the NORMAL state on a fresh connection — show it as such instead of
+            // a meaningless age.
             DiagGameThread = Res.Format("str.System.Diag.GameThread",
                 d.GameThread.HookActive ? "on" : "off",
                 d.GameThread.Responsive
                     ? Res.Get("str.System.Diag.Responsive")
                     : Res.Get("str.System.Diag.Stalled"),
-                d.GameThread.MsSinceLastFire,
+                d.GameThread.HasFired
+                    ? Res.Format("str.System.Diag.LastFire", d.GameThread.MsSinceLastFire)
+                    : Res.Get("str.System.Diag.NeverFired"),
                 d.GameThread.HookFireCount);
 
             DiagCommands.Clear();
