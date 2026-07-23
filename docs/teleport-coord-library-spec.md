@@ -351,14 +351,20 @@ k3fc,"Chest, big one",Chest,Map02,1.5,-2.25,0,0,0,0
 k3fd,"He said ""hi""",Other,Map02,0,0,0,0,0,0
 k3fe,寶箱 3（上層）,寶箱,Map03,-4096.5,8192.25,120,0,180,0
 k3ff,'=Boss Arena,Other,Map03,10,20,30,0,0,0
-k400,'1-2,Zones,Map03,1e-05,-0.0,100000,0,0,0
+k400,'1-2,Zones,Map03,0,0,100000,0,0,0
 ```
 
 Row by row: an **empty group**; an **embedded comma** (quoted); an **embedded
 quote** (doubled); a **CJK label with full-width parens**; a **formula-armoured**
 label (`'` stripped on import → `=Boss Arena`); and a label Excel would eat
-(`1-2` → a date) plus a **scientific-notation** coordinate that `"R"` legitimately
-emits below 1e-5.
+(`1-2` → a date).
+
+Note the last row's X: an input of `1e-5` is **below** the 3-decimal precision, so
+D4's capture rounding collapses it to `0`. The writer rounds too — defensively, so
+`Write → Parse → Write` is byte-identical no matter how the entry was constructed,
+not only for entries that came through a pose capture. In practice that also means
+`"R"` never emits scientific notation for a realistic coordinate; the reader still
+sets `AllowExponent`, which costs nothing and covers a hand-written file.
 
 ### 5.3 Import is a two-stage, consented operation
 

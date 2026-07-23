@@ -627,6 +627,56 @@
                       IsEnabled="{Binding HasSelectedCoord}" Padding="10,4"/>
             </StackPanel>
 
+            <!-- CSV round-trip. Import is deliberately two-stage: Excel silently
+                 coerces labels like "1-2" to dates and writes back the displayed
+                 text, producing valid CSV no validator can reject, so the only
+                 defence is showing the diff before it commits. -->
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Button Content="{StaticResource str.TP.LibExportCsv}"
+                      Command="{Binding ExportCoordCsvCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibExportCsv}" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibExportTemplate}"
+                      Command="{Binding ExportCoordCsvTemplateCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibExportTemplate}" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibImportCsv}"
+                      Command="{Binding PreviewCoordCsvImportCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibImportCsv}" Padding="10,4"/>
+              <CheckBox Content="{StaticResource str.TP.LibImportReplace}"
+                        IsChecked="{Binding CoordImportReplace}"
+                        ToolTip.Tip="{StaticResource str.Tip.TP.LibImportReplace}"
+                        Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
+            </StackPanel>
+
+            <Border Background="#2D2D30" CornerRadius="3" Padding="8"
+                    IsVisible="{Binding HasPendingCoordImport}">
+              <StackPanel Spacing="6">
+                <ScrollViewer MaxHeight="180">
+                  <TextBlock Text="{Binding CoordImportPreview}" Foreground="#DDDDDD"
+                             FontFamily="Consolas, Menlo, monospace" FontSize="11"
+                             TextWrapping="Wrap"/>
+                </ScrollViewer>
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <Button Content="{StaticResource str.TP.LibImportApply}"
+                          Command="{Binding ApplyCoordImportCommand}"
+                          Classes="accent" Padding="12,4"/>
+                  <Button Content="{StaticResource str.TP.LibImportCancel}"
+                          Command="{Binding CancelCoordImportCommand}" Padding="10,4"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <!-- Parse errors with no importable rows: shown without the Apply row. -->
+            <TextBlock Text="{Binding CoordImportPreview}" Foreground="#E0A030"
+                       FontSize="11" TextWrapping="Wrap"
+                       FontFamily="Consolas, Menlo, monospace">
+              <TextBlock.IsVisible>
+                <MultiBinding Converter="{x:Static BoolConverters.And}">
+                  <Binding Path="CoordImportPreview" Converter="{x:Static StringConverters.IsNotNullOrEmpty}"/>
+                  <Binding Path="HasPendingCoordImport" Converter="{x:Static BoolConverters.Not}"/>
+                </MultiBinding>
+              </TextBlock.IsVisible>
+            </TextBlock>
+
             <TextBlock Text="{Binding CoordStatus}" Foreground="#CCCCCC"
                        FontSize="12" TextWrapping="Wrap"/>
           </StackPanel>

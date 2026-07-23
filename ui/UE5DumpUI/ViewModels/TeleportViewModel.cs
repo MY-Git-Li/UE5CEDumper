@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
@@ -3332,6 +3334,193 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         CoordPitch = e.Pitch; CoordYaw = e.Yaw; CoordRoll = e.Roll;
         CoordSetRotation = true;
         CoordStatus = $"'{e.Label}' copied into the coordinate fields.";
+    }
+
+    // ── CSV round-trip (P2) — spec §5 ───────────────────────────────────
+
+    /// <summary>Pending import, held between stage 1 (parse + preview) and stage 2
+    /// (commit). Null when no import is awaiting confirmation.</summary>
+    private List<CoordEntry>? _pendingImport;
+    private List<CoordChange>? _pendingChanges;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPendingCoordImport))]
+    private string _coordImportPreview = "";
+
+    /// <summary>Replace (delete anything not in the file) vs merge (add + update only).</summary>
+    [ObservableProperty] private bool _coordImportReplace;
+
+    public bool HasPendingCoordImport => _pendingImport != null;
+
+    /// <summary>Export the WHOLE library — never the filtered grid. A user who filters
+    /// to one map, exports, then re-imports with Replace would otherwise lose
+    /// everything else.</summary>
+    [RelayCommand]
+    private async Task ExportCoordCsvAsync()
+    {
+        if (_coordAll.Count == 0)
+        {
+            CoordStatus = "Nothing to export — the library is empty.";
+            return;
+        }
+        try
+        {
+            var name = string.IsNullOrEmpty(_activeCoordKey) ? "teleport-coords" : _activeCoordKey;
+            var path = await _platform.ShowSaveFileDialogAsync($"{name}.csv", "CSV file", "csv");
+            if (string.IsNullOrEmpty(path)) return;
+            CoordCsvCodec.WriteFile(path!, _coordAll);
+            CoordStatus = $"Exported {_coordAll.Count} entr{(_coordAll.Count == 1 ? "y" : "ies")} to {path}.";
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord CSV export failed", ex); }
+    }
+
+    /// <summary>Write a header + three illustrative rows, for starting from scratch.</summary>
+    [RelayCommand]
+    private async Task ExportCoordCsvTemplateAsync()
+    {
+        try
+        {
+            var path = await _platform.ShowSaveFileDialogAsync(
+                "teleport-coords-template.csv", "CSV file", "csv");
+            if (string.IsNullOrEmpty(path)) return;
+            File.WriteAllText(path!, CoordCsvCodec.SampleTemplate(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            CoordStatus = $"Wrote a sample CSV to {path}.";
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord CSV template failed", ex); }
+    }
+
+    /// <summary>
+    /// Stage 1 of the import: parse the file and show what WOULD change. Nothing is
+    /// written. This is the only defence against the corruptions we cannot detect —
+    /// Excel silently coerces "1-2" to a date and "0012" to "12" and writes back the
+    /// displayed text, producing perfectly valid CSV.
+    /// </summary>
+    [RelayCommand]
+    private async Task PreviewCoordCsvImportAsync()
+    {
+        try
+        {
+            var path = await _platform.ShowOpenFileDialogAsync("CSV file", "csv");
+            if (string.IsNullOrEmpty(path)) return;
+
+            var parsed = CoordCsvCodec.ParseFile(path!);
+            BuildImportPreview(parsed, System.IO.Path.GetFileName(path!));
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord CSV preview failed", ex); }
+    }
+
+    /// <summary>Shared by the CSV importer and (P4) the Lua importer.</summary>
+    internal void BuildImportPreview(CoordCsvParseResult parsed, string sourceName)
+    {
+        if (!parsed.HasEntries)
+        {
+            _pendingImport = null;
+            _pendingChanges = null;
+            CoordImportPreview = parsed.Issues.Count > 0
+                ? $"Nothing importable from {sourceName}:\n" + FormatIssues(parsed.Issues)
+                : $"Nothing importable from {sourceName}.";
+            OnPropertyChanged(nameof(HasPendingCoordImport));
+            return;
+        }
+
+        var changes = CoordCsvCodec.Diff(_coordAll, parsed.Entries, CoordImportReplace);
+        _pendingImport = parsed.Entries;
+        _pendingChanges = changes;
+
+        var sb = new StringBuilder();
+        sb.Append($"{sourceName}: {parsed.Entries.Count} row(s) read");
+        if (parsed.Delimiter != ',') sb.Append($" (delimiter '{parsed.Delimiter}')");
+        sb.Append(" — ").Append(CoordCsvCodec.SummarizeDiff(changes)).Append('.');
+
+        var changed = changes.Where(c => c.Kind == CoordChangeKind.Changed).Take(20).ToList();
+        if (changed.Count > 0)
+        {
+            sb.Append("\nChanges:");
+            foreach (var c in changed)
+                sb.Append($"\n  {c.Label}: {string.Join("; ", c.FieldDiffs.Take(4))}");
+            int more = changes.Count(c => c.Kind == CoordChangeKind.Changed) - changed.Count;
+            if (more > 0) sb.Append($"\n  …and {more} more changed.");
+        }
+        if (parsed.Issues.Count > 0)
+            sb.Append("\nSkipped / adjusted:\n").Append(FormatIssues(parsed.Issues));
+
+        sb.Append("\nPress Apply to commit (a .preimport.bak is written first).");
+        CoordImportPreview = sb.ToString();
+        OnPropertyChanged(nameof(HasPendingCoordImport));
+    }
+
+    private static string FormatIssues(IReadOnlyList<CoordCsvIssue> issues)
+    {
+        var shown = issues.Take(15).Select(i => "  " + i);
+        var text = string.Join("\n", shown);
+        return issues.Count > 15 ? text + $"\n  …and {issues.Count - 15} more." : text;
+    }
+
+    /// <summary>Stage 2: commit the previewed import.</summary>
+    [RelayCommand]
+    private void ApplyCoordImport()
+    {
+        if (_pendingImport == null || _pendingChanges == null) return;
+
+        var bak = _coordStore?.SavePreImportBackup(_activeCoordKey) ?? "";
+
+        if (CoordImportReplace)
+        {
+            _coordAll.Clear();
+            foreach (var e in _pendingImport)
+            {
+                if (string.IsNullOrEmpty(e.Uid)) e.Uid = UniqueUid();
+                _coordAll.Add(e);
+            }
+        }
+        else
+        {
+            foreach (var change in _pendingChanges)
+            {
+                switch (change.Kind)
+                {
+                    case CoordChangeKind.Added:
+                        var add = change.Incoming!;
+                        if (string.IsNullOrEmpty(add.Uid)) add.Uid = UniqueUid();
+                        _coordAll.Add(add);
+                        break;
+                    case CoordChangeKind.Changed:
+                        var target = change.Existing!;
+                        var src = change.Incoming!;
+                        target.Label = src.Label; target.Group = src.Group; target.Map = src.Map;
+                        target.X = src.X; target.Y = src.Y; target.Z = src.Z;
+                        target.Pitch = src.Pitch; target.Yaw = src.Yaw; target.Roll = src.Roll;
+                        break;
+                }
+            }
+        }
+
+        int n = _pendingImport.Count;
+        _pendingImport = null;
+        _pendingChanges = null;
+        CoordImportPreview = "";
+        SelectedCoord = null;
+        PersistCoordLibrary();
+        RebuildCoordGroups();
+        ApplyCoordFilter();
+        OnPropertyChanged(nameof(HasPendingCoordImport));
+        CoordStatus = string.IsNullOrEmpty(bak)
+            ? $"Imported {n} entr{(n == 1 ? "y" : "ies")}."
+            : $"Imported {n} entr{(n == 1 ? "y" : "ies")}. Previous library backed up to " +
+              $"{System.IO.Path.GetFileName(bak)}.";
+        CoordLibraryExpanded = true;
+    }
+
+    /// <summary>Discard a previewed import without touching anything.</summary>
+    [RelayCommand]
+    private void CancelCoordImport()
+    {
+        _pendingImport = null;
+        _pendingChanges = null;
+        CoordImportPreview = "";
+        OnPropertyChanged(nameof(HasPendingCoordImport));
+        CoordStatus = "Import cancelled — nothing was changed.";
     }
 
     // ── Force mouse cursor on/off (shared with Lua via set_mouse_cursor) ─

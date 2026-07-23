@@ -1187,6 +1187,17 @@
     <sys:String x:Key="str.Tip.TP.LibUpdateCoords">Overwrite the selected entry's coordinates (and map) with the live pose, keeping its label and group.</sys:String>
     <sys:String x:Key="str.Tip.TP.LibClear">Delete every entry for this game, and its file. There is no undo.</sys:String>
 
+    <sys:String x:Key="str.TP.LibExportCsv">Export CSV</sys:String>
+    <sys:String x:Key="str.TP.LibExportTemplate">Sample CSV</sys:String>
+    <sys:String x:Key="str.TP.LibImportCsv">Import CSV…</sys:String>
+    <sys:String x:Key="str.TP.LibImportReplace">Replace (not merge)</sys:String>
+    <sys:String x:Key="str.TP.LibImportApply">Apply import</sys:String>
+    <sys:String x:Key="str.TP.LibImportCancel">Cancel import</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibExportCsv">Write the WHOLE library (not just the filtered rows) as UTF-8 CSV with a BOM, so Excel opens non-ASCII labels correctly.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibExportTemplate">Write a small sample CSV — a header plus three example rows — to fill in by hand.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibImportCsv">Read a CSV and show what it WOULD change. Nothing is written until you press Apply. Columns are matched by header name, so extra or reordered columns are fine.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibImportReplace">On: the file becomes the whole library and anything missing from it is deleted. Off (default): only add new entries and update matching ones.</sys:String>
+
     <sys:String x:Key="str.TP.CursorForceHeader">Force Mouse Cursor</sys:String>
     <sys:String x:Key="str.TP.CursorForceHint">Force the OS mouse cursor visible or hidden by writing the PlayerController's bShowMouseCursor. Handy when a game hides the cursor but you want Cursor Teleport. One-shot: a game that re-sets the flag every frame may revert it, and a captured input mode can still hide the cursor.</sys:String>
     <sys:String x:Key="str.TP.CursorStateLabel">State:</sys:String>
