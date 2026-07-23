@@ -2861,6 +2861,186 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Tools menu: push the DLL-injection bootstrap into the CE table the user
+    /// ALREADY has open, as an [ENABLE]/[DISABLE] memory record
+    /// (<see cref="Services.CeInjectScriptGenerator"/>), so they never have to
+    /// open the standalone <c>UE5CEDumper.CT</c> first. Cheat Engine holds one
+    /// table at a time, which is what made the <c>.CT</c> route a two-stage load;
+    /// the <c>.CT</c> stays shipped as the developer / no-AOBMaker path.
+    ///
+    /// Falls back to CE record XML on the clipboard when the AOBMaker plugin
+    /// isn't reachable — the same pattern the Teleport / invoke pushes use.
+    /// </summary>
+    [RelayCommand]
+    private async Task InjectCeBootstrapAsync()
+    {
+        // The injectable DLL sits next to the UI exe (dist\UE5Dumper.dll) — the
+        // same resolution ProxyDeployViewModel.InjectIntoRunningGameAsync uses.
+        // Resolve it HERE rather than in the generator so a missing file is a
+        // clear error instead of a script that fails inside Cheat Engine.
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        var dllPath = Path.Combine(exeDir, "UE5Dumper.dll");
+        if (!File.Exists(dllPath))
+        {
+            StatusText = $"Inject bootstrap: UE5Dumper.dll not found next to the app ({dllPath})";
+            return;
+        }
+
+        StatusText = "Building CE inject bootstrap...";
+
+        try
+        {
+            var script = Services.CeInjectScriptGenerator.Generate(dllPath);
+            var description = Services.CeInjectScriptGenerator.RecordDescription;
+
+            // Sample availability before sending so "pipe broke mid-send" reads
+            // differently from "CE was never running".
+            if (_aobMaker != null)
+                await _aobMaker.CheckAvailabilityAsync();
+            bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+
+            bool sentToCe = false;
+            if (_aobMaker != null && wasAvailable)
+            {
+                // autoActivate stays false: this injects a DLL, so the user ticks
+                // it deliberately.
+                sentToCe = await _aobMaker.CreateAAScriptAsync(
+                    description, script, autoActivate: false,
+                    group: Services.CeInjectScriptGenerator.RecordGroup);
+            }
+
+            if (!sentToCe)
+            {
+                // A bare AA body can't be pasted into a record — wrap as CE
+                // memory-record XML.
+                await _platform.CopyToClipboardAsync(
+                    Services.CheatTableBuilder.WrapAaScriptXml(description, script));
+            }
+
+            StatusText = sentToCe
+                ? "Inject bootstrap added to the current CE table — tick it to inject"
+                : wasAvailable
+                    ? "⚠ AOBMaker pipe broke (CE closed?) — bootstrap copied as CE XML, paste into your address list"
+                    : "AOBMaker not connected — bootstrap copied as CE XML, paste into your address list";
+            _log.Info($"CE inject bootstrap {(sentToCe ? "sent to CE" : "to clipboard")} " +
+                      $"(dll={dllPath}, wasAvailable={wasAvailable})");
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Inject CE bootstrap failed", ex);
+            StatusText = $"Inject bootstrap failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Locate a Cheat Engine installation from a RUNNING CE process. Deliberately
+    /// not the registry: that would need a new platform-abstraction surface, and a
+    /// running CE is both the common case (the user is about to use it) and the
+    /// authoritative answer for WHICH install of several is in play.
+    /// Returns the install directory, or null when CE isn't running.
+    /// </summary>
+    private async Task<string?> TryFindCheatEngineDirAsync()
+    {
+        if (ProxyDeploy == null) return null;
+        try
+        {
+            // showAll: CE is not a UE game, so the UE-only filter would hide it.
+            var procs = await ProxyDeploy.ListGameProcessesAsync(showAll: true);
+            foreach (var p in procs)
+            {
+                if (string.IsNullOrEmpty(p.Path)) continue;
+                var name = Path.GetFileNameWithoutExtension(p.Path);
+                // cheatengine-x86_64.exe / cheatengine-i386.exe / "Cheat Engine.exe"
+                if (name.Replace(" ", "").StartsWith("cheatengine", StringComparison.OrdinalIgnoreCase))
+                    return Path.GetDirectoryName(p.Path);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Locate Cheat Engine failed: {ex.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Tools menu: install the autorun helper into Cheat Engine's <c>autorun\</c>
+    /// folder (<see cref="Services.CeAutorunScriptGenerator"/>). CE runs that folder
+    /// at start-up, so <c>ue5_inject()</c> then exists in EVERY table permanently —
+    /// the only delivery route needing neither the standalone <c>.CT</c> nor the
+    /// AOBMaker plugin.
+    ///
+    /// Writes straight into a running CE's install when we can find one; otherwise
+    /// falls back to the save dialog so the user can place it by hand.
+    /// </summary>
+    [RelayCommand]
+    private async Task InstallCeAutorunAsync()
+    {
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        var dllPath = Path.Combine(exeDir, "UE5Dumper.dll");
+        if (!File.Exists(dllPath))
+        {
+            StatusText = $"Install CE autorun: UE5Dumper.dll not found next to the app ({dllPath})";
+            return;
+        }
+
+        StatusText = "Locating Cheat Engine...";
+
+        try
+        {
+            var content = Services.CeAutorunScriptGenerator.Generate(dllPath);
+            var fileName = Services.CeAutorunScriptGenerator.DefaultFileName;
+
+            var ceDir = await TryFindCheatEngineDirAsync();
+            string? target = null;
+
+            if (ceDir != null)
+            {
+                var autorunDir = Path.Combine(
+                    ceDir, Services.CeAutorunScriptGenerator.AutorunFolderName);
+                // CE ships the folder, but a portable/trimmed copy may not have it —
+                // creating it is safe and is what CE itself expects to find.
+                Directory.CreateDirectory(autorunDir);
+                target = Path.Combine(autorunDir, fileName);
+            }
+            else
+            {
+                // No running CE to point at — let the user place the file. The
+                // dialog default name matches what CE expects to find.
+                StatusText = "Cheat Engine not running — choose its autorun folder...";
+                target = await _platform.ShowSaveFileDialogAsync(
+                    defaultFileName: fileName,
+                    filterName: "CE autorun Lua (*.lua)",
+                    filterExtension: ".lua");
+                if (string.IsNullOrEmpty(target))
+                {
+                    StatusText = "Install CE autorun: cancelled";
+                    return;
+                }
+            }
+
+            await File.WriteAllTextAsync(target, content);
+            _log.Info($"Installed CE autorun helper: {target} ({content.Length:N0} chars, " +
+                      $"dll={dllPath}, autoLocated={ceDir != null})");
+
+            // Whether auto-located or hand-placed, the file only takes effect on the
+            // NEXT CE start — say so, or the user will click and see nothing happen.
+            var placed = Path.GetDirectoryName(target) ?? target;
+            var looksRight = string.Equals(
+                Path.GetFileName(placed),
+                Services.CeAutorunScriptGenerator.AutorunFolderName,
+                StringComparison.OrdinalIgnoreCase);
+            StatusText = looksRight
+                ? $"CE autorun helper installed to {placed} — restart Cheat Engine, then use ue5_inject()"
+                : $"⚠ Written to {placed}, which is not an 'autorun' folder — CE only runs files inside <CheatEngine>\\autorun\\";
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Install CE autorun failed", ex);
+            StatusText = $"Install CE autorun failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
     /// Tools menu: stream the embedded <c>ue5_freeze_helper.lua</c> to a
     /// user-chosen file. Manual-fallback companion to
     /// <see cref="InjectFreezeHelperLuaAsync"/> for cases where AOBMaker

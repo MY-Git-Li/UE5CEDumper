@@ -172,6 +172,12 @@ public static class Constants
     // dxgi.dll — statically imported by every D3D11/D3D12 UE game; the
     // reliable hijack target for EXEs that import neither version nor dinput8.
     public const string ProxyDllNameDxgi = "dxgi.dll";
+    // winmm.dll — measured at 24/24 importable across every installed UE game,
+    // exactly matching dxgi. It exists NOT for coverage (it reaches nothing dxgi
+    // misses) but as a second free SLOT: dxgi.dll is the name ReShade and many
+    // mod loaders take, and version.dll is likewise often occupied. See the
+    // 4th-proxy section in docs/todo.md.
+    public const string ProxyDllNameWinmm = "winmm.dll";
     public const string ProxyProductName = "UE5CEDumper";
     public const string SteamRegistryPath = @"SOFTWARE\WOW6432Node\Valve\Steam";
     public const string SteamRegistryKey = "InstallPath";

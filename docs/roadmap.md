@@ -7,7 +7,43 @@ trail. Build number tags reflect when each row reached its current
 state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
-> build 2246 (PR #448, 2026-07-20).** Newer work lives in [dev-log.md](dev-log.md):
+> build 2252 (PR #452, 2026-07-22).** Newer work lives in [dev-log.md](dev-log.md):
+> - builds **2301–2335 (2026-07-23)** — **the measurement cycle**, and a 4th proxy.
+>   **`winmm.dll` proxy** (LIVE-VERIFIED on Elliot UE5.4 + SEED UE4.27, 180/180 exports
+>   forwarded lazily): built as a spare *slot*, not for coverage — an n=24 census
+>   (`scripts/analysis/scan_proxy_imports.py`) showed winmm and dxgi both reach 100% of installed
+>   UE games, but a proxy only works if its filename is FREE, and ReShade commonly takes `dxgi.dll`
+>   while some games ship their own `version.dll`. Generated, never hand-written
+>   (`scripts/gen_proxy_forwarders.py`). Prerequisite shipped first: Mimic stopped statically
+>   importing winmm (a self-call would have silently no-op'd the 1 ms mailbox tick).
+>   **New `Sense` diagnostics module** + a System-tab card + automatic `PERF` records around every
+>   heavy operation, which together **answered a question open since 2026-06**:
+>   `multipipe-eval.md`'s premise was wrong. Measured over 24,178 dispatches on two games, the DLL
+>   dispatcher is **idle ~70%** of wall-clock and the worst single dispatch is **14.3 ms** — so
+>   **Phase 1 (non-blocking dispatch) is now WON'T-DO** (§10); it had already been built and
+>   reverted once on that premise. The real cost was **round-trip count**: a Copy CE XML issued
+>   **22,500** `walk_instance` calls. **`walk_instance_batch`** + a breadth-first struct-tree
+>   prefetch made that export **1.71× faster** (5,893 → 3,437 ms, 22,522 → 1,355 dispatches), and
+>   corrected the cost model on the way — **IPC is only ~2/3 per-round-trip; the rest is
+>   payload-proportional** (§10.5). Also: Undeploy now removes every proxy flavour of ours rather
+>   than only the selected radio.
+> - builds **2291–2299 (2026-07-23)** — **four ranked DLL-delivery routes**, and the ranking is
+>   now stated in the UI (Proxy Deploy header line + every button tooltip) and leads
+>   [tips.md](tips.md). **① proxy DLL > ② in-UI inject > ③ from Cheat Engine > ④ standalone
+>   `.CT`.** ③ gained both flavours: **Tools → Install CE autorun Helper** (writes
+>   `ue5_autorun.lua` into `<CheatEngine>\autorun\`, auto-locating the install from a running CE
+>   process — every table then has `ue5_inject()` permanently, no `.CT` and no AOBMaker plugin)
+>   and **Tools → Add "Inject DLL" Record** (pushes the bootstrap into the table already open via
+>   `CreateAAScript`). The blind 15 s wait is gone everywhere: all routes poll the DLL's new
+>   `Mimic::InitState` (mailbox `+0x0C`, a pure memory read — never `executeCodeEx`, which needs
+>   `CreateRemoteThread` that games block at start-up), and a timeout is now a real error instead
+>   of "complete (or failed)". Shared emitter `CeReadinessLua` keeps the three call sites from
+>   drifting. Also: the double-inject guards learned `dinput8`/`dxgi` (they still tested the old
+>   `version`+`winmm` pair), and **Undeploy is type-agnostic** — it sweeps every proxy flavour of
+>   ours rather than only the selected radio, while never touching another program's DLL.
+>   **LIVE-VERIFIED: all three CE routes** — standalone `.CT`, the pushed *Inject DLL* record, and
+>   the `autorun\` helper (which also settles the evaluation's open question: `getMainForm().Menu`
+>   *is* reachable that early in CE start-up).
 > - builds **2220 + 2238 (2026-07-19)** — **MindsEye licensee-fork support** (Build A Rocket
 >   Boy, UE 5.4.4). Two independent failures solved: **GObjects** was reported `OK` **on
 >   garbage** (the AOB found the real array but the preset was written one struct-level down,

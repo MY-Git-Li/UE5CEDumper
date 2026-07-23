@@ -902,6 +902,16 @@ Pick up when the active plan finishes or when blocked.
 
 ## Pending live-game verification (verify only — no code)
 
+- **Flaky: `SnapshotViewModelTests.GroupMatch_MissingValue_ShowsErrorNoCandidates`** — failed ONCE
+  in a full parallel run on 2026-07-23 (build 2318), then passed 25/25 three times in isolation and
+  green on an immediate full re-run. Unrelated to the winmm/proxy work that was in flight. This test
+  class has prior form for snapshot-DB concurrency flakes (see `feedback-ci-only-test-flakes`, and
+  PR #451's concurrent-first-open fix), so the likeliest cause is another store-level race under
+  parallel load rather than the assertion itself. **Not chased** — one observation is not a
+  reproduction. If it recurs, capture whether `GroupCandidates` was non-empty or `GroupStatusText`
+  empty, since those point at different halves. Effort **S** once reproducible.
+
+
 Shipped + unit-tests-pass but unproven on real games:
 
 - **Copy CE Field drills object-pointer arrays — leaf + GWorld-path spine + dup-crumb dedup — DONE +
@@ -998,6 +1008,373 @@ injected DLL.** (36-agent adversarial verify against UE engine source, 2026-07-0
   hides the mesh — nothing we can do about it from a DLL.
 
 *Parent: Schlacht Stage 1 (dev-log 2026-07-08 build ~1989; project-seethrough-occluders-schlacht).*
+
+-----
+
+## Output-monitor pin — "the game has no monitor-select UI" — EVALUATED (2026-07-23), NOT BUILT
+
+**Question:** on a dual-monitor setup, when a game exposes no output-display setting, can we fix it
+with **UE functionality**? **Verdict: the UE reflection layer has no concept of an output monitor —
+the monitor-selecting step is Win32/DXGI. UE reflection only contributes the windowed↔fullscreen
+toggle and the persistence.** And the hard part is not the initial move, it is that the game
+**drifts back** — so the deliverable is a *pin*, not a one-shot move.
+
+**What UE reflection does and does not give us**
+
+- Stock UE has **no** monitor-index `UPROPERTY`, no BlueprintCallable monitor selector, and no cvar.
+  (The `-monitor=N` recipe circulating since Froyok's 2018 post is an *engine source modification*,
+  not stock behaviour.) `r.setres WxH[w|f|wf]` changes mode/resolution, never the screen.
+- **Invokable today** (BlueprintCallable ⇒ in the reflection function table ⇒ reachable via
+  `invoke_function`): `UGameUserSettings::SetFullscreenMode(int32)` (`EWindowMode` 0=Fullscreen /
+  1=WindowedFullscreen / 2=Windowed), `SetScreenResolution`, `ApplyResolutionSettings(bool)`,
+  `ApplySettings(bool)`, `SaveSettings()`.
+- **NOT invokable:** `SetWindowPosition()` / `GetWindowPosition()` are **not** BlueprintCallable, so
+  they are absent from the reflection function table. The backing `WindowPosX` / `WindowPosY` *are*
+  config properties (default `-1` = centre) ⇒ writable via Property Search / Live Walker / Solide
+  Force. That yields a no-code path (**write WindowPosX/Y → invoke `SaveSettings()` → restart**) but
+  it needs a restart and collides with the documented UE 4.16+ "re-centres itself after the startup
+  map loads" override.
+- Why the move-then-fullscreen sequence works at all: UE `WindowedFullscreen` resolves via
+  `MonitorFromWindow`, and DXGI exclusive fullscreen picks "the output containing most of the client
+  area" when `pTarget` is NULL — **both follow the window**. So `SetFullscreenMode(2) → move the
+  HWND → SetFullscreenMode(1)` lands on the target screen.
+
+**Drift is event-driven, not continuous** — regain focus / alt-tab / `WM_DISPLAYCHANGE` /
+swapchain reset. Unity's issue tracker documents exactly this symptom ("exclusive fullscreen always
+opens on monitor 1 after regaining focus even when monitor 2 is set as primary"). So a pin does
+**not** need a high-frequency poll.
+
+**Three pin mechanisms, lightest first**
+
+- **(a) Rewrite `WM_WINDOWPOSCHANGING` — the good one.** `Grausam.cpp` `SubclassProc` (~line 144)
+  already subclasses the game WndProc and `Grausam.cpp` `FindGameWindow()` (~line 61) already resolves the HWND
+  (`EnumWindows` + same PID + largest visible). Patching `WINDOWPOS.x/y` **before the move happens**
+  is flicker-free and the game never notices. Any "detect it moved, move it back" scheme flickers and
+  fights the game's own repositioning — which is the user-visible "it just snaps back" symptom.
+- **(b) Low-frequency watchdog — the backstop.** ~4-5 Hz worker; if
+  `MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) != target`, `SetWindowPos`. Structurally
+  **identical to the Solide / Hemmung / Laufen write-on-drift re-assert workers** — copy the shape.
+  Covers paths (a) can't see (game switches mode via the swapchain, not via `SetWindowPos`).
+- **(c) Hook `IDXGISwapChain::SetFullscreenState` — the real fix for exclusive fullscreen.** MSDN is
+  explicit: `pTarget` **is** the output selector; NULL means "DXGI guesses from window placement",
+  and on alt-enter **NULL is the only option DXGI has**. So for a true-exclusive-fullscreen game
+  (a)+(b) are palliative — the game's next `SetFullscreenState(TRUE, NULL)` re-guesses. Substituting
+  the user's chosen `IDXGIOutput*` is the cure. MinHook is already vendored (Stark/Grausam), but
+  `Lugner_Dxgi.cpp` is a **pure export forwarder (asm thunks), not a
+  swapchain vtable hook** — this is entirely new work, and per-API (D3D11 / D3D12 / Vulkan separately).
+
+**This feature is not UE-bound (scope decision needed).** `Heiter.cpp` (`ProxyStart`, ~lines 57-86)
+shows **proxy mode starts the pipe server immediately with no AOB scan**, and all three mechanisms
+above are pure Win32/DXGI with zero UE reflection ⇒ injected via the `dxgi.dll` proxy this would work
+in a **Unity** game too. Blocker: every UI panel currently assumes UE init succeeded, so a non-UE
+process shows a wall of errors. Either accept "only this one card works, everything else is red" or
+build a minimal non-UE mode — decide before advertising it as a capability.
+
+**Try the no-code per-engine fixes first** (this class of game is rare; don't pre-build):
+
+- **Unity:** `HKCU\Software\<Company>\<Product>` → **`UnitySelectMonitor`** (0-based), and the
+  documented **`-adapter N`** launch arg. ⚠ *Engine-specific*: in **UE**, `-adapter` selects the **GPU
+  adapter** and does nothing for monitor choice — the two engines are not interchangeable here, and
+  `-adapter` is widely mis-recommended for UE.
+- **UE:** `-windowed -WinX= -WinY= -ResX= -ResY=` (Steam launch options) or the same keys in
+  `%LOCALAPPDATA%\<Game>\Saved\Config\Windows\GameUserSettings.ini` — subject to the 4.16+ recentre bug.
+- **Engine-agnostic:** disable the unwanted display before launch (MultiMonitorTool / `DisplaySwitch`),
+  re-enable after. 100% effective against "always picks output 0" games.
+- **Why "set it as primary" fails:** enumeration order comes from the adapter's output connectors
+  (`EnumDisplayMonitors` / DXGI output order); Windows exposes **no** way to reorder it, and the
+  primary flag doesn't change it. That is why physically re-ordering the DP cables is the only clean
+  non-tool fix.
+
+**Prior art — check before building.** Special K already does this (Window Management X/Y offset,
+retained across launches). For one or two games it is the faster answer. Our differentiators: the
+zero-flicker (a) that Special K lacks, integration with the existing UI, and the (c) DXGI path —
+Special K's own multi-display borderless-fullscreen limitation is still open (SpecialKO/SpecialK#87).
+
+| Phase | Scope | Effort | Risk |
+|---|---|---|---|
+| **P1** | (a) `WM_WINDOWPOSCHANGING` + (b) watchdog + `EnumDisplayMonitors` listing + 2 pipe cmds (`list_monitors` / `set_game_monitor`) + one Teleport card. Borderless/windowed only | **M** | low |
+| **P2** | (c) `SetFullscreenState` hook — covers exclusive fullscreen | **M-L** | med — swapchain vtable hooks read as overlay behaviour to some anti-cheat; per-graphics-API work |
+| **P3** | Minimal non-UE-mode UI boundary (unlocks Unity/other engines) | **M** | med |
+
+**Naming:** take **Böse** (barrier/guard) from the [naming-convention.md](naming-convention.md) roster —
+the module's job is *holding the window in place*, a barrier, not a transfer (so not `Zart`, and
+teleport semantics stay with Wirbel).
+
+**Recommendation:** spend ten minutes on `UnitySelectMonitor` / `-adapter N` against the actual
+offending game first. If that sticks, park this entirely — P1+P2 is M-L of work for a handful of
+games. If it doesn't stick *and* more than one such game is on hand, P1 alone is cheap: it reuses
+Grausam's subclass and Solide's re-assert shape, leaving only monitor enumeration and the
+`WM_WINDOWPOSCHANGING` branch as genuinely new code.
+
+*Parent: Grausam foreground-lock infrastructure (dev-log builds ~1950-1984;
+project-foreground-lock-grausam). Sibling evaluation of the Schlacht see-through and Hemmung
+time-control evals above.*
+
+-----
+
+## 4th proxy DLL — winmm.dll — ✅ SHIPPED build 2317 (as a SLOT, not for coverage)
+
+**Built on the slot-contention trigger, not the coverage one.** The n=24 census below stands: winmm
+and dxgi both cover 100% and winmm reaches exactly zero games dxgi misses, so there was never a
+coverage case. What justifies it is the other half of that finding — **a proxy only works if its
+filename is free.** `dxgi.dll` is the name ReShade and many mod loaders take; `version.dll` is
+likewise often occupied (P3R ships one). With both taken the only remaining choice was dinput8 at
+2/24. winmm is the spare universally-viable slot.
+
+**Generated, not hand-written** (`scripts/gen_proxy_forwarders.py winmm`): 180 exports across
+`Lugner_Winmm.cpp` / `.asm` / `ProxyWinmm.def`. Re-run with `--check` to verify they are current.
+**Verified against the real DLL:** 180/180 forwarding exports present, **every ordinal matching
+System32 winmm exactly**, zero missing, plus our 60-symbol UE5 ABI — and the proxy does **not**
+import winmm itself, which the build-2301 prerequisite is what makes possible.
+
+*Kept below: the census that says don't build it for coverage, and the trap that had to be fixed
+first. Both still govern any FIFTH flavour.*
+
+**⚠ The earlier n=7 recommendation was wrong, and it is worth knowing why.** That sample silently
+included **non-UE games** — Nioh3 (Team Ninja), Crimson Desert (BlackSpace), Atelier Yumia (KT) —
+because it globbed a Steam library rather than gating on UE markers. Nioh3 was the single row that
+made winmm look uniquely valuable ("imports neither dxgi nor version"), and it is not a UE game at
+all, so it never bore on this decision.
+
+**Measured — every installed UE game, n=24 (`scripts/analysis/scan_proxy_imports.py`):**
+
+| Module | Coverage | Note |
+|---|---|---|
+| **dxgi.dll** | **24/24 (100%)** | every UE game, static or delay import |
+| **winmm.dll** | **24/24 (100%)** | identical set — **adds nothing over dxgi** |
+| d3d11 / d3d12 | 24/24 | (not hijack candidates; sanity check that the scan saw real games) |
+| dsound.dll | 23/24 | |
+| xinput1_3 | 17/24 | |
+| version.dll | 7/24 | **but see below — this number does NOT measure version's viability** |
+| dinput8.dll | 2/24 | genuinely weak |
+
+**Games importing none of {version, dinput8, dxgi}: 0.** The current three already reach everything.
+
+- **The version.dll 7/24 is not a coverage figure.** Per `ProxyImportAnalyzer`'s own class remarks,
+  version.dll is loaded *dynamically* by almost every Windows process, so its absence from an import
+  table says nothing about whether the proxy works. It remains the safe universal default; the 29%
+  is only how often it happens to be a *static* import.
+- **KnownDLLs verified on this host** (Win11 26200): `winmm` / `dsound` / `dxgi` / `version` /
+  `dinput8` are **all absent** ⇒ all app-dir-hijackable. `IMM32` / `MSVCRT` / `gdiplus` / `SHCORE` /
+  `PSAPI` / `SHLWAPI` **are** listed ⇒ permanently non-viable, exclude from any future selection.
+- **Export counts (measured):** version 17 · dinput8 6 · dxgi 20 · **winmm 181 (180 named)** ·
+  dsound 12. If winmm is ever built: do **not** hand-write it — **generate** the `.def` + trampoline
+  `.asm` from the real DLL's export table (and re-generate dxgi's from the same script to kill
+  hand-maintenance drift).
+
+**The one surviving trigger: slot contention, not coverage.** A proxy only helps if its filename is
+*free*. Two real cases: **ReShade** commonly installs itself as `dxgi.dll` (or `d3d11.dll`), and
+**P3R already ships its own `version.dll`** in `Binaries\Win64\`. A user with ReShade on dxgi *and*
+something on version has only dinput8 left, which is 2/24. **Build winmm if, and only if, that
+combination shows up in practice** — it would then be a genuinely free 100%-coverage slot. Until
+then it is M-effort for a case nobody has reported.
+
+**✅ DONE (build 2308) — `ProxyImportAnalyzer` misread modular UE builds.** `ReadProxyImports`
+is handed `game.ExePath` only. In a **modular** build (Satisfactory) that exe is a ~264 KB bootstrap
+stub and the engine lives in `*-Win64-Shipping.dll` modules, so the analyzer sees no dxgi/dinput8 and
+the Suggested-proxy column claims `version · default · no dxgi/dinput8` — when a dxgi proxy would in
+fact load fine (`D3D12RHI` imports it). **Severity LOW**: the analyzer's design deliberately treats
+imports as advisory context that never overrides the version default, so the harm is a misleading
+hint string, not a wrong deployment. Fix shape: when the main exe imports none of
+`{dxgi, d3d11, d3d12}`, union in the imports of the sibling `*-Win64-Shipping.dll` modules — the same
+fallback `scan_proxy_imports.py` uses. **Shipped:** `ImportsNone` + a pure `Merge` OR on
+`ProxyImportInfo`, with the file-walking half in `ProxyDeployService` so the analyzer stays OS-free.
+Measured at **30 ms** for Satisfactory's 182 modules; monolithic games unaffected (0 ms, fallback
+never triggers). +5 tests.
+
+**✅ CLEARED (build 2301) — the BLOCKER: we called winmm ourselves, from the shared object library.**
+Kept here because it is the single most important thing to understand before touching this idea, and
+because the same trap applies to any future proxy whose API we also *consume*.
+
+`Mimic.cpp` raises the timer resolution for the CE-mailbox poll thread
+(`timeBeginPeriod(kPollIntervalMs)` / `timeEndPeriod`), and `Mimic.cpp` is in
+**`UE5_COMMON_SOURCES`** — the object library linked into the main DLL *and every proxy*. `Winmm` was
+in both `UE5Dumper`'s link list and `PROXY_LINK_LIBS`. Had our proxy *been* `winmm.dll`:
+
+- our static import of `winmm.dll!timeBeginPeriod` would resolve against the module named
+  `winmm.dll` in the process — **ourselves** → `Proxy_timeBeginPeriod` → the forwarding pointer.
+  Before the real System32 winmm is resolved that pointer is the fallback stub, which **returns 0 —
+  and `0` is `TIMERR_NOERROR`**. So it would not crash: it would **silently succeed while doing
+  nothing**, `Sleep(1)` degrading to the 15.6 ms tick and CE-mailbox latency getting ~15× worse with
+  no error anywhere.
+- **Delay-load would not have saved us** (unlike the version proxy, which delay-loads `version.dll`
+  purely to break the link-time circularity and never calls into it): a delay-load
+  `LoadLibrary("winmm.dll")` from the game directory finds **us** again.
+- **No test would have caught it** — `dll_helpers_test` linked `Winmm` directly into the test exe, so
+  its `timeBeginPeriod(1)` + `Sleep(1)` latency assert passed regardless of proxy behaviour.
+
+**How it was fixed (build 2301, dev-log 2026-07-23):** `Mimic.cpp` now resolves
+`timeBeginPeriod` / `timeEndPeriod` from the **System32** copy by explicit path
+(`GetSystemDirectoryW` → `LoadLibraryW(<sys>\winmm.dll)` → `GetProcAddress`), and `Winmm` is gone
+from `UE5Dumper`'s link list, `PROXY_LINK_LIBS`, **and** `dll_helpers_test` — whose latency check now
+resolves the same way, so it covers the real mechanism. Windows keys loaded modules by full path, so
+this always yields the genuine OS winmm even with a same-named proxy of ours mapped. The helper is
+proxy-agnostic (no `UE5_PROXY_*` test), satisfying the `UE5_COMMON_SOURCES` invariant — an `#ifdef`
+would have violated it. **Verified objectively:** `winmm.dll` no longer appears in the import table
+of `UE5Dumper.dll`, any of the three proxies, or the test exe; and the reworked latency check
+measures 1.95 ms/sleep through the resolved pointers (vs the ~15.6 ms a silent no-op would give).
+**UI side: verified clean** — no `winmm` / `timeBeginPeriod` usage anywhere in `ui/`.
+
+**Prior art — `D:\Github\ZoltDump` already ships a winmm proxy.** Shape to copy: `Eisen.cpp/.h` +
+a **generated** `EisenWinmmPtrs.h` (one `extern "C" FARPROC g_pfn_<name>` per export, every one
+initialised to `Proxy_Fallback` = `xor rax,rax; ret` so exports missing on older Windows return 0
+instead of jumping through null) + `ProxyWinmmTrampoline.asm` (MASM stubs jumping via the pointers) +
+`ProxyWinmm.def` (`name = Proxy_name`), with the real DLL loaded by explicit `GetSystemDirectoryW`
+path. Its `build.ps1` parameterises the flavour as `-ProxyTarget winmm` rather than our hardcoded
+target triple. **Two caveats when copying:** (1) ZoltDump has **no** `timeBeginPeriod` caller of its
+own, so its design does not address the self-call trap above — don't assume copying it is enough
+(ours is now handled on our side, in Mimic); (2) that same
+returns-0 fallback is precisely what makes our self-call fail *silently*. Keep our forwarder named
+`Lugner_Winmm.cpp` for internal consistency (`Lugner` owns proxy forwarding here); ZoltDump used
+`Eisen` only because it has no `Lügner` equivalent.
+
+**Build-script deltas (measured, so the "compile once" sharing is preserved):**
+`dll/CMakeLists.txt` — add `src/Lugner_Winmm.cpp` to `PROXY_SPECIFIC_SOURCES` (gated by
+`UE5_PROXY_WINMM_BUILD` like the other two) + one `option(BUILD_PROXY_WINMM)` / `add_library` block
+copied from the dxgi one. **`UE5DumperCommon` must not change** — that is what keeps the shared
+sources compiling once instead of 5×. `build.ps1` — `-Target` `ValidateSet`, the `$cppTargets` map
+(~line 355), the `-DBUILD_PROXY_*=ON` configure string (appears **twice**: ~363 and ~588 — both must
+be updated or the test configure silently drops the target), and the dist-copy table (~413-415).
+`build.cmd` needs nothing unless we want a `build proxywinmm` alias (it only forwards mode/target).
+UI — `Models/ProxyType.cs` (enum + `GetDllName` + `GetDisplayName` + `FromDllName`), `Constants.cs`,
+`Services/ProxyImportAnalyzer.cs`, `Services/DumperModuleDetector.cs`, `Services/ProxyDeployService.cs`,
+`ViewModels/ProxyDeployViewModel.cs`, `Resources/Strings/en.axaml`, tests.
+
+**Two invariants to hold:** (1) `ProxyImportAnalyzer`'s class remarks deliberately refuse to
+auto-escalate away from the version default — **winmm must be an advisory alt, not the new default**,
+until a wider sample proves otherwise. (2) A static import only proves the DLL *gets loaded*, not
+that the proxy *survives* (anti-tamper, signature checks, an occupied slot); and its absence doesn't
+prove the reverse either, since a dynamic `LoadLibrary("dxgi.dll")` also searches the app dir first.
+
+**Rejected alternatives:** `dsound` — cheap (12 exports) but 4/7 and lands in audio init.
+`xinput1_4` — 109 functions but only **8 named, the rest ordinal-only**, so the `.def` needs
+`NONAME` + ordinal mapping, for only 3/7 coverage.
+
+**Note for whoever adds winmm:** the double-inject guards are now driven off a shared named list
+(`Methode.cpp` `kProxyDllNames` / `UE5CEDumper.CT` `UE5_PROXY_DLL_NAMES`) rather than the old
+hardcoded `version` + `winmm` pair — add the 4th flavour to **both** or the guard silently stops
+covering it (shipped build 2291; the `.CT` half is in-game verified, the `Methode.cpp` CE-plugin half
+is only reachable via CE's *Inject && Connect* menu item and has not been exercised).
+
+Effort **M** · Risk low (the prerequisite is done) — **but do not spend it without the slot-contention
+trigger above.** The census that would have justified it has now been run (n=24) and says no; re-run
+`scripts/analysis/scan_proxy_imports.py` if the installed set changes substantially before
+revisiting.
+
+*Parent: the 3-proxy set (version/dinput8/dxgi; project-dll-loading-and-proxies).*
+
+-----
+
+## UE performance counters in the UI — EVALUATED (2026-07-23), tiered
+
+**Verdict: the literal ask — surfacing UE's own `stat` counters — is impossible from an injected
+DLL. But the two cheapest tiers are worth more than the literal ask, because they measure the thing
+[multipipe-eval.md](multipipe-eval.md) already blames for UI lag and currently has zero telemetry for.**
+
+- **Tier 0 — WON'T DO: UE's `stat` system.** Shipping builds compile with `STATS=0` (even the *Test*
+  configuration defines `STATS 0` by default), and the console is **removed from the binary** in
+  Shipping, not hidden. Re-enabling needs `FORCE_USE_STATS` and an engine recompile. Unreachable from
+  an injected DLL — record as WON'T-DO so it isn't re-litigated.
+
+- **✅ Tier 1 — DONE (build 2308).** New `Sense` module + `get_diagnostics` pipe command + a
+  System-tab card. Records per-command dispatch cost (count / total / max / last) at Fern's existing
+  `inFlight` chokepoint — which is exactly the head-of-line window — and reports `busy_percent`, the
+  fraction of wall-clock a dispatcher was occupied. **That is the number Phase 1 was missing.**
+  Also carries game-thread health from Stark and the GObjects count. *Original note kept below for
+  the rationale.*
+
+- **Tier 1 — our own health. Zero new machinery, highest value.**
+  [multipipe-eval.md](multipipe-eval.md) already names DLL-side **serial-dispatch head-of-line
+  blocking** as the root cause of UI lag and game-thread CPU starvation as the CE-mailbox risk — yet
+  neither is measured, so Phase 1 would be decided blind. Free to collect: per-command Fern handling
+  time + queue depth; Stark invoke queue depth / timeout count (`invoke_timeout_ms` is already
+  reported over the pipe); per-worker tick count + write-on-drift hit rate for Solide / Hemmung /
+  Laufen / Solitar / Schlacht; Aura `NumElements` over time (GC/leak indicator). **Linie already
+  computes frame-cadence statistics** (per-UFunction fire counts + Welford mean/cv) — it just isn't
+  presented as performance. Effort **S-M** · Risk none.
+
+- **✅ Tier 2 — DONE (build 2308).** Working set / private bytes / CPU% / thread + handle counts,
+  in the same `get_diagnostics` payload. On demand only (thread count walks a system-wide snapshot).
+  CPU% is `-1` until a second sample exists to difference against, and the UI renders that as an em
+  dash — "0%" would read as *idle*, which is a different and wrong claim.
+
+- **Tier 3 — real FPS / frame time: hook `IDXGISwapChain::Present`.** The only engine-version-
+  independent, accurate source (true frametime, 1% low, pacing, present mode). **Shares its entire
+  hook infrastructure with P2 of the output-monitor-pin evaluation above** — these two must be
+  decided together and funded once, not twice. Effort **M-L** (joint) · Risk med (overlay-shaped
+  behaviour; per-graphics-API work).
+
+- **Tier 3.5 — `GAverageFPS` / `GAverageMS` via AOB.** These are plain engine globals
+  (`GAverageFPS = 1000/GAverageMS`), **not** gated by `STATS`, so they survive Shipping, and Himmel's
+  128-pattern infrastructure could carry a signature. But it is a per-version/per-compiler signature
+  to maintain and yields the engine's *smoothed average*, strictly worse than the Present hook. Keep
+  only as the fallback if we decide never to hook DXGI.
+
+- **Tier 4 — reflected time values.** `AWorldSettings::TimeDilation` (Hemmung already reads it) and
+  `UWorld::TimeSeconds` / `RealTimeSeconds` / `DeltaTimeSeconds` (not `UPROPERTY` — needs DynOff
+  probing). Caveat: `DeltaTimeSeconds` is the **game-thread** delta only (no render/GPU) and is
+  polluted by time dilation — usable as context, **not** as an FPS readout.
+
+**Status: Tier 1 + Tier 2 SHIPPED (build 2308). Tier 3 still deferred to the monitor-pin P2
+DXGI-hook decision; Tier 0 remains WON'T-DO.**
+
+**Follow-on deliberately NOT built: per-worker tick counters** for Solide / Hemmung / Laufen /
+Solitar / Schlacht (tick count + write-on-drift hit rate). That is five modules touched for a number
+that does not bear on the dispatch question — and the dispatch question is the one that blocked a
+decision. Worth doing if a re-assert worker is ever suspected of burning game-thread time. Effort
+**S-M** · Risk low.
+
+**✅ Automatic PERF records — DONE (build 2320).** `Services/DiagnosticsProbe.cs` brackets **Copy CE
+XML / Copy CE Field / Value Scan (First & Next) / Snapshot capture** with two `get_diagnostics`
+snapshots and logs the delta as a `PERF` line in the `view` log. Better than the manual measurement
+session it replaces: a deliberate test only covers the scenario somebody thought of, and only if they
+remembered to reset first — this accumulates evidence from real use.
+
+**✅ ANSWERED (2026-07-23, build 2324) — and the answer is "don't build Phase 1".** Measured on
+Elliot (UE 5.4) + SEED (UE 4.27), 24,178 dispatches across 5 real Copy CE XML / Copy CE Field runs.
+Full table and reasoning in [multipipe-eval.md](multipipe-eval.md) §10.
+
+- **Dispatcher busy 29.8%** — idle ~70% of wall-clock, and the ratio holds (22-31%) across
+  operations from 2.6 ms to 5.4 s. Non-blocking dispatch can only recover a slice of the busy 30%,
+  and only if something were queued behind it — in a single-user export nothing is.
+- **Worst SINGLE dispatch: 14.3 ms** out of 24,178. Phase 1's premise is a long-blocking command
+  holding the read loop; no such command exists here.
+- Phase 1 was already **shipped and reverted once** (build 1840) and a correct version needs
+  overlapped/async pipe I/O. Not a trade worth making for this.
+
+**The real lever is CALL COUNT.** `walk_instance` is 100% of dispatcher cost in every row, and one
+Copy CE XML issued **20,357** of them: **0.088 ms in the DLL vs 0.208 ms of round-trip overhead —
+2.4x the work is overhead.** Batching it at the established ~200/call chunk (as
+`search_properties_batch` / `walk_class_batch` already do) would collapse 24,178 round-trips to
+~121. **✅ SHIPPED build 2329 — `walk_instance_batch`.** The measurement said dll 27-30% / **ipc 59-73%** /
+ui 0-10%, i.e. per-call round-trip overhead roughly 2x the actual walk, so the calls were collapsed
+(chunk ~200). Built to the `walk_class_batch` precedent with all three safety layers: a DLL handler
+that is a trivial loop over the single-call path, a shared serialiser/deserialiser pair, and an
+equivalence test comparing both paths field-for-field. The CE export now walks breadth-first per
+level. A failed batch — or a short/long reply, which would otherwise mis-pair results with addresses
+— replays the chunk as single calls.
+
+**✅ DONE + MEASURED (build 2335): 1.71x faster.** Copy CE XML on SEED went **5,893 -> 3,437 ms**,
+dispatches **22,522 -> 1,355**, IPC **3,532 -> 1,278 ms**. `top:` names `walk_instance_batch`.
+(Build 2329 had batched the wrong loop - the calls come from the STRUCT tree, not the
+object-pointer drilldown; fixed with a breadth-first `PrefetchStructTreeAsync` feeding the
+unchanged depth-first emit, since that emit's order IS the exported field order.)
+
+**The 2.4-3.5x projection was wrong, and usefully so - IPC is not purely per-round-trip.** At the
+old 0.157 ms/call, 1,355 calls should have cost ~212 ms of IPC; they cost **1,278 ms**. So of the
+original 3,532 ms, ~2,253 ms was fixed per-round-trip cost (removed) and **~1,066 ms is
+payload-proportional** (untouchable by batching - the same bytes still cross). `ui` rose 610 -> 653
+ms for the same reason. Full table in [multipipe-eval.md](multipipe-eval.md) section 10.5.
+
+**Next lever, if anyone wants more: BYTES, not messages.** Remaining 3,437 ms = dll 1,506 (real
+work) + ipc 1,278 (mostly payload) + ui 653 (parse). Trimming fields the CE export never reads would
+hit the payload-proportional IPC *and* the parse cost together. **Unquantified** - nobody has
+measured what fraction of a `walk_instance` payload the export actually consumes; measure that
+before committing. Note also that raising the batch chunk would achieve nothing: average batch size
+is ~16.6 (fan-out-limited), not near the 200 cap.
+
+*Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
+(dev-log build 2156) already holds the cadence half.*
 
 -----
 

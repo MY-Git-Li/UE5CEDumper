@@ -939,6 +939,154 @@ public partial class PointerPanelViewModel : ViewModelBase
         }
     }
 
+    // --- Diagnostics (Sense) ---
+    //
+    // docs/multipipe-eval.md names DLL-side serial-dispatch head-of-line blocking
+    // as the root cause of UI lag, but nothing measured it — so "should Phase 1
+    // (non-blocking dispatch) be built?" was a blind decision. These numbers are
+    // the evidence. Sits next to Pipe Activity on purpose: that card shows WHAT
+    // crossed the pipe, this one shows what it COST.
+
+    [ObservableProperty] private string _diagSummary = "";
+    [ObservableProperty] private string _diagProcess = "";
+    [ObservableProperty] private string _diagGameThread = "";
+    [ObservableProperty] private string _diagStatus = "";
+    [ObservableProperty] private bool _diagBusy;
+
+    /// <summary>Poll interval for auto-refresh. Deliberately unhurried: every poll is
+    /// itself a dispatch, so a fast timer would inflate the very numbers it reports
+    /// (<c>get_diagnostics</c> already shows up in its own table). 5 s is slow enough
+    /// to stay in the noise while still making CPU% — which needs two samples to
+    /// difference — meaningful over a rolling window.</summary>
+    private const int DiagAutoRefreshSeconds = 5;
+
+    private DispatcherTimer? _diagTimer;
+
+    [ObservableProperty] private bool _diagAutoRefresh;
+
+    partial void OnDiagAutoRefreshChanged(bool value)
+    {
+        if (value)
+        {
+            _diagTimer ??= new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(DiagAutoRefreshSeconds),
+            };
+            // Re-subscribe defensively: the timer instance is reused across
+            // toggles, and a double subscription would double the poll rate.
+            _diagTimer.Tick -= OnDiagTimerTick;
+            _diagTimer.Tick += OnDiagTimerTick;
+            _diagTimer.Start();
+            _ = RefreshDiagnosticsAsync();   // don't make the user wait one interval
+        }
+        else
+        {
+            _diagTimer?.Stop();
+        }
+    }
+
+    private void OnDiagTimerTick(object? sender, EventArgs e)
+    {
+        // Never stack requests: a slow snapshot (the first one measured 125 ms) must
+        // not queue up behind itself and turn the poll into a burst.
+        if (DiagBusy) return;
+        _ = RefreshDiagnosticsAsync();
+    }
+
+    /// <summary>Called when the user navigates away from the System tab. Stops the
+    /// poll so a forgotten toggle doesn't keep adding pipe traffic — and skewing the
+    /// dispatch numbers — while the user works somewhere else. The checkbox stays
+    /// ticked, so returning to the tab resumes.</summary>
+    public void OnLeavingTab() => _diagTimer?.Stop();
+
+    /// <summary>Called when the user navigates INTO the System tab: resume the poll
+    /// if it was left enabled.</summary>
+    public void OnEnteringTab()
+    {
+        if (DiagAutoRefresh) _diagTimer?.Start();
+    }
+
+    /// <summary>Per-command dispatch cost, heaviest total first.</summary>
+    public ObservableCollection<DiagnosticsCommandEntry> DiagCommands { get; } = new();
+
+    private static string Mib(long bytes) =>
+        (bytes / (1024.0 * 1024.0)).ToString("N1", CultureInfo.InvariantCulture) + " MiB";
+
+    [RelayCommand]
+    private async Task RefreshDiagnosticsAsync()
+    {
+        if (_dump == null) { DiagStatus = Res.Get("str.System.Diag.NotConnected"); return; }
+        DiagBusy = true;
+        try
+        {
+            var d = await _dump.GetDiagnosticsAsync();
+
+            DiagSummary = Res.Format("str.System.Diag.Summary",
+                d.TotalDispatches,
+                (d.UptimeMs / 1000.0).ToString("N1", CultureInfo.InvariantCulture),
+                d.BusyPercent.ToString("N1", CultureInfo.InvariantCulture),
+                d.GObjectsCount);
+
+            // CPU is -1 until a SECOND sample exists to difference against — show a
+            // dash rather than a misleading 0%.
+            DiagProcess = Res.Format("str.System.Diag.Process",
+                Mib(d.Process.WorkingSetBytes),
+                Mib(d.Process.PrivateBytes),
+                d.Process.HasCpu
+                    ? d.Process.CpuPercent.ToString("N1", CultureInfo.InvariantCulture) + "%"
+                    : "—",
+                d.Process.ThreadCount,
+                d.Process.HandleCount);
+
+            // The PE hook is installed lazily by the first invoke, so "never fired"
+            // is the NORMAL state on a fresh connection — show it as such instead of
+            // a meaningless age.
+            DiagGameThread = Res.Format("str.System.Diag.GameThread",
+                d.GameThread.HookActive ? "on" : "off",
+                d.GameThread.Responsive
+                    ? Res.Get("str.System.Diag.Responsive")
+                    : Res.Get("str.System.Diag.Stalled"),
+                d.GameThread.HasFired
+                    ? Res.Format("str.System.Diag.LastFire", d.GameThread.MsSinceLastFire)
+                    : Res.Get("str.System.Diag.NeverFired"),
+                d.GameThread.HookFireCount);
+
+            DiagCommands.Clear();
+            foreach (var c in d.Commands) DiagCommands.Add(c);
+            DiagStatus = "";
+        }
+        catch (Exception ex)
+        {
+            DiagStatus = Res.Format("str.System.Diag.Error", ex.Message);
+            _log?.Error(Constants.LogCatView, "RefreshDiagnostics failed", ex);
+        }
+        finally
+        {
+            DiagBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ResetDiagnosticsAsync()
+    {
+        if (_dump == null) { DiagStatus = Res.Get("str.System.Diag.NotConnected"); return; }
+        try
+        {
+            await _dump.ResetDiagnosticsAsync();
+            DiagCommands.Clear();
+            DiagSummary = DiagProcess = DiagGameThread = "";
+            DiagStatus = Res.Get("str.System.Diag.Reset.Done");
+            // Immediately re-read so the card shows a live (empty) baseline rather
+            // than looking broken until the user clicks Refresh.
+            await RefreshDiagnosticsAsync();
+        }
+        catch (Exception ex)
+        {
+            DiagStatus = Res.Format("str.System.Diag.Error", ex.Message);
+            _log?.Error(Constants.LogCatView, "ResetDiagnostics failed", ex);
+        }
+    }
+
     // --- Pipe Activity log ---
 
     /// <summary>

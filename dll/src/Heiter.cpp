@@ -72,16 +72,19 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
         for (auto& c : exe) c = towlower(c);
         if (exe == L"ue5dumpui.exe") {
             LOG_WARN("DllMain ProxyStart: loaded by UE5DumpUI.exe — skipping proxy init");
+            g_invokeMailbox.initState = Mimic::INIT_SKIPPED;
             return 0;
         }
     }
 
     LOG_INFO("DllMain ProxyStart: proxy DLL mode — starting pipe server only (no scan)");
+    g_invokeMailbox.initState = Mimic::INIT_RUNNING;
 
     // Brief delay for game to finish early init (avoid pipe creation during process startup)
     Sleep(500);
 
     bool ok = UE5_StartPipeServer();
+    g_invokeMailbox.initState = ok ? Mimic::INIT_READY : Mimic::INIT_FAILED;
     LOG_INFO("DllMain ProxyStart: pipe server %s", ok ? "started" : "FAILED to start");
     return 0;
 }
@@ -107,6 +110,7 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
 
     if (g_isCEPlugin.load()) {
         LOG_INFO("DllMain AutoStart: CE plugin host — skipping auto-start");
+        g_invokeMailbox.initState = Mimic::INIT_SKIPPED;
         return 0;
     }
 
@@ -119,6 +123,9 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
     if (testPipe != INVALID_HANDLE_VALUE) {
         CloseHandle(testPipe);
         LOG_WARN("DllMain AutoStart: pipe already exists (another UE5Dumper instance running) — skipping auto-start");
+        // SKIPPED, not FAILED: a pipe server IS up (owned by the other instance),
+        // so a CE Lua poller should proceed to connect rather than report an error.
+        g_invokeMailbox.initState = Mimic::INIT_SKIPPED;
         return 0;
     }
 

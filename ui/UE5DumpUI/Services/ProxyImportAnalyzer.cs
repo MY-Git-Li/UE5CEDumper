@@ -32,7 +32,22 @@ internal static class ProxyImportAnalyzer
     /// delay-) imports. <c>version.dll</c> is tracked for completeness but is
     /// almost never a static import (see class remarks) and is never used to
     /// downgrade the version default.</summary>
-    public readonly record struct ProxyImportInfo(bool ImportsVersion, bool ImportsDinput8, bool ImportsDxgi);
+    public readonly record struct ProxyImportInfo(bool ImportsVersion, bool ImportsDinput8, bool ImportsDxgi)
+    {
+        /// <summary>True when this PE imports none of the three — which for a game's
+        /// main .exe is the signature of a MODULAR UE build's bootstrap stub, not of
+        /// a game no proxy can reach. See <see cref="Merge"/>.</summary>
+        public bool ImportsNone => !ImportsVersion && !ImportsDinput8 && !ImportsDxgi;
+
+        /// <summary>OR two results together. Used to fold a modular build's
+        /// <c>*-Win64-Shipping.dll</c> modules into the stub exe's (empty) result:
+        /// a proxy is loaded if ANY module in the process imports that name, since
+        /// the loader searches the .exe's directory whichever one asks.</summary>
+        public ProxyImportInfo Merge(ProxyImportInfo other) => new(
+            ImportsVersion || other.ImportsVersion,
+            ImportsDinput8 || other.ImportsDinput8,
+            ImportsDxgi    || other.ImportsDxgi);
+    }
 
     /// <summary>A per-game proxy suggestion: the recommended type (null when the
     /// known-good method is injection, which has no proxy type) plus a concise,

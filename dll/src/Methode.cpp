@@ -104,11 +104,32 @@ static char g_PluginName[]   = "UE5CEDumper";
 static char g_MenuName[]     = "UE5CEDumper: Inject && Connect";
 static char g_AutoStartFn[]  = "UE5_AutoStart";
 
+// ── Proxy DLL file names we ship ─────────────────────────────────────────────
+//
+// A hijacked copy lives in the GAME folder; the genuine Windows DLL of the same
+// name lives under System32/SysWOW64 and is filtered out by path at the call
+// site. Keep this list in sync with `ue5_isAlreadyLoaded` in
+// scripts/UE5CEDumper.CT and with Models/ProxyType.cs — a flavour missing here
+// means the double-inject guard silently does nothing for it.
+static const char* const kProxyDllNames[] = {
+    "version.dll",
+    "dinput8.dll",
+    "dxgi.dll",
+    "winmm.dll",
+};
+
+static bool IsProxyDllName(const char* fileName) {
+    for (const char* name : kProxyDllNames) {
+        if (_stricmp(fileName, name) == 0) return true;
+    }
+    return false;
+}
+
 // ── Helper: detect if UE5CEDumper is already present in the target process ───
 //
 // Catches two cases that would otherwise cause a redundant inject:
 //   1. UE5Dumper.dll already injected (e.g. user clicked menu twice)
-//   2. Proxy DLL (version.dll / winmm.dll) hijacked from the game folder
+//   2. A proxy DLL (see kProxyDllNames) hijacked from the game folder
 //      — distinguished from the genuine Windows DLL by checking the load path
 //      is NOT under System32 / SysWOW64.
 //
@@ -119,8 +140,8 @@ static bool IsAlreadyLoadedInTarget(HANDLE hProcess, std::string& outName,
 {
     if (!hProcess) return false;
 
-    // System directory prefix — used to exclude the genuine Windows copy of
-    // version.dll / winmm.dll from the proxy detection.
+    // System directory prefix — used to exclude the genuine Windows copies of
+    // the kProxyDllNames entries from the proxy detection.
     char sysDir[MAX_PATH] = {};
     GetSystemDirectoryA(sysDir, MAX_PATH);
     const size_t sysDirLen = strlen(sysDir);
@@ -152,8 +173,7 @@ static bool IsAlreadyLoadedInTarget(HANDLE hProcess, std::string& outName,
         }
 
         // Case 2: proxy DLL — only count if NOT loaded from System32/SysWOW64
-        if (_stricmp(fileName, "version.dll") == 0 ||
-            _stricmp(fileName, "winmm.dll")   == 0) {
+        if (IsProxyDllName(fileName)) {
             if (sysDirLen == 0 ||
                 _strnicmp(modPath, sysDir, sysDirLen) != 0) {
                 outName = fileName;

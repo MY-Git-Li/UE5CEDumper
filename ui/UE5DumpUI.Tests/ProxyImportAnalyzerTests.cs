@@ -183,6 +183,73 @@ public class ProxyImportAnalyzerTests
         Assert.Null(ProxyImportAnalyzer.Analyze(new MemoryStream(bogus)));
     }
 
+    // ── Modular-build folding (ImportsNone / Merge) ──
+    //
+    // A MODULAR UE build ships a thin bootstrap .exe with the engine split across
+    // sibling *-Win64-Shipping.dll modules (Satisfactory's stub is ~264 KB). Reading
+    // the stub alone reports NOTHING imported, which made the Suggested column claim
+    // "no dxgi/dinput8" for a game where a dxgi proxy loads perfectly well — D3D12RHI
+    // imports it. ProxyDeployService folds the siblings in via these two members;
+    // the file-walking half lives there (this type stays OS-free by design).
+
+    [Fact]
+    public void ImportsNone_is_true_only_when_nothing_is_imported()
+    {
+        Assert.True(new ProxyImportAnalyzer.ProxyImportInfo(false, false, false).ImportsNone);
+        Assert.False(new ProxyImportAnalyzer.ProxyImportInfo(true, false, false).ImportsNone);
+        Assert.False(new ProxyImportAnalyzer.ProxyImportInfo(false, true, false).ImportsNone);
+        Assert.False(new ProxyImportAnalyzer.ProxyImportInfo(false, false, true).ImportsNone);
+    }
+
+    [Fact]
+    public void ImportsNone_detects_the_bootstrap_stub_shape()
+    {
+        // A stub imports plenty (kernel32 &c.) — just none of OUR three.
+        var stub = ProxyImportAnalyzer.Analyze(
+            new MemoryStream(BuildPe64WithImports("kernel32.dll", "user32.dll")));
+        Assert.NotNull(stub);
+        Assert.True(stub!.Value.ImportsNone);
+    }
+
+    [Fact]
+    public void Merge_folds_a_module_into_the_stub_result()
+    {
+        // The real Satisfactory case: stub imports none; ApplicationCore/D3D12RHI
+        // bring dxgi and Core brings version.
+        var stub = new ProxyImportAnalyzer.ProxyImportInfo(false, false, false);
+        var rhi = ProxyImportAnalyzer.Analyze(
+            new MemoryStream(BuildPe64WithImports("dxgi.dll", "d3d12.dll")))!.Value;
+        var core = ProxyImportAnalyzer.Analyze(
+            new MemoryStream(BuildPe64WithImports("version.dll")))!.Value;
+
+        var folded = stub.Merge(rhi).Merge(core);
+        Assert.True(folded.ImportsDxgi);
+        Assert.True(folded.ImportsVersion);
+        Assert.False(folded.ImportsDinput8);
+        Assert.False(folded.ImportsNone);
+    }
+
+    [Fact]
+    public void Merge_is_a_pure_or_and_never_clears_a_flag()
+    {
+        var all = new ProxyImportAnalyzer.ProxyImportInfo(true, true, true);
+        var none = new ProxyImportAnalyzer.ProxyImportInfo(false, false, false);
+        Assert.Equal(all, all.Merge(none));
+        Assert.Equal(all, none.Merge(all));
+        Assert.Equal(all, all.Merge(all));
+        Assert.Equal(none, none.Merge(none));
+    }
+
+    [Fact]
+    public void Merge_does_not_mutate_either_operand()
+    {
+        var a = new ProxyImportAnalyzer.ProxyImportInfo(true, false, false);
+        var b = new ProxyImportAnalyzer.ProxyImportInfo(false, false, true);
+        _ = a.Merge(b);
+        Assert.Equal(new ProxyImportAnalyzer.ProxyImportInfo(true, false, false), a);
+        Assert.Equal(new ProxyImportAnalyzer.ProxyImportInfo(false, false, true), b);
+    }
+
     private static byte[] BuildPe64WithImports(params string[] dllNames) =>
         BuildPe64(0x200, dllNames);   // 0x200 == PointerToRawData → identity mapping
 

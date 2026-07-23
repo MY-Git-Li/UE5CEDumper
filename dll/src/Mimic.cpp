@@ -27,7 +27,7 @@
 #include "Grimoire.h"
 
 #include <Windows.h>
-#include <timeapi.h>   // timeBeginPeriod / timeEndPeriod (winmm)
+#include <timeapi.h>   // MMRESULT / TIMERR_NOERROR (types only — see WinmmTimer below)
 
 #include <atomic>
 #include <cstring>
@@ -115,6 +115,79 @@ struct CompoundOpGuard {
     }
 };
 
+// ---- winmm timer-resolution access ─────────────────────────────────────────
+//
+// timeBeginPeriod/timeEndPeriod are resolved from the SYSTEM32 copy of winmm at
+// run time instead of being statically imported. That is not stylistic:
+//
+//   A static import of "winmm.dll!timeBeginPeriod" resolves against whichever
+//   module named winmm.dll is loaded in the process. The moment we ship a
+//   winmm.dll PROXY (see docs/todo.md, "4th proxy DLL"), that module is US, so
+//   the call would land in our own forwarding stub. Before the stub has resolved
+//   the real export it returns 0 — and 0 is TIMERR_NOERROR — so the call would
+//   SILENTLY SUCCEED while doing nothing: Sleep(1) degrades to the 15.6ms tick
+//   and CE-mailbox latency gets ~15x worse with no error anywhere. Delay-loading
+//   does not help either, since a delay-load LoadLibrary("winmm.dll") from the
+//   game directory finds us again.
+//
+// Loading by explicit System32 path sidesteps all of it: Windows keys loaded
+// modules by full path, so this always yields the genuine OS winmm even when a
+// same-named proxy of ours is already mapped.
+//
+// Deliberately proxy-AGNOSTIC (no UE5_PROXY_* test) so this file can stay in
+// UE5DumperCommon, which the invariant in dll/CMakeLists.txt requires.
+namespace {
+
+using TimePeriodFn = MMRESULT (WINAPI*)(UINT);
+
+TimePeriodFn g_timeBeginPeriod = nullptr;
+TimePeriodFn g_timeEndPeriod   = nullptr;
+
+// Resolve once. The module handle is intentionally never freed: its lifetime is
+// the process, and winmm is almost always already loaded by the game anyway.
+void EnsureWinmmResolved() {
+    static bool s_tried = false;
+    if (s_tried) return;
+    s_tried = true;
+
+    wchar_t path[MAX_PATH] = {};
+    UINT n = GetSystemDirectoryW(path, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) {
+        LOG_WARN("Mailbox: GetSystemDirectoryW failed (err=%lu) — timer resolution "
+                 "stays at the system default", GetLastError());
+        return;
+    }
+    wcsncat_s(path, L"\\winmm.dll", _TRUNCATE);
+
+    HMODULE h = LoadLibraryW(path);
+    if (!h) {
+        LOG_WARN("Mailbox: LoadLibraryW(System32 winmm.dll) failed (err=%lu) — timer "
+                 "resolution stays at the system default", GetLastError());
+        return;
+    }
+    g_timeBeginPeriod = reinterpret_cast<TimePeriodFn>(GetProcAddress(h, "timeBeginPeriod"));
+    g_timeEndPeriod   = reinterpret_cast<TimePeriodFn>(GetProcAddress(h, "timeEndPeriod"));
+    if (!g_timeBeginPeriod || !g_timeEndPeriod) {
+        LOG_WARN("Mailbox: winmm timeBeginPeriod/timeEndPeriod not found — timer "
+                 "resolution stays at the system default");
+        g_timeBeginPeriod = nullptr;   // never use one without the other
+        g_timeEndPeriod   = nullptr;
+    }
+}
+
+// Unresolvable → report a non-zero (failure) rc so the caller's existing
+// "log and proceed" path runs and the paired EndPeriod is skipped.
+MMRESULT BeginTimePeriod(UINT ms) {
+    EnsureWinmmResolved();
+    return g_timeBeginPeriod ? g_timeBeginPeriod(ms) : TIMERR_NOCANDO;
+}
+
+void EndTimePeriod(UINT ms) {
+    if (g_timeEndPeriod) g_timeEndPeriod(ms);
+}
+
+} // namespace
+
 // ---- Polling thread ----
 
 static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
@@ -128,7 +201,7 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
     // exits cleanly. MMSYSERR_NOERROR == 0; non-zero just logs (caller decision
     // is to proceed: even on failure the worst case is Sleep granularity falls
     // back to the system default, not a correctness break).
-    MMRESULT tbpRc = timeBeginPeriod(kPollIntervalMs);
+    MMRESULT tbpRc = BeginTimePeriod(kPollIntervalMs);
     if (tbpRc != TIMERR_NOERROR) {
         LOG_WARN("Mailbox: timeBeginPeriod(%u) failed rc=%u — Sleep granularity "
                  "may fall back to system default", kPollIntervalMs, tbpRc);
@@ -218,7 +291,7 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
     }
 
     if (tbpRc == TIMERR_NOERROR) {
-        timeEndPeriod(kPollIntervalMs);
+        EndTimePeriod(kPollIntervalMs);
     }
 
     LOG_INFO("Mailbox: polling thread stopped");

@@ -6,6 +6,40 @@ a goal to the panels / buttons that get you there. Add new recipes as separate
 
 -----
 
+## Getting `UE5Dumper.dll` into the game — which of the four routes?
+
+They are ranked, and the ranking is repeated in the UI (Proxy Deploy panel header +
+each button's tooltip). Pick the first one that fits your situation.
+
+| # | Route | Where | Use it when |
+|---|---|---|---|
+| ① | **Deploy a proxy DLL** | Proxy Deploy tab → *Deploy* | You can restart the game. It loads with the game, survives restarts, and Cheat Engine is never involved. **The default answer.** |
+| ② | **Inject into a running game** | Proxy Deploy tab → *Inject into running game…* | The game is already up and you didn't deploy a proxy. Nothing to install, but you repeat it every launch. |
+| ③ | **From Cheat Engine** | Tools ▸ *Install CE autorun Helper* — or ▸ *Add "Inject DLL" Record* | You work inside CE anyway. See below. |
+| ④ | **Standalone `dist\UE5CEDumper.CT`** | Open it in CE, tick the record | Developer fallback. Costs you a two-stage table load (CE holds one table at a time), so prefer ③. |
+
+### ③ has two flavours — pick by how often you use CE
+
+- **`Install CE autorun Helper`** *(permanent, no plugin needed)* — writes `ue5_autorun.lua` into
+  `<CheatEngine>\autorun\`. CE runs that folder at start-up, so **every** table then has
+  `ue5_inject()` / `ue5_shutdown()`, plus a **UE5CEDumper: Inject DLL** entry in CE's main menu.
+  Installs straight into a running Cheat Engine when one is found. **Takes effect on the next CE
+  start.** Re-run it after moving UE5DumpUI — the DLL path is baked into the file.
+- **`Add "Inject DLL" Record`** *(one-off, needs the AOBMaker plugin)* — pushes an
+  `[ENABLE]`/`[DISABLE]` record into the table you already have open, grouped under
+  *UE5CEDumper (DLL)*. Tick it to inject. Without the plugin it lands on the clipboard as CE XML for
+  you to paste.
+
+Both poll the DLL until its pipe server is actually up rather than sleeping a fixed budget, and
+both report a real error if start-up fails or times out.
+
+### After any route
+
+Launch `UE5DumpUI.exe` and click **Connect**. If the DLL is already present, every route detects it
+and skips re-injecting rather than double-mapping.
+
+-----
+
 ## Walking the engine from the top: "Start from GameEngine"
 
 The Live Walker tab has two root entry points:

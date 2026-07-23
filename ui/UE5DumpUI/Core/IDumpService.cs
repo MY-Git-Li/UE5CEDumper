@@ -68,6 +68,25 @@ public interface IDumpService
 
     // --- Live Data Walker ---
     Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null, int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// Walk N instances in as few round-trips as possible (chunked at ~200).
+    ///
+    /// <para><b>Why it exists (measured, multipipe-eval.md §10.4):</b> a Copy CE XML
+    /// issued <b>20,357</b> single <c>walk_instance</c> calls, and the cost split as
+    /// dll 30% / <b>ipc 59-73%</b> / ui ~0%. Per call the round-trip overhead
+    /// (0.16-0.21 ms) is roughly TWICE the actual walk (0.08 ms) — so collapsing the
+    /// calls, not changing the dispatch model, is the lever.</para>
+    ///
+    /// <para>Results are positionally aligned with <paramref name="items"/>. A chunk
+    /// that fails for any reason — including an older DLL that does not know the
+    /// command — is replayed as single calls, so behaviour degrades rather than
+    /// losing data.</para>
+    /// </summary>
+    Task<IReadOnlyList<InstanceWalkResult>> WalkInstanceBatchAsync(
+        IReadOnlyList<(string Addr, string? ClassAddr)> items,
+        int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false,
+        CancellationToken ct = default);
     Task<WorldWalkResult> WalkWorldAsync(int actorLimit = 200, int arrayLimit = 64, CancellationToken ct = default);
     // newestFirst: scan GObjects from the high (most-recently-allocated) end so
     // the newest runtime spawns survive the limit cap (catch a just-spawned
@@ -350,6 +369,17 @@ public interface IDumpService
     Task PeProfileStopAsync(CancellationToken ct = default);
     // Fetch the ranked fire-count table (top <paramref name="limit"/> by count).
     Task<PeProfileResult> PeProfileGetAsync(int limit = 200, CancellationToken ct = default);
+
+    /// <summary>
+    /// Fetch a <c>get_diagnostics</c> snapshot: how long each pipe command has
+    /// occupied the DLL's dispatcher, plus Win32 process facts and game-thread
+    /// health. Read-only and safe to poll.
+    /// </summary>
+    Task<DiagnosticsResult> GetDiagnosticsAsync(int limit = 25, CancellationToken ct = default);
+
+    /// <summary>Clear the dispatch counters and restart the uptime clock, so a
+    /// measurement can be scoped to one deliberate action.</summary>
+    Task ResetDiagnosticsAsync(CancellationToken ct = default);
 
     // --- Extra Scan (user-triggered aggressive fallback) ---
     Task<RescanStartResult> StartRescanAsync(CancellationToken ct = default);

@@ -27,6 +27,7 @@
 #include "Grausam.h"   // Grausam::SetForegroundLock — keep game thread alive when backgrounded
 #include "Edel.h"
 #include "Linie.h"     // Live PE profiler — pe_profile_start/stop/get
+#include "Sense.h"     // Diagnostics — dispatch timing + process facts
 #include "BuildStamp.h"
 
 #include <json.hpp>
@@ -722,9 +723,21 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         // mid-command disconnect (a long bulk scan blocks this thread). inFlight
         // is set only around DispatchCommand (CPU-bound; not touching the pipe),
         // never around ReadLine/WriteLine, so the monitor's peek never races I/O.
+        // Time exactly the inFlight window. That span is the CPU-bound,
+        // pipe-free stretch during which this connection's dispatcher is
+        // unavailable to any other command — i.e. precisely the head-of-line
+        // blocking docs/multipipe-eval.md blames for UI lag, which until now
+        // nothing measured. See Sense.h.
         conn->inFlight.store(true, std::memory_order_relaxed);
+        // QPC, not GetTickCount64: its ~15.6 ms granularity floored every sub-tick
+        // dispatch to 0, so a live run of 1397 walk_instance calls reported
+        // "0 ms total, max 15 ms" — an artefact of which calls straddled a tick,
+        // not a measurement. Most pipe commands sit far below that granularity.
+        const uint64_t dispatchStart = Sense::NowTicks();
         std::string response = DispatchCommand(conn, line);
+        const uint64_t dispatchUs = Sense::TicksToUs(Sense::NowTicks() - dispatchStart);
         conn->inFlight.store(false, std::memory_order_relaxed);
+        Sense::RecordDispatch(cmd.empty() ? std::string("(unparsed)") : cmd, dispatchUs);
 
         if (!response.empty()) {
             if (!WriteLine(*conn, response)) {
@@ -758,6 +771,7 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         Radar::SessionManager::Instance().DropAll();
         Radar::GroupSessionManager::Instance().DropAll();
         Linie::Reset();   // last client gone — drop any live PE-profile recording
+        Sense::Reset();   // ...and restart diagnostics so the next session's numbers are its own
         // Un-hide any see-through occluders + stop its worker — the header contract is
         // "un-hidden on disable / disconnect", and there's no UI left to toggle it.
         // Cheap no-op when see-through was never enabled. (M3)
@@ -1507,6 +1521,38 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             return Renge::MakeResponse(id, data).dump();
         }
 
+        // EncodeInstanceWalkToJson — shared serialiser used by both
+        // walk_instance (single) and walk_instance_batch. Same contract as
+        // EncodeClassInfoToJson below: centralising the emit guarantees the two
+        // pipe paths produce byte-identical instance objects, so the CE export
+        // can switch to the batch without a field silently changing shape.
+        // (Layer 2 of the walk_class_batch safety net.)
+        auto EncodeInstanceWalkToJson = [&](const Ubel::InstanceWalkResult& result) -> json {
+            json data;
+            data["addr"]       = Renge::AddrToStr(result.addr);
+            data["name"]       = result.name;
+            data["class"]      = result.className;
+            data["class_addr"] = Renge::AddrToStr(result.classAddr);
+            data["outer"]      = Renge::AddrToStr(result.outerAddr);
+            data["outer_name"] = result.outerName;
+            data["outer_class"]= result.outerClassName;
+            // Optional keys stay OPTIONAL — emitting them unconditionally would
+            // change the single-call wire shape and break byte-equivalence.
+            if (result.isDefinition)
+                data["is_definition"] = true;
+            if (result.isStale)
+                data["stale"] = true;
+            if (result.propsSize > 0)
+                data["props_size"] = result.propsSize;
+
+            json fields = json::array();
+            for (const auto& fv : result.fields) {
+                fields.push_back(SerializeField(fv));
+            }
+            data["fields"] = fields;
+            return data;
+        };
+
         // EncodeClassInfoToJson — shared serialiser used by both
         // walk_class (single) and walk_class_batch. Centralising the
         // emit logic guarantees the two pipe paths produce byte-
@@ -1760,26 +1806,63 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
 
             auto result = Ubel::WalkInstance(addr, classAddr, arrayLimit, previewLimit, fillGaps);
 
-            json data;
-            data["addr"]       = Renge::AddrToStr(result.addr);
-            data["name"]       = result.name;
-            data["class"]      = result.className;
-            data["class_addr"] = Renge::AddrToStr(result.classAddr);
-            data["outer"]      = Renge::AddrToStr(result.outerAddr);
-            data["outer_name"] = result.outerName;
-            data["outer_class"]= result.outerClassName;
-            if (result.isDefinition)
-                data["is_definition"] = true;
-            if (result.isStale)
-                data["stale"] = true;
-            if (result.propsSize > 0)
-                data["props_size"] = result.propsSize;
+            // Shared serialiser — walk_instance_batch emits the SAME function, so
+            // single and batch responses cannot drift field-by-field.
+            return Renge::MakeResponse(id, EncodeInstanceWalkToJson(result)).dump();
+        }
 
-            json fields = json::array();
-            for (const auto& fv : result.fields) {
-                fields.push_back(SerializeField(fv));
+        // ── walk_instance_batch: N instance walks in ONE round-trip ──
+        //
+        // MEASURED justification (build 2327, multipipe-eval.md §10.4): a Copy CE
+        // XML issued 20,357 single walk_instance calls, and the split was
+        // dll 30% / ipc 59-73% / ui ~0%. The per-call IPC (0.16-0.21 ms) is roughly
+        // TWICE the actual walk (0.08 ms) and is pure round-trip overhead — exactly
+        // what collapsing N calls into one removes.
+        //
+        // Deliberately a trivial loop over the single-call path: that is a
+        // STRUCTURAL guarantee of equivalence (layer 1 of the walk_class_batch
+        // safety net), not a promise. Any cleverness here would have to be proven
+        // instead of being true by construction.
+        if (cmd == Renge::CMD_WALK_INSTANCE_BATCH) {
+            if (!request.contains("items") || !request["items"].is_array()) {
+                return Renge::MakeError(id, "Missing or non-array 'items'").dump();
             }
-            data["fields"] = fields;
+            // Per-batch defaults; each item may override.
+            int32_t defArrayLimit   = request.value("array_limit", 64);
+            int32_t defPreviewLimit = request.value("preview_limit", 2);
+            bool    defFillGaps     = request.value("fill_gaps", false);
+
+            json arr = json::array();
+            for (const auto& item : request["items"]) {
+                // A malformed element must not abort the batch — the UI's fallback
+                // replays a failed chunk as single calls, and losing the whole
+                // chunk's good entries would defeat that.
+                if (!item.is_object()) { arr.push_back(json::object()); continue; }
+
+                uintptr_t a = 0;
+                std::string as = item.value("addr", "");
+                if (as.empty() || !Renge::TryStrToAddr(as, a)) {
+                    arr.push_back(json::object());
+                    continue;
+                }
+                uintptr_t ca = 0;
+                std::string cas = item.value("class_addr", "");
+                if (!cas.empty()) Renge::TryStrToAddr(cas, ca);
+
+                auto r = Ubel::WalkInstance(a, ca,
+                                            item.value("array_limit",   defArrayLimit),
+                                            item.value("preview_limit", defPreviewLimit),
+                                            item.value("fill_gaps",     defFillGaps));
+                arr.push_back(EncodeInstanceWalkToJson(r));
+
+                // Same cooperative-cancel contract as every other bulk loop: a
+                // disconnect mid-batch returns what is done rather than walking on.
+                if (Tot::Requested()) break;
+            }
+
+            json data;
+            data["instances"] = arr;
+            data["count"]     = static_cast<int>(arr.size());
             return Renge::MakeResponse(id, data).dump();
         }
 
@@ -3101,6 +3184,86 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             Sein::Info("PIPE:profile", "pe_profile_stop: recording frozen");
             json data;
             data["recording"] = false;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // ── get_diagnostics: Sense self-health telemetry ──
+        // Tier 1 (our own dispatch cost) + Tier 2 (Win32 process facts). Read
+        // only; safe to poll. See Sense.h for why this exists.
+        if (cmd == Renge::CMD_GET_DIAGNOSTICS) {
+            int limit = request.value("limit", 25);
+            if (limit < 0) limit = 0;
+
+            json data;
+            const uint64_t uptimeMs = Sense::UptimeMs();
+            const uint64_t busyUs   = Sense::TotalBusyUs();
+            const double   busyMs   = double(busyUs) / 1000.0;
+            data["uptime_ms"]        = uptimeMs;
+            data["total_dispatches"] = Sense::TotalDispatches();
+            // Fractional ms: the commands this exists to measure are mostly
+            // sub-millisecond, so an integer would round the interesting ones away.
+            data["total_busy_ms"]    = busyMs;
+            // The headline number: what fraction of wall-clock was a dispatcher
+            // occupied? A high value with a lagging UI is the evidence Phase 1
+            // (non-blocking dispatch) would help; a low one says look elsewhere.
+            data["busy_percent"] = (uptimeMs > 0)
+                ? (busyMs * 100.0 / double(uptimeMs)) : 0.0;
+
+            json cmds = json::array();
+            for (const auto& s : Sense::TopCommands(static_cast<size_t>(limit))) {
+                json e;
+                e["cmd"]      = s.cmd;
+                e["count"]    = s.count;
+                e["total_ms"] = double(s.totalUs) / 1000.0;
+                e["max_ms"]   = double(s.maxUs)   / 1000.0;
+                e["last_ms"]  = double(s.lastUs)  / 1000.0;
+                e["avg_ms"]   = (s.count > 0)
+                    ? (double(s.totalUs) / double(s.count) / 1000.0) : 0.0;
+                cmds.push_back(e);
+            }
+            data["commands"] = cmds;
+
+            const Sense::ProcessStat ps = Sense::SampleProcess();
+            json proc;
+            proc["working_set_bytes"] = ps.workingSetBytes;
+            proc["private_bytes"]     = ps.privateBytes;
+            proc["peak_working_set"]  = ps.peakWorkingSet;
+            proc["handle_count"]      = ps.handleCount;
+            proc["thread_count"]      = ps.threadCount;
+            proc["cpu_percent"]       = ps.cpuPercent;   // -1 = needs a 2nd sample
+            data["process"] = proc;
+
+            // Game-thread health from Stark — already public, and the other half
+            // of "is the game starved?". A stalled game thread makes every
+            // invoke-bearing command sit in the dispatcher.
+            json gt;
+            gt["hook_active"]           = Stark::IsHookActive();
+            gt["hook_fire_count"]       = Stark::GetHookFireCount();
+            // MsSinceLastHookFire returns UINT64_MAX for "never fired — liveness
+            // unknown". Do NOT put that on the wire: it exceeds int64 and every
+            // JSON reader with a signed integer type chokes on it (System.Text.Json
+            // reports it identically to a fractional value, which sends you looking
+            // in the wrong place). -1 is the same "unknown" in a range everyone can
+            // parse.
+            const uint64_t msSinceFire = Stark::MsSinceLastHookFire();
+            gt["ms_since_last_fire"]    = (msSinceFire == UINT64_MAX)
+                                            ? int64_t(-1) : int64_t(msSinceFire);
+            gt["responsive"]            = Stark::IsGameThreadResponsive();
+            gt["invoke_timeout_ms"]     = Stark::GetInvokeTimeoutMs();
+            data["game_thread"] = gt;
+
+            // Object-pool size over time is a cheap GC / leak signal. Aura, not
+            // the UE5_* export layer — the pipe shouldn't reach through the C ABI
+            // to reach something it already links directly.
+            data["gobjects_count"] = Aura::GetCount();
+
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_RESET_DIAGNOSTICS) {
+            Sense::Reset();
+            json data;
+            data["ok"] = true;
             return Renge::MakeResponse(id, data).dump();
         }
 

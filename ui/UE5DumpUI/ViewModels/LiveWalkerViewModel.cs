@@ -3402,6 +3402,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrEmpty(CurrentAddress) || Breadcrumbs.Count == 0) return;
         if (IsExporting) return;   // an export is already running — its Cancel button is showing
 
+        // Record what this heavy operation costs the DLL dispatcher. Automatic
+        // rather than a measurement session: the evidence then accumulates from
+        // real use instead of only the scenario somebody thought to test. Degrades
+        // to a no-op when not connected; never affects the operation.
+        await using var _perf = await Services.DiagnosticsProbe.BeginAsync(_dump, _log, "Copy CE XML");
+
         var cts = _exportCts = new CancellationTokenSource();
         try
         {
@@ -3660,6 +3666,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task ExportCeFieldXmlAsync()
     {
+        // Record what this heavy operation costs the DLL dispatcher. Automatic
+        // rather than a measurement session: the evidence then accumulates from
+        // real use instead of only the scenario somebody thought to test. Degrades
+        // to a no-op when not connected; never affects the operation.
+        await using var _perf = await Services.DiagnosticsProbe.BeginAsync(_dump, _log, "Copy CE Field");
+
         // Use the multi-selection snapshot; fall back to SelectedField for
         // robustness if SelectionChanged hasn't synced yet (e.g. when the
         // command fires programmatically right after a single-row selection).

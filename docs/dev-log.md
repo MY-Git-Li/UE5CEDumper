@@ -20,6 +20,747 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 - RESULT: struct-tree batching is 1.71x, and the IPC cost model was wrong (build 2335)
+
+`top:` names `walk_instance_batch` - the acceptance criterion - and the same Copy CE XML on SEED
+went **5,893.3 -> 3,437.1 ms (1.71x)**, dispatches **22,522 -> 1,355 (16.6x fewer)**.
+
+| | before | after |
+|---|---:|---:|
+| wall | 5,893.3 ms | **3,437.1 ms** |
+| dll | 1,751.7 | 1,505.5 |
+| **ipc** | **3,531.7** | **1,278.4** |
+| ui | 609.9 | 653.2 |
+
+**The projection was 2.4-3.5x; reality is 1.71x - and the gap is informative.** Section 10.4 flagged
+the projection as an upper bound because it assumed batching adds nothing. The data now says
+precisely what it adds: **IPC is not purely a per-round-trip cost.** At the old 0.157 ms/call, 1,355
+calls should have cost ~212 ms; they cost 1,278 ms. Of the original 3,532 ms, **~2,253 ms was fixed
+per-round-trip overhead (removed)** and **~1,066 ms is payload-proportional** - the same bytes still
+cross the pipe however many messages carry them. `ui` rose 610 -> 653 ms for the same reason: bigger
+JSON documents cost more to parse.
+
+Two secondary findings, recorded in [multipipe-eval.md](multipipe-eval.md) section 10.5:
+- **Average batch size is ~16.6**, far below the 200 chunk cap - the limit is struct fan-out, not
+  the cap, so raising the chunk would achieve nothing.
+- **Worst single dispatch rose 14.5 -> 85.2 ms** (a batch does ~16 walks). Harmless at that scale,
+  but it is the exact metric Phase 1 cared about, and batching moves it the wrong way - one more
+  reason those two ideas do not belong together.
+
+**Next lever is BYTES, not messages.** The residual 3,437 ms is dll 1,506 (real work) + ipc 1,278
+(mostly payload) + ui 653 (parse); trimming fields the export never reads would attack the last two
+together. Left unquantified on purpose - nobody has measured what share of a `walk_instance` payload
+the CE export actually consumes, and this cycle already showed what happens when a projection
+outruns its measurement.
+
+-----
+
+## 2026-07-23 — The batching was aimed at the wrong loop; fixed at the struct tree (build 2335; dev, UI-only)
+
+Build 2329 shipped `walk_instance_batch` and batched the CE export's object-pointer
+drilldown. The next live run showed **no change at all** — 22,522 dispatches, still
+`walk_instance 22,521x`, and no fallback warnings, so the batch command was simply never
+called:
+
+```
+PERF Copy CE XML: wall 5,893.3 ms · busy 1,751.7 ms (29.7%) · 22522 dispatches
+   · split dll 1,751.7 / ipc 3,531.7 / ui 609.9 ms · top: walk_instance 1,751.7ms/22521x
+```
+
+**The calls come from the STRUCT tree, not the pointer drilldown.**
+`ResolveStructFieldsIntoAsync` → `ResolveStructRecursiveAsync` issues one
+`walk_instance` per `StructProperty` and recurses into nested structs — and a UE class is
+full of them (FVector, FTransform, custom structs, each nesting further). The
+object-pointer loop that got batched is a minor contributor by comparison.
+
+**Why the fix isn't "batch that recursion too".** `ResolveStructRecursiveAsync` produces a
+**depth-first flattened list**, and that traversal order — with its accumulated
+`Parent.Child` name prefixes and summed offsets — *is* the emitted CE XML's field order.
+Restructuring it breadth-first would reorder every exported struct.
+
+So: a separate **breadth-first prefetch** (`PrefetchStructTreeAsync`) walks the tree one
+batched call per level, bounded by the same `MaxStructDepth`, and the **unchanged**
+depth-first emit reads from that cache. Output order is preserved by construction, because
+the emit traversal is literally the same code.
+
+Details worth keeping:
+- **One shared predicate** (`IsRecursableStruct`) decides both what the prefetch fetches and
+  what the emit recurses into, so the two can't drift. A mismatch is harmless either way — a
+  superset wastes a walk, a subset falls back to a live call — but matching is what makes it pay.
+- **The cache is a pure optimisation.** Any miss (older DLL, failed batch, an unanticipated
+  shape) walks live exactly as before. `PrefetchStructTreeAsync` swallows batch failures and
+  returns what it has.
+- **Dedup doubles as the cycle guard**: a self-referential struct is fetched once, then the
+  depth bound stops the descent.
+- Cache key includes the class address — the same data address walked as a different class is
+  a different walk.
+
+**Verification:** 2911 tests green (+4), the important one comparing batched vs
+batch-disabled output field-for-field (names, types, offsets, order) over a deliberately
+asymmetric tree. AOT publish clean. **Not verified: the speed-up** — that needs another live
+Copy CE XML, and this time the check is simple: `top:` should show `walk_instance_batch`,
+not `walk_instance`.
+
+**Process note:** build 2329's claim rested on the round-trip count alone; a single grep of
+the next PERF line for `walk_instance_batch` would have caught the miss immediately. That
+check is now the stated acceptance criterion rather than the projection.
+
+-----
+
+## 2026-07-23 — `walk_instance_batch`: act on the measurement (build 2329; dev, DLL + UI)
+
+Implements what §10.4 concluded. A Copy CE XML issued **20,357** single `walk_instance` calls whose
+cost split as dll 30% / **ipc 59-73%** / ui ~0% — per call, 0.16-0.21 ms of round-trip overhead
+carrying 0.08 ms of actual work. Collapsing the calls is the lever.
+
+**Built to the `walk_class_batch` precedent, all three safety layers:**
+- **Layer 1 — structural.** The DLL handler is a trivial `for` loop over `Ubel::WalkInstance`, the
+  same function the single command calls. Equivalence is true by construction, not by promise.
+- **Layer 2 — shared serialiser.** New `EncodeInstanceWalkToJson` on the DLL side (the single
+  command's inline emit was extracted into it) and `DumpService.DeserializeInstanceWalk` on the UI
+  side. One emitter, one parser, so the two paths cannot disagree about a field — including the
+  **optional** keys (`is_definition` / `stale` / `props_size`), which is where an independently
+  written batch encoder diverges first.
+- **Layer 3 — equivalence test.** `WalkInstanceBatchEquivalenceTests` runs the same fixture through
+  both paths and compares field-for-field, and covers chunk splitting, ordering, and both
+  degradation paths.
+
+**The export walks breadth-first per level now.** `ResolvePointerInstancesRecursiveAsync` collects
+every pointer target at one depth, walks them in one batched call, then recurses. That restructuring
+is what makes batching possible at all — targets at one depth are independent. The `visited` /
+`resolved` guards deliberately stay outside the batch so cycle protection and dedup behave exactly
+as before.
+
+**Two failure modes, both degrading rather than losing data:**
+- A batch that throws — including an **older DLL that doesn't know the command** — replays that
+  chunk as single calls. Each can then fail independently, exactly as before batching existed.
+- **A short or long reply also falls back.** Consuming N-1 rows positionally would silently attach
+  one instance's fields to a *different* address — in a CE export that is a wrong pointer chain that
+  looks perfectly valid. There is a test for precisely this.
+
+**Verification:** all 4 proxies + DLL build clean; 2907 tests green (+7). **Not verified: the actual
+speed-up** — the projection is 2.4-3.5×, but it is an upper bound (it assumes batching adds nothing,
+while a larger payload costs something on both sides). The next live Copy CE XML will print its own
+`split dll / ipc / ui` line and settle it.
+
+-----
+
+## 2026-07-23 — MEASURED: IPC is 59-73% of a heavy export; batch `walk_instance` (build 2327; docs)
+
+The decomposition built earlier today, read on real data. Three Copy CE XML runs on **SEED BATTLE
+DESTINY REMASTERED (UE 4.27)**:
+
+| run | wall | dll | ipc | ui | calls | per call (dll / ipc / ui) |
+|---|---:|---:|---:|---:|---:|---|
+| A | 5,548.3 ms | 1,689.5 (30.5%) | **3,290.0 (59.3%)** | 568.8 (10.3%) | 20,357 | 0.083 / 0.162 / 0.028 ms |
+| B | 555.1 ms | 157.7 (28.4%) | **406.3 (73.2%)** | 0.0 (0%) | 1,901 | 0.083 / 0.214 / 0.000 ms |
+| C | 614.6 ms | 165.9 (27.0%) | **411.8 (67.0%)** | 36.9 (6.0%) | 2,108 | 0.079 / 0.195 / 0.018 ms |
+
+**IPC is the cost — 59-73% of wall-clock, roughly 2× the actual DLL work — and it is exactly the
+part batching removes.** The per-call figures barely move across a 10× spread in operation size,
+which is what a fixed per-round-trip overhead looks like. UI-side per-result work is negligible
+(0.000-0.028 ms/call), so the export tree building is *not* where the time goes — worth knowing,
+because that was the other plausible suspect.
+
+Projected at the established ~200/call chunk: **2.4-3.5×** (A: 5,548 → ~2,275 ms, 20,357 round-trips
+→ 102).
+
+**Treat that as an upper bound.** It assumes batching removes IPC proportionally and adds nothing,
+whereas real batching serialises a larger payload and parses a bigger document — some of which
+reappears in `dll` and `ui`. `ui` in run B hit the zero floor (transport ≥ wall), so it is
+"negligible, at or below the measurement floor", not precisely quantified. And `dll` at ~0.08 ms/call
+is untouched by batching: run A cannot go below its 1,689 ms of actual walking.
+
+**This settles multipipe Phase 1 harder than the first measurement did.** Phase 1 targets the `dll`
+share (27-30%); the cost is `ipc` (59-73%). It would have been aimed at the smaller half of the
+wrong problem — and it had already been built and reverted once on that premise.
+
+Recommendation recorded in [multipipe-eval.md](multipipe-eval.md) §10.4 and [todo.md](todo.md):
+**batch `walk_instance`**, following the `walk_class_batch` / `search_properties_batch` precedent
+*including* their three-layer equivalence safety net, because a silently dropped field in a CE
+export is invisible until someone needs it months later.
+
+-----
+
+## 2026-07-23 — Decompose the per-call overhead: dll / ipc / ui (build 2327; dev, UI-only)
+
+Build 2324 proved the dispatcher is not the bottleneck and pointed at `walk_instance`'s **20,357
+round-trips per export** instead — 0.088 ms of DLL work carrying 0.208 ms of overhead. But it could
+not say how much of that 0.208 ms **batching would actually recover**: pipe latency vanishes when
+200 calls become one, UI-side per-result work does not. Promising a speed-up on that basis would
+have been guessing.
+
+**One new measurement closes the gap.** `PipeTransportStats` accumulates time spent inside
+`PipeClient.SendAsync` (write → response). Combined with the two figures already collected, every
+part of an operation is now accounted for:
+
+| part | derivation | does batching remove it? |
+|---|---|---|
+| `dll` | Sense dispatcher busy | no — it is the actual work |
+| `ipc` | transport − dll | **yes** — the round-trip itself |
+| `ui`  | wall − transport | no — deserialise + per-result caller work |
+
+The PERF line gained both the totals and the per-call breakdown, the latter at microsecond
+resolution because the whole decision turns on sub-millisecond figures that `N1` would round away:
+
+```
+PERF Copy CE XML: wall 5,362.7 ms · dispatcher busy 1,651.3 ms (30.8%) · 20357 dispatches
+   · split dll 1,651.3 / ipc 2,348.7 / ui 1,362.7 ms
+   · (per call: dll 0.081 / ipc 0.115 / ui 0.067 ms)
+```
+
+Details worth keeping:
+- **Transport is timed in a `finally`**, so a cancelled or faulted request still counts. Dropping
+  those would flatter the IPC figure exactly when the pipe is misbehaving.
+- **The probe subtracts its own two round-trips** from the call count, the same reasoning that
+  already excludes its `get_diagnostics` from the busy total.
+- **Monotonic snapshots, differenced** — never a reset — so two overlapping probes cannot clobber
+  each other's baseline.
+- **Every derived figure is floored at zero.** Concurrency or clock skew can make transport look
+  smaller than the DLL time it contains, and a negative "ipc" in a log is worse than a wrong one.
+- **Stated caveat:** transport is summed per call, so with both lanes sending concurrently the sum
+  can exceed wall-clock. The heavy exports this measures are sequential, but the number is not
+  exclusive time and must not be read as such.
+
+Cost is one `Stopwatch.GetTimestamp` pair and two interlocked adds per pipe call.
+
+**Verification:** 2900 tests green (+4), including the split arithmetic shaped on the real Copy CE
+XML numbers, the omit-when-unsampled path, and the negative-guard. **Not verified: real split
+figures** — that needs another live export, and is the point of the change.
+
+-----
+
+## 2026-07-23 — MEASURED: the dispatcher is not the bottleneck; Phase 1 is WON'T-DO (build 2324; docs)
+
+The question this whole diagnostics chain was built to answer, answered. `multipipe-eval.md`'s core
+claim — that DLL-side serial-dispatch head-of-line blocking is what makes the UI lag — was reasoned
+in 2026-06 and never measured. It is now, on two games spanning both engine generations: **Elliot
+(UE 5.4)** and **SEED BATTLE DESTINY REMASTERED (UE 4.27)**, 24,178 dispatches across five real
+Copy CE XML / Copy CE Field runs.
+
+**Dispatcher busy: 29.8% aggregate**, and remarkably stable — 22-31% across operations spanning
+2.6 ms to 5.4 s. **Worst single dispatch out of 24,178: 14.3 ms.**
+
+**Verdict: do not build Phase 1.** Three independent readings agree. The dispatcher is idle ~70% of
+wall-clock, so non-blocking dispatch can only recover a slice of the busy 30% — and only if
+something were queued behind it, which in a single-user export there is not. There is no
+head-of-line spike to remove: nothing holds the read loop for more than a frame. And Phase 1 is
+expensive — it was shipped and reverted once already (build 1840) and a correct version needs
+overlapped/async pipe I/O.
+
+**What the data says the real lever is: call count.** `walk_instance` is 100% of the dispatcher cost
+in every single row, and one Copy CE XML issued **20,357** of them. Per round-trip: **0.088 ms
+inside the DLL, 0.208 ms everywhere else** — pipe latency, JSON envelope, UI-side deserialise. **2.4x
+the actual work is overhead.** Batching at the established ~200/call chunk (the pattern
+`search_properties_batch` and `walk_class_batch` already use) would collapse 24,178 round-trips to
+~121.
+
+**Stated limit on that estimate:** this data cannot decompose the 0.208 ms into pipe latency (which
+batching removes) and UI-side per-result work (which it does not). The trend is suggestive —
+per-call overhead falls from 0.427 ms at 386 calls to 0.182 ms at 20,357 — but the split must be
+measured before promising a number. Recorded as a candidate with that caveat rather than as a plan.
+
+Written up in [multipipe-eval.md](multipipe-eval.md) §10 with the full table; Phase 1's status in
+that document changes from "phased recommendation" to **WON'T-DO**, revisit only if a workload
+appears whose *single* dispatches block for hundreds of ms.
+
+**Also confirmed this run:** the winmm proxy on a second game — SEED is **UE 4.27**, so the proxy is
+now verified across both engine generations, 180/180 exports forwarded on each.
+
+-----
+
+## 2026-07-23 — winmm proxy LIVE-VERIFIED; the PERF records immediately found two of their own bugs (build 2324; dev)
+
+**winmm proxy works.** First live run, The Adventures of Elliot (UE 5.4):
+
+```
+DllMain ProxyStart: proxy DLL mode — starting pipe server only (no scan)
+DllMain ProxyStart: pipe server started
+[PROXY] winmm proxy: lazily forwarded 180/180 exports to real System32 winmm.dll
+UE5_Init: Complete (UE504, GObjects=0x149BFF150, GNames=0x149B1B600, Objects=326364)
+```
+
+**180/180 forwarded**, and at T+1.2 s — i.e. lazily, on a game thread after DllMain returned, exactly
+as designed rather than under the loader lock. Name sanity 10/10, full offset detection, GWorld
+found. The proxy family is now version / dinput8 / dxgi / winmm, all four working.
+
+**And the automatic PERF records earned their keep on their first outing** by exposing two defects in
+themselves — which a hand-run measurement session would very likely have shrugged past:
+
+```
+PERF Copy CE Field: wall 57.7 ms · dispatcher busy 93 ms (161.2%) · top: walk_instance 0ms/128x max 15ms
+```
+
+**161% busy, and the breakdown contradicting the total.** Two independent causes:
+
+1. **`GetTickCount64` was the wrong clock.** Its ~15.6 ms granularity floors every sub-tick dispatch
+   to zero, so 128 `walk_instance` calls summed to "0 ms" while one that happened to straddle a tick
+   read 15 ms. That is an artefact of tick alignment, not a measurement — and sub-millisecond
+   commands are precisely the population this exists to measure. `Sense` now times with
+   **QueryPerformanceCounter and accumulates microseconds**, reporting fractional ms on the wire
+   (`total_ms` / `max_ms` / `last_ms` became doubles, and the C# model with them).
+2. **The probe was measuring itself.** `busy` came from the global `total_busy_ms` delta, which
+   includes the probe's own opening `get_diagnostics` (~93 ms) — while the per-command ranking
+   already excluded it. Hence 93 ms of "busy" against a 57.7 ms operation whose top row showed 0 ms.
+   Busy is now **summed from the per-command deltas**, so the percentage and the breakdown agree by
+   construction rather than by coincidence.
+
+Both are pinned by regression tests carrying the real numbers from the log. Note that a genuine
+>100% remains possible and meaningful — the two-connection lane split can have two dispatchers busy
+at once — so the figure is deliberately not capped.
+
+**Verification:** all 4 proxies + main DLL build clean; 2896 tests green (+3). **Still to do: re-read
+the PERF lines with the fixed clock** — the pre-fix numbers above understate sub-ms commands and
+overstate short operations, so the multipipe Phase 1 decision should wait for fresh ones.
+
+-----
+
+## 2026-07-23 — Automatic PERF records around every heavy operation (build 2320; dev, UI-only)
+
+The user's idea, and better than the manual measurement session it replaces: a deliberate test run
+only ever covers the scenario somebody thought to try, and only if they remembered to reset the
+counters first. Recording every real **Copy CE XML / Copy CE Field / Value Scan (First & Next) /
+Snapshot capture** instead means the evidence for the multipipe Phase 1 decision accumulates from
+actual use — including the combinations nobody would think to test.
+
+New `Services/DiagnosticsProbe.cs` brackets each operation with two `get_diagnostics` snapshots and
+writes one `PERF` line to the `view` log:
+
+```
+PERF Value Scan (First): wall 2,340.0 ms · dispatcher busy 1,980 ms (84.6%) · 7 dispatches
+   · top: value_scan_begin 1900ms/1x max 1900ms, get_object_list 80ms/6x max 32ms
+```
+
+Design decisions that make the line trustworthy:
+- **Deltas, not absolutes.** Absolute totals answer "what has this session done"; the question is
+  what *this* operation cost. Wall-clock is measured locally rather than from the DLL's uptime, so a
+  `reset_diagnostics` landing mid-operation cannot produce a negative duration — every figure is
+  floored at zero and there is a test that fires a mid-operation reset.
+- **The probe excludes its own calls.** The opening snapshot is itself a dispatch that lands in the
+  closing one; without the filter every measurement would list the measurement.
+- **`await using`**, so the closing sample happens even when the operation throws or is cancelled.
+- **Never affects the operation.** No connection, an older DLL that doesn't know the command, a
+  mid-operation disconnect — all swallowed, and `BeginAsync` returns a working no-op probe rather
+  than null so call sites need no null handling. A diagnostic that breaks what it measures is worse
+  than no diagnostic.
+- **`MaxMs` is reported, not differenced** — it is a running high-water mark, so a delta would be
+  meaningless.
+
+Cost is two pipe round-trips (~0-125 ms each) around operations that run for seconds, so it is on
+unconditionally rather than behind a flag.
+
+**Verification:** 2893 tests green (+11), covering the delta arithmetic, the self-call exclusion, the
+mid-operation-reset floor, and the zero-length-operation divisor guard. **Not verified: the lines
+against a real heavy operation** — that is the point of the feature, and the next thing to look at.
+
+-----
+
+## 2026-07-23 — winmm.dll proxy: the spare slot (build 2317; dev, DLL + UI)
+
+The 4th proxy. **Built on the slot-contention trigger, not the coverage one** — the n=24 census
+(build 2313) stands: winmm and dxgi both cover 100% of installed UE games and winmm reaches exactly
+zero that dxgi misses. What justifies it is the other half of that finding: **a proxy only works if
+its filename is free.** `dxgi.dll` is the name ReShade and many mod loaders take, `version.dll` is
+likewise often occupied (P3R ships its own), and with both gone the only remaining choice was
+dinput8 at 2/24. winmm is the spare universally-viable slot, so users now get a real dxgi/winmm
+choice.
+
+**Generated, never hand-written.** New `scripts/gen_proxy_forwarders.py` reads the export table of
+the real System32 DLL and emits all three artefacts in the shapes the dxgi proxy already uses —
+`Lugner_Winmm.cpp` (the `mProcs[]` table + lazy System32 resolver), `Lugner_Winmm.asm` (180 MASM
+lazy jmp-thunks), `ProxyWinmm.def` (`name = fN @ordinal` + our C ABI). At 180 exports hand-editing
+was never an option; `--check` verifies the checked-in files are current. The generator carries the
+two hard-won constraints in its header: jmp-thunks rather than C forwarders (a bare `jmp` forwards
+ANY signature, which matters because the export table holds undocumented internals), and LAZY
+resolution rather than eager DllMain (eager resolution crashed Octopath Traveler through the dxgi
+proxy by running LoadLibrary under the loader lock).
+
+**Verified against the real DLL rather than by inspection:** 180/180 forwarding exports present,
+**every ordinal matching System32 winmm exactly**, zero missing, plus the 60-symbol UE5 ABI
+including `g_invokeMailbox`. One ordinal-only export (@2, an internal) is skipped and reported by
+the generator — a game importing winmm by ordinal would miss it; none does. And the proxy does
+**not import winmm itself**, which is only possible because build 2301 moved Mimic's
+`timeBeginPeriod` off a static import.
+
+**Two more hardcoded proxy lists found and removed** while wiring this up — the same desync class
+that had left the double-inject guards blind to dinput8/dxgi. `DumperModuleDetector.ProxyNames` and
+`WindowsPlatformService`'s module filter both carried literal `{version, dinput8, dxgi}`; both now
+derive from `ProxyType` through one `IsInterestingModuleName` helper. New `ProxyTypeCoverageTests`
+walks every enum value through `GetDllName` / `GetDisplayName` / `FromDllName` / the module filter,
+so a fifth flavour cannot be half-added again.
+
+**Also in this build:** the Diagnostics card's process line now reads *"Game process (not the DLL)"*.
+The figures are the whole game's — we are injected into it and there is no supported way to
+attribute a working set to one module — and an unlabelled "7,453 MiB" next to our own diagnostics
+read as ours.
+
+**Verification:** all 4 proxies + main DLL build clean; 2882 tests green (+7). **Not verified: the
+winmm proxy loading a real game** — that needs a deploy-and-launch and is the obvious next step.
+
+-----
+
+## 2026-07-23 — Diagnostics card: auto-refresh toggle + resizable columns (build 2315; dev, UI-only)
+
+Two things the first live run made obvious.
+
+**Auto-refresh (5 s), off by default.** The interval is deliberately unhurried, and the reason is
+specific to this card: **every poll is itself a dispatch**, so a fast timer would inflate the very
+numbers being reported — `get_diagnostics` already appears in its own table (8.6% of busy time on
+the user's first run, from a single call). 5 s stays in the noise while making CPU% meaningful, since
+that needs two samples to difference.
+
+Three guards, all for the same reason — the measurement must not perturb what it measures:
+- **Pauses on tab-leave, resumes on tab-enter** (`OnLeavingTab` / `OnEnteringTab`, wired the same way
+  Live Funcs auto-stops its recording). A forgotten toggle would otherwise keep adding pipe traffic
+  while the user works elsewhere. The checkbox stays ticked.
+- **Never stacks requests** — a tick is skipped while one is in flight. The first snapshot measured
+  125 ms; queuing polls behind each other would turn a timer into a burst.
+- Toggling on fires one refresh immediately rather than making the user wait a full interval.
+
+**Resizable columns.** The numeric columns had been sized to their content and were clipping their
+own headers ("Cou", "% bu") with no way to widen them — `CanUserResizeColumns` was never set. Now
+explicit, with `MinWidth` so a dragged column can't collapse. **Sorting is explicitly OFF**: Avalonia's
+DataGrid sort is reflection-based (an AOT hazard — see `ui-avalonia12-pinvoke-gotchas`), the rows
+already arrive ranked by total time, and switching it off reclaims the header space the sort glyph
+was reserving, which is part of why the headers fit now.
+
+One self-inflicted compile break worth noting: adding `vm.Pointers?.OnLeavingTab()` made the
+compiler treat `vm.Pointers` as nullable from that point on, breaking a pre-existing non-null
+dereference three lines later. `Pointers` is a non-nullable property; the `?.` was wrong, not the
+old code.
+
+-----
+
+## 2026-07-23 — Diagnostics fix: a UINT64_MAX sentinel on the wire blanked the whole card (build 2311; dev, DLL + UI)
+
+First live run of the new Diagnostics card failed outright with *"An element of type 'Number'
+cannot be converted to a 'System.Int64'"*.
+
+**Root cause.** `Stark::MsSinceLastHookFire()` returns `UINT64_MAX` for "the PE hook never fired —
+liveness unknown", and build 2308 put that straight on the pipe. 18446744073709551615 does not fit
+an `Int64`, so `GetValue<long>()` threw and took the entire panel with it. **"Never fired" is the
+NORMAL state on a fresh connection** — the hook installs lazily on the first invoke — so this was
+the default path, not an edge case.
+
+**Why it took longer than it should have:** `System.Text.Json` emits the *identical* message for
+out-of-range and for fractional values, and names neither. That sends you hunting for a decimal
+point. The raw payload settled it in one grep — the UI's own pipe log had
+`"ms_since_last_fire":18446744073709551615` sitting there the whole time. Recorded in
+[lessons-learned.md](lessons-learned.md): grab the payload before theorising.
+
+**Two fixes, because either alone would be insufficient.**
+- **Wire boundary (DLL).** The sentinel is now mapped to `-1` before serialising. An in-process
+  `UINT64_MAX` convention is fine; the wire is a narrower type system and sentinels must land in the
+  range the other side can parse.
+- **Reader (UI).** New `Services/JsonNum.cs` — saturating, non-throwing `L/I/D/B` reads, now used
+  throughout the diagnostics parse. **Telemetry must degrade, never throw:** one odd field is worth
+  a wrong number in one cell, not a blank panel the user opened to debug something else. `JsonNum.D`
+  also collapses non-finite values, since a `NaN` reaching a format string prints "NaN%" at the user.
+  A pre-fix DLL still works — `UINT64_MAX` saturates to `long.MaxValue`, which `HasFired` reads as
+  "unknown" rather than as a plausible age.
+
+**UI:** the card now prints *"never fired (hook installs on first invoke)"* instead of a nonsense
+age. **Tests:** +17, including the verbatim failing payload from the log and both causes of that
+ambiguous STJ message pinned separately. 2875 green.
+
+-----
+
+## 2026-07-23 — Diagnostics (`Sense`): measure what the pipe traffic actually costs (build 2308; dev, DLL + UI)
+
+Tier 1 + Tier 2 of the performance-counter evaluation. Exists for one reason:
+[multipipe-eval.md](multipipe-eval.md) names DLL-side **serial-dispatch head-of-line blocking** as
+the root cause of UI lag and game-thread CPU starvation as the CE-mailbox risk — and **nothing
+measured either**, so "should Phase 1 (non-blocking dispatch) be built?" was a blind decision. Now it
+isn't.
+
+**New `Sense` module** (Frieren roster: Second-Exam proctor, "scythe" — the roster's own suggested
+use for that name was *harvest-collection*). Records per-command dispatch cost — count / total / max
+/ last — plus Win32 process facts and game-thread health. New pipe commands `get_diagnostics` /
+`reset_diagnostics`, both pipe-only.
+
+**Where the timing is taken matters.** Fern already brackets `DispatchCommand` with an `inFlight`
+flag, documented as the CPU-bound stretch that never touches the pipe. That span *is* the window
+during which the connection's dispatcher is unavailable to anything else — so it is exactly the
+head-of-line blocking in question, and the measurement needed no new chokepoint.
+
+**The headline number is `busy_percent`** — what fraction of wall-clock a dispatcher was occupied.
+High, with a lagging UI, is the case *for* Phase 1; low says the lag is elsewhere and Phase 1 would
+not help. The per-command table ranks by **total** rather than max, because the question is which
+command *owns* the dispatcher, not which one spiked once — `max_ms` is reported alongside because
+that is the spike a user actually feels.
+
+Three deliberate choices:
+- **Dedicated mutex.** Borrowing a lock a long scan also holds would make the diagnostics contend
+  with the very thing they exist to measure. Cost when idle is a map lookup and a few adds per
+  command — noise next to commands that are microseconds at best.
+- **CPU% is `-1`, not `0`, until a second sample exists** to difference against. The UI renders that
+  as an em dash: "0%" would read as *idle*, a different and wrong claim. Normalised by core count so
+  100 means one whole machine, matching what a user sees in Task Manager.
+- **Tier 2 is on demand only.** Thread count walks a system-wide `TH32CS_SNAPTHREAD` snapshot (no
+  cheaper documented API), so it never runs unless a client asks.
+
+**UI:** System tab → *Diagnostics — DLL dispatch cost*, placed directly above the existing Pipe
+Activity card — that one shows *what* crossed the pipe, this shows what it *cost*. Refresh + Reset
+counters; the reset re-reads immediately so the card shows a live empty baseline rather than looking
+broken. Counters also reset when the last client disconnects, so one session's numbers never
+pollute the next.
+
+**Not built, deliberately:** per-worker tick counters for Solide / Hemmung / Laufen / Solitar /
+Schlacht. That means touching five modules for a number that does not bear on the dispatch question,
+and the dispatch question is what blocks a decision. Recorded in [todo.md](todo.md) as the natural
+follow-on.
+
+**Verification:** 2858 tests green (+12). DLL + all 3 proxies build clean. App launched to confirm
+the new card and its `DataGrid` bind without error. **Not verified: the numbers themselves against a
+live game** — that needs an attached session, and is the point of the feature rather than of the
+code.
+
+-----
+
+## 2026-07-23 — Modular UE builds: fold the engine modules into the proxy-import hint (build 2308; dev, UI-only)
+
+Fixes the LOW-severity defect the n=24 proxy census turned up. `ReadProxyImports` was handed
+`game.ExePath` only. In a **modular** build the exe is a thin bootstrap — Satisfactory's is 264 KB,
+with the engine split across ~182 sibling `*-Win64-Shipping.dll` modules — so the analyzer saw no
+dxgi/dinput8 and the Suggested-proxy column claimed `version · default · no dxgi/dinput8` for a game
+where a dxgi proxy loads perfectly well (`D3D12RHI` imports it).
+
+A proxy activates if **any** module in the process imports that name — the loader searches the exe's
+directory whichever one asks. So when the exe imports none of the three (`ImportsNone`, the
+bootstrap-stub signature), the sibling modules are now folded in with `Merge`, a pure OR. The
+file-walking half stays in `ProxyDeployService`; `ProxyImportAnalyzer` remains OS-free and
+synthetic-PE-testable by design.
+
+**Measured, not assumed:** Satisfactory goes from *nothing* to `version + dxgi` in **30 ms** for all
+182 modules (header-only parsing), and a monolithic game is untouched at 0 ms because the fallback
+never triggers. The 512 cap is a runaway guard, not a budget — 182 is walked in full, since the
+all-three short-circuit cannot fire on a build that imports no dinput8.
+
+Severity was LOW throughout: imports are advisory context the analyzer never lets override the
+version default, so the harm was a misleading hint string, not a wrong deployment. +5 tests.
+
+-----
+
+## 2026-07-23 — Stop statically importing winmm: resolve the 1 ms timer from System32 (build 2301; dev, DLL)
+
+Clears the hard prerequisite the winmm-proxy evaluation identified. Correct on its own, and shipped
+separately from the proxy so the two can be judged independently.
+
+**The trap.** `Mimic.cpp` raises the timer resolution for the CE-mailbox poll thread
+(`timeBeginPeriod(1)` / `timeEndPeriod`), and it lives in `UE5_COMMON_SOURCES` — the object library
+linked into the main DLL *and every proxy*, with `Winmm` in both link lists. The day a proxy target
+**is** `winmm.dll`, our own static import of `winmm.dll!timeBeginPeriod` resolves against the module
+of that name in the process — **ourselves** — landing in our forwarding stub. Before the stub has
+resolved the real export it returns 0, and **0 is `TIMERR_NOERROR`**: no crash, no error, the call
+just silently does nothing while `Sleep(1)` degrades to the 15.6 ms tick and mailbox latency gets
+~15× worse. Delay-loading would not have helped (a delay-load `LoadLibrary("winmm.dll")` from the
+game folder finds us again), and no test would have caught it — `dll_helpers_test` linked `Winmm`
+into the test exe, so its latency assert passed regardless of proxy behaviour.
+
+**The fix.** `Mimic.cpp` resolves both functions from the **System32** copy by explicit path
+(`GetSystemDirectoryW` → `LoadLibraryW` → `GetProcAddress`); Windows keys loaded modules by full
+path, so this yields the genuine OS winmm even with a same-named proxy of ours mapped. `Winmm` is now
+absent from `UE5Dumper`'s link list, `PROXY_LINK_LIBS`, **and** `dll_helpers_test`. Unresolvable →
+returns a non-zero rc so the existing "log and proceed" path runs and the paired `timeEndPeriod` is
+skipped; the worst case was always a graceful degradation to system Sleep granularity, never a
+correctness break. The helper is deliberately proxy-agnostic (no `UE5_PROXY_*` test), which is what
+lets `Mimic.cpp` stay in the shared object library — an `#ifdef` would have violated that invariant
+and forced the file out of the compile-once set.
+
+**Verification — objective, not by inspection.** Parsing the built PE import tables shows
+`winmm.dll` is gone from `UE5Dumper.dll`, all three proxies, **and** the test exe. The poll-latency
+micro-benchmark was reworked to resolve the same way rather than through a linked import, so it now
+covers the real mechanism; it measures **1.95 ms/sleep** (194.9 ms for 100 × `Sleep(1)`) — a silent
+no-op would have landed near 15.6 ms/sleep. `dll_helpers_test` 845 pass / 0 fail (+4), UI 2846 / 0.
+
+-----
+
+## 2026-07-23 — Undeploy removes every proxy flavour of ours, not just the selected one (build 2299; dev, UI-only)
+
+**Reported bug.** With `dxgi.dll` deployed and the radio switched to `version.dll`, *Undeploy* did
+nothing — `UndeployAsync` only ever looked at `proxyType.GetDllName()`. The user was left unable to
+remove the proxy at all, while the grid cheerfully reported `DeployedOtherType` at them (the
+*detection* side has handled all flavours since build 2134 via `deployedProxyNames`; only the removal
+was type-scoped).
+
+**Fix: undeploy is type-agnostic.** The radio governs what to *deploy*; undeploy is a clean-up, so it
+now sweeps every flavour we ship. `UndeployAsync` lost its `ProxyType` parameter entirely rather than
+keeping a misleading one. It still only deletes files that are **ours** (`IsOurProxyDll` →
+`FileVersionInfo.ProductName`); a foreign `version.dll`/`dxgi.dll` (mod loader, another tool) is left
+alone and named in the message.
+
+Three decisions worth keeping:
+- **Per-file try/catch.** One locked DLL must not abandon the rest — removing what we can is the
+  point, and the locked one is reported by name.
+- **Refusing a foreign DLL is only a FAILURE when we removed nothing of ours.** Otherwise it's a note
+  on an otherwise successful clean-up (`NotDeployed` + "Left another program's version.dll").
+  A locked file outranks both, since it's the actionable one.
+- **The policy is pure and separately testable.** `PlanUndeploy` (which files) and
+  `ResolveUndeployOutcome` (status/message/success) are static and side-effect free, because
+  ownership is decided by a PE version resource — fabricating one in a unit test would test the
+  fixture, not the policy. `AllProxyDllNames()` is now shared with the refresh path.
+
+**Verification:** 2846 tests green (+12 pure-policy cases covering the exact reported combination,
+the all-three sweep, the foreign-DLL spare, and the locked/foreign precedence). The real
+file-touching path was additionally exercised once against the **actual built proxies** in
+`dist\proxy\` (real `ProductName`, so `IsOurProxyDll` ran for real): both of ours deleted, a foreign
+`version.dll` kept and named. That integration check was not kept as a test — it would depend on
+build outputs being present.
+
+-----
+
+## 2026-07-23 — CE autorun helper: every table gets `ue5_inject()`, permanently (build 2297; dev, UI-only)
+
+The fourth and last delivery route, and the only one needing **neither** the standalone `.CT`
+**nor** the AOBMaker plugin. **Tools → Install CE autorun Helper** writes `ue5_autorun.lua` into
+`<CheatEngine>\autorun\`, which CE executes at start-up — so `ue5_inject()` / `ue5_shutdown()` then
+exist in **every** table, plus a **UE5CEDumper: Inject DLL** entry in CE's main menu. Takes effect on
+the next CE start.
+
+**Finding Cheat Engine without new plumbing.** The install directory comes from a *running* CE
+process via the existing `GameProcessInfo.Path` (`ListGameProcessesAsync(showAll: true)` — CE isn't a
+UE game, so the UE-only filter would hide it), falling back to the save dialog when CE isn't running.
+Deliberately not the registry: that would need a new platform-abstraction surface, and a running CE
+is both the common case and the authoritative answer for *which* install of several is in play.
+
+**The early-startup API risk is designed out, not tested away.** Autorun runs before any process is
+attached, so the file **only defines things at load time** — every process-dependent call sits inside
+a function the user invokes later. A unit test enforces it by parsing top-level statements and
+rejecting `injectDLL` / `getOpenedProcessID` / `readInteger` / `executeCodeEx` / `showMessage` there.
+The one genuinely uncertain call, `getMainForm().Menu`, is `pcall`-wrapped: if the form isn't ready
+the menu is simply absent and `ue5_inject()` still works from the Lua console — a cosmetic extra must
+never break someone's CE start-up. The menu API shape (`createMenuItem` / `parent.add` / `.Caption` /
+`.OnClick`) is copied from the verified precedent in `vendor/UE4 Dumper.CT` rather than invented, per
+the CE-API rule. A `ue5_menuAdded` global makes a manual re-run idempotent.
+
+**Shared readiness emitter.** With two generators plus the `.CT` all needing the same
+"wait until the DLL is actually up" loop, it now lives in one place —
+`Services/CeReadinessLua.cs` — so the offsets, timeouts, and the two properties that matter
+(pure memory read, never `executeCodeEx`; symbol resolved *inside* the loop) cannot drift.
+`CeInjectScriptGenerator` was refactored onto it; the three failure messages are shared too, so both
+routes give the same diagnosis for the same state.
+
+**Route ranking updated to four** across the Proxy Deploy panel line and the Deploy / Inject /
+bootstrap / autorun tooltips, and a new **"Getting `UE5Dumper.dll` into the game — which of the four
+routes?"** recipe leads [tips.md](tips.md).
+
+**Verification:** 2834 tests green (+12). The generated Lua was parsed with a real Lua parser (whole
+file for the autorun helper, per-`{$lua}`-block for the record) — the shape assertions alone would
+not catch a syntax error. **LIVE-VERIFIED 2026-07-23** — Cheat Engine picks the file up at start-up
+and the route works end to end, which also settles the early-startup API question the evaluation
+flagged: `getMainForm().Menu` is reachable from `autorun\`.
+
+-----
+
+## 2026-07-23 — Push the "Inject DLL" record into the CE table you already have open (build 2295; dev, UI-only)
+
+Kills the two-stage table load. Cheat Engine holds **one table at a time**, so using the standalone
+`scripts/UE5CEDumper.CT` meant: open ours → inject → open the game's own table → the injection entry
+is gone. New **Tools → "Add \"Inject DLL\" Record to Current CE Table"** generates the same bootstrap
+as an `[ENABLE]`/`[DISABLE]` memory record and pushes it into whatever table CE currently has open,
+via the AOBMaker plugin's existing `CreateAAScript` (grouped under `UE5CEDumper (DLL)` so it doesn't
+litter the user's root). **The standalone `.CT` is unchanged and still shipped** — it stays the
+developer / no-AOBMaker path.
+
+**Zero new plumbing.** `CreateAAScript` already wrote into the open address list (Teleport and
+LiveWalker invoke have used it for builds); the bootstrap simply had no generator behind it. New
+`Services/CeInjectScriptGenerator.cs` + one Tools command; no DLL, pipe, or CE-plugin change.
+
+Carried over from the build-2291 `.CT` work, so both routes behave identically: **polls the DLL's
+mailbox `initState` instead of sleeping a fixed budget** (pure memory read via `g_invokeMailbox`,
+never `executeCodeEx` — games block `CreateRemoteThread` during start-up), resolves the symbol
+**inside** the poll loop (CE's symbol handler may not see the fresh module on the first try), and
+treats a timeout as a real error rather than printing "probably fine". `[DISABLE]` may use
+`executeCodeEx` because by then the game is running normally.
+
+Improvements over the `.CT` version:
+- **The DLL path is baked in.** The UI already knows where `dist\UE5Dumper.dll` is (same resolution
+  as `ProxyDeployViewModel.InjectIntoRunningGameAsync`), so there is no run-time directory search,
+  and a missing DLL is reported by the UI *before* generating rather than failing inside CE.
+- **`[DISABLE]` is a quiet no-op when nothing was ever loaded.** `[ENABLE]`'s early bail-outs set
+  `memrec.Active = false`, which makes CE run `[DISABLE]` against a DLL that never loaded; it now
+  probes for `UE5_StopPipeServer` first and stays silent instead of reporting a false failure.
+- Falls back to CE record XML on the clipboard when AOBMaker isn't reachable, distinguishing "pipe
+  broke mid-send" from "CE was never running".
+
+**Route guidance (build 2296).** Three delivery routes now exist and they are not equally good, so
+the ordering is stated where each choice is made: an always-visible line in the Proxy Deploy panel
+(`str.ProxyDeploy.RouteOrder`) ranks **① deploy a proxy DLL** (loads with the game, survives
+restarts, no CE at all) → **② inject into a running game, or push the bootstrap record into your open
+CE table** → **③ the standalone `dist\UE5CEDumper.CT`** (developer fallback, and the only route
+needing no AOBMaker plugin); the Deploy / Inject / Tools-bootstrap tooltips each name their own rank
+so the ordering stays consistent. In-panel rather than tooltip-only on purpose — that panel is where
+the decision happens, and a tooltip is only found by someone who already knew to look.
+
+**Verification:** 2822 tests green (+17). **LIVE-VERIFIED 2026-07-23** — the pushed
+*UE5CEDumper: Inject DLL + Start Pipe Server* record was ticked in a real CE table and injected +
+came up correctly. `CeMailboxLayout` gained `OffInitState` + the five
+`InitState` values so the offsets stay single-sourced. The emitted Lua was additionally checked by
+running both `{$lua}` blocks through a real Lua parser — the shape assertions alone would not have
+caught a syntax error. For the route-guidance strings the tests prove nothing (no string-resource
+coverage test exists), so those were checked by confirming every key resolves, then launching the
+app: `ProxyDeployPanel` is instantiated directly by `MainWindow.axaml`, not lazily, so a clean start
+with an error-free init log means the new `StaticResource` resolved. The wrapped layout itself was
+not visually inspected.
+
+Two test-only traps worth remembering: `Assert.DoesNotContain("\0", s)` **always fails** — the string
+overload is culture-sensitive and under ICU a NUL has zero collation weight, so it "matches" at
+position 0 of any string (use the `char` overload, which is ordinal); and asserting
+`DoesNotContain("executeCodeEx(")` misses `pcall(executeCodeEx, ...)`, so the check now strips Lua
+comment lines and asserts on the bare identifier against code only.
+
+-----
+
+## 2026-07-23 — CE `.CT` inject: poll for readiness instead of sleeping 15 s; double-inject guard learns dinput8/dxgi (build 2291; dev)
+
+Two small fixes to the Cheat-Engine injection path, both from the 2026-07-23 evaluation batch
+in [todo.md](todo.md). **LIVE-VERIFIED 2026-07-23** — the `.CT` route was run against a real game
+(CE Lua is not unit-testable, so this was the only way to confirm it). The `Methode.cpp` half of the
+double-inject guard is only reachable via CE's *Inject && Connect* plugin menu item and has not been
+exercised.
+
+**1. The 15 s blind wait is now a 250 ms poll.** `scripts/UE5CEDumper.CT` `ue5_inject()` used to
+`sleep(1000)` fifteen times and then print "complete (or failed — check DLL log)" **without ever
+checking anything**: a normal run (its own comment budgets "1 s thread delay + ~2-8 s AOB scan")
+wasted 5-10 s, and a *failed* run still reported success.
+
+The readiness signal is a new `Mimic::InitState` published into the mailbox
+(`IDLE`/`RUNNING`/`READY`/`FAILED`/`SKIPPED`), written by `UE5_AutoStart` (`Frieren.cpp`) and both
+`AutoStartThreadProc` flavours (`Heiter.cpp`, proxy + CE-inject). CE Lua reads it with
+`getAddress("g_invokeMailbox")` + `readInteger` — **a pure memory read**, deliberately not
+`executeCodeEx`, because the script's own step-1 comment says `CreateRemoteThread` is avoided here
+(games block it). Timeout raised to 25 s but only reached when genuinely wedged; a timeout is now an
+**error** (`showMessage` + `return`), as is `FAILED`. `SKIPPED` (another instance owns the pipe, or
+we are the CE plugin host) proceeds — a pipe server *is* up.
+
+Three details worth keeping:
+- **`initState` reuses the former `reserved` alignment slot** at `MailboxData+0x0C` (same type, same
+  offset) ⇒ struct layout unchanged, so no proxy `.def` needed a new `DATA` entry and the UI's
+  mailbox offsets are untouched.
+- **The symbol is resolved inside the poll loop, not once up-front.** CE's symbol handler may not
+  have picked up the just-injected module yet; a single failed `getAddress` would have silently
+  dropped back to the blind wait and lost the entire benefit. A 5 s grace period, then the old
+  fixed wait as fallback for pre-`initState` DLL builds.
+- **`READY`/`FAILED` are published only after `UE5_StartPipeServer` returns**, so a poller that
+  observes `READY` can connect immediately. `UE5_Shutdown` resets to `IDLE` (load-bearing for the
+  path where `Mimic::StopThread` early-returns and its whole-struct `memset` never runs).
+
+**2. The double-inject guard only knew the *old* proxy pair.** `Methode.cpp`
+`IsAlreadyLoadedInTarget` and the `.CT`'s `ue5_isAlreadyLoaded` both tested `version.dll` /
+`winmm.dll` — **neither checked `dinput8.dll` or `dxgi.dll`, the two proxies we actually ship**
+(`winmm` was aspirational; no such proxy exists). A user running the dxgi or dinput8 proxy got no
+guard at all and could double-map. Both sites now drive off a named list (`kProxyDllNames` /
+`UE5_PROXY_DLL_NAMES`) carrying all three real flavours, with cross-references so a future 4th
+flavour can't desync them.
+
+**Verification:** DLL + all 3 proxies build clean; `dll_helpers_test` 841 pass / 0 fail; UI suite
+2805 pass / 0 fail. The `.CT`'s embedded Lua was checked by parsing the table as XML and running
+every `{$lua}` block through a real Lua parser — which also caught that the new `<` / `>=` operators
+needed XML-escaping (`&lt;` / `&gt;=`), since this table stores Lua as escaped text, not CDATA
+(precedent: the pre-existing `2&gt;nul` shell redirect at `UE5CEDumper.CT:110`).
+
+-----
+
 ## 2026-07-23 — Teleport Coordinate Library: unlimited labelled positions, CSV + CE-Lua round trip (builds 2257-2267; dev, UI-only)
 
 **P1-P5 all shipped, 2777 tests green, ZERO DLL/pipe change.** An unlimited, labelled +

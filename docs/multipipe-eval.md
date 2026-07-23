@@ -391,3 +391,159 @@ streaming `Utf8JsonReader` and/or smaller chunks (already noted in todo).
   - Cancellation: "trip global Tot only for heavy-in-flight connection" (proposed) vs full
     per-connection cancel tokens (cleaner, more work).
   - Whether to also tag Pipe Activity entries by lane now (small, recommended).
+
+-----
+
+## 10. MEASURED (2026-07-23, build 2324) — the dispatcher is NOT the bottleneck
+
+This document's core claim — that DLL-side serial-dispatch head-of-line blocking is what makes the
+UI lag — was reasoned, never measured. `Sense` (build 2308) plus the automatic PERF records
+(build 2320) finally measured it, on two games spanning both engine generations: **The Adventures
+of Elliot (UE 5.4)** and **SEED BATTLE DESTINY REMASTERED (UE 4.27)**.
+
+| Operation | wall | dispatcher busy | busy % | dispatches | dominant command |
+|---|---:|---:|---:|---:|---|
+| Copy CE Field | 486.5 ms | 120.4 ms | 24.7% | 740 | `walk_instance` (100%) |
+| Copy CE XML | 224.4 ms | 59.5 ms | 26.5% | 386 | `walk_instance` (100%) |
+| Copy CE Field | 534.5 ms | 144.1 ms | 27.0% | 793 | `walk_instance` (100%) |
+| **Copy CE XML** | **5,362.7 ms** | **1,651.3 ms** | **30.8%** | **20,357** | `walk_instance` (100%) |
+| Copy CE Field | 570.1 ms | 163.6 ms | 28.7% | 1,902 | `walk_instance` (100%) |
+| **aggregate** | **7,178 ms** | **2,139 ms** | **29.8%** | **24,178** | |
+
+### 10.1 Verdict: do NOT build Phase 1
+
+Three independent readings of the same data say the dispatch model is not the problem:
+
+- **The dispatcher is idle ~70% of wall-clock**, and the ratio is strikingly stable (22–31%) across
+  operations spanning 2.6 ms to 5.4 s. Making dispatch non-blocking can only ever recover a slice of
+  the busy 30% — and only if something else were queued behind it, which in a single-user export
+  there is not.
+- **No head-of-line spike exists to remove.** The worst *single* dispatch across 24,178 of them was
+  **14.3 ms**. Phase 1's entire premise is a long-blocking command holding the read loop; nothing
+  here holds it for more than a frame.
+- **Phase 1 is expensive.** It was shipped and reverted once already (build 1840, §8), and a correct
+  version needs overlapped/async pipe I/O. Paying that to chase a 30% slice of a non-blocking
+  workload is not a trade worth making.
+
+### 10.2 What the data says the real lever is: CALL COUNT
+
+`walk_instance` is **100% of the dispatcher cost in every row**, and one Copy CE XML issued
+**20,357** of them. Per round-trip:
+
+- **0.088 ms inside the DLL** (the actual work)
+- **0.208 ms everywhere else** — pipe latency, JSON envelope, UI-side deserialise — i.e. **2.4× the
+  work is overhead**
+
+That is the *pipe round-trip amortisation* win this document already describes in §5's sibling
+material, and the repo already has the pattern twice: `search_properties_batch` (build 685) and
+`walk_class_batch` (build 693). Batching `walk_instance` at the established ~200/call chunk size
+would collapse 24,178 round-trips to ~121.
+
+**Honest limit on that estimate:** this data cannot decompose the 0.208 ms into pipe latency (which
+batching removes) versus UI-side per-result work (which it does not). The trend across runs is
+suggestive — per-call overhead falls from 0.427 ms at 386 calls to 0.182 ms at 20,357, consistent
+with fixed costs amortising — but the split must be measured before promising a figure.
+`walk_class_batch` is the precedent to compare against, since it too gets only the round-trip win.
+
+### 10.3 Status change
+
+- **Phase 1 — WON'T DO** on the evidence above. Revisit only if a workload appears whose *single*
+  dispatches actually block for hundreds of ms (a full `Dump All`, or a `value_scan` on a huge pool,
+  neither of which is in this sample).
+- **Phase 2 — unchanged** (still speculative, still gated on the concurrency-safety prerequisites).
+- **New candidate, better founded than Phase 1: `walk_instance` batching.** Measure the
+  latency/UI-work split first.
+
+### 10.4 MEASURED (build 2327) — the split, and what batching would actually recover
+
+§10.2 identified `walk_instance`'s round-trip count as the lever but could not say how much of the
+0.208 ms/call overhead batching would recover. `PipeTransportStats` now separates it. Three Copy CE
+XML runs on **SEED BATTLE DESTINY REMASTERED (UE 4.27)**:
+
+| run | wall | dll | ipc | ui | dll % | **ipc %** | ui % | calls |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| A | 5,548.3 ms | 1,689.5 | 3,290.0 | 568.8 | 30.5% | **59.3%** | 10.3% | 20,357 |
+| B | 555.1 ms | 157.7 | 406.3 | 0.0 | 28.4% | **73.2%** | 0.0% | 1,901 |
+| C | 614.6 ms | 165.9 | 411.8 | 36.9 | 27.0% | **67.0%** | 6.0% | 2,108 |
+
+Per call, strikingly consistent across a 10× spread in operation size:
+
+| | dll | ipc | ui |
+|---|---:|---:|---:|
+| A | 0.083 ms | 0.162 ms | 0.028 ms |
+| B | 0.083 ms | 0.214 ms | 0.000 ms |
+| C | 0.079 ms | 0.195 ms | 0.018 ms |
+
+**IPC is the cost — 59–73% of wall-clock, roughly 2× the actual DLL work — and it is exactly the
+part batching removes.** UI-side per-result work is negligible (0.000–0.028 ms/call), so the export
+tree building is not where the time goes.
+
+Projected at the established ~200/call chunk:
+
+| run | now | batched | speed-up | round-trips |
+|---|---:|---:|---:|---|
+| A | 5,548 ms | ~2,275 ms | **2.4×** | 20,357 → 102 |
+| B | 555 ms | ~160 ms | **3.5×** | 1,901 → 10 |
+| C | 615 ms | ~205 ms | **3.0×** | 2,108 → 11 |
+
+**Three caveats on that projection, all pushing the same way — treat it as an upper bound:**
+
+- It assumes batching removes IPC proportionally and **adds nothing**. Real batching serialises a
+  larger payload and parses a bigger JSON document; some of that reappears in `dll` and `ui`.
+- `ui = wall − transport`, and run B hit the zero floor (transport ≥ wall). So `ui` is "negligible,
+  at or below the measurement floor" rather than precisely quantified.
+- `dll` is unaffected by batching and is a hard floor at ~0.08 ms/call — run A cannot go below its
+  1,689 ms of actual walking without optimising the walk itself.
+
+**This also settles Phase 1 more firmly than §10.1 did.** Phase 1 targets the `dll` share (27–30%);
+the cost is `ipc` (59–73%). It would have been aimed at the smaller half of the wrong problem.
+
+**Recommendation: batch `walk_instance`.** Effort **M**, risk **low-med**, following the
+`walk_class_batch` / `search_properties_batch` precedent — including their safety net: a DLL-side
+batch that is a trivial `for` loop over the single-call path, one shared serialiser between single
+and batch dispatch, and an equivalence test proving byte-identical output.
+
+
+### 10.5 RESULT (build 2335) - 1.71x measured, and the IPC model was wrong
+
+Same Copy CE XML on SEED, before (build 2327) and after the struct-tree batching:
+
+| | before | after | change |
+|---|---:|---:|---|
+| **wall** | 5,893.3 ms | **3,437.1 ms** | **1.71x faster** (-2,456 ms) |
+| dispatches | 22,522 | **1,355** | 16.6x fewer |
+| dll | 1,751.7 ms | 1,505.5 ms | 1.16x (the actual walking - expected to be flat) |
+| **ipc** | 3,531.7 ms | **1,278.4 ms** | **2.76x** (-2,253 ms) |
+| ui | 609.9 ms | 653.2 ms | 0.93x - **slightly worse**, as predicted |
+
+`top:` now names `walk_instance_batch`, which was the acceptance criterion.
+
+**The projection was 2.4-3.5x; reality is 1.71x.** Section 10.4 flagged it as an upper bound
+because it assumed batching adds nothing. It adds, and the data says exactly where:
+
+**IPC is NOT purely a per-round-trip cost.** If it were, 1,355 calls at the old 0.157 ms/call
+would be ~212 ms. It is **1,278 ms**. So of the original 3,532 ms:
+
+- **~2,253 ms was fixed per-round-trip overhead** - removed by batching.
+- **~1,066 ms is payload-proportional** - the same bytes still cross the pipe regardless of how
+  many messages carry them, and batching cannot touch it.
+
+Per-call IPC rose 0.157 -> 0.945 ms for the same reason: each call now carries ~16x the payload.
+`ui` rose too (610 -> 653 ms) - bigger JSON documents cost more to parse, which is the other half
+of "batching adds something".
+
+**Two secondary observations worth recording:**
+
+- **Average batch size is only ~16.6 instances**, far below the 200 chunk cap. The limit is the
+  *fan-out* - a struct has a handful of nested structs, not hundreds - so raising the chunk size
+  would achieve nothing. Batching across roots rather than per `ResolveStructFieldsIntoAsync` call
+  would grow the batches, but since the residual IPC is mostly payload-proportional, the return
+  would be far smaller than the round-trip arithmetic suggests.
+- **Worst single dispatch rose 14.5 ms -> 85.2 ms** (a batch does ~16 walks). Still nowhere near a
+  problem, but it is the metric Phase 1 cared about, and batching moves it the *wrong* way. Another
+  reason not to pair those two ideas.
+
+**Where the remaining 3,437 ms sits:** dll 1,506 (real work) + ipc 1,278 (mostly payload) + ui 653
+(parse). **The next lever is BYTES, not messages** - trimming fields the export never reads would
+attack both the payload-proportional IPC and the UI parse cost at once. Unquantified: nobody has
+measured what fraction of a `walk_instance` payload the CE export actually consumes.
