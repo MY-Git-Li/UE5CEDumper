@@ -184,6 +184,60 @@ public class DiagnosticsProbeTests
                     $"avg should be sub-ms, was {rows[0].AvgMs}");
     }
 
+    // ── The dll / ipc / ui split (the batching decision) ────────────
+
+    [Fact]
+    public void Split_separates_dll_work_from_ipc_latency_from_ui_work()
+    {
+        // Shaped after the real Copy CE XML: 20,357 calls, 5.36 s wall,
+        // 1.65 s in the DLL. Transport (which INCLUDES the DLL time, since
+        // SendAsync waits for the response) is the new measurement.
+        var before = R(0, 0);
+        var after  = R(20357, 1651.3, ("walk_instance", 20357, 1651.3, 14.3));
+
+        var line = DiagnosticsProbe.Format("Copy CE XML", TimeSpan.FromMilliseconds(5362.7),
+                                           before, after, transportMs: 4000.0, transportCalls: 20357);
+
+        // dll 1651.3 · ipc = 4000 - 1651.3 = 2348.7 · ui = 5362.7 - 4000 = 1362.7
+        Assert.Contains("split dll 1,651.3 / ipc 2,348.7 / ui 1,362.7 ms", line, StringComparison.Ordinal);
+        Assert.Contains("per call:", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Split_is_omitted_when_transport_was_not_sampled()
+    {
+        // A probe from before the transport counter existed, or a run where the
+        // snapshot failed — the line must simply not claim a split.
+        var line = DiagnosticsProbe.Format("X", TimeSpan.FromSeconds(1), R(0, 0), R(1, 10, ("a", 1, 10, 10)));
+        Assert.DoesNotContain("split dll", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Split_never_goes_negative_when_transport_undershoots_dll_time()
+    {
+        // Concurrency or clock skew can make transport look smaller than the DLL
+        // time it contains; a negative "ipc" would be nonsense in a log.
+        var line = DiagnosticsProbe.Format("X", TimeSpan.FromSeconds(1), R(0, 0),
+                                           R(1, 900, ("a", 1, 900, 900)),
+                                           transportMs: 100.0, transportCalls: 1);
+        Assert.Contains("ipc 0.0", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("-", line.Replace("·", ""), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Per_call_figures_are_reported_to_microsecond_resolution()
+    {
+        // The whole decision hinges on sub-millisecond per-call costs, so N1
+        // would round them all to 0.1/0.2 and hide the comparison.
+        var before = R(0, 0);
+        var after  = R(1000, 88.0, ("walk_instance", 1000, 88.0, 1.0));
+        var line = DiagnosticsProbe.Format("X", TimeSpan.FromMilliseconds(296.0),
+                                           before, after, transportMs: 208.0, transportCalls: 1000);
+        Assert.Contains("dll 0.088", line, StringComparison.Ordinal);
+        Assert.Contains("ipc 0.120", line, StringComparison.Ordinal);
+        Assert.Contains("ui 0.088", line, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Format_survives_a_zero_length_operation()
     {

@@ -1346,8 +1346,10 @@ Full table and reasoning in [multipipe-eval.md](multipipe-eval.md) §10.
 Copy CE XML issued **20,357** of them: **0.088 ms in the DLL vs 0.208 ms of round-trip overhead —
 2.4x the work is overhead.** Batching it at the established ~200/call chunk (as
 `search_properties_batch` / `walk_class_batch` already do) would collapse 24,178 round-trips to
-~121. **Effort M · Risk low-med** — but *first* measure how much of the 0.208 ms is pipe latency
-(batching removes it) versus UI-side per-result work (it does not); this data cannot separate them.
+~121. **Effort M · Risk low-med.** The measurement that was missing is now built (build 2327): every PERF
+line carries `split dll / ipc / ui` plus a per-call breakdown, so the next live export answers
+"how much would batching recover?" directly — **`ipc` per call is the recoverable part, `ui` is
+not.** Decide from those numbers, not from the round-trip count alone.
 
 *Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
 (dev-log build 2156) already holds the cadence half.*

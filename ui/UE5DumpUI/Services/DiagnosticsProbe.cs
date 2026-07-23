@@ -53,6 +53,9 @@ internal sealed class DiagnosticsProbe : IAsyncDisposable
     private readonly string _label;
     private readonly DiagnosticsResult? _before;
     private readonly Stopwatch _sw = Stopwatch.StartNew();
+    /// <summary>Transport baseline, differenced at close. Monotonic snapshots
+    /// rather than a reset, so two overlapping probes can't clobber each other.</summary>
+    private readonly (double Ms, long Calls) _txBefore = PipeTransportStats.Snapshot();
     private bool _done;
 
     private DiagnosticsProbe(IDumpService? dump, ILoggingService? log, string label,
@@ -90,14 +93,22 @@ internal sealed class DiagnosticsProbe : IAsyncDisposable
         try { after = await _dump.GetDiagnosticsAsync(limit: 0); }
         catch { return; }   // disconnected mid-operation: nothing to report
 
-        try { _log.Info(Constants.LogCatView, Format(_label, _sw.Elapsed, _before, after)); }
+        var txAfter = PipeTransportStats.Snapshot();
+        // Subtract the probe's OWN two get_diagnostics round-trips: they are real
+        // transport, but they are the measurement, not the operation.
+        double txMs = Math.Max(0, txAfter.Ms - _txBefore.Ms);
+        long txCalls = Math.Max(0, txAfter.Calls - _txBefore.Calls - 2);
+
+        try { _log.Info(Constants.LogCatView,
+                        Format(_label, _sw.Elapsed, _before, after, txMs, txCalls)); }
         catch { /* logging must never surface into the operation */ }
     }
 
     /// <summary>Build the log line. Pure + internal so the shape is unit-testable
     /// without a pipe.</summary>
     internal static string Format(string label, TimeSpan elapsed,
-                                  DiagnosticsResult before, DiagnosticsResult after)
+                                  DiagnosticsResult before, DiagnosticsResult after,
+                                  double transportMs = -1, long transportCalls = 0)
     {
         var top = TopDeltas(before, after, 0);
 
@@ -132,6 +143,27 @@ internal sealed class DiagnosticsProbe : IAsyncDisposable
         if (Math.Abs(wsDelta) > 1024 * 1024)
             sb.Append(" · game WS ").Append(wsDelta > 0 ? "+" : "")
               .Append(F(wsDelta / (1024.0 * 1024.0))).Append(" MiB");
+
+        // The dll / ipc / ui split — the whole reason transport is measured.
+        // Only emitted when transport was actually sampled (>= 0).
+        if (transportMs >= 0 && wallMs > 0)
+        {
+            // transport INCLUDES the DLL's own dispatch time (SendAsync waits for
+            // the response), so pure IPC is what's left after removing it.
+            double ipcMs = Math.Max(0, transportMs - busyMs);
+            double uiMs  = Math.Max(0, wallMs - transportMs);
+            sb.Append(" · split dll ").Append(F(busyMs))
+              .Append(" / ipc ").Append(F(ipcMs))
+              .Append(" / ui ").Append(F(uiMs)).Append(" ms");
+            if (transportCalls > 0)
+            {
+                // Per-call is the figure that decides whether batching is worth it:
+                // ipc/call vanishes when N calls become one, ui/call does not.
+                sb.Append(" (per call: dll ").Append(F3(busyMs / transportCalls))
+                  .Append(" / ipc ").Append(F3(ipcMs / transportCalls))
+                  .Append(" / ui ").Append(F3(uiMs / transportCalls)).Append(" ms)");
+            }
+        }
 
         if (top.Count > 0)
         {
@@ -176,4 +208,5 @@ internal sealed class DiagnosticsProbe : IAsyncDisposable
     }
 
     private static string F(double v) => v.ToString("N1", CultureInfo.InvariantCulture);
+    private static string F3(double v) => v.ToString("N3", CultureInfo.InvariantCulture);
 }

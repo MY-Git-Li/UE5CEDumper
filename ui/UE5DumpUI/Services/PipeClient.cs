@@ -129,6 +129,11 @@ public sealed class PipeClient : IPipeClient
         if (!IsConnected || writer == null)
             throw new InvalidOperationException("Not connected to pipe server");
 
+        // Transport timing starts here and ends at the response — the ONE extra
+        // measurement that lets DiagnosticsProbe split a heavy operation into
+        // dll / ipc / ui. See PipeTransportStats for why that split matters.
+        long _txStart = System.Diagnostics.Stopwatch.GetTimestamp();
+
         int id = Interlocked.Increment(ref _nextId);
         request["id"] = id;
 
@@ -195,7 +200,17 @@ public sealed class PipeClient : IPipeClient
                 orphan.TrySetException(new IOException("Pipe disconnected during send"));
         }
 
-        return await tcs.Task;
+        try
+        {
+            return await tcs.Task;
+        }
+        finally
+        {
+            // finally, not after the await: a cancelled or faulted request still
+            // consumed transport time, and dropping those would flatter the IPC
+            // figure exactly when the pipe is misbehaving.
+            PipeTransportStats.Record(System.Diagnostics.Stopwatch.GetTimestamp() - _txStart);
+        }
     }
 
     private async Task ReadLoopAsync()

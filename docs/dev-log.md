@@ -20,6 +20,54 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — Decompose the per-call overhead: dll / ipc / ui (build 2327; dev, UI-only)
+
+Build 2324 proved the dispatcher is not the bottleneck and pointed at `walk_instance`'s **20,357
+round-trips per export** instead — 0.088 ms of DLL work carrying 0.208 ms of overhead. But it could
+not say how much of that 0.208 ms **batching would actually recover**: pipe latency vanishes when
+200 calls become one, UI-side per-result work does not. Promising a speed-up on that basis would
+have been guessing.
+
+**One new measurement closes the gap.** `PipeTransportStats` accumulates time spent inside
+`PipeClient.SendAsync` (write → response). Combined with the two figures already collected, every
+part of an operation is now accounted for:
+
+| part | derivation | does batching remove it? |
+|---|---|---|
+| `dll` | Sense dispatcher busy | no — it is the actual work |
+| `ipc` | transport − dll | **yes** — the round-trip itself |
+| `ui`  | wall − transport | no — deserialise + per-result caller work |
+
+The PERF line gained both the totals and the per-call breakdown, the latter at microsecond
+resolution because the whole decision turns on sub-millisecond figures that `N1` would round away:
+
+```
+PERF Copy CE XML: wall 5,362.7 ms · dispatcher busy 1,651.3 ms (30.8%) · 20357 dispatches
+   · split dll 1,651.3 / ipc 2,348.7 / ui 1,362.7 ms
+   · (per call: dll 0.081 / ipc 0.115 / ui 0.067 ms)
+```
+
+Details worth keeping:
+- **Transport is timed in a `finally`**, so a cancelled or faulted request still counts. Dropping
+  those would flatter the IPC figure exactly when the pipe is misbehaving.
+- **The probe subtracts its own two round-trips** from the call count, the same reasoning that
+  already excludes its `get_diagnostics` from the busy total.
+- **Monotonic snapshots, differenced** — never a reset — so two overlapping probes cannot clobber
+  each other's baseline.
+- **Every derived figure is floored at zero.** Concurrency or clock skew can make transport look
+  smaller than the DLL time it contains, and a negative "ipc" in a log is worse than a wrong one.
+- **Stated caveat:** transport is summed per call, so with both lanes sending concurrently the sum
+  can exceed wall-clock. The heavy exports this measures are sequential, but the number is not
+  exclusive time and must not be read as such.
+
+Cost is one `Stopwatch.GetTimestamp` pair and two interlocked adds per pipe call.
+
+**Verification:** 2900 tests green (+4), including the split arithmetic shaped on the real Copy CE
+XML numbers, the omit-when-unsampled path, and the negative-guard. **Not verified: real split
+figures** — that needs another live export, and is the point of the change.
+
+-----
+
 ## 2026-07-23 — MEASURED: the dispatcher is not the bottleneck; Phase 1 is WON'T-DO (build 2324; docs)
 
 The question this whole diagnostics chain was built to answer, answered. `multipipe-eval.md`'s core
