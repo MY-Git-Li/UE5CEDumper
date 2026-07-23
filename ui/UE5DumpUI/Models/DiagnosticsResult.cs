@@ -24,7 +24,16 @@ public sealed class DiagnosticsCommandEntry
     public double SharePercent { get; set; }
 }
 
-/// <summary>Win32 process facts (Tier 2) — no UE dependency at all.</summary>
+/// <summary>
+/// Win32 process facts (Tier 2) — no UE dependency at all.
+///
+/// <para><b>These are the GAME process's numbers, not the DLL's.</b> We are
+/// injected into the game, so the OS reports one process and there is no
+/// supported way to attribute a working set to a single loaded module. A
+/// multi-GB figure here is the game's memory; only the dispatch table is purely
+/// our cost. Any UI surfacing these must say so — an unlabelled "7,453 MiB"
+/// next to our diagnostics reads as ours.</para>
+/// </summary>
 public sealed class DiagnosticsProcess
 {
     public long   WorkingSetBytes { get; init; }

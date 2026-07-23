@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     UE5CEDumper unified build script — C++ DLL + C# Avalonia UI
 
@@ -39,7 +39,7 @@ param(
     [ValidateSet("Debug", "Release", "Publish")]
     [string]$Mode = "Release",
 
-    [ValidateSet("All", "DLL", "ProxyDLL", "ProxyDinput8", "ProxyDxgi", "UI", "Test")]
+    [ValidateSet("All", "DLL", "ProxyDLL", "ProxyDinput8", "ProxyDxgi", "ProxyWinmm", "UI", "Test")]
     [string]$Target = "All",
 
     [switch]$Clean,
@@ -353,6 +353,7 @@ if ($Target -in "All", "DLL")               { $cppTargets += "UE5Dumper" }
 if ($Target -in "All", "DLL", "ProxyDLL")     { $cppTargets += "UE5Dumper_Proxy" }
 if ($Target -in "All", "DLL", "ProxyDinput8") { $cppTargets += "UE5Dumper_ProxyDinput8" }
 if ($Target -in "All", "DLL", "ProxyDxgi")    { $cppTargets += "UE5Dumper_ProxyDxgi" }
+if ($Target -in "All", "DLL", "ProxyWinmm")   { $cppTargets += "UE5Dumper_ProxyWinmm" }
 
 if ($cppTargets.Count -gt 0) {
     Write-Banner "C++ DLLs  |  $CppConfig"
@@ -360,7 +361,7 @@ if ($cppTargets.Count -gt 0) {
     # NOTE: no clean here. -Clean already removed $BUILD_DIR in the Clean phase;
     # otherwise we keep it for an incremental Ninja build (the whole point).
     Write-Step "Configuring CMake (Ninja + MSVC, all DLL targets)..."
-    $configOk = Invoke-CmdInVsEnv "cmake -S `"$ROOT_DIR`" -B `"$BUILD_DIR`" -G Ninja -DCMAKE_BUILD_TYPE=$CppConfig -DBUILD_PROXY_DLL=ON -DBUILD_PROXY_DINPUT8=ON -DBUILD_PROXY_DXGI=ON"
+    $configOk = Invoke-CmdInVsEnv "cmake -S `"$ROOT_DIR`" -B `"$BUILD_DIR`" -G Ninja -DCMAKE_BUILD_TYPE=$CppConfig -DBUILD_PROXY_DLL=ON -DBUILD_PROXY_DINPUT8=ON -DBUILD_PROXY_DXGI=ON -DBUILD_PROXY_WINMM=ON"
 
     if (-not $configOk) {
         Write-Fail "CMake configure failed"
@@ -412,7 +413,8 @@ if ($cppTargets.Count -gt 0) {
             $proxyOutputs = @(
                 @{ When = "ProxyDLL";     File = "version.dll"; Pdb = "version.pdb" },
                 @{ When = "ProxyDinput8"; File = "dinput8.dll"; Pdb = "dinput8.pdb" },
-                @{ When = "ProxyDxgi";    File = "dxgi.dll";    Pdb = "dxgi.pdb"    }
+                @{ When = "ProxyDxgi";    File = "dxgi.dll";    Pdb = "dxgi.pdb"    },
+                @{ When = "ProxyWinmm";   File = "winmm.dll";   Pdb = "winmm.pdb"   }
             )
             $proxyOutDir = Join-Path $DIST_DIR "proxy"
             foreach ($p in $proxyOutputs) {
@@ -585,7 +587,7 @@ if ($Target -in "All", "Test") {
     # targets are compiled below, not the DLLs).
     if (-not (Test-Path (Join-Path $BUILD_DIR "CMakeCache.txt"))) {
         Write-Step "Configuring CMake for tests (Ninja + MSVC)..."
-        $testCfgOk = Invoke-CmdInVsEnv "cmake -S `"$ROOT_DIR`" -B `"$BUILD_DIR`" -G Ninja -DCMAKE_BUILD_TYPE=$CppConfig -DBUILD_PROXY_DLL=ON -DBUILD_PROXY_DINPUT8=ON -DBUILD_PROXY_DXGI=ON"
+        $testCfgOk = Invoke-CmdInVsEnv "cmake -S `"$ROOT_DIR`" -B `"$BUILD_DIR`" -G Ninja -DCMAKE_BUILD_TYPE=$CppConfig -DBUILD_PROXY_DLL=ON -DBUILD_PROXY_DINPUT8=ON -DBUILD_PROXY_DXGI=ON -DBUILD_PROXY_WINMM=ON"
         if (-not $testCfgOk) {
             Write-Fail "CMake configure (tests) failed"
             $exitCode = 1

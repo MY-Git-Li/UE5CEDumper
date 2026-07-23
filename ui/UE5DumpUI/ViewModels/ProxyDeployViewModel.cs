@@ -128,6 +128,11 @@ public partial class ProxyDeployViewModel : ViewModelBase
         get => SelectedProxyType == ProxyType.Dxgi;
         set { if (value) SelectedProxyType = ProxyType.Dxgi; }
     }
+    public bool IsWinmmSelected
+    {
+        get => SelectedProxyType == ProxyType.Winmm;
+        set { if (value) SelectedProxyType = ProxyType.Winmm; }
+    }
 
     /// <summary>
     /// Detected games. Non-replaceable: items are added/removed in place so that
@@ -209,6 +214,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsVersionSelected));
         OnPropertyChanged(nameof(IsDinput8Selected));
         OnPropertyChanged(nameof(IsDxgiSelected));
+        OnPropertyChanged(nameof(IsWinmmSelected));
 
         // If we already have games, re-evaluate their deploy status against
         // the new proxy type. Fire-and-forget — UI doesn't block on toggle.

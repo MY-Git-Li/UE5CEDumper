@@ -20,6 +20,50 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — winmm.dll proxy: the spare slot (build 2317; dev, DLL + UI)
+
+The 4th proxy. **Built on the slot-contention trigger, not the coverage one** — the n=24 census
+(build 2313) stands: winmm and dxgi both cover 100% of installed UE games and winmm reaches exactly
+zero that dxgi misses. What justifies it is the other half of that finding: **a proxy only works if
+its filename is free.** `dxgi.dll` is the name ReShade and many mod loaders take, `version.dll` is
+likewise often occupied (P3R ships its own), and with both gone the only remaining choice was
+dinput8 at 2/24. winmm is the spare universally-viable slot, so users now get a real dxgi/winmm
+choice.
+
+**Generated, never hand-written.** New `scripts/gen_proxy_forwarders.py` reads the export table of
+the real System32 DLL and emits all three artefacts in the shapes the dxgi proxy already uses —
+`Lugner_Winmm.cpp` (the `mProcs[]` table + lazy System32 resolver), `Lugner_Winmm.asm` (180 MASM
+lazy jmp-thunks), `ProxyWinmm.def` (`name = fN @ordinal` + our C ABI). At 180 exports hand-editing
+was never an option; `--check` verifies the checked-in files are current. The generator carries the
+two hard-won constraints in its header: jmp-thunks rather than C forwarders (a bare `jmp` forwards
+ANY signature, which matters because the export table holds undocumented internals), and LAZY
+resolution rather than eager DllMain (eager resolution crashed Octopath Traveler through the dxgi
+proxy by running LoadLibrary under the loader lock).
+
+**Verified against the real DLL rather than by inspection:** 180/180 forwarding exports present,
+**every ordinal matching System32 winmm exactly**, zero missing, plus the 60-symbol UE5 ABI
+including `g_invokeMailbox`. One ordinal-only export (@2, an internal) is skipped and reported by
+the generator — a game importing winmm by ordinal would miss it; none does. And the proxy does
+**not import winmm itself**, which is only possible because build 2301 moved Mimic's
+`timeBeginPeriod` off a static import.
+
+**Two more hardcoded proxy lists found and removed** while wiring this up — the same desync class
+that had left the double-inject guards blind to dinput8/dxgi. `DumperModuleDetector.ProxyNames` and
+`WindowsPlatformService`'s module filter both carried literal `{version, dinput8, dxgi}`; both now
+derive from `ProxyType` through one `IsInterestingModuleName` helper. New `ProxyTypeCoverageTests`
+walks every enum value through `GetDllName` / `GetDisplayName` / `FromDllName` / the module filter,
+so a fifth flavour cannot be half-added again.
+
+**Also in this build:** the Diagnostics card's process line now reads *"Game process (not the DLL)"*.
+The figures are the whole game's — we are injected into it and there is no supported way to
+attribute a working set to one module — and an unlabelled "7,453 MiB" next to our own diagnostics
+read as ours.
+
+**Verification:** all 4 proxies + main DLL build clean; 2882 tests green (+7). **Not verified: the
+winmm proxy loading a real game** — that needs a deploy-and-launch and is the obvious next step.
+
+-----
+
 ## 2026-07-23 — Diagnostics card: auto-refresh toggle + resizable columns (build 2315; dev, UI-only)
 
 Two things the first live run made obvious.

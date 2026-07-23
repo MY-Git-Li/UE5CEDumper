@@ -902,6 +902,16 @@ Pick up when the active plan finishes or when blocked.
 
 ## Pending live-game verification (verify only — no code)
 
+- **Flaky: `SnapshotViewModelTests.GroupMatch_MissingValue_ShowsErrorNoCandidates`** — failed ONCE
+  in a full parallel run on 2026-07-23 (build 2318), then passed 25/25 three times in isolation and
+  green on an immediate full re-run. Unrelated to the winmm/proxy work that was in flight. This test
+  class has prior form for snapshot-DB concurrency flakes (see `feedback-ci-only-test-flakes`, and
+  PR #451's concurrent-first-open fix), so the likeliest cause is another store-level race under
+  parallel load rather than the assertion itself. **Not chased** — one observation is not a
+  reproduction. If it recurs, capture whether `GroupCandidates` was non-empty or `GroupStatusText`
+  empty, since those point at different halves. Effort **S** once reproducible.
+
+
 Shipped + unit-tests-pass but unproven on real games:
 
 - **Copy CE Field drills object-pointer arrays — leaf + GWorld-path spine + dup-crumb dedup — DONE +
@@ -1102,13 +1112,23 @@ time-control evals above.*
 
 -----
 
-## 4th proxy DLL — winmm.dll — RE-MEASURED n=24 (2026-07-23) — **WON'T DO for coverage**
+## 4th proxy DLL — winmm.dll — ✅ SHIPPED build 2317 (as a SLOT, not for coverage)
 
-**Verdict reversed by data. At n=24 real UE games, winmm and dxgi both cover 100% — winmm reaches
-exactly ZERO games that dxgi does not, and no installed UE game is unreachable by the current three
-proxies. Do not build it for coverage.** One narrow trigger survives (slot contention, below); the
-hard prerequisite is already done (build 2301), so if that trigger ever fires the work is unblocked
-and purely mechanical.
+**Built on the slot-contention trigger, not the coverage one.** The n=24 census below stands: winmm
+and dxgi both cover 100% and winmm reaches exactly zero games dxgi misses, so there was never a
+coverage case. What justifies it is the other half of that finding — **a proxy only works if its
+filename is free.** `dxgi.dll` is the name ReShade and many mod loaders take; `version.dll` is
+likewise often occupied (P3R ships one). With both taken the only remaining choice was dinput8 at
+2/24. winmm is the spare universally-viable slot.
+
+**Generated, not hand-written** (`scripts/gen_proxy_forwarders.py winmm`): 180 exports across
+`Lugner_Winmm.cpp` / `.asm` / `ProxyWinmm.def`. Re-run with `--check` to verify they are current.
+**Verified against the real DLL:** 180/180 forwarding exports present, **every ordinal matching
+System32 winmm exactly**, zero missing, plus our 60-symbol UE5 ABI — and the proxy does **not**
+import winmm itself, which the build-2301 prerequisite is what makes possible.
+
+*Kept below: the census that says don't build it for coverage, and the trap that had to be fixed
+first. Both still govern any FIFTH flavour.*
 
 **⚠ The earlier n=7 recommendation was wrong, and it is worth knowing why.** That sample silently
 included **non-UE games** — Nioh3 (Team Ninja), Crimson Desert (BlackSpace), Atelier Yumia (KT) —

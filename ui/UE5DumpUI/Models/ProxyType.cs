@@ -27,6 +27,19 @@ public enum ProxyType
     /// SQUARE ENIX UE4 builds). Does not apply to Vulkan/OpenGL-only games.
     /// </summary>
     Dxgi,
+
+    /// <summary>
+    /// Hijack winmm.dll. Measured at 24/24 importable across every installed UE
+    /// game — exactly the same set as <see cref="Dxgi"/>, so it reaches nothing
+    /// dxgi misses.
+    ///
+    /// <para>It exists as a second free <b>slot</b>, not for coverage: a proxy
+    /// only works if its filename is unused, and <c>dxgi.dll</c> is the name
+    /// ReShade and many mod loaders take, while <c>version.dll</c> is likewise
+    /// often occupied (P3R ships one). When both are taken, winmm is the
+    /// remaining universally-importable choice — dinput8 is only 2/24.</para>
+    /// </summary>
+    Winmm,
 }
 
 /// <summary>
@@ -43,6 +56,7 @@ public static class ProxyTypeExtensions
         ProxyType.Version => Constants.ProxyDllName,
         ProxyType.Dinput8 => Constants.ProxyDllNameDinput8,
         ProxyType.Dxgi    => Constants.ProxyDllNameDxgi,
+        ProxyType.Winmm   => Constants.ProxyDllNameWinmm,
         _                 => Constants.ProxyDllName,
     };
 
@@ -54,6 +68,7 @@ public static class ProxyTypeExtensions
         ProxyType.Version => "version.dll",
         ProxyType.Dinput8 => "dinput8.dll",
         ProxyType.Dxgi    => "dxgi.dll",
+        ProxyType.Winmm   => "winmm.dll",
         _                 => "version.dll",
     };
 
@@ -68,6 +83,7 @@ public static class ProxyTypeExtensions
         if (string.Equals(dllName, Constants.ProxyDllName, StringComparison.OrdinalIgnoreCase)) return ProxyType.Version;
         if (string.Equals(dllName, Constants.ProxyDllNameDinput8, StringComparison.OrdinalIgnoreCase)) return ProxyType.Dinput8;
         if (string.Equals(dllName, Constants.ProxyDllNameDxgi, StringComparison.OrdinalIgnoreCase)) return ProxyType.Dxgi;
+        if (string.Equals(dllName, Constants.ProxyDllNameWinmm, StringComparison.OrdinalIgnoreCase)) return ProxyType.Winmm;
         return null;
     }
 }

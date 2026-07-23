@@ -459,7 +459,9 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
             {
                 string name = m.ModuleName ?? "";
                 string lower = name.ToLowerInvariant();
-                if (lower is not ("version.dll" or "dinput8.dll" or "dxgi.dll" or "ue5dumper.dll"))
+                // Single source of truth (DumperModuleDetector), not a repeated
+                // literal list — a 4th proxy flavour must not need editing here.
+                if (!DumperModuleDetector.IsInterestingModuleName(lower))
                     continue;
                 string? product = null, version = null;
                 try

@@ -164,6 +164,7 @@ local UE5_PROXY_DLL_NAMES = {
     ["version.dll"] = true,
     ["dinput8.dll"] = true,
     ["dxgi.dll"]    = true,
+    ["winmm.dll"]   = true,
 }
 
 function ue5_isAlreadyLoaded()

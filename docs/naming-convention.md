@@ -76,6 +76,7 @@ narrative identity resonates with what the module *does*.
 | `CEPlugin.cpp` | `Methode.cpp` | *(no header)* |
 | `dllmain.cpp` | `Heiter.cpp` | *(no header)* |
 | `ProxyVersion.cpp` | `Lugner.cpp` | *(no header)* |
+| *(generated)* | `Lugner_Winmm.cpp/.asm` + `ProxyWinmm.def` | *(no header)* |
 
 **Unchanged**: `BuildInfo.h.in`, `version.rc`
 

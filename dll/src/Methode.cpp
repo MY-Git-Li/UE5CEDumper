@@ -115,6 +115,7 @@ static const char* const kProxyDllNames[] = {
     "version.dll",
     "dinput8.dll",
     "dxgi.dll",
+    "winmm.dll",
 };
 
 static bool IsProxyDllName(const char* fileName) {
