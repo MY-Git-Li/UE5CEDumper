@@ -89,6 +89,22 @@ the row here when it ships.
   > Regression test `AutoSnapshot_DisconnectMidCapture_StopsLoopWithoutWedge`; 2527 green. *Delete after the
   > audit batch is merged to main.*
 
+- **What the 2026-07-23 SEED + Elliot sessions do and do NOT tell us about the DLL batch** —
+  Checked both games' logs (`init` / `pipe` / `walk`, all four rotations). The command mix is
+  walk/export only — `walk_instance(_batch)`, `walk_functions`, `walk_world`, `get_object_list`,
+  `get_diagnostics`, plus **read-only** `teleport_get_markers` / `get_time_state` on tab load. **No
+  Schlacht / Solide / Hemmung-set / Laufen / Solitar / Dunste / Grausam / Linie worker was ever
+  started**, so the audit-#3 DLL cluster (M1-M5 + L1-L12 — almost all about those modules'
+  enable/disable/shutdown lifecycle) was **not exercised**: this is not evidence of health. What the
+  logs DO show clean: `UE5_Init` + offsets validated on both, a clean two-lane `Client disconnected`
+  → `PipeServer: Stopped` shutdown, and **zero errors**. The only warnings are 46 benign
+  `WalkInstance: instance 0x3f80000040400000 not readable (freed?), skipping` in one Elliot session —
+  the SEH guard refusing an ObjectProperty slot that actually held float data, which is the guard
+  working. **To actually exercise the batch:** toggle See-through on/off (M1/M2/M3), leave a Solide
+  force-field held while disconnecting the UI (M4/L2/L3/L4), set + reset a time dilation and a
+  movement multiplier, toggle the foreground lock (L10), run a PE-profile Start/Stop (L7), then close
+  the game while a scan runs (M5). *Parent: audit-2026-07-14-findings; log review 2026-07-23.*
+
 - **[✅ ALL 13 LOWs DONE] Audit #3 low-severity batch** — SHIPPED on `dev` in four commits:
   UI L13–L17 (`8bd33f8`, +2 tests), Solide L2/L3/L4 (`408fd2d`), DLL L1/L5/L8/L10/L12 (`7f3898f`), and the
   adversarial-verify followups (`3362636`: L4 prune-guard for >256-instance churn + L10 GFW-hook re-subclass
@@ -232,7 +248,12 @@ the row here when it ships.
   *Parent: P0–P3 shipped on dev (this session); builds on value_search_caveats, the `Orden`
   seam (group-value-scan-spec §3.1), and the "Guess What" build (commit 75ea723).*
 
-- **Snapshot capture too slow on huge games (FF7 Rebirth ~433K objects) — esp. with Native-C** —
+- **[✅ IMPROVED — parked unless it bites again] Snapshot capture too slow on huge games** —
+  User re-tested 2026-07-23 **on a smaller title rather than FF7 Rebirth and confirms the four
+  changes below improved it**, so the item is parked. What that does NOT settle is the original
+  433K-object case — keep the notes below for when it recurs; the untried levers are class-scoped
+  capture (only a chosen class's instances) and a clearer "X% captured" progress.
+  **Native-C P3 verification is no longer blocked by this.**
   Effort: **M-L** · Risk: med (touches the hot capture path). FF7 Rebirth snapshot with
   Native-C ON ran **16+ min and left >50% of objects uncaptured**, so P3 couldn't be verified
   there. Likely causes, in order: (1) **Native-C `AppendRawHoleFields` calls `Ubel::GuessGapTypes`,
@@ -386,33 +407,44 @@ Design contract: **[teleport-coord-library-spec.md](teleport-coord-library-spec.
 Write-up: [dev-log.md](dev-log.md) 2026-07-23. All five phases are on `dev`, 2777 tests green,
 **zero DLL/pipe change**. What remains is verification that unit tests structurally cannot do.
 
-- **VERIFY IN-GAME — the teleport itself** — Effort: **S** · Risk: low.
-  Save current pos → move → Teleport selected → land back. Then the map guard: save on map A, load
-  map B, confirm plain Teleport refuses and Force is the only way through. Watch for `Tier == 2`
-  (raw-write fallback) in the status line — the game may snap the pawn back, which is expected and
-  already surfaced. *Parent: P1.*
+> **User verification pass 2026-07-23:** the **DLL-flavour** emitted Lua **WORKS in CE** (picker
+> opens, list + filter + teleport), **CSV export/import was exercised**, and the group/label round
+> trip was driven from the Lua picker UI. Two results came out of it — the DLL flavour is verified,
+> and the **no-DLL (standalone) flavour does NOT work on the tested title**. The remaining VERIFY
+> rows are the ones that pass was not aimed at. *(Which title the standalone failed on still needs
+> filling in here.)*
 
-- **VERIFY IN CE — the emitted picker (both flavours)** — Effort: **M** · Risk: med.
-  **Nothing has executed a single line of the emitted Lua.** Push to CE → enable the record → the
-  form should open with the ListView filled, the filter narrowing on space-AND, both RadioGroups
-  live, Teleport working and Force bypassing the map guard. Highest-risk items, in order:
-  (a) the CE control/property set — verified from `CrimsonDesert.CT` CheatEntry 357, not from CE's
-  own docs, so `lv.ItemIndex`, `readString(mb + params + 48, 127, false)` and
-  `rgGroup.Items.add` are the ones most likely to be wrong;
-  (b) panel creation order actually producing the intended layout;
-  (c) the no-DLL flavour's raw write, which additionally needs "UE5 Trainer: Setup" enabled first
-  and has the known may-not-visibly-move caveat. *Parent: P3 + P5.*
+- **✅ VERIFIED — the emitted picker, DLL flavour (2026-07-23).** Form opens, ListView fills, filter
+  narrows, Teleport works from the picker. That confirms the CE control/property set lifted from
+  `CrimsonDesert.CT` (`lv.ItemIndex`, `readString(mb + params + 48, 127, false)`, `rgGroup.Items.add`)
+  against a real CE — the highest-risk unknown in P3/P5. *Delete after the batch merges to main.*
 
-- **VERIFY — CSV against a real spreadsheet** — Effort: **S** · Risk: low.
-  Export → open in Excel (check CJK renders, i.e. the BOM did its job) → edit a label → save →
-  re-import and confirm the two-stage preview shows the change *before* committing. Deliberately
-  try a group named `1-2` and a label starting `=` — the first should show up in the diff as an
-  Excel date mangling, the second should survive the armouring round trip. *Parent: P2.*
+- **✅ VERIFIED — CSV export/import (2026-07-23).** Round trip exercised. NOT separately confirmed:
+  the two deliberate hostile cases (a group named `1-2` that Excel mangles into a date; a label
+  starting `=` surviving the formula armouring). Retry those only if a real library corrupts.
+
+- **BUG / LIMIT — the no-DLL (standalone) flavour does not teleport on the tested title** —
+  Effort: **M** · Risk: med. Confirmed by the user 2026-07-23. The spec already carries the caveat
+  ("needs *UE5 Trainer: Setup* enabled first; may not visibly move"), so this is that caveat firing
+  rather than a surprise: the standalone flavour writes the pawn's location RAW, and a game that
+  re-asserts its own transform every tick simply overwrites it. **Decide between** (a) documenting it
+  as a hard limitation of the no-DLL flavour (cheap, honest), or (b) having the standalone picker
+  DETECT the snap-back — read the location back N ms after the write and, if it drifted back, say so
+  in the status line instead of silently doing nothing. (b) is what stops the next user concluding
+  the feature is broken. *Parent: P5; teleport-coord-library-spec.md §10.*
+
+- **VERIFY IN-GAME — the teleport itself, from the APP (not the CE picker)** — Effort: **S** · Risk: low.
+  Still open: save current pos → move → Teleport selected → land back, then the **map guard** (save on
+  map A, load map B; plain Teleport must refuse and Force must be the only way through). Watch for
+  `Tier == 2` (raw-write fallback) in the status line. *Parent: P1.*
 
 - **VERIFY — the quick-jump menu label** — Effort: **S** · Risk: low.
-  The tab's right-click menu takes a card's label from the first `SemiBold` TextBlock descendant of
-  a direct-child `Border`. The new card puts that TextBlock inside an `Expander.Header`; confirm the
-  walk still resolves "Coordinate Library" rather than a wrong label. Spec §7 flags this. *Parent: P1.*
+  **This is NOT the coordinate group/label.** It is the **Teleport TAB's own right-click menu** in the
+  Avalonia app, which lists that tab's cards so you can jump to one. It reads a card's name from the
+  first `SemiBold` TextBlock descendant of a direct-child `Border`; the Coordinate Library card puts
+  that TextBlock inside an `Expander.Header`, so the walk may resolve a wrong label (or none).
+  Right-click the Teleport tab and confirm the entry reads "Coordinate Library". Spec §7 flags it.
+  *Parent: P1.*
 
 - **VERIFY — DataGrid behaviour at scale** — Effort: **S** · Risk: med.
   The grid carries `MaxHeight="260"` precisely because `ContentRoot` is a vertically unbounded
@@ -1398,10 +1430,20 @@ matching section 10.6's prediction. The XML is unchanged — 149,621 lines / 14,
 sides, 15 differing lines and every one a per-session value (root address + FName ComparisonIndex,
 name half identical). DLL serialise time -20% (146.7 -> 116-119 ms), consistent across both runs.
 
-**Still open — the wall-clock.** On this export `ipc` did NOT move (207 -> 213-216 ms) even though
-the bytes nearly halved: at ~15 KB/response and 134 calls, IPC is dominated by fixed per-call cost.
-Repeat on the ~20k-call export target of section 10.4/10.5 before claiming any speed-up. While at
-it, re-run the payload audit with `UE5DUMP_PIPE_LOG_FULL=1` for an untruncated sample — the
+**Still open — the wall-clock.** On that small export `ipc` did NOT move (207 -> 213-216 ms) even
+though the bytes nearly halved: at ~15 KB/response over 134 calls, IPC is dominated by fixed
+per-call cost.
+
+A **bigger lean run exists** (2026-07-23 22:09, SEED `BP_LifeGameInstance_C`, depth 4, 13,845 structs
+/ 54 pointers): wall **2,086.6 ms**, 302 dispatches, split **dll 832.4 (39.9%) / ipc 704.3 / ui
+549.9 ms**, and **10.16 MB of lean payload** across 241 batch + 65 single responses (~39 KB per batch
+response — 4x the small run). It has **no before-side**, so it measures where the time sits now
+(DLL-bound) rather than what lean saved. Two cheap ways to close it:
+(a) re-run the same export against the pre-lean DLL (build 2338) for a true A/B; or
+(b) export the **same object as CSX**, which goes through the same `ResolveDrilldownAsync` with
+`lean:false` — caveat: CSX additionally drills object-arrays / DataTable rows, so its walk set is a
+SUPERSET and the comparison is an upper bound, not an equality.
+While at it, re-run the payload audit with `UE5DUMP_PIPE_LOG_FULL=1` for an untruncated sample — the
 1024-char body-log cap makes the whole-payload split read a flattering 39%.
 
 *Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
