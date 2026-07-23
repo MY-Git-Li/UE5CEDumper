@@ -1330,6 +1330,11 @@ snapshots and logs the delta as a `PERF` line in the `view` log. Better than the
 session it replaces: a deliberate test only covers the scenario somebody thought of, and only if they
 remembered to reset first — this accumulates evidence from real use.
 
+**⚠ Read numbers from build 2324 or later.** The first live run (2321) used `GetTickCount64`, whose
+15.6 ms granularity floored sub-ms commands to zero, and counted the probe's own `get_diagnostics`
+in the busy total — so those lines understate per-command cost and overstate short operations
+(a 57.7 ms op reported 161% busy). Both fixed in 2324.
+
 **Still open: read the numbers.** The point of Tier 1 is to decide multipipe Phase 1. Now that every
 heavy operation self-records, just use the tool normally on a game that lags and grep the `view` log
 for `PERF`. **High `dispatcher busy %` ⇒ build Phase 1; low ⇒ the lag is elsewhere** (UI thread,

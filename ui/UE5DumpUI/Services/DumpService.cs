@@ -2479,15 +2479,15 @@ public sealed class DumpService : IDumpService
                 {
                     Cmd     = obj["cmd"]?.GetValue<string>() ?? "",
                     Count   = JsonNum.L(obj["count"]),
-                    TotalMs = JsonNum.L(obj["total_ms"]),
-                    MaxMs   = JsonNum.L(obj["max_ms"]),
-                    LastMs  = JsonNum.L(obj["last_ms"]),
+                    TotalMs = JsonNum.D(obj["total_ms"]),
+                    MaxMs   = JsonNum.D(obj["max_ms"]),
+                    LastMs  = JsonNum.D(obj["last_ms"]),
                     AvgMs   = JsonNum.D(obj["avg_ms"]),
                 });
             }
         }
 
-        long totalBusy = JsonNum.L(res["total_busy_ms"]);
+        double totalBusy = JsonNum.D(res["total_busy_ms"]);
         // Share-of-busy is derived here rather than on the wire: the DLL already
         // sends the total, and a percentage computed client-side can't disagree
         // with the rows it is computed from.

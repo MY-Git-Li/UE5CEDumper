@@ -99,8 +99,16 @@ internal sealed class DiagnosticsProbe : IAsyncDisposable
     internal static string Format(string label, TimeSpan elapsed,
                                   DiagnosticsResult before, DiagnosticsResult after)
     {
+        var top = TopDeltas(before, after, 0);
+
+        // Busy is summed from the per-command deltas, NOT from the global
+        // total_busy_ms delta. The two disagreed on the first live run: the global
+        // figure includes the probe's OWN opening get_diagnostics, so a 57.7 ms
+        // Copy CE Field reported "busy 93 ms (161.2%)" — the probe measuring
+        // itself. Deriving busy from the same rows the ranking shows makes the
+        // percentage and the breakdown agree by construction.
+        double busyMs = top.Sum(t => t.TotalMs);
         long dispatches = Math.Max(0, after.TotalDispatches - before.TotalDispatches);
-        long busyMs     = Math.Max(0, after.TotalBusyMs - before.TotalBusyMs);
         double wallMs   = elapsed.TotalMilliseconds;
 
         // Share of the operation's own wall-clock spent inside the DLL dispatcher.
@@ -112,7 +120,7 @@ internal sealed class DiagnosticsProbe : IAsyncDisposable
         var sb = new StringBuilder();
         sb.Append("PERF ").Append(label)
           .Append(": wall ").Append(F(wallMs)).Append(" ms")
-          .Append(" · dispatcher busy ").Append(busyMs).Append(" ms (")
+          .Append(" · dispatcher busy ").Append(F(busyMs)).Append(" ms (")
           .Append(F(busyPct)).Append("%)")
           .Append(" · ").Append(dispatches).Append(" dispatches");
 
@@ -125,12 +133,11 @@ internal sealed class DiagnosticsProbe : IAsyncDisposable
             sb.Append(" · game WS ").Append(wsDelta > 0 ? "+" : "")
               .Append(F(wsDelta / (1024.0 * 1024.0))).Append(" MiB");
 
-        var top = TopDeltas(before, after, 3);
         if (top.Count > 0)
         {
             sb.Append(" · top: ");
-            sb.Append(string.Join(", ", top.Select(t =>
-                $"{t.Cmd} {t.TotalMs}ms/{t.Count}x max {t.MaxMs}ms")));
+            sb.Append(string.Join(", ", top.Take(3).Select(t =>
+                $"{t.Cmd} {F(t.TotalMs)}ms/{t.Count}x max {F(t.MaxMs)}ms")));
         }
         return sb.ToString();
     }
@@ -147,7 +154,7 @@ internal sealed class DiagnosticsProbe : IAsyncDisposable
         {
             if (string.Equals(a.Cmd, SelfCmd, StringComparison.Ordinal)) continue;
             baseline.TryGetValue(a.Cmd, out var b);
-            long total = a.TotalMs - (b?.TotalMs ?? 0);
+            double total = a.TotalMs - (b?.TotalMs ?? 0);
             long count = a.Count - (b?.Count ?? 0);
             if (count <= 0 && total <= 0) continue;   // untouched by this operation
             deltas.Add(new DiagnosticsCommandEntry
@@ -158,10 +165,10 @@ internal sealed class DiagnosticsProbe : IAsyncDisposable
                 // Max is a running high-water mark, so it cannot be differenced —
                 // report the observed peak and let the label carry the caveat.
                 MaxMs   = a.MaxMs,
-                AvgMs   = count > 0 ? (double)total / count : 0.0,
+                AvgMs   = count > 0 ? total / count : 0.0,
             });
         }
-        deltas.Sort((x, y) => y.TotalMs != x.TotalMs
+        deltas.Sort((x, y) => y.TotalMs.CompareTo(x.TotalMs) != 0
             ? y.TotalMs.CompareTo(x.TotalMs)
             : string.CompareOrdinal(x.Cmd, y.Cmd));
         if (limit > 0 && deltas.Count > limit) deltas.RemoveRange(limit, deltas.Count - limit);

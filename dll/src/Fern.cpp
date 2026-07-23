@@ -729,11 +729,15 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         // blocking docs/multipipe-eval.md blames for UI lag, which until now
         // nothing measured. See Sense.h.
         conn->inFlight.store(true, std::memory_order_relaxed);
-        const uint64_t dispatchStart = GetTickCount64();
+        // QPC, not GetTickCount64: its ~15.6 ms granularity floored every sub-tick
+        // dispatch to 0, so a live run of 1397 walk_instance calls reported
+        // "0 ms total, max 15 ms" — an artefact of which calls straddled a tick,
+        // not a measurement. Most pipe commands sit far below that granularity.
+        const uint64_t dispatchStart = Sense::NowTicks();
         std::string response = DispatchCommand(conn, line);
-        const uint64_t dispatchMs = GetTickCount64() - dispatchStart;
+        const uint64_t dispatchUs = Sense::TicksToUs(Sense::NowTicks() - dispatchStart);
         conn->inFlight.store(false, std::memory_order_relaxed);
-        Sense::RecordDispatch(cmd.empty() ? std::string("(unparsed)") : cmd, dispatchMs);
+        Sense::RecordDispatch(cmd.empty() ? std::string("(unparsed)") : cmd, dispatchUs);
 
         if (!response.empty()) {
             if (!WriteLine(*conn, response)) {
@@ -3123,26 +3127,29 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
 
             json data;
             const uint64_t uptimeMs = Sense::UptimeMs();
-            const uint64_t busyMs   = Sense::TotalBusyMs();
+            const uint64_t busyUs   = Sense::TotalBusyUs();
+            const double   busyMs   = double(busyUs) / 1000.0;
             data["uptime_ms"]        = uptimeMs;
             data["total_dispatches"] = Sense::TotalDispatches();
+            // Fractional ms: the commands this exists to measure are mostly
+            // sub-millisecond, so an integer would round the interesting ones away.
             data["total_busy_ms"]    = busyMs;
             // The headline number: what fraction of wall-clock was a dispatcher
             // occupied? A high value with a lagging UI is the evidence Phase 1
             // (non-blocking dispatch) would help; a low one says look elsewhere.
             data["busy_percent"] = (uptimeMs > 0)
-                ? (double(busyMs) * 100.0 / double(uptimeMs)) : 0.0;
+                ? (busyMs * 100.0 / double(uptimeMs)) : 0.0;
 
             json cmds = json::array();
             for (const auto& s : Sense::TopCommands(static_cast<size_t>(limit))) {
                 json e;
                 e["cmd"]      = s.cmd;
                 e["count"]    = s.count;
-                e["total_ms"] = s.totalMs;
-                e["max_ms"]   = s.maxMs;
-                e["last_ms"]  = s.lastMs;
+                e["total_ms"] = double(s.totalUs) / 1000.0;
+                e["max_ms"]   = double(s.maxUs)   / 1000.0;
+                e["last_ms"]  = double(s.lastUs)  / 1000.0;
                 e["avg_ms"]   = (s.count > 0)
-                    ? (double(s.totalMs) / double(s.count)) : 0.0;
+                    ? (double(s.totalUs) / double(s.count) / 1000.0) : 0.0;
                 cmds.push_back(e);
             }
             data["commands"] = cmds;

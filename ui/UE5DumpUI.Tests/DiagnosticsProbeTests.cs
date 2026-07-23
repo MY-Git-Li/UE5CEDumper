@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using Xunit;
@@ -18,8 +19,8 @@ namespace UE5DumpUI.Tests;
 /// </summary>
 public class DiagnosticsProbeTests
 {
-    private static DiagnosticsResult R(long dispatches, long busyMs,
-                                       params (string Cmd, long Count, long TotalMs, long MaxMs)[] cmds)
+    private static DiagnosticsResult R(long dispatches, double busyMs,
+                                       params (string Cmd, long Count, double TotalMs, double MaxMs)[] cmds)
         => new()
         {
             TotalDispatches = dispatches,
@@ -131,9 +132,56 @@ public class DiagnosticsProbeTests
         var line = DiagnosticsProbe.Format("Value Scan (First)", TimeSpan.FromSeconds(2), before, after);
         Assert.StartsWith("PERF Value Scan (First):", line, StringComparison.Ordinal);
         Assert.Contains("wall 2,000.0 ms", line, StringComparison.Ordinal);
-        Assert.Contains("dispatcher busy 500 ms (25.0%)", line, StringComparison.Ordinal);
+        Assert.Contains("dispatcher busy 500.0 ms (25.0%)", line, StringComparison.Ordinal);
         Assert.Contains("3 dispatches", line, StringComparison.Ordinal);
-        Assert.Contains("value_scan_begin 500ms/1x", line, StringComparison.Ordinal);
+        Assert.Contains("value_scan_begin 500.0ms/1x", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Busy_excludes_the_probes_own_call_so_short_ops_cannot_exceed_100pct()
+    {
+        // The exact first-live-run failure: a 57.7 ms Copy CE Field reported
+        // "busy 93 ms (161.2%)" because the global total included the probe's own
+        // 93 ms opening get_diagnostics. Busy is now summed from the per-command
+        // deltas, which exclude it.
+        var before = R(0, 0);
+        var after  = R(130, 93, ("get_diagnostics", 1, 93, 93), ("walk_instance", 128, 20, 15));
+
+        var line = DiagnosticsProbe.Format("Copy CE Field",
+            TimeSpan.FromMilliseconds(57.7), before, after);
+
+        Assert.Contains("dispatcher busy 20.0 ms", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("161", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("get_diagnostics", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Busy_always_equals_the_sum_of_the_reported_rows()
+    {
+        // The percentage and the breakdown must agree by construction — they
+        // disagreed on the live run (93 ms busy vs a top row showing 0 ms).
+        var before = R(0, 0);
+        var after  = R(9, 999, ("a", 1, 100.5, 100.5), ("b", 2, 40.25, 30),
+                               ("get_diagnostics", 1, 500, 500));
+
+        var line = DiagnosticsProbe.Format("X", TimeSpan.FromSeconds(1), before, after);
+        var rows = DiagnosticsProbe.TopDeltas(before, after, 0);
+        Assert.Equal(140.75, rows.Sum(r => r.TotalMs), 3);
+        Assert.Contains("dispatcher busy 140.8 ms", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Sub_millisecond_commands_survive_as_fractions()
+    {
+        // GetTickCount64's 15.6 ms granularity floored these to zero; QPC
+        // microseconds keep them. 1397 walk_instance calls at ~0.11 ms each.
+        var before = R(0, 0);
+        var after  = R(1397, 155.2, ("walk_instance", 1397, 155.2, 0.9));
+
+        var rows = DiagnosticsProbe.TopDeltas(before, after, 1);
+        Assert.Equal(155.2, rows[0].TotalMs, 3);
+        Assert.True(rows[0].AvgMs > 0.0 && rows[0].AvgMs < 1.0,
+                    $"avg should be sub-ms, was {rows[0].AvgMs}");
     }
 
     [Fact]

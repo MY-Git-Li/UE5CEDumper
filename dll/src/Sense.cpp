@@ -22,7 +22,7 @@ namespace {
 std::mutex                                  g_mutex;
 std::unordered_map<std::string, CommandStat> g_stats;
 uint64_t                                    g_totalDispatches = 0;
-uint64_t                                    g_totalBusyMs     = 0;
+uint64_t                                    g_totalBusyUs     = 0;
 uint64_t                                    g_startTick       = GetTickCount64();
 
 // ── CPU% differencing state (guarded by g_cpuMutex, separate from g_mutex so a
@@ -30,6 +30,12 @@ uint64_t                                    g_startTick       = GetTickCount64()
 std::mutex g_cpuMutex;
 uint64_t   g_lastCpuSampleTick = 0;   // GetTickCount64 at the previous sample
 uint64_t   g_lastCpu100ns      = 0;   // kernel+user, 100ns units
+
+// QPC frequency is fixed for the process lifetime, so read it once.
+LARGE_INTEGER QpcFreq() {
+    static LARGE_INTEGER f = [] { LARGE_INTEGER q{}; QueryPerformanceFrequency(&q); return q; }();
+    return f;
+}
 
 uint64_t FileTimeTo100ns(const FILETIME& ft) {
     ULARGE_INTEGER u;
@@ -67,17 +73,30 @@ uint32_t CountOwnThreads() {
 
 } // namespace
 
-void RecordDispatch(const std::string& cmd, uint64_t elapsedMs) {
+uint64_t NowTicks() {
+    LARGE_INTEGER t{};
+    QueryPerformanceCounter(&t);
+    return static_cast<uint64_t>(t.QuadPart);
+}
+
+uint64_t TicksToUs(uint64_t deltaTicks) {
+    const uint64_t f = static_cast<uint64_t>(QpcFreq().QuadPart);
+    if (f == 0) return 0;
+    // Scale before dividing so a sub-microsecond delta doesn't floor to zero.
+    return (deltaTicks * 1000000ULL) / f;
+}
+
+void RecordDispatch(const std::string& cmd, uint64_t elapsedUs) {
     std::lock_guard<std::mutex> lock(g_mutex);
     auto& s = g_stats[cmd];
     if (s.cmd.empty()) s.cmd = cmd;
     s.count   += 1;
-    s.totalMs += elapsedMs;
-    s.lastMs   = elapsedMs;
-    if (elapsedMs > s.maxMs) s.maxMs = elapsedMs;
+    s.totalUs += elapsedUs;
+    s.lastUs   = elapsedUs;
+    if (elapsedUs > s.maxUs) s.maxUs = elapsedUs;
 
     g_totalDispatches += 1;
-    g_totalBusyMs     += elapsedMs;
+    g_totalBusyUs     += elapsedUs;
 }
 
 std::vector<CommandStat> TopCommands(size_t limit) {
@@ -91,8 +110,8 @@ std::vector<CommandStat> TopCommands(size_t limit) {
     // Tie-break on max then name so the order is stable between polls (an
     // unstable order makes a live panel jitter for no reason).
     std::sort(out.begin(), out.end(), [](const CommandStat& a, const CommandStat& b) {
-        if (a.totalMs != b.totalMs) return a.totalMs > b.totalMs;
-        if (a.maxMs   != b.maxMs)   return a.maxMs   > b.maxMs;
+        if (a.totalUs != b.totalUs) return a.totalUs > b.totalUs;
+        if (a.maxUs   != b.maxUs)   return a.maxUs   > b.maxUs;
         return a.cmd < b.cmd;
     });
     if (limit > 0 && out.size() > limit) out.resize(limit);
@@ -104,9 +123,9 @@ uint64_t TotalDispatches() {
     return g_totalDispatches;
 }
 
-uint64_t TotalBusyMs() {
+uint64_t TotalBusyUs() {
     std::lock_guard<std::mutex> lock(g_mutex);
-    return g_totalBusyMs;
+    return g_totalBusyUs;
 }
 
 uint64_t UptimeMs() {
@@ -120,7 +139,7 @@ void Reset() {
         std::lock_guard<std::mutex> lock(g_mutex);
         g_stats.clear();
         g_totalDispatches = 0;
-        g_totalBusyMs     = 0;
+        g_totalBusyUs     = 0;
         g_startTick       = GetTickCount64();
     }
     // Drop the CPU baseline too, so the first sample of the next session reports

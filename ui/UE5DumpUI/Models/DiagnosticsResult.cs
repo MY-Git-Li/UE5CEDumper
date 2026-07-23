@@ -11,11 +11,15 @@ public sealed class DiagnosticsCommandEntry
 {
     public string Cmd     { get; init; } = "";
     public long   Count   { get; init; }
-    public long   TotalMs { get; init; }
+    /// <summary>Fractional milliseconds. The DLL times dispatches with QPC and
+    /// reports microseconds scaled to ms, because most pipe commands are
+    /// SUB-millisecond — an integer here would round the interesting ones to
+    /// zero, which is exactly the bug the first live run exposed.</summary>
+    public double TotalMs { get; init; }
     /// <summary>Worst single dispatch — the head-of-line spike a user feels as a
     /// frozen UI.</summary>
-    public long   MaxMs   { get; init; }
-    public long   LastMs  { get; init; }
+    public double MaxMs   { get; init; }
+    public double LastMs  { get; init; }
     public double AvgMs   { get; init; }
 
     /// <summary>Share of all dispatcher-busy time owned by this command. Set by the
@@ -81,7 +85,8 @@ public sealed class DiagnosticsResult
 {
     public long   UptimeMs        { get; init; }
     public long   TotalDispatches { get; init; }
-    public long   TotalBusyMs     { get; init; }
+    /// <summary>Fractional milliseconds — see <see cref="DiagnosticsCommandEntry.TotalMs"/>.</summary>
+    public double TotalBusyMs     { get; init; }
     /// <summary>Fraction of wall-clock a dispatcher was occupied. High here plus a
     /// lagging UI is the case FOR non-blocking dispatch; low here says the lag is
     /// somewhere else and Phase 1 would not help.</summary>

@@ -20,6 +20,52 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — winmm proxy LIVE-VERIFIED; the PERF records immediately found two of their own bugs (build 2324; dev)
+
+**winmm proxy works.** First live run, The Adventures of Elliot (UE 5.4):
+
+```
+DllMain ProxyStart: proxy DLL mode — starting pipe server only (no scan)
+DllMain ProxyStart: pipe server started
+[PROXY] winmm proxy: lazily forwarded 180/180 exports to real System32 winmm.dll
+UE5_Init: Complete (UE504, GObjects=0x149BFF150, GNames=0x149B1B600, Objects=326364)
+```
+
+**180/180 forwarded**, and at T+1.2 s — i.e. lazily, on a game thread after DllMain returned, exactly
+as designed rather than under the loader lock. Name sanity 10/10, full offset detection, GWorld
+found. The proxy family is now version / dinput8 / dxgi / winmm, all four working.
+
+**And the automatic PERF records earned their keep on their first outing** by exposing two defects in
+themselves — which a hand-run measurement session would very likely have shrugged past:
+
+```
+PERF Copy CE Field: wall 57.7 ms · dispatcher busy 93 ms (161.2%) · top: walk_instance 0ms/128x max 15ms
+```
+
+**161% busy, and the breakdown contradicting the total.** Two independent causes:
+
+1. **`GetTickCount64` was the wrong clock.** Its ~15.6 ms granularity floors every sub-tick dispatch
+   to zero, so 128 `walk_instance` calls summed to "0 ms" while one that happened to straddle a tick
+   read 15 ms. That is an artefact of tick alignment, not a measurement — and sub-millisecond
+   commands are precisely the population this exists to measure. `Sense` now times with
+   **QueryPerformanceCounter and accumulates microseconds**, reporting fractional ms on the wire
+   (`total_ms` / `max_ms` / `last_ms` became doubles, and the C# model with them).
+2. **The probe was measuring itself.** `busy` came from the global `total_busy_ms` delta, which
+   includes the probe's own opening `get_diagnostics` (~93 ms) — while the per-command ranking
+   already excluded it. Hence 93 ms of "busy" against a 57.7 ms operation whose top row showed 0 ms.
+   Busy is now **summed from the per-command deltas**, so the percentage and the breakdown agree by
+   construction rather than by coincidence.
+
+Both are pinned by regression tests carrying the real numbers from the log. Note that a genuine
+>100% remains possible and meaningful — the two-connection lane split can have two dispatchers busy
+at once — so the figure is deliberately not capped.
+
+**Verification:** all 4 proxies + main DLL build clean; 2896 tests green (+3). **Still to do: re-read
+the PERF lines with the fixed clock** — the pre-fix numbers above understate sub-ms commands and
+overstate short operations, so the multipipe Phase 1 decision should wait for fresh ones.
+
+-----
+
 ## 2026-07-23 — Automatic PERF records around every heavy operation (build 2320; dev, UI-only)
 
 The user's idea, and better than the manual measurement session it replaces: a deliberate test run

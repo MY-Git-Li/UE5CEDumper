@@ -30,12 +30,20 @@
 namespace Sense {
 
 /// Aggregated dispatch cost for one pipe command name.
+///
+/// Times are MICROSECONDS, accumulated from QueryPerformanceCounter. Milliseconds
+/// off GetTickCount64 were the first implementation and were actively misleading:
+/// its ~15.6 ms granularity floors every sub-tick dispatch to 0, so a real run of
+/// 1397 `walk_instance` calls reported "0 ms total, max 15 ms" — a statistical
+/// artefact of which calls happened to straddle a tick boundary, not a
+/// measurement. Most pipe commands are far below that granularity, which is
+/// exactly the population this exists to measure.
 struct CommandStat {
     std::string cmd;
     uint64_t    count   = 0;   // times dispatched since the last Reset
-    uint64_t    totalMs = 0;   // summed wall-clock inside DispatchCommand
-    uint64_t    maxMs   = 0;   // worst single dispatch — the head-of-line spike
-    uint64_t    lastMs  = 0;   // most recent, so a live panel shows movement
+    uint64_t    totalUs = 0;   // summed time inside DispatchCommand
+    uint64_t    maxUs   = 0;   // worst single dispatch — the head-of-line spike
+    uint64_t    lastUs  = 0;   // most recent, so a live panel shows movement
 };
 
 /// Win32 process facts. Zeroes on any query failure — this is diagnostics, so a
@@ -52,9 +60,15 @@ struct ProcessStat {
     double   cpuPercent       = -1.0;
 };
 
-/// Record one completed dispatch. Called from Fern's chokepoint; safe from any
-/// thread (the two-connection lane split means two can land at once).
-void RecordDispatch(const std::string& cmd, uint64_t elapsedMs);
+/// Record one completed dispatch, in MICROSECONDS. Called from Fern's chokepoint;
+/// safe from any thread (the two-connection lane split means two can land at once).
+void RecordDispatch(const std::string& cmd, uint64_t elapsedUs);
+
+/// QueryPerformanceCounter ticks, for bracketing a dispatch.
+uint64_t NowTicks();
+
+/// Convert a tick delta to microseconds using the cached QPC frequency.
+uint64_t TicksToUs(uint64_t deltaTicks);
 
 /// Per-command stats, heaviest TOTAL time first — total, not max, because the
 /// question is which command owns the dispatcher, not which one spiked once.
@@ -63,7 +77,7 @@ std::vector<CommandStat> TopCommands(size_t limit);
 
 /// Totals across every command since the last Reset.
 uint64_t TotalDispatches();
-uint64_t TotalBusyMs();
+uint64_t TotalBusyUs();
 
 /// Milliseconds since the DLL started collecting — the denominator for "what
 /// fraction of wall-clock was the dispatcher busy?".
