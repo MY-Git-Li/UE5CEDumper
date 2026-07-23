@@ -1194,13 +1194,13 @@ prove the reverse either, since a dynamic `LoadLibrary("dxgi.dll")` also searche
 `xinput1_4` — 109 functions but only **8 named, the rest ordinal-only**, so the `.def` needs
 `NONAME` + ordinal mapping, for only 3/7 coverage.
 
-**🐞 Latent bug found while measuring (independent of this item):** the double-inject guards only
-know the *old* proxy pair. `Methode.cpp` `IsAlreadyLoadedInTarget` (~line 155) tests
-`version.dll` / `winmm.dll`, and `scripts/UE5CEDumper.CT` `ue5_isAlreadyLoaded` (~line 173) has the
-same stale pair — **neither checks `dinput8.dll` or `dxgi.dll`**, the two proxies we actually ship.
-A user running the dxgi or dinput8 proxy gets no guard and can double-map. Fix both lists (and drive
-them off one shared name list so a 4th flavour can't desync them again). Effort **XS** · Risk low —
-**worth doing now, regardless of whether winmm ever happens.**
+**✅ DONE — latent bug found while measuring (independent of this item).** The double-inject guards
+only knew the *old* proxy pair: `Methode.cpp` `IsAlreadyLoadedInTarget` and
+`scripts/UE5CEDumper.CT` `ue5_isAlreadyLoaded` both tested `version.dll` / `winmm.dll` and
+**neither checked `dinput8.dll` or `dxgi.dll`**, the two proxies we actually ship — so a dxgi or
+dinput8 deployment had no guard and could double-map. Both now drive off a named list
+(`kProxyDllNames` / `UE5_PROXY_DLL_NAMES`) with cross-references so a 4th flavour can't desync them.
+SHIPPED build 2291 (dev-log 2026-07-23). *Delete this note after in-game verify.*
 
 Effort **M** · Risk low (after the BLOCKER fix). **Prereq before committing:** re-run the import
 measurement across the 30+ titles in [test-games.md](test-games.md) using the repo's own
@@ -1260,10 +1260,11 @@ record Tier 0 as WON'T-DO.**
 
 -----
 
-## `.CT` delivery — kill the two-stage table load + the blind 15 s wait — EVALUATED (2026-07-23)
+## `.CT` delivery — kill the two-stage table load + the blind 15 s wait — EVALUATED (2026-07-23); **(b) SHIPPED**
 
 **Verdict: the push mechanism the user wants already exists and already ships — it just was never
 pointed at the bootstrap script. Both halves are small and immediately actionable.**
+**(b) shipped in build 2291; (a) is still open.**
 
 ### (a) Two-stage table load — three existing escapes, one small gap
 
@@ -1291,36 +1292,19 @@ Worth evaluating as a 4th route: **CE's `autorun` folder** — a `.lua` dropped 
 plugin, and the UI can write the file. Effort **S**, but verify first that the CE APIs we rely on are
 available that early in CE startup.
 
-### (b) The 15 s wait is a blind countdown — make it poll
+### (b) ✅ DONE — the 15 s blind countdown is now a 250 ms poll
 
-`scripts/UE5CEDumper.CT` (~line 257) has **no readiness check at all**:
+SHIPPED build 2291 (dev-log 2026-07-23). New `Mimic::InitState`
+(`IDLE`/`RUNNING`/`READY`/`FAILED`/`SKIPPED`) published by `UE5_AutoStart` + both
+`AutoStartThreadProc` flavours, read by the `.CT` via `getAddress("g_invokeMailbox")` +
+`readInteger` — a pure memory read, no `CreateRemoteThread`. Timeout and `FAILED` are now real
+errors instead of a success message. `initState` reuses the former `reserved` slot at `+0x0C`, so
+no `.def` or UI offset changed. The symbol is resolved **inside** the poll loop because CE's symbol
+handler may not see the just-injected module yet. **Needs in-game verify** (CE Lua isn't
+unit-testable); *delete this note afterwards.*
 
-```lua
-local WAIT_SEC = 15
-for i = WAIT_SEC, 1, -1 do sleep(1000) ... end
-```
-
-then prints "complete (or failed — check DLL log)". Its own comment states the timeline is "1 s
-thread delay + ~2-8 s AOB scan", so 15 s is a worst-case constant that wastes 5-10 s on every normal
-run *and* reports success even on failure.
-
-Replace with poll-until-ready: check every 250 ms, break on ready, cap at 20-25 s, and **report an
-actual error on timeout**. Readiness signal, in preference order (per CLAUDE.md, **confirm the CE Lua
-API exists before using it — do not invent one**):
-
-- **Preferred — the Mimic mailbox.** Have the DLL write a ready magic into the mailbox once init
-  completes; CE Lua polls it with `getAddress()` + `readInteger`. **A pure memory read, no remote
-  thread** — which matters, because the `.CT`'s own comment (~line 244) says `executeCodeEx` was
-  deliberately avoided during init since games may block `CreateRemoteThread`. May need a new ready
-  field in Mimic (DLL side **XS**).
-- Second — poll `ue5_callDLL("UE5_IsInitialized", "bool")`; same remote-thread exposure.
-- **Do not** assume CE exposes a named-pipe client API to probe for the pipe — unverified.
-
-Free side-benefit: printing the real ready time yields a per-host "how long does the AOB scan
-actually take" measurement — exactly a Tier 1 input for the performance-counter item above.
-
-Effort **S** (Lua loop) + **XS** (DLL ready flag) · Risk low. **Best effort-to-payoff of the three
-2026-07-23 evaluations — do this first.**
+Free side-benefit now available: the script prints the real ready time, giving a per-host "how long
+does the AOB scan actually take" measurement — a Tier 1 input for the performance-counter item above.
 
 *Parent: AOBMaker bridge `CreateAAScript` / `InjectTableFile` (aobmaker-integration.md §3-4);
 project-ce-lua-output-hygiene.*

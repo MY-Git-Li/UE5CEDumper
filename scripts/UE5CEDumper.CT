@@ -155,6 +155,17 @@ end
 -- Returns: present (bool), moduleName (string|nil), modulePath (string|nil)
 -- ============================================================
 
+-- Proxy DLL file names we ship. A hijacked copy sits in the GAME folder; the
+-- genuine Windows DLL of the same name lives in System32/SysWOW64 and is
+-- filtered out by path below. Keep this list in sync with the C++ side
+-- (Methode.cpp IsAlreadyLoadedInTarget) and with Models/ProxyType.cs — a name
+-- missing here means the double-inject guard silently fails for that flavour.
+local UE5_PROXY_DLL_NAMES = {
+    ["version.dll"] = true,
+    ["dinput8.dll"] = true,
+    ["dxgi.dll"]    = true,
+}
+
 function ue5_isAlreadyLoaded()
     -- Fast path: any UE5_* export resolvable means our code is already in.
     local okGet, addr = pcall(getAddress, "UE5_Init")
@@ -170,7 +181,7 @@ function ue5_isAlreadyLoaded()
             if nm == "ue5dumper.dll" then
                 return true, mod.Name, mod.PathToFile
             end
-            if nm == "version.dll" or nm == "winmm.dll" then
+            if UE5_PROXY_DLL_NAMES[nm] then
                 local path = string.lower(mod.PathToFile or "")
                 -- Skip System32/SysWOW64 — that's the genuine Windows copy
                 if path ~= "" and not path:find("\\system32\\", 1, true)
@@ -251,18 +262,90 @@ function ue5_inject()
     end
     ue5_log("DLL injected OK")
 
-    -- 2. Wait for auto-start thread to complete.
-    -- Timeline: 1s thread delay + ~2-8s AOB scan + pipe server start.
-    -- Total budget: 15 seconds. We count down to show progress.
-    local WAIT_SEC = 15
-    ue5_log("Waiting %d sec for GObjects/GNames scan + Pipe Server...", WAIT_SEC)
-    for i = WAIT_SEC, 1, -1 do
-        sleep(1000)
-        ue5_log("  ... %d sec remaining", i - 1)
+    -- 2. Wait for the auto-start thread to finish — by POLLING, not by sleeping
+    --    a fixed budget.
+    --
+    -- Timeline: 1s thread delay + ~2-8s AOB scan + pipe server start. The old
+    -- code slept a flat 15s and then printed "complete (or failed)" without ever
+    -- checking anything, so a normal run wasted 5-10s AND a failed run still
+    -- reported success.
+    --
+    -- The readiness signal is Mimic's mailbox initState field (Mimic.h
+    -- InitState). Reading it is a PURE MEMORY READ via the exported
+    -- g_invokeMailbox symbol — deliberately NOT executeCodeEx, which needs
+    -- CreateRemoteThread and is exactly what step 1's comment says we avoid
+    -- here because games may block it.
+    local INIT_IDLE, INIT_RUNNING = 0, 1
+    local INIT_READY, INIT_FAILED, INIT_SKIPPED = 2, 3, 4
+    local MAILBOX_INITSTATE_OFF = 0x0C   -- MailboxData.initState
+    local POLL_MS      = 250
+    local TIMEOUT_MS   = 25000           -- generous: a cold cache + big pool can
+                                         -- legitimately exceed the old 15s budget
+
+    -- Resolve the mailbox symbol INSIDE the loop, not once up-front: CE's symbol
+    -- handler may not have picked up the just-injected module yet, and a single
+    -- failed getAddress would silently drop us back to the blind wait and lose
+    -- the whole point of this change.
+    local SYMBOL_GRACE_MS = 5000   -- give up on the symbol (not on the DLL) after this
+    local mb = nil
+
+    ue5_log("Waiting for GObjects/GNames scan + Pipe Server (polling)...")
+    local waited, state, lastLogged = 0, INIT_IDLE, -1
+    while waited &lt; TIMEOUT_MS do
+        if mb == nil then
+            local okGet, addr = pcall(getAddress, "g_invokeMailbox")
+            if okGet and addr and addr ~= 0 then
+                mb = addr
+            elseif waited &gt;= SYMBOL_GRACE_MS then
+                break   -- symbol never appeared → fall back below
+            end
+        end
+        if mb ~= nil then
+            local okRead, v = pcall(readInteger, mb + MAILBOX_INITSTATE_OFF)
+            state = (okRead and v) or INIT_IDLE
+            if state == INIT_READY or state == INIT_FAILED or state == INIT_SKIPPED then
+                break
+            end
+            if state ~= lastLogged then
+                ue5_log("  ... %s", state == INIT_RUNNING and "scanning" or "starting up")
+                lastLogged = state
+            end
+        end
+        sleep(POLL_MS)
+        waited = waited + POLL_MS
+    end
+
+    if mb == nil then
+        -- Symbol never resolved (very old DLL build, or CE's symbol handler is
+        -- not cooperating). Fall back to the historical blind wait rather than
+        -- failing outright — but only for the remainder of the old 15s budget.
+        local remain = 15000 - waited
+        ue5_log("Mailbox symbol not found — falling back to a fixed wait.")
+        if remain &gt; 0 then sleep(remain) end
+        ue5_log("Fixed wait elapsed (state unknown — check the DLL log).")
+    else
+        if state == INIT_READY then
+            ue5_log("DLL auto-start complete in %.1f sec.", waited / 1000)
+        elseif state == INIT_SKIPPED then
+            -- Another UE5CEDumper instance already owns the pipe (or we are the
+            -- CE plugin host). A pipe server IS up, so this is not an error.
+            ue5_log("Auto-start skipped — another UE5CEDumper instance owns the pipe. Proceeding.")
+        elseif state == INIT_FAILED then
+            -- Real failure: init ran but the pipe server did not come up.
+            ue5_logError("DLL init finished but the Pipe Server FAILED to start.")
+            showMessage("UE5 Dumper Error:\n\nThe DLL loaded and initialised, but the Pipe Server failed to start.\n\nMost likely another process already owns \\\\.\\pipe\\UE5DumpBfx.\nCheck the DLL log:\n  %LOCALAPPDATA%\\UE5CEDumper\\Logs")
+            return
+        else
+            -- Timed out still IDLE/RUNNING — the scan is wedged or far slower
+            -- than expected. A timeout is an error: report and stop.
+            ue5_logError("Timed out after %d sec waiting for DLL auto-start (state=%d).",
+                         TIMEOUT_MS / 1000, state)
+            showMessage("UE5 Dumper Error:\n\nTimed out waiting for the DLL to finish starting up.\n\nThe AOB scan may be wedged, or the game may be blocking our thread.\nCheck the DLL log:\n  %LOCALAPPDATA%\\UE5CEDumper\\Logs")
+            return
+        end
     end
 
     ue5_log("=========================================")
-    ue5_log("DLL auto-start complete (or failed — check DLL log).")
     ue5_log("Pipe: \\\\.\\pipe\\UE5DumpBfx")
     ue5_log("Launch UE5DumpUI.exe and click Connect.")
     ue5_log("DLL log: %%LOCALAPPDATA%%\\UE5CEDumper\\Logs")

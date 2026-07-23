@@ -515,6 +515,9 @@ void UE5_Shutdown() {
     Stark::Shutdown();
     s_pipeServer.Stop();
     s_initialized = false;
+    // The pipe is gone, so stop advertising READY — a CE Lua re-enable after a
+    // Disable must wait for the fresh auto-start rather than read a stale flag.
+    g_invokeMailbox.initState = Mimic::INIT_IDLE;
 }
 
 uint32_t UE5_GetVersion() {
@@ -649,8 +652,14 @@ bool UE5_AutoStart() {
     // Called by CEPlugin's InjectDLL after the DLL is loaded into the game.
     // Idempotent: UE5_Init checks s_initialized and skips if already done.
     LOG_INFO("UE5_AutoStart: entry");
+    // Publish progress into the mailbox so a CE Lua poller can stop sleeping a
+    // fixed budget and react the moment we are actually ready (Mimic::InitState).
+    g_invokeMailbox.initState = Mimic::INIT_RUNNING;
     UE5_Init();  // Always succeeds (partial init is OK — Extra Scan can recover)
     bool ok = UE5_StartPipeServer();
+    // Publish only AFTER StartPipeServer returns — a poller that sees READY must
+    // be able to connect immediately.
+    g_invokeMailbox.initState = ok ? Mimic::INIT_READY : Mimic::INIT_FAILED;
     LOG_INFO("UE5_AutoStart: pipe server %s", ok ? "started" : "FAILED to start");
     return ok;
 }

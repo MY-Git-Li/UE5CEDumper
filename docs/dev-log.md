@@ -20,6 +20,53 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — CE `.CT` inject: poll for readiness instead of sleeping 15 s; double-inject guard learns dinput8/dxgi (build 2291; dev)
+
+Two small fixes to the Cheat-Engine injection path, both from the 2026-07-23 evaluation batch
+in [todo.md](todo.md). **Needs in-game verification** — CE Lua is not unit-testable.
+
+**1. The 15 s blind wait is now a 250 ms poll.** `scripts/UE5CEDumper.CT` `ue5_inject()` used to
+`sleep(1000)` fifteen times and then print "complete (or failed — check DLL log)" **without ever
+checking anything**: a normal run (its own comment budgets "1 s thread delay + ~2-8 s AOB scan")
+wasted 5-10 s, and a *failed* run still reported success.
+
+The readiness signal is a new `Mimic::InitState` published into the mailbox
+(`IDLE`/`RUNNING`/`READY`/`FAILED`/`SKIPPED`), written by `UE5_AutoStart` (`Frieren.cpp`) and both
+`AutoStartThreadProc` flavours (`Heiter.cpp`, proxy + CE-inject). CE Lua reads it with
+`getAddress("g_invokeMailbox")` + `readInteger` — **a pure memory read**, deliberately not
+`executeCodeEx`, because the script's own step-1 comment says `CreateRemoteThread` is avoided here
+(games block it). Timeout raised to 25 s but only reached when genuinely wedged; a timeout is now an
+**error** (`showMessage` + `return`), as is `FAILED`. `SKIPPED` (another instance owns the pipe, or
+we are the CE plugin host) proceeds — a pipe server *is* up.
+
+Three details worth keeping:
+- **`initState` reuses the former `reserved` alignment slot** at `MailboxData+0x0C` (same type, same
+  offset) ⇒ struct layout unchanged, so no proxy `.def` needed a new `DATA` entry and the UI's
+  mailbox offsets are untouched.
+- **The symbol is resolved inside the poll loop, not once up-front.** CE's symbol handler may not
+  have picked up the just-injected module yet; a single failed `getAddress` would have silently
+  dropped back to the blind wait and lost the entire benefit. A 5 s grace period, then the old
+  fixed wait as fallback for pre-`initState` DLL builds.
+- **`READY`/`FAILED` are published only after `UE5_StartPipeServer` returns**, so a poller that
+  observes `READY` can connect immediately. `UE5_Shutdown` resets to `IDLE` (load-bearing for the
+  path where `Mimic::StopThread` early-returns and its whole-struct `memset` never runs).
+
+**2. The double-inject guard only knew the *old* proxy pair.** `Methode.cpp`
+`IsAlreadyLoadedInTarget` and the `.CT`'s `ue5_isAlreadyLoaded` both tested `version.dll` /
+`winmm.dll` — **neither checked `dinput8.dll` or `dxgi.dll`, the two proxies we actually ship**
+(`winmm` was aspirational; no such proxy exists). A user running the dxgi or dinput8 proxy got no
+guard at all and could double-map. Both sites now drive off a named list (`kProxyDllNames` /
+`UE5_PROXY_DLL_NAMES`) carrying all three real flavours, with cross-references so a future 4th
+flavour can't desync them.
+
+**Verification:** DLL + all 3 proxies build clean; `dll_helpers_test` 841 pass / 0 fail; UI suite
+2805 pass / 0 fail. The `.CT`'s embedded Lua was checked by parsing the table as XML and running
+every `{$lua}` block through a real Lua parser — which also caught that the new `<` / `>=` operators
+needed XML-escaping (`&lt;` / `&gt;=`), since this table stores Lua as escaped text, not CDATA
+(precedent: the pre-existing `2&gt;nul` shell redirect at `UE5CEDumper.CT:110`).
+
+-----
+
 ## 2026-07-23 — Teleport Coordinate Library: unlimited labelled positions, CSV + CE-Lua round trip (builds 2257-2267; dev, UI-only)
 
 **P1-P5 all shipped, 2777 tests green, ZERO DLL/pipe change.** An unlimited, labelled +

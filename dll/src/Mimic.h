@@ -216,6 +216,28 @@ enum Status : int32_t {
     STATUS_PROCESSING   = 0xFF,
 };
 
+// Auto-start readiness (DLL writes to the initState field).
+//
+// Why it lives in the mailbox instead of being its own exported global: CE Lua
+// then reads it with one getAddress("g_invokeMailbox") + readInteger — a PURE
+// MEMORY READ, no executeCodeEx and therefore no CreateRemoteThread, which
+// games may block (the reason UE5CEDumper.CT deliberately avoids executeCodeEx
+// during injection). It also reuses the former `reserved` alignment slot, so
+// the struct layout and every later field offset are unchanged and the proxy
+// .def files need no new DATA entry.
+//
+// Ordering contract: the DLL must publish READY/FAILED only AFTER the pipe
+// server call has returned, so a poller that observes READY can connect
+// immediately.
+enum InitState : int32_t {
+    INIT_IDLE    = 0, // DLL mapped; the auto-start thread has not begun work
+    INIT_RUNNING = 1, // AOB scan / pipe-server start in progress
+    INIT_READY   = 2, // init finished AND the pipe server is up
+    INIT_FAILED  = 3, // init finished but the pipe server failed to start
+    INIT_SKIPPED = 4, // auto-start deliberately skipped — CE plugin host, or
+                      // another UE5CEDumper instance already owns the pipe
+};
+
 // Mailbox structure (exported as global variable)
 // CE Lua accesses via getAddress("g_invokeMailbox") + offset reads/writes
 //
@@ -225,7 +247,13 @@ struct MailboxData {
     volatile int32_t  cmd;              // 0x000: Cmd enum (CE writes LAST as trigger)
     volatile int32_t  status;           // 0x004: Status enum (DLL writes)
     volatile int32_t  result;           // 0x008: Return code (0=ok, negative=error)
-    int32_t           reserved;         // 0x00C: Alignment padding
+    volatile int32_t  initState;        // 0x00C: InitState enum (DLL writes).
+                                        //        CE Lua polls this to learn when
+                                        //        auto-start finished, instead of
+                                        //        sleeping a fixed budget.
+                                        //        (Was `reserved` alignment padding
+                                        //        — same type and offset, so the
+                                        //        struct layout is unchanged.)
 
     volatile uint64_t instanceAddr;     // 0x010: UObject* instance
     volatile uint64_t ufuncAddr;        // 0x018: UFunction* address
