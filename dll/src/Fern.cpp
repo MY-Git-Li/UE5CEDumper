@@ -65,6 +65,7 @@ extern "C" int32_t   UE5_GetProtectState(int32_t* outWant, int32_t* outLive, int
 // timed-out invoke can't use-after-free this handler's stack-local paramBuf.
 extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc, uintptr_t params, uint32_t paramsSize);
 extern "C" bool      UE5_EnsureGameThreadHook();
+extern "C" bool      UE5_IsGameThreadHookActive();
 extern "C" int       UE5_GetProcessEventOffset();
 
 // ============================================================
@@ -4936,6 +4937,11 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             json data;
             data["code"]         = st.code;          // 0 ok; negative Schlacht::SeeThroughResult
             data["active"]       = st.active;
+            // Why the feature may be refused (code -5) and whether it can be
+            // retried NOW: the game-thread hook can fail transiently to install
+            // and recover later, so the card needs the live value, not a memory
+            // of the last failure.
+            data["hook_active"]  = UE5_IsGameThreadHookActive();
             data["has_target"]   = st.hasTarget;     // camera + pawn resolved last tick
             data["hidden_count"] = st.hiddenCount;   // occluders currently hidden
             data["pierce_count"] = st.pierceCount;   // nearest occluders to hide along the ray

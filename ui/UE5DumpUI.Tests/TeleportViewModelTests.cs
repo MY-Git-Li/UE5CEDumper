@@ -1591,6 +1591,69 @@ public class TeleportViewModelTests
         Assert.Equal("ON", vm.SeeThroughState);
     }
 
+    // The DLL refuses to enable See-through when the game-thread hook is down,
+    // because its ~10 Hz tracing invokes would otherwise run off the game thread.
+    // Nothing visibly happens on a refusal, so the card MUST say why — and must say
+    // it is retryable, since a MinHook trampoline-allocation failure is a VM-layout
+    // accident, not a property of the game.
+    [Fact]
+    public async Task ApplySeeThrough_refused_for_no_hook_explains_and_offers_a_retry()
+    {
+        var fake = new FakeDumpService
+        {
+            NextSeeThroughStatus = new() { Active = false, Code = -5, State = -5, HookActive = false }
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.ApplySeeThroughCommand.ExecuteAsync(null);
+
+        Assert.Equal("Unavailable", vm.SeeThroughState);
+        Assert.Contains("Game-thread hook unavailable", vm.SeeThroughCurrentText);
+        Assert.Contains("retry", vm.SeeThroughCurrentText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("retry", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Once the hook comes back, a Refresh must CLEAR the warning rather than leave
+    // the card looking broken — the recovery half of "reflect failure/restore".
+    [Fact]
+    public async Task RefreshSeeThrough_after_the_hook_recovers_drops_the_warning()
+    {
+        var fake = new FakeDumpService
+        {
+            NextSeeThroughStatus = new() { Active = false, Code = -5, State = -5, HookActive = false }
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        await vm.ApplySeeThroughCommand.ExecuteAsync(null);
+        Assert.Equal("Unavailable", vm.SeeThroughState);
+
+        // Hook recovered on a later attempt; the stale refusal code is still there.
+        fake.NextSeeThroughStatus = new() { Active = false, Code = -5, HookActive = true };
+        await vm.RefreshSeeThroughCommand.ExecuteAsync(null);
+
+        Assert.Equal("OFF", vm.SeeThroughState);
+        Assert.DoesNotContain("hook", vm.SeeThroughCurrentText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // A fresh session has never invoked anything, so the hook is legitimately not
+    // installed yet. That must NOT read as a failure.
+    [Fact]
+    public async Task Lazy_hook_not_yet_installed_is_not_reported_as_unavailable()
+    {
+        var fake = new FakeDumpService
+        {
+            NextSeeThroughStatus = new() { Active = false, Code = 0, HookActive = false }
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.RefreshSeeThroughCommand.ExecuteAsync(null);
+
+        Assert.Equal("OFF", vm.SeeThroughState);
+        Assert.DoesNotContain("hook", vm.SeeThroughCurrentText, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task Changing_pierce_depth_while_active_pushes_it_live()
     {

@@ -3250,6 +3250,8 @@ public sealed class DumpService : IDumpService
         HiddenCount = res?["hidden_count"]?.GetValue<int>() ?? 0,
         PierceCount = res?["pierce_count"]?.GetValue<int>() ?? 1,
         State       = res?["state"]?.GetValue<int>() ?? -1,
+        // Older DLLs don't send it; assume healthy so their behaviour is unchanged.
+        HookActive  = res?["hook_active"]?.GetValue<bool>() ?? true,
     };
 
     // === Teleport (Wirbel) — docs/teleport-spec.md §7 ===

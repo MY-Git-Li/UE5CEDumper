@@ -362,13 +362,31 @@ the row here when it ships.
      in 19 seconds (~10 ProcessEvent calls/second from a non-game thread). It happened to survive
      here, but a one-shot user invoke and a 10 Hz re-assert worker are very different exposures.
 
-  **Fix shape:** (a) latch `s_hookAttempted` only on SUCCESS and allow a bounded, rate-limited retry
-  (e.g. at most N attempts, no more often than every few seconds, or simply re-attempt on the next
-  *user-initiated enable* rather than per invoke) — MinHook state after a failed `MH_CreateHook` is
-  clean, so retrying is safe; (b) log the unsafe-fallback line **once per state transition** instead
-  of once per invoke; (c) consider refusing the direct-call fallback for *repeating worker* invokes
-  specifically (Schlacht/Solide/Hemmung re-assert), where the risk/benefit is worst — a feature that
-  quietly declines is better than one that quietly risks the game. **Decide (c) before building.**
+  **✅ FIXED (build 2358) — (a)+(b)+(c) all built, with the UI reflecting failure AND recovery:**
+  - **(a) Retry instead of latch.** One install path (`TryInstallGameThreadHook`), no permanent
+    `s_hookAttempted`: it returns early when the hook is already up, otherwise retries up to 8 times
+    with a 5 s cooldown. Cheap enough to sit on the lazy invoke path (a 10 Hz worker adds at most one
+    attempt per cooldown) and bounded so a genuinely unhookable game stops trying. A user-initiated
+    enable calls it with `force`, skipping cooldown and cap. Recovery logs
+    `hook RECOVERED on attempt N`.
+  - **(b) One line per transition.** `ReportHookState` logs the fallback once when the hook goes
+    down and once when it comes back, carrying the count of invokes that took the fallback meanwhile.
+    The per-invoke `direct call inst=…` / `direct call success` INFO pair is gone (the exception path
+    still logs unconditionally — that IS per-call news).
+  - **(c) Worker invokes refuse the unsafe path.** `Tot::IsBackgroundWorker()` (the thread-local the
+    M4 fix already set on every re-assert worker) gates it: with the hook down, a worker invoke
+    returns **-8** instead of calling ProcessEvent off the game thread. `Schlacht::SetEnabled(true)`
+    forces one hook attempt and, if it still isn't up, declines with **`STR_ERR_NO_HOOK` (-5)**
+    without starting a worker that could only tick uselessly.
+  - **UI.** `seethrough_set`/`get_state` now carry `hook_active`; the See-through card shows
+    "Unavailable" + *"Game-thread hook unavailable … press Apply again to retry"* on a refusal, and
+    a later Refresh CLEARS it once the hook recovers. Gated on the refusal CODE, not on `hook_active`
+    alone — the hook installs lazily, so "not installed yet" is the normal state of a fresh session
+    and must not read as a failure. Three tests pin exactly that (refusal / recovery / lazy).
+
+  **Re-check in-game:** the failure is intermittent, so it may not reproduce. What to look for if it
+  does: the log should show at most 8 install attempts (not one), a single fallback WARN instead of
+  hundreds, and See-through should refuse with a visible message rather than silently doing nothing.
   *Parent: Stark::InstallHook / Frieren::TryInstallGameThreadHook; log review 2026-07-23.*
 
 -----

@@ -39,6 +39,9 @@ extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc,
                                             uintptr_t params, uint32_t size);
 // Resolve a class CDO/instance by short name (KismetSystemLibrary for the trace).
 extern "C" uintptr_t UE5_FindInstanceOfClass(const char* className);
+// Force the game-thread ProcessEvent hook up (user-initiated, so it retries a
+// transient MinHook failure) and report whether it is available.
+extern "C" bool      UE5_EnsureGameThreadHook();
 
 namespace {
 
@@ -470,6 +473,21 @@ int32_t SetEnabled(bool enable) {
         // inherits it and its first live tick's diff un-hides anything no longer
         // occluding — moving+clearing it here without un-hiding would orphan those
         // actors (they'd stay SetActorHiddenInGame with nothing tracking them). (M1/M2)
+        // The worker's whole job is invoking LineTraceSingle ~10x/s. Those invokes
+        // are refused when the game-thread hook is down (the direct-call fallback
+        // off the game thread is the historic crash shape), so a worker started
+        // now would tick uselessly. Force one hook attempt — this is a
+        // user-initiated enable, so a transient MinHook failure gets retried — and
+        // decline loudly if it still isn't up, rather than pretending to work.
+        if (!UE5_EnsureGameThreadHook()) {
+            std::lock_guard<std::mutex> lk(s_mutex);
+            s_state.code  = STR_ERR_NO_HOOK;
+            s_state.state = STR_ERR_NO_HOOK;
+            LOG_WARN("SeeThrough: refusing to enable — game-thread hook unavailable "
+                     "(the tracing invokes would have to run off the game thread)");
+            return STR_ERR_NO_HOOK;
+        }
+
         bool responsive = Stark::IsGameThreadResponsive();
         std::unordered_set<uintptr_t> leftover;
         {
