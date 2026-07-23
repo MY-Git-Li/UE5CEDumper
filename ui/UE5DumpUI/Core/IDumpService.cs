@@ -351,6 +351,17 @@ public interface IDumpService
     // Fetch the ranked fire-count table (top <paramref name="limit"/> by count).
     Task<PeProfileResult> PeProfileGetAsync(int limit = 200, CancellationToken ct = default);
 
+    /// <summary>
+    /// Fetch a <c>get_diagnostics</c> snapshot: how long each pipe command has
+    /// occupied the DLL's dispatcher, plus Win32 process facts and game-thread
+    /// health. Read-only and safe to poll.
+    /// </summary>
+    Task<DiagnosticsResult> GetDiagnosticsAsync(int limit = 25, CancellationToken ct = default);
+
+    /// <summary>Clear the dispatch counters and restart the uptime clock, so a
+    /// measurement can be scoped to one deliberate action.</summary>
+    Task ResetDiagnosticsAsync(CancellationToken ct = default);
+
     // --- Extra Scan (user-triggered aggressive fallback) ---
     Task<RescanStartResult> StartRescanAsync(CancellationToken ct = default);
     Task<RescanStatusResult> GetRescanStatusAsync(CancellationToken ct = default);

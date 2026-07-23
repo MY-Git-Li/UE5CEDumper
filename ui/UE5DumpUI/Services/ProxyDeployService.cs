@@ -979,18 +979,68 @@ public sealed class ProxyDeployService : IProxyDeployService
     /// hint. The parsing itself lives in the pure, testable ProxyImportAnalyzer.</summary>
     private ProxyImportAnalyzer.ProxyImportInfo? ReadProxyImports(string exePath)
     {
+        var info = AnalyzeOnePe(exePath);
+        if (info is not { ImportsNone: true }) return info;
+
+        // Importing NONE of the three is the signature of a MODULAR UE build: the
+        // .exe is a thin bootstrap (Satisfactory's is ~264 KB) and the engine lives
+        // in sibling *-Win64-Shipping.dll modules. Reading the stub alone made the
+        // Suggested column claim "no dxgi/dinput8" for a game where a dxgi proxy
+        // loads perfectly well (D3D12RHI imports it). A proxy activates if ANY
+        // module in the process imports that name, so fold the siblings in.
+        return info.Value.Merge(ReadModuleImports(Path.GetDirectoryName(exePath)));
+    }
+
+    /// <summary>Parse one PE's import directories. Returns null when the file is
+    /// missing/locked/malformed — the caller then shows no viability hint.</summary>
+    private ProxyImportAnalyzer.ProxyImportInfo? AnalyzeOnePe(string path)
+    {
         try
         {
             using var fs = new FileStream(
-                exePath, FileMode.Open, FileAccess.Read,
+                path, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
             return ProxyImportAnalyzer.Analyze(fs);
         }
         catch (Exception ex)
         {
-            _log.Debug("ProxyDeploy", $"Import parse skipped for {exePath}: {ex.Message}");
+            _log.Debug("ProxyDeploy", $"Import parse skipped for {path}: {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>Upper bound on modular-build modules parsed per game — a runaway
+    /// guard, not a budget. Satisfactory ships 182 next to its stub, and the
+    /// all-three short-circuit does NOT fire there (nothing imports dinput8), so
+    /// the whole set really is walked; 512 keeps a comfortable margin rather than
+    /// silently truncating the answer. Cheap because Analyze reads PE headers
+    /// only, and this path is reached solely for a stub exe.</summary>
+    private const int MaxModularModulesScanned = 512;
+
+    /// <summary>OR the proxy-import flags of the <c>*-Win64-Shipping.dll</c> modules
+    /// sitting next to a modular build's bootstrap .exe. Top-level only (no recursion)
+    /// — that is where UE puts them, and it keeps this off the hot path of a library
+    /// scan. Short-circuits once all three names are accounted for.</summary>
+    private ProxyImportAnalyzer.ProxyImportInfo ReadModuleImports(string? dir)
+    {
+        var acc = new ProxyImportAnalyzer.ProxyImportInfo(false, false, false);
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return acc;
+        try
+        {
+            int seen = 0;
+            foreach (string dll in Directory.EnumerateFiles(dir, "*-Win64-Shipping.dll"))
+            {
+                if (++seen > MaxModularModulesScanned) break;
+                if (AnalyzeOnePe(dll) is { } m) acc = acc.Merge(m);
+                if (acc is { ImportsVersion: true, ImportsDinput8: true, ImportsDxgi: true })
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Debug("ProxyDeploy", $"Modular import scan skipped for {dir}: {ex.Message}");
+        }
+        return acc;
     }
 
     // ────────────────────────────────────────────────────────────────

@@ -939,6 +939,96 @@ public partial class PointerPanelViewModel : ViewModelBase
         }
     }
 
+    // --- Diagnostics (Sense) ---
+    //
+    // docs/multipipe-eval.md names DLL-side serial-dispatch head-of-line blocking
+    // as the root cause of UI lag, but nothing measured it — so "should Phase 1
+    // (non-blocking dispatch) be built?" was a blind decision. These numbers are
+    // the evidence. Sits next to Pipe Activity on purpose: that card shows WHAT
+    // crossed the pipe, this one shows what it COST.
+
+    [ObservableProperty] private string _diagSummary = "";
+    [ObservableProperty] private string _diagProcess = "";
+    [ObservableProperty] private string _diagGameThread = "";
+    [ObservableProperty] private string _diagStatus = "";
+    [ObservableProperty] private bool _diagBusy;
+
+    /// <summary>Per-command dispatch cost, heaviest total first.</summary>
+    public ObservableCollection<DiagnosticsCommandEntry> DiagCommands { get; } = new();
+
+    private static string Mib(long bytes) =>
+        (bytes / (1024.0 * 1024.0)).ToString("N1", CultureInfo.InvariantCulture) + " MiB";
+
+    [RelayCommand]
+    private async Task RefreshDiagnosticsAsync()
+    {
+        if (_dump == null) { DiagStatus = Res.Get("str.System.Diag.NotConnected"); return; }
+        DiagBusy = true;
+        try
+        {
+            var d = await _dump.GetDiagnosticsAsync();
+
+            DiagSummary = Res.Format("str.System.Diag.Summary",
+                d.TotalDispatches,
+                (d.UptimeMs / 1000.0).ToString("N1", CultureInfo.InvariantCulture),
+                d.BusyPercent.ToString("N1", CultureInfo.InvariantCulture),
+                d.GObjectsCount);
+
+            // CPU is -1 until a SECOND sample exists to difference against — show a
+            // dash rather than a misleading 0%.
+            DiagProcess = Res.Format("str.System.Diag.Process",
+                Mib(d.Process.WorkingSetBytes),
+                Mib(d.Process.PrivateBytes),
+                d.Process.HasCpu
+                    ? d.Process.CpuPercent.ToString("N1", CultureInfo.InvariantCulture) + "%"
+                    : "—",
+                d.Process.ThreadCount,
+                d.Process.HandleCount);
+
+            DiagGameThread = Res.Format("str.System.Diag.GameThread",
+                d.GameThread.HookActive ? "on" : "off",
+                d.GameThread.Responsive
+                    ? Res.Get("str.System.Diag.Responsive")
+                    : Res.Get("str.System.Diag.Stalled"),
+                d.GameThread.MsSinceLastFire,
+                d.GameThread.HookFireCount);
+
+            DiagCommands.Clear();
+            foreach (var c in d.Commands) DiagCommands.Add(c);
+            DiagStatus = "";
+        }
+        catch (Exception ex)
+        {
+            DiagStatus = Res.Format("str.System.Diag.Error", ex.Message);
+            _log?.Error(Constants.LogCatView, "RefreshDiagnostics failed", ex);
+        }
+        finally
+        {
+            DiagBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ResetDiagnosticsAsync()
+    {
+        if (_dump == null) { DiagStatus = Res.Get("str.System.Diag.NotConnected"); return; }
+        try
+        {
+            await _dump.ResetDiagnosticsAsync();
+            DiagCommands.Clear();
+            DiagSummary = DiagProcess = DiagGameThread = "";
+            DiagStatus = Res.Get("str.System.Diag.Reset.Done");
+            // Immediately re-read so the card shows a live (empty) baseline rather
+            // than looking broken until the user clicks Refresh.
+            await RefreshDiagnosticsAsync();
+        }
+        catch (Exception ex)
+        {
+            DiagStatus = Res.Format("str.System.Diag.Error", ex.Message);
+            _log?.Error(Constants.LogCatView, "ResetDiagnostics failed", ex);
+        }
+    }
+
     // --- Pipe Activity log ---
 
     /// <summary>

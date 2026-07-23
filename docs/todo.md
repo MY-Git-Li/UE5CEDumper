@@ -1149,7 +1149,7 @@ something on version has only dinput8 left, which is 2/24. **Build winmm if, and
 combination shows up in practice** — it would then be a genuinely free 100%-coverage slot. Until
 then it is M-effort for a case nobody has reported.
 
-**🐞 Found while measuring — `ProxyImportAnalyzer` misreads modular UE builds.** `ReadProxyImports`
+**✅ DONE (build 2308) — `ProxyImportAnalyzer` misread modular UE builds.** `ReadProxyImports`
 is handed `game.ExePath` only. In a **modular** build (Satisfactory) that exe is a ~264 KB bootstrap
 stub and the engine lives in `*-Win64-Shipping.dll` modules, so the analyzer sees no dxgi/dinput8 and
 the Suggested-proxy column claims `version · default · no dxgi/dinput8` — when a dxgi proxy would in
@@ -1157,7 +1157,10 @@ fact load fine (`D3D12RHI` imports it). **Severity LOW**: the analyzer's design 
 imports as advisory context that never overrides the version default, so the harm is a misleading
 hint string, not a wrong deployment. Fix shape: when the main exe imports none of
 `{dxgi, d3d11, d3d12}`, union in the imports of the sibling `*-Win64-Shipping.dll` modules — the same
-fallback `scan_proxy_imports.py` now uses. Effort **S** · Risk low.
+fallback `scan_proxy_imports.py` uses. **Shipped:** `ImportsNone` + a pure `Merge` OR on
+`ProxyImportInfo`, with the file-walking half in `ProxyDeployService` so the analyzer stays OS-free.
+Measured at **30 ms** for Satisfactory's 182 modules; monolithic games unaffected (0 ms, fallback
+never triggers). +5 tests.
 
 **✅ CLEARED (build 2301) — the BLOCKER: we called winmm ourselves, from the shared object library.**
 Kept here because it is the single most important thing to understand before touching this idea, and
@@ -1253,7 +1256,14 @@ DLL. But the two cheapest tiers are worth more than the literal ask, because the
   Shipping, not hidden. Re-enabling needs `FORCE_USE_STATS` and an engine recompile. Unreachable from
   an injected DLL — record as WON'T-DO so it isn't re-litigated.
 
-- **Tier 1 — our own health. Zero new machinery, highest value. DO THIS.**
+- **✅ Tier 1 — DONE (build 2308).** New `Sense` module + `get_diagnostics` pipe command + a
+  System-tab card. Records per-command dispatch cost (count / total / max / last) at Fern's existing
+  `inFlight` chokepoint — which is exactly the head-of-line window — and reports `busy_percent`, the
+  fraction of wall-clock a dispatcher was occupied. **That is the number Phase 1 was missing.**
+  Also carries game-thread health from Stark and the GObjects count. *Original note kept below for
+  the rationale.*
+
+- **Tier 1 — our own health. Zero new machinery, highest value.**
   [multipipe-eval.md](multipipe-eval.md) already names DLL-side **serial-dispatch head-of-line
   blocking** as the root cause of UI lag and game-thread CPU starvation as the CE-mailbox risk — yet
   neither is measured, so Phase 1 would be decided blind. Free to collect: per-command Fern handling
@@ -1263,9 +1273,10 @@ DLL. But the two cheapest tiers are worth more than the literal ask, because the
   computes frame-cadence statistics** (per-UFunction fire counts + Welford mean/cv) — it just isn't
   presented as performance. Effort **S-M** · Risk none.
 
-- **Tier 2 — Win32 process metrics, zero UE dependency.** `GetProcessMemoryInfo` (WorkingSet /
-  PrivateBytes), `GetProcessTimes` (CPU%), thread + handle counts. We are in-process; each is one
-  call. Effort **S** · Risk none.
+- **✅ Tier 2 — DONE (build 2308).** Working set / private bytes / CPU% / thread + handle counts,
+  in the same `get_diagnostics` payload. On demand only (thread count walks a system-wide snapshot).
+  CPU% is `-1` until a second sample exists to difference against, and the UI renders that as an em
+  dash — "0%" would read as *idle*, which is a different and wrong claim.
 
 - **Tier 3 — real FPS / frame time: hook `IDXGISwapChain::Present`.** The only engine-version-
   independent, accurate source (true frametime, 1% low, pacing, present mode). **Shares its entire
@@ -1284,8 +1295,18 @@ DLL. But the two cheapest tiers are worth more than the literal ask, because the
   probing). Caveat: `DeltaTimeSeconds` is the **game-thread** delta only (no render/GPU) and is
   polluted by time dilation — usable as context, **not** as an FPS readout.
 
-**Recommendation: build Tier 1 + Tier 2; defer Tier 3 until the monitor-pin P2 DXGI-hook decision;
-record Tier 0 as WON'T-DO.**
+**Status: Tier 1 + Tier 2 SHIPPED (build 2308). Tier 3 still deferred to the monitor-pin P2
+DXGI-hook decision; Tier 0 remains WON'T-DO.**
+
+**Follow-on deliberately NOT built: per-worker tick counters** for Solide / Hemmung / Laufen /
+Solitar / Schlacht (tick count + write-on-drift hit rate). That is five modules touched for a number
+that does not bear on the dispatch question — and the dispatch question is the one that blocked a
+decision. Worth doing if a re-assert worker is ever suspected of burning game-thread time. Effort
+**S-M** · Risk low.
+
+**Also open: use the numbers.** The point of Tier 1 is to decide multipipe Phase 1. Attach to a game
+that lags, run a heavy scan, and read `busy_percent` + the top command. High busy% ⇒ build Phase 1;
+low ⇒ the lag is elsewhere and Phase 1 would not help. Effort **0** (measure only).
 
 *Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
 (dev-log build 2156) already holds the cadence half.*

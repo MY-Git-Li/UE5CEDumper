@@ -1350,6 +1350,56 @@ Error codes:
 - `-5` = game-thread dispatch timeout (5s) — game may be paused or unresponsive
 - `-7` = hook not active, fell back to direct call (may have succeeded but on wrong thread)
 
+### get_diagnostics / reset_diagnostics
+
+Self-health telemetry (`Sense`). Read-only and safe to poll. Exists to answer the
+question [multipipe-eval.md](multipipe-eval.md) leaves open: that doc names DLL-side
+**serial-dispatch head-of-line blocking** as the root cause of UI lag and game-thread
+CPU starvation as the CE-mailbox risk, but nothing measured either — so Phase 1
+(non-blocking dispatch) was a blind decision. `busy_percent` plus the per-command
+ranking is the evidence.
+
+Timing is taken around Fern's `inFlight` window, i.e. exactly the CPU-bound,
+pipe-free stretch during which that connection's dispatcher is unavailable.
+
+```jsonc
+// Request
+{ "id": 1, "cmd": "get_diagnostics", "limit": 25 }   // limit = top-N commands, 0 = all
+
+// Response
+{
+  "id": 1, "ok": true,
+  "uptime_ms": 61234,            // since DLL start / last reset
+  "total_dispatches": 842,
+  "total_busy_ms": 9310,
+  "busy_percent": 15.2,          // ← the headline: fraction of wall-clock a dispatcher was busy
+  "gobjects_count": 486231,      // pool size over time = cheap GC / leak signal
+  "commands": [                  // heaviest TOTAL first (who OWNS the dispatcher)
+    { "cmd": "value_scan_begin", "count": 3, "total_ms": 8100,
+      "max_ms": 4200,            // ← worst single dispatch = the spike a user feels
+      "last_ms": 1900, "avg_ms": 2700.0 }
+  ],
+  "process": {                   // Tier 2 — Win32 only, no UE dependency
+    "working_set_bytes": 734003200, "private_bytes": 812345678,
+    "peak_working_set": 900000000, "handle_count": 1204, "thread_count": 61,
+    "cpu_percent": 3.4           // -1 until a SECOND sample exists to difference against
+  },
+  "game_thread": {               // from Stark's ProcessEvent hook
+    "hook_active": true, "hook_fire_count": 918273,
+    "ms_since_last_fire": 16, "responsive": true, "invoke_timeout_ms": 5000
+  }
+}
+```
+
+```jsonc
+// Clear the counters and restart the uptime clock, to scope a measurement to one
+// deliberate action. Also happens automatically when the last client disconnects.
+{ "id": 2, "cmd": "reset_diagnostics" }   →   { "id": 2, "ok": true, "ok": true }
+```
+
+**UI:** System tab → *Diagnostics — DLL dispatch cost*, directly above the Pipe
+Activity card (that one shows *what* crossed the pipe; this shows what it *cost*).
+
 ### Error response (any command)
 
 ```jsonc

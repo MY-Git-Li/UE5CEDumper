@@ -2460,6 +2460,74 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    public async Task<DiagnosticsResult> GetDiagnosticsAsync(int limit = 25, CancellationToken ct = default)
+    {
+        var res = await _pipe.SendAsync(
+            new JsonObject { ["cmd"] = "get_diagnostics", ["limit"] = limit }, ct);
+        CheckResponse(res);
+
+        var cmds = new List<DiagnosticsCommandEntry>();
+        if (res["commands"] is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                if (item is not JsonObject obj) continue;
+                cmds.Add(new DiagnosticsCommandEntry
+                {
+                    Cmd     = obj["cmd"]?.GetValue<string>() ?? "",
+                    Count   = obj["count"]?.GetValue<long>() ?? 0L,
+                    TotalMs = obj["total_ms"]?.GetValue<long>() ?? 0L,
+                    MaxMs   = obj["max_ms"]?.GetValue<long>() ?? 0L,
+                    LastMs  = obj["last_ms"]?.GetValue<long>() ?? 0L,
+                    AvgMs   = obj["avg_ms"]?.GetValue<double>() ?? 0.0,
+                });
+            }
+        }
+
+        long totalBusy = res["total_busy_ms"]?.GetValue<long>() ?? 0L;
+        // Share-of-busy is derived here rather than on the wire: the DLL already
+        // sends the total, and a percentage computed client-side can't disagree
+        // with the rows it is computed from.
+        foreach (var c in cmds)
+            c.SharePercent = totalBusy > 0 ? c.TotalMs * 100.0 / totalBusy : 0.0;
+
+        var p = res["process"] as JsonObject;
+        var g = res["game_thread"] as JsonObject;
+
+        return new DiagnosticsResult
+        {
+            UptimeMs        = res["uptime_ms"]?.GetValue<long>() ?? 0L,
+            TotalDispatches = res["total_dispatches"]?.GetValue<long>() ?? 0L,
+            TotalBusyMs     = totalBusy,
+            BusyPercent     = res["busy_percent"]?.GetValue<double>() ?? 0.0,
+            GObjectsCount   = res["gobjects_count"]?.GetValue<int>() ?? 0,
+            Process = new DiagnosticsProcess
+            {
+                WorkingSetBytes = p?["working_set_bytes"]?.GetValue<long>() ?? 0L,
+                PrivateBytes    = p?["private_bytes"]?.GetValue<long>() ?? 0L,
+                PeakWorkingSet  = p?["peak_working_set"]?.GetValue<long>() ?? 0L,
+                HandleCount     = p?["handle_count"]?.GetValue<int>() ?? 0,
+                ThreadCount     = p?["thread_count"]?.GetValue<int>() ?? 0,
+                CpuPercent      = p?["cpu_percent"]?.GetValue<double>() ?? -1.0,
+            },
+            GameThread = new DiagnosticsGameThread
+            {
+                HookActive      = g?["hook_active"]?.GetValue<bool>() ?? false,
+                HookFireCount   = g?["hook_fire_count"]?.GetValue<long>() ?? 0L,
+                MsSinceLastFire = g?["ms_since_last_fire"]?.GetValue<long>() ?? 0L,
+                Responsive      = g?["responsive"]?.GetValue<bool>() ?? false,
+                InvokeTimeoutMs = g?["invoke_timeout_ms"]?.GetValue<int>() ?? 0,
+            },
+            Commands = cmds,
+        };
+    }
+
+    public async Task ResetDiagnosticsAsync(CancellationToken ct = default)
+    {
+        var res = await _pipe.SendAsync(new JsonObject { ["cmd"] = "reset_diagnostics" }, ct);
+        CheckResponse(res);
+    }
+
     // --- Extra Scan (user-triggered aggressive fallback) ---
 
     public async Task<RescanStartResult> StartRescanAsync(CancellationToken ct = default)

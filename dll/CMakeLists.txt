@@ -233,6 +233,7 @@ set(UE5_COMMON_SOURCES
     src/Grausam.cpp
     src/Schlacht.cpp
     src/Linie.cpp
+    src/Sense.cpp
 )
 
 add_library(UE5DumperCommon OBJECT ${UE5_COMMON_SOURCES})

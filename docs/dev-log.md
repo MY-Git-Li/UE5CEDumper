@@ -20,6 +20,82 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — Diagnostics (`Sense`): measure what the pipe traffic actually costs (build 2308; dev, DLL + UI)
+
+Tier 1 + Tier 2 of the performance-counter evaluation. Exists for one reason:
+[multipipe-eval.md](multipipe-eval.md) names DLL-side **serial-dispatch head-of-line blocking** as
+the root cause of UI lag and game-thread CPU starvation as the CE-mailbox risk — and **nothing
+measured either**, so "should Phase 1 (non-blocking dispatch) be built?" was a blind decision. Now it
+isn't.
+
+**New `Sense` module** (Frieren roster: Second-Exam proctor, "scythe" — the roster's own suggested
+use for that name was *harvest-collection*). Records per-command dispatch cost — count / total / max
+/ last — plus Win32 process facts and game-thread health. New pipe commands `get_diagnostics` /
+`reset_diagnostics`, both pipe-only.
+
+**Where the timing is taken matters.** Fern already brackets `DispatchCommand` with an `inFlight`
+flag, documented as the CPU-bound stretch that never touches the pipe. That span *is* the window
+during which the connection's dispatcher is unavailable to anything else — so it is exactly the
+head-of-line blocking in question, and the measurement needed no new chokepoint.
+
+**The headline number is `busy_percent`** — what fraction of wall-clock a dispatcher was occupied.
+High, with a lagging UI, is the case *for* Phase 1; low says the lag is elsewhere and Phase 1 would
+not help. The per-command table ranks by **total** rather than max, because the question is which
+command *owns* the dispatcher, not which one spiked once — `max_ms` is reported alongside because
+that is the spike a user actually feels.
+
+Three deliberate choices:
+- **Dedicated mutex.** Borrowing a lock a long scan also holds would make the diagnostics contend
+  with the very thing they exist to measure. Cost when idle is a map lookup and a few adds per
+  command — noise next to commands that are microseconds at best.
+- **CPU% is `-1`, not `0`, until a second sample exists** to difference against. The UI renders that
+  as an em dash: "0%" would read as *idle*, a different and wrong claim. Normalised by core count so
+  100 means one whole machine, matching what a user sees in Task Manager.
+- **Tier 2 is on demand only.** Thread count walks a system-wide `TH32CS_SNAPTHREAD` snapshot (no
+  cheaper documented API), so it never runs unless a client asks.
+
+**UI:** System tab → *Diagnostics — DLL dispatch cost*, placed directly above the existing Pipe
+Activity card — that one shows *what* crossed the pipe, this shows what it *cost*. Refresh + Reset
+counters; the reset re-reads immediately so the card shows a live empty baseline rather than looking
+broken. Counters also reset when the last client disconnects, so one session's numbers never
+pollute the next.
+
+**Not built, deliberately:** per-worker tick counters for Solide / Hemmung / Laufen / Solitar /
+Schlacht. That means touching five modules for a number that does not bear on the dispatch question,
+and the dispatch question is what blocks a decision. Recorded in [todo.md](todo.md) as the natural
+follow-on.
+
+**Verification:** 2858 tests green (+12). DLL + all 3 proxies build clean. App launched to confirm
+the new card and its `DataGrid` bind without error. **Not verified: the numbers themselves against a
+live game** — that needs an attached session, and is the point of the feature rather than of the
+code.
+
+-----
+
+## 2026-07-23 — Modular UE builds: fold the engine modules into the proxy-import hint (build 2308; dev, UI-only)
+
+Fixes the LOW-severity defect the n=24 proxy census turned up. `ReadProxyImports` was handed
+`game.ExePath` only. In a **modular** build the exe is a thin bootstrap — Satisfactory's is 264 KB,
+with the engine split across ~182 sibling `*-Win64-Shipping.dll` modules — so the analyzer saw no
+dxgi/dinput8 and the Suggested-proxy column claimed `version · default · no dxgi/dinput8` for a game
+where a dxgi proxy loads perfectly well (`D3D12RHI` imports it).
+
+A proxy activates if **any** module in the process imports that name — the loader searches the exe's
+directory whichever one asks. So when the exe imports none of the three (`ImportsNone`, the
+bootstrap-stub signature), the sibling modules are now folded in with `Merge`, a pure OR. The
+file-walking half stays in `ProxyDeployService`; `ProxyImportAnalyzer` remains OS-free and
+synthetic-PE-testable by design.
+
+**Measured, not assumed:** Satisfactory goes from *nothing* to `version + dxgi` in **30 ms** for all
+182 modules (header-only parsing), and a monolithic game is untouched at 0 ms because the fallback
+never triggers. The 512 cap is a runaway guard, not a budget — 182 is walked in full, since the
+all-three short-circuit cannot fire on a build that imports no dinput8.
+
+Severity was LOW throughout: imports are advisory context the analyzer never lets override the
+version default, so the harm was a misleading hint string, not a wrong deployment. +5 tests.
+
+-----
+
 ## 2026-07-23 — Stop statically importing winmm: resolve the 1 ms timer from System32 (build 2301; dev, DLL)
 
 Clears the hard prerequisite the winmm-proxy evaluation identified. Correct on its own, and shipped

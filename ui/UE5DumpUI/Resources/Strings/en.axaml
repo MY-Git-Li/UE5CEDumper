@@ -421,6 +421,21 @@
 
     <!-- System tab: Maintenance (open log folder + remove all snapshot databases) -->
     <sys:String x:Key="str.System.Maintenance.Header">Maintenance</sys:String>
+
+    <!-- Diagnostics (Sense) — what the pipe traffic costs -->
+    <sys:String x:Key="str.System.Diag.Header">Diagnostics — DLL dispatch cost</sys:String>
+    <sys:String x:Key="str.System.Diag.Refresh">Refresh</sys:String>
+    <sys:String x:Key="str.System.Diag.Reset">Reset counters</sys:String>
+    <sys:String x:Key="str.System.Diag.RefreshTip">Read a fresh snapshot: how long each pipe command has occupied the DLL's dispatcher, plus process memory / CPU / thread counts and game-thread health. Read-only and safe to click repeatedly. CPU% needs two samples, so it shows a dash on the first read.</sys:String>
+    <sys:String x:Key="str.System.Diag.ResetTip">Clear the counters and restart the uptime clock, so the next measurement covers one deliberate action instead of the whole session. Counters also reset automatically when the last client disconnects.</sys:String>
+    <sys:String x:Key="str.System.Diag.Summary">{0} dispatches over {1}s — dispatcher busy {2}% of wall-clock · GObjects {3:N0}</sys:String>
+    <sys:String x:Key="str.System.Diag.Process">Process: working set {0} · private {1} · CPU {2} · {3} threads · {4} handles</sys:String>
+    <sys:String x:Key="str.System.Diag.GameThread">Game thread: PE hook {0} · {1} · last fire {2} ms ago · {3:N0} fires</sys:String>
+    <sys:String x:Key="str.System.Diag.Responsive">responsive</sys:String>
+    <sys:String x:Key="str.System.Diag.Stalled">STALLED</sys:String>
+    <sys:String x:Key="str.System.Diag.NotConnected">Diagnostics need a live DLL connection.</sys:String>
+    <sys:String x:Key="str.System.Diag.Reset.Done">Counters reset.</sys:String>
+    <sys:String x:Key="str.System.Diag.Error">Diagnostics failed: {0}</sys:String>
     <sys:String x:Key="str.System.OpenLogFolder">Open Log Folder</sys:String>
     <sys:String x:Key="str.System.OpenLogFolderTip">Open the application log folder (%LOCALAPPDATA%\UE5CEDumper\Logs) in the file browser.</sys:String>
     <sys:String x:Key="str.System.OpenLogFolder.Error">Could not open log folder: {0}</sys:String>

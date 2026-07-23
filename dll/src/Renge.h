@@ -161,6 +161,12 @@ constexpr const char* CMD_PE_PROFILE_START         = "pe_profile_start";
 constexpr const char* CMD_PE_PROFILE_STOP          = "pe_profile_stop";
 constexpr const char* CMD_PE_PROFILE_GET           = "pe_profile_get";
 
+// Diagnostics (Sense) — self-health telemetry: how long each pipe command
+// actually occupies the dispatcher (the head-of-line blocking multipipe-eval.md
+// blames for UI lag but nothing measured), plus Win32 process facts. Pipe-only.
+constexpr const char* CMD_GET_DIAGNOSTICS          = "get_diagnostics";
+constexpr const char* CMD_RESET_DIAGNOSTICS        = "reset_diagnostics";
+
 // Event types
 constexpr const char* EVT_WATCH            = "watch";
 

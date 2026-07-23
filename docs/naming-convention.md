@@ -191,7 +191,7 @@ Total votes: **12,700,122** | Voting period: 2026-03-08 ~ 2026-03-29
 | 10 | Bought Skeleton (骨頭) | 339,302 | — |
 | 11 | Solitär (索莉塔) | — | — |
 | 12 | Lügner (琉古納) | — | **ProxyVersion** |
-| 13 | Sense (乘斯) | — | — |
+| 13 | Sense (乘斯) | — | **Diagnostics** |
 | 14 | Linie (莉涅) | — | **LivePEProfiler** |
 | 15 | Übel (尤蓓爾) | — | **UStructWalker** |
 | 16 | Methode (梅特戴) | — | **CEPlugin** |
@@ -286,7 +286,7 @@ German spelling.
 | Serie | ゼーリエ | Serie | Living-history great mage | 🟢 FNamePool | — |
 | Genau | ゲナウ | Genau | First-Exam proctor / examiner | 🟢 OffsetFinder | — |
 | Methode | メトーデ | Methode | All-capable analyst, detection | 🟢 CEPlugin | — |
-| Sense | ゼンゼ | Sense | Second-Exam proctor ("scythe") | ⬜ | Reaping / cleanup / harvest-collection |
+| Sense | ゼンゼ | Sense | Second-Exam proctor ("scythe") | 🟢 Diagnostics | Self-health telemetry — *harvests* how long each pipe command occupies the DLL dispatcher (the head-of-line blocking multipipe-eval.md blames for UI lag but nothing measured) + Win32 process facts + game-thread health. Pipe-only `get_diagnostics` / `reset_diagnostics` (`Sense.cpp/.h`, build 2308) |
 | Falsch | ファルシュ | Falsch | By-the-book proctor ("false") | ⬜ | Validation / assertion / error detection |
 | Lernen | レルネン | Lernen | Serie's apprentice ("to learn") | ⬜ | Adaptive heuristics / calibration |
 | Lineal | リネアール | Lineal | 15-year undercover spy ("ruler") | 🟢 PackedItem reconstruct | UE5.7+ packed FUObjectItem split/rejoin (`Lineal.h`, was `PackedItem`) |

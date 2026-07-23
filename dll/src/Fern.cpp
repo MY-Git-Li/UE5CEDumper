@@ -27,6 +27,7 @@
 #include "Grausam.h"   // Grausam::SetForegroundLock — keep game thread alive when backgrounded
 #include "Edel.h"
 #include "Linie.h"     // Live PE profiler — pe_profile_start/stop/get
+#include "Sense.h"     // Diagnostics — dispatch timing + process facts
 #include "BuildStamp.h"
 
 #include <json.hpp>
@@ -722,9 +723,17 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         // mid-command disconnect (a long bulk scan blocks this thread). inFlight
         // is set only around DispatchCommand (CPU-bound; not touching the pipe),
         // never around ReadLine/WriteLine, so the monitor's peek never races I/O.
+        // Time exactly the inFlight window. That span is the CPU-bound,
+        // pipe-free stretch during which this connection's dispatcher is
+        // unavailable to any other command — i.e. precisely the head-of-line
+        // blocking docs/multipipe-eval.md blames for UI lag, which until now
+        // nothing measured. See Sense.h.
         conn->inFlight.store(true, std::memory_order_relaxed);
+        const uint64_t dispatchStart = GetTickCount64();
         std::string response = DispatchCommand(conn, line);
+        const uint64_t dispatchMs = GetTickCount64() - dispatchStart;
         conn->inFlight.store(false, std::memory_order_relaxed);
+        Sense::RecordDispatch(cmd.empty() ? std::string("(unparsed)") : cmd, dispatchMs);
 
         if (!response.empty()) {
             if (!WriteLine(*conn, response)) {
@@ -758,6 +767,7 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         Radar::SessionManager::Instance().DropAll();
         Radar::GroupSessionManager::Instance().DropAll();
         Linie::Reset();   // last client gone — drop any live PE-profile recording
+        Sense::Reset();   // ...and restart diagnostics so the next session's numbers are its own
         // Un-hide any see-through occluders + stop its worker — the header contract is
         // "un-hidden on disable / disconnect", and there's no UI left to toggle it.
         // Cheap no-op when see-through was never enabled. (M3)
@@ -3101,6 +3111,75 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             Sein::Info("PIPE:profile", "pe_profile_stop: recording frozen");
             json data;
             data["recording"] = false;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // ── get_diagnostics: Sense self-health telemetry ──
+        // Tier 1 (our own dispatch cost) + Tier 2 (Win32 process facts). Read
+        // only; safe to poll. See Sense.h for why this exists.
+        if (cmd == Renge::CMD_GET_DIAGNOSTICS) {
+            int limit = request.value("limit", 25);
+            if (limit < 0) limit = 0;
+
+            json data;
+            const uint64_t uptimeMs = Sense::UptimeMs();
+            const uint64_t busyMs   = Sense::TotalBusyMs();
+            data["uptime_ms"]        = uptimeMs;
+            data["total_dispatches"] = Sense::TotalDispatches();
+            data["total_busy_ms"]    = busyMs;
+            // The headline number: what fraction of wall-clock was a dispatcher
+            // occupied? A high value with a lagging UI is the evidence Phase 1
+            // (non-blocking dispatch) would help; a low one says look elsewhere.
+            data["busy_percent"] = (uptimeMs > 0)
+                ? (double(busyMs) * 100.0 / double(uptimeMs)) : 0.0;
+
+            json cmds = json::array();
+            for (const auto& s : Sense::TopCommands(static_cast<size_t>(limit))) {
+                json e;
+                e["cmd"]      = s.cmd;
+                e["count"]    = s.count;
+                e["total_ms"] = s.totalMs;
+                e["max_ms"]   = s.maxMs;
+                e["last_ms"]  = s.lastMs;
+                e["avg_ms"]   = (s.count > 0)
+                    ? (double(s.totalMs) / double(s.count)) : 0.0;
+                cmds.push_back(e);
+            }
+            data["commands"] = cmds;
+
+            const Sense::ProcessStat ps = Sense::SampleProcess();
+            json proc;
+            proc["working_set_bytes"] = ps.workingSetBytes;
+            proc["private_bytes"]     = ps.privateBytes;
+            proc["peak_working_set"]  = ps.peakWorkingSet;
+            proc["handle_count"]      = ps.handleCount;
+            proc["thread_count"]      = ps.threadCount;
+            proc["cpu_percent"]       = ps.cpuPercent;   // -1 = needs a 2nd sample
+            data["process"] = proc;
+
+            // Game-thread health from Stark — already public, and the other half
+            // of "is the game starved?". A stalled game thread makes every
+            // invoke-bearing command sit in the dispatcher.
+            json gt;
+            gt["hook_active"]           = Stark::IsHookActive();
+            gt["hook_fire_count"]       = Stark::GetHookFireCount();
+            gt["ms_since_last_fire"]    = Stark::MsSinceLastHookFire();
+            gt["responsive"]            = Stark::IsGameThreadResponsive();
+            gt["invoke_timeout_ms"]     = Stark::GetInvokeTimeoutMs();
+            data["game_thread"] = gt;
+
+            // Object-pool size over time is a cheap GC / leak signal. Aura, not
+            // the UE5_* export layer — the pipe shouldn't reach through the C ABI
+            // to reach something it already links directly.
+            data["gobjects_count"] = Aura::GetCount();
+
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_RESET_DIAGNOSTICS) {
+            Sense::Reset();
+            json data;
+            data["ok"] = true;
             return Renge::MakeResponse(id, data).dump();
         }
 
