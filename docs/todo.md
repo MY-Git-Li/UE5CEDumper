@@ -1102,11 +1102,11 @@ time-control evals above.*
 
 -----
 
-## 4th proxy DLL — winmm.dll — EVALUATED (2026-07-23), NOT BUILT — **has a hard prerequisite**
+## 4th proxy DLL — winmm.dll — EVALUATED (2026-07-23), NOT BUILT — **prerequisite now CLEARED**
 
-**Verdict: winmm.dll is the right 4th target, but it CANNOT be added until our own
-`timeBeginPeriod` call is de-static-linked from the shared code (see BLOCKER).** The prerequisite
-is a correct standalone change; do it first, separately.
+**Verdict: winmm.dll is the right 4th target. Its hard prerequisite — our own `timeBeginPeriod` call
+being statically linked in the shared object library — was fixed separately in build 2301, so the
+proxy itself is now unblocked and is plain (if mechanical) work.**
 
 **Measured — PE import + delay-import table of 7 installed UE Shipping exes (2026-07-23):**
 
@@ -1136,29 +1136,38 @@ is a correct standalone change; do it first, separately.
   + trampoline `.asm` from the real DLL's export table (and re-generate dxgi's from the same script
   to kill hand-maintenance drift).
 
-**🚫 BLOCKER — we call winmm ourselves, from the shared object library.**
+**✅ CLEARED (build 2301) — the BLOCKER: we called winmm ourselves, from the shared object library.**
+Kept here because it is the single most important thing to understand before touching this idea, and
+because the same trap applies to any future proxy whose API we also *consume*.
+
 `Mimic.cpp` raises the timer resolution for the CE-mailbox poll thread
 (`timeBeginPeriod(kPollIntervalMs)` / `timeEndPeriod`), and `Mimic.cpp` is in
-**`UE5_COMMON_SOURCES`** — the object library linked into the main DLL *and every proxy*. `Winmm` is
-in both `UE5Dumper`'s link list and `PROXY_LINK_LIBS`. If our proxy *is* `winmm.dll`:
+**`UE5_COMMON_SOURCES`** — the object library linked into the main DLL *and every proxy*. `Winmm` was
+in both `UE5Dumper`'s link list and `PROXY_LINK_LIBS`. Had our proxy *been* `winmm.dll`:
 
-- our static import of `winmm.dll!timeBeginPeriod` resolves against the module named `winmm.dll` in
-  the process — **ourselves** → `Proxy_timeBeginPeriod` → the forwarding pointer. Before the real
-  System32 winmm is resolved that pointer is the fallback stub, which **returns 0 — and `0` is
-  `TIMERR_NOERROR`**. So it does not crash: it **silently succeeds while doing nothing**, `Sleep(1)`
-  degrades to the 15.6 ms tick, and CE-mailbox latency gets ~15× worse with no error anywhere.
-- **Delay-load does not save us here** (unlike the version proxy, which delay-loads `version.dll`
+- our static import of `winmm.dll!timeBeginPeriod` would resolve against the module named
+  `winmm.dll` in the process — **ourselves** → `Proxy_timeBeginPeriod` → the forwarding pointer.
+  Before the real System32 winmm is resolved that pointer is the fallback stub, which **returns 0 —
+  and `0` is `TIMERR_NOERROR`**. So it would not crash: it would **silently succeed while doing
+  nothing**, `Sleep(1)` degrading to the 15.6 ms tick and CE-mailbox latency getting ~15× worse with
+  no error anywhere.
+- **Delay-load would not have saved us** (unlike the version proxy, which delay-loads `version.dll`
   purely to break the link-time circularity and never calls into it): a delay-load
   `LoadLibrary("winmm.dll")` from the game directory finds **us** again.
-- **No existing test catches it** — `dll_helpers_test` links `Winmm` directly into the test exe, so
-  its `timeBeginPeriod(1)` + `Sleep(1)` latency assert passes regardless of proxy behaviour.
+- **No test would have caught it** — `dll_helpers_test` linked `Winmm` directly into the test exe, so
+  its `timeBeginPeriod(1)` + `Sleep(1)` latency assert passed regardless of proxy behaviour.
 
-**Fix (do first, independently):** resolve `timeBeginPeriod` / `timeEndPeriod` explicitly from the
-**System32** copy (`GetSystemDirectoryW` → `LoadLibraryW(<sys>\winmm.dll)` → `GetProcAddress`) inside
-`Mimic.cpp`, and drop `Winmm` from both link lists. This is proxy-agnostic, so it satisfies the
-`UE5_COMMON_SOURCES` invariant ("a file may live here ONLY if it never tests a `UE5_PROXY_*` macro")
-— an `#ifdef` would violate it. Effort **XS-S** · Risk low, and it is a correctness improvement on
-its own. **UI side: verified clean** — no `winmm` / `timeBeginPeriod` usage anywhere in `ui/`.
+**How it was fixed (build 2301, dev-log 2026-07-23):** `Mimic.cpp` now resolves
+`timeBeginPeriod` / `timeEndPeriod` from the **System32** copy by explicit path
+(`GetSystemDirectoryW` → `LoadLibraryW(<sys>\winmm.dll)` → `GetProcAddress`), and `Winmm` is gone
+from `UE5Dumper`'s link list, `PROXY_LINK_LIBS`, **and** `dll_helpers_test` — whose latency check now
+resolves the same way, so it covers the real mechanism. Windows keys loaded modules by full path, so
+this always yields the genuine OS winmm even with a same-named proxy of ours mapped. The helper is
+proxy-agnostic (no `UE5_PROXY_*` test), satisfying the `UE5_COMMON_SOURCES` invariant — an `#ifdef`
+would have violated it. **Verified objectively:** `winmm.dll` no longer appears in the import table
+of `UE5Dumper.dll`, any of the three proxies, or the test exe; and the reworked latency check
+measures 1.95 ms/sleep through the resolved pointers (vs the ~15.6 ms a silent no-op would give).
+**UI side: verified clean** — no `winmm` / `timeBeginPeriod` usage anywhere in `ui/`.
 
 **Prior art — `D:\Github\ZoltDump` already ships a winmm proxy.** Shape to copy: `Eisen.cpp/.h` +
 a **generated** `EisenWinmmPtrs.h` (one `extern "C" FARPROC g_pfn_<name>` per export, every one
@@ -1167,7 +1176,8 @@ instead of jumping through null) + `ProxyWinmmTrampoline.asm` (MASM stubs jumpin
 `ProxyWinmm.def` (`name = Proxy_name`), with the real DLL loaded by explicit `GetSystemDirectoryW`
 path. Its `build.ps1` parameterises the flavour as `-ProxyTarget winmm` rather than our hardcoded
 target triple. **Two caveats when copying:** (1) ZoltDump has **no** `timeBeginPeriod` caller of its
-own, so its design does not address our BLOCKER — don't assume it's solved; (2) that same
+own, so its design does not address the self-call trap above — don't assume copying it is enough
+(ours is now handled on our side, in Mimic); (2) that same
 returns-0 fallback is precisely what makes our self-call fail *silently*. Keep our forwarder named
 `Lugner_Winmm.cpp` for internal consistency (`Lugner` owns proxy forwarding here); ZoltDump used
 `Eisen` only because it has no `Lügner` equivalent.
@@ -1200,7 +1210,7 @@ hardcoded `version` + `winmm` pair — add the 4th flavour to **both** or the gu
 covering it (shipped build 2291; the `.CT` half is in-game verified, the `Methode.cpp` CE-plugin half
 is only reachable via CE's *Inject && Connect* menu item and has not been exercised).
 
-Effort **M** · Risk low (after the BLOCKER fix). **Prereq before committing:** re-run the import
+Effort **M** · Risk low (the prerequisite is done). **Prereq before committing:** re-run the import
 measurement across the 30+ titles in [test-games.md](test-games.md) using the repo's own
 `ProxyImportAnalyzer` — n=7 is too small to lock a decision on, and the tooling already exists.
 

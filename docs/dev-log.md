@@ -20,6 +20,40 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — Stop statically importing winmm: resolve the 1 ms timer from System32 (build 2301; dev, DLL)
+
+Clears the hard prerequisite the winmm-proxy evaluation identified. Correct on its own, and shipped
+separately from the proxy so the two can be judged independently.
+
+**The trap.** `Mimic.cpp` raises the timer resolution for the CE-mailbox poll thread
+(`timeBeginPeriod(1)` / `timeEndPeriod`), and it lives in `UE5_COMMON_SOURCES` — the object library
+linked into the main DLL *and every proxy*, with `Winmm` in both link lists. The day a proxy target
+**is** `winmm.dll`, our own static import of `winmm.dll!timeBeginPeriod` resolves against the module
+of that name in the process — **ourselves** — landing in our forwarding stub. Before the stub has
+resolved the real export it returns 0, and **0 is `TIMERR_NOERROR`**: no crash, no error, the call
+just silently does nothing while `Sleep(1)` degrades to the 15.6 ms tick and mailbox latency gets
+~15× worse. Delay-loading would not have helped (a delay-load `LoadLibrary("winmm.dll")` from the
+game folder finds us again), and no test would have caught it — `dll_helpers_test` linked `Winmm`
+into the test exe, so its latency assert passed regardless of proxy behaviour.
+
+**The fix.** `Mimic.cpp` resolves both functions from the **System32** copy by explicit path
+(`GetSystemDirectoryW` → `LoadLibraryW` → `GetProcAddress`); Windows keys loaded modules by full
+path, so this yields the genuine OS winmm even with a same-named proxy of ours mapped. `Winmm` is now
+absent from `UE5Dumper`'s link list, `PROXY_LINK_LIBS`, **and** `dll_helpers_test`. Unresolvable →
+returns a non-zero rc so the existing "log and proceed" path runs and the paired `timeEndPeriod` is
+skipped; the worst case was always a graceful degradation to system Sleep granularity, never a
+correctness break. The helper is deliberately proxy-agnostic (no `UE5_PROXY_*` test), which is what
+lets `Mimic.cpp` stay in the shared object library — an `#ifdef` would have violated that invariant
+and forced the file out of the compile-once set.
+
+**Verification — objective, not by inspection.** Parsing the built PE import tables shows
+`winmm.dll` is gone from `UE5Dumper.dll`, all three proxies, **and** the test exe. The poll-latency
+micro-benchmark was reworked to resolve the same way rather than through a linked import, so it now
+covers the real mechanism; it measures **1.95 ms/sleep** (194.9 ms for 100 × `Sleep(1)`) — a silent
+no-op would have landed near 15.6 ms/sleep. `dll_helpers_test` 845 pass / 0 fail (+4), UI 2846 / 0.
+
+-----
+
 ## 2026-07-23 — Undeploy removes every proxy flavour of ours, not just the selected one (build 2299; dev, UI-only)
 
 **Reported bug.** With `dxgi.dll` deployed and the radio switched to `version.dll`, *Undeploy* did

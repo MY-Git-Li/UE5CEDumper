@@ -266,7 +266,11 @@ target_link_libraries(UE5Dumper PRIVATE
     Shlwapi
     Psapi
     Version   # GetFileVersionInfoW / VerQueryValueW for PE VERSIONINFO
-    Winmm     # timeBeginPeriod / timeEndPeriod — Mimic poll-thread 1ms tick
+    # NOTE: Winmm is deliberately NOT linked. Mimic resolves timeBeginPeriod /
+    # timeEndPeriod from the System32 copy at run time instead, so that a future
+    # winmm.dll PROXY build cannot have our own call resolve back into its own
+    # forwarding stub (whose pre-resolution return of 0 == TIMERR_NOERROR would
+    # silently no-op the 1ms tick). See the comment in Mimic.cpp.
     minhook
     Zydis     # native UFunction disassembly (Denken / Path 2)
 )
@@ -307,8 +311,10 @@ set(PROXY_SPECIFIC_SOURCES
     src/version.rc
 )
 
+# Winmm is deliberately absent — see the note on UE5Dumper's link list above.
+# It matters most HERE: one of these targets will eventually BE winmm.dll.
 set(PROXY_LINK_LIBS
-    ws2_32 Shlwapi Psapi Version Winmm delayimp minhook Zydis
+    ws2_32 Shlwapi Psapi Version delayimp minhook Zydis
 )
 
 option(BUILD_PROXY_DLL "Build the proxy DLL (version.dll) target" OFF)
@@ -492,8 +498,9 @@ if(BUILD_DLL_TESTS)
         )
     endif()
 
-    # Mimic poll-latency micro-benchmark calls timeBeginPeriod / timeEndPeriod
-    # to verify Sleep(1) actually delivers ~1ms on this host. Without winmm
-    # the test exe wouldn't link.
-    target_link_libraries(dll_helpers_test PRIVATE Winmm Zydis)
+    # Winmm deliberately absent here too: the poll-latency micro-benchmark now
+    # resolves timeBeginPeriod / timeEndPeriod from System32 by explicit path,
+    # exactly as Mimic does, so it covers the real mechanism instead of a linked
+    # import. Nothing in the tree statically imports winmm any more.
+    target_link_libraries(dll_helpers_test PRIVATE Zydis)
 endif()

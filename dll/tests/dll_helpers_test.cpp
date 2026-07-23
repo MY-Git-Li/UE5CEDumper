@@ -235,8 +235,32 @@ static void Test_Alignment_WeakAndSparseDelegate() {
 // tick regression cleanly (which would land near 1560ms).
 
 static void Test_Mimic_PollLatency_OneMillisecond() {
-    // Mirror the DLL polling thread's timer-resolution request.
-    MMRESULT rc = timeBeginPeriod(1);
+    // Mirror the DLL polling thread's timer-resolution request — INCLUDING how it
+    // reaches winmm. Mimic no longer statically imports winmm: it resolves
+    // timeBeginPeriod/timeEndPeriod from the System32 copy by explicit path, so
+    // that a future winmm.dll PROXY build cannot have the call resolve back into
+    // its own forwarding stub (which returns 0 == TIMERR_NOERROR before it has
+    // resolved the real export, silently no-opping the 1ms tick). Resolving the
+    // same way here means this test covers the actual mechanism, and lets the test
+    // exe drop its winmm import too — nothing in the tree statically imports it.
+    using TimePeriodFn = MMRESULT (WINAPI*)(UINT);
+    wchar_t winmmPath[MAX_PATH] = {};
+    UINT n = GetSystemDirectoryW(winmmPath, MAX_PATH);
+    EXPECT("GetSystemDirectoryW ok", n != 0 && n < MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return;
+    wcsncat_s(winmmPath, L"\\winmm.dll", _TRUNCATE);
+
+    HMODULE hWinmm = LoadLibraryW(winmmPath);
+    EXPECT("LoadLibraryW(System32 winmm.dll) ok", hWinmm != nullptr);
+    if (!hWinmm) return;
+
+    auto pBegin = reinterpret_cast<TimePeriodFn>(GetProcAddress(hWinmm, "timeBeginPeriod"));
+    auto pEnd   = reinterpret_cast<TimePeriodFn>(GetProcAddress(hWinmm, "timeEndPeriod"));
+    EXPECT("timeBeginPeriod resolved", pBegin != nullptr);
+    EXPECT("timeEndPeriod resolved", pEnd != nullptr);
+    if (!pBegin || !pEnd) return;
+
+    MMRESULT rc = pBegin(1);
     EXPECT("timeBeginPeriod(1) ok", rc == TIMERR_NOERROR);
     if (rc != TIMERR_NOERROR) {
         std::printf("  [warn] timeBeginPeriod failed rc=%u — skipping latency assert\n", rc);
@@ -253,7 +277,7 @@ static void Test_Mimic_PollLatency_OneMillisecond() {
     }
 
     QueryPerformanceCounter(&end);
-    timeEndPeriod(1);
+    pEnd(1);
 
     double elapsedMs = double(end.QuadPart - start.QuadPart) * 1000.0 / double(freq.QuadPart);
     std::printf("  [info] 100 x Sleep(1) under timeBeginPeriod(1) = %.1f ms "
