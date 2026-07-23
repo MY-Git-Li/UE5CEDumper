@@ -51,10 +51,23 @@ Improvements over the `.CT` version:
 - Falls back to CE record XML on the clipboard when AOBMaker isn't reachable, distinguishing "pipe
   broke mid-send" from "CE was never running".
 
+**Route guidance (build 2296).** Three delivery routes now exist and they are not equally good, so
+the ordering is stated where each choice is made: an always-visible line in the Proxy Deploy panel
+(`str.ProxyDeploy.RouteOrder`) ranks **① deploy a proxy DLL** (loads with the game, survives
+restarts, no CE at all) → **② inject into a running game, or push the bootstrap record into your open
+CE table** → **③ the standalone `dist\UE5CEDumper.CT`** (developer fallback, and the only route
+needing no AOBMaker plugin); the Deploy / Inject / Tools-bootstrap tooltips each name their own rank
+so the ordering stays consistent. In-panel rather than tooltip-only on purpose — that panel is where
+the decision happens, and a tooltip is only found by someone who already knew to look.
+
 **Verification:** 2822 tests green (+17). `CeMailboxLayout` gained `OffInitState` + the five
 `InitState` values so the offsets stay single-sourced. The emitted Lua was additionally checked by
 running both `{$lua}` blocks through a real Lua parser — the shape assertions alone would not have
-caught a syntax error.
+caught a syntax error. For the route-guidance strings the tests prove nothing (no string-resource
+coverage test exists), so those were checked by confirming every key resolves, then launching the
+app: `ProxyDeployPanel` is instantiated directly by `MainWindow.axaml`, not lazily, so a clean start
+with an error-free init log means the new `StaticResource` resolved. The wrapped layout itself was
+not visually inspected.
 
 Two test-only traps worth remembering: `Assert.DoesNotContain("\0", s)` **always fails** — the string
 overload is culture-sensitive and under ICU a NUL has zero collation weight, so it "matches" at

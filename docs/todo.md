@@ -1281,9 +1281,11 @@ Improvements over the `.CT` route, both worth keeping if this code is ever touch
 record, which makes CE run `[DISABLE]` against a DLL that never loaded). **Needs in-game verify**;
 *delete this note afterwards.*
 
-**Still open — the preference order isn't surfaced in the UI.** Users have no signpost that the
-routes rank **proxy DLL (no CE at all) > UI Inject button / pushed AA record > standalone `.CT`**.
-Effort **XS** (tooltip / status wording).
+**✅ DONE — the preference order is surfaced in the UI** (build 2296). An always-visible line in the
+Proxy Deploy panel (`str.ProxyDeploy.RouteOrder`) ranks the three routes, and the Deploy / Inject /
+Tools-bootstrap tooltips each name their own rank so the ordering is consistent wherever the user is
+standing. Deliberately not tooltip-only in the panel: that is the screen where the choice is made,
+and a tooltip is only found by someone who already knew to look.
 
 **Still open — CE's `autorun` folder as a 4th route.** A `.lua` dropped in `Cheat Engine/autorun/`
 would define `ue5_inject()` for **every** table permanently and needs no AOBMaker plugin; the UI can

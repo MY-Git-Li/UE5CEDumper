@@ -119,6 +119,15 @@
                  VerticalAlignment="Center" Margin="8,0"/>
     </StackPanel>
 
+    <!-- Route guidance. Deliberately always-visible rather than a tooltip: this
+         panel is where the user picks between deploying a proxy and injecting,
+         and the three delivery routes are not equally good. A tooltip here would
+         only be found by someone who already knew to look. -->
+    <TextBlock DockPanel.Dock="Top"
+               Text="{StaticResource str.ProxyDeploy.RouteOrder}"
+               Foreground="#8A8A8A" FontSize="11" TextWrapping="Wrap"
+               Margin="0,0,0,8"/>
+
     <!-- Scanning progress.
          IsIndeterminate is bound to IsScanning so the indeterminate animation
          does not keep ticking (and invalidating layout) while the bar is
