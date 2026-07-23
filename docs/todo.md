@@ -1102,6 +1102,231 @@ time-control evals above.*
 
 -----
 
+## 4th proxy DLL — winmm.dll — EVALUATED (2026-07-23), NOT BUILT — **has a hard prerequisite**
+
+**Verdict: winmm.dll is the right 4th target, but it CANNOT be added until our own
+`timeBeginPeriod` call is de-static-linked from the shared code (see BLOCKER).** The prerequisite
+is a correct standalone change; do it first, separately.
+
+**Measured — PE import + delay-import table of 7 installed UE Shipping exes (2026-07-23):**
+
+| Game | version | dinput8 | dxgi | **winmm** | dsound |
+|---|:-:|:-:|:-:|:-:|:-:|
+| DQ7R | – | – | ✅ | ✅ | ✅ |
+| EVERSPACE 2 | ✅ | – | ✅ | ✅ | ✅ |
+| P3R | – | – | ✅ | ✅ | ✅ |
+| FF7 Rebirth (`ff7rebirth_.exe`) | – | – | ✅ | ✅ | ✅ |
+| Atelier Yumia | ✅ | ✅ | ✅ | ✅ | – |
+| **Nioh3** | – | ✅ | **–** | ✅ | – |
+| Crimson Desert | – | – | ✅ | ✅ | – |
+| **total** | 2/7 | 2/7 | 6/7 | **7/7** | 4/7 |
+
+- **winmm is the only 7/7 target**, and **Nioh3 imports neither dxgi nor version** — the exact gap
+  the current three leave open (dinput8 only). That single row is the case for building it.
+- **KnownDLLs verified on this host** (Win11 26200): `winmm` / `dsound` / `dxgi` / `version` /
+  `dinput8` are **all absent** ⇒ all app-dir-hijackable. `IMM32` / `MSVCRT` / `gdiplus` / `SHCORE` /
+  `PSAPI` / `SHLWAPI` **are** listed ⇒ permanently non-viable, exclude from any future selection.
+- **P3R already ships its own `version.dll` in `Binaries\Win64\`** — a live example of the version
+  slot being occupied by a mod loader, which is an independent reason to want a 4th flavour.
+- **Trap:** `ff7rebirth.exe` (launcher) has an empty import table; the real game is
+  `ff7rebirth_.exe`. `ProxyImportAnalyzer`'s "flattened top-level exe" pattern must survive the
+  launcher/real-exe pair.
+- **Export counts (measured):** version 17 · dinput8 6 · dxgi 20 · **winmm 181 (180 named)** ·
+  dsound 12. winmm is 9× dxgi but the *same shape* — do **not** hand-write; **generate** the `.def`
+  + trampoline `.asm` from the real DLL's export table (and re-generate dxgi's from the same script
+  to kill hand-maintenance drift).
+
+**🚫 BLOCKER — we call winmm ourselves, from the shared object library.**
+`Mimic.cpp` raises the timer resolution for the CE-mailbox poll thread
+(`timeBeginPeriod(kPollIntervalMs)` / `timeEndPeriod`), and `Mimic.cpp` is in
+**`UE5_COMMON_SOURCES`** — the object library linked into the main DLL *and every proxy*. `Winmm` is
+in both `UE5Dumper`'s link list and `PROXY_LINK_LIBS`. If our proxy *is* `winmm.dll`:
+
+- our static import of `winmm.dll!timeBeginPeriod` resolves against the module named `winmm.dll` in
+  the process — **ourselves** → `Proxy_timeBeginPeriod` → the forwarding pointer. Before the real
+  System32 winmm is resolved that pointer is the fallback stub, which **returns 0 — and `0` is
+  `TIMERR_NOERROR`**. So it does not crash: it **silently succeeds while doing nothing**, `Sleep(1)`
+  degrades to the 15.6 ms tick, and CE-mailbox latency gets ~15× worse with no error anywhere.
+- **Delay-load does not save us here** (unlike the version proxy, which delay-loads `version.dll`
+  purely to break the link-time circularity and never calls into it): a delay-load
+  `LoadLibrary("winmm.dll")` from the game directory finds **us** again.
+- **No existing test catches it** — `dll_helpers_test` links `Winmm` directly into the test exe, so
+  its `timeBeginPeriod(1)` + `Sleep(1)` latency assert passes regardless of proxy behaviour.
+
+**Fix (do first, independently):** resolve `timeBeginPeriod` / `timeEndPeriod` explicitly from the
+**System32** copy (`GetSystemDirectoryW` → `LoadLibraryW(<sys>\winmm.dll)` → `GetProcAddress`) inside
+`Mimic.cpp`, and drop `Winmm` from both link lists. This is proxy-agnostic, so it satisfies the
+`UE5_COMMON_SOURCES` invariant ("a file may live here ONLY if it never tests a `UE5_PROXY_*` macro")
+— an `#ifdef` would violate it. Effort **XS-S** · Risk low, and it is a correctness improvement on
+its own. **UI side: verified clean** — no `winmm` / `timeBeginPeriod` usage anywhere in `ui/`.
+
+**Prior art — `D:\Github\ZoltDump` already ships a winmm proxy.** Shape to copy: `Eisen.cpp/.h` +
+a **generated** `EisenWinmmPtrs.h` (one `extern "C" FARPROC g_pfn_<name>` per export, every one
+initialised to `Proxy_Fallback` = `xor rax,rax; ret` so exports missing on older Windows return 0
+instead of jumping through null) + `ProxyWinmmTrampoline.asm` (MASM stubs jumping via the pointers) +
+`ProxyWinmm.def` (`name = Proxy_name`), with the real DLL loaded by explicit `GetSystemDirectoryW`
+path. Its `build.ps1` parameterises the flavour as `-ProxyTarget winmm` rather than our hardcoded
+target triple. **Two caveats when copying:** (1) ZoltDump has **no** `timeBeginPeriod` caller of its
+own, so its design does not address our BLOCKER — don't assume it's solved; (2) that same
+returns-0 fallback is precisely what makes our self-call fail *silently*. Keep our forwarder named
+`Lugner_Winmm.cpp` for internal consistency (`Lugner` owns proxy forwarding here); ZoltDump used
+`Eisen` only because it has no `Lügner` equivalent.
+
+**Build-script deltas (measured, so the "compile once" sharing is preserved):**
+`dll/CMakeLists.txt` — add `src/Lugner_Winmm.cpp` to `PROXY_SPECIFIC_SOURCES` (gated by
+`UE5_PROXY_WINMM_BUILD` like the other two) + one `option(BUILD_PROXY_WINMM)` / `add_library` block
+copied from the dxgi one. **`UE5DumperCommon` must not change** — that is what keeps the shared
+sources compiling once instead of 5×. `build.ps1` — `-Target` `ValidateSet`, the `$cppTargets` map
+(~line 355), the `-DBUILD_PROXY_*=ON` configure string (appears **twice**: ~363 and ~588 — both must
+be updated or the test configure silently drops the target), and the dist-copy table (~413-415).
+`build.cmd` needs nothing unless we want a `build proxywinmm` alias (it only forwards mode/target).
+UI — `Models/ProxyType.cs` (enum + `GetDllName` + `GetDisplayName` + `FromDllName`), `Constants.cs`,
+`Services/ProxyImportAnalyzer.cs`, `Services/DumperModuleDetector.cs`, `Services/ProxyDeployService.cs`,
+`ViewModels/ProxyDeployViewModel.cs`, `Resources/Strings/en.axaml`, tests.
+
+**Two invariants to hold:** (1) `ProxyImportAnalyzer`'s class remarks deliberately refuse to
+auto-escalate away from the version default — **winmm must be an advisory alt, not the new default**,
+until a wider sample proves otherwise. (2) A static import only proves the DLL *gets loaded*, not
+that the proxy *survives* (anti-tamper, signature checks, an occupied slot); and its absence doesn't
+prove the reverse either, since a dynamic `LoadLibrary("dxgi.dll")` also searches the app dir first.
+
+**Rejected alternatives:** `dsound` — cheap (12 exports) but 4/7 and lands in audio init.
+`xinput1_4` — 109 functions but only **8 named, the rest ordinal-only**, so the `.def` needs
+`NONAME` + ordinal mapping, for only 3/7 coverage.
+
+**🐞 Latent bug found while measuring (independent of this item):** the double-inject guards only
+know the *old* proxy pair. `Methode.cpp` `IsAlreadyLoadedInTarget` (~line 155) tests
+`version.dll` / `winmm.dll`, and `scripts/UE5CEDumper.CT` `ue5_isAlreadyLoaded` (~line 173) has the
+same stale pair — **neither checks `dinput8.dll` or `dxgi.dll`**, the two proxies we actually ship.
+A user running the dxgi or dinput8 proxy gets no guard and can double-map. Fix both lists (and drive
+them off one shared name list so a 4th flavour can't desync them again). Effort **XS** · Risk low —
+**worth doing now, regardless of whether winmm ever happens.**
+
+Effort **M** · Risk low (after the BLOCKER fix). **Prereq before committing:** re-run the import
+measurement across the 30+ titles in [test-games.md](test-games.md) using the repo's own
+`ProxyImportAnalyzer` — n=7 is too small to lock a decision on, and the tooling already exists.
+
+*Parent: the 3-proxy set (version/dinput8/dxgi; project-dll-loading-and-proxies).*
+
+-----
+
+## UE performance counters in the UI — EVALUATED (2026-07-23), tiered
+
+**Verdict: the literal ask — surfacing UE's own `stat` counters — is impossible from an injected
+DLL. But the two cheapest tiers are worth more than the literal ask, because they measure the thing
+[multipipe-eval.md](multipipe-eval.md) already blames for UI lag and currently has zero telemetry for.**
+
+- **Tier 0 — WON'T DO: UE's `stat` system.** Shipping builds compile with `STATS=0` (even the *Test*
+  configuration defines `STATS 0` by default), and the console is **removed from the binary** in
+  Shipping, not hidden. Re-enabling needs `FORCE_USE_STATS` and an engine recompile. Unreachable from
+  an injected DLL — record as WON'T-DO so it isn't re-litigated.
+
+- **Tier 1 — our own health. Zero new machinery, highest value. DO THIS.**
+  [multipipe-eval.md](multipipe-eval.md) already names DLL-side **serial-dispatch head-of-line
+  blocking** as the root cause of UI lag and game-thread CPU starvation as the CE-mailbox risk — yet
+  neither is measured, so Phase 1 would be decided blind. Free to collect: per-command Fern handling
+  time + queue depth; Stark invoke queue depth / timeout count (`invoke_timeout_ms` is already
+  reported over the pipe); per-worker tick count + write-on-drift hit rate for Solide / Hemmung /
+  Laufen / Solitar / Schlacht; Aura `NumElements` over time (GC/leak indicator). **Linie already
+  computes frame-cadence statistics** (per-UFunction fire counts + Welford mean/cv) — it just isn't
+  presented as performance. Effort **S-M** · Risk none.
+
+- **Tier 2 — Win32 process metrics, zero UE dependency.** `GetProcessMemoryInfo` (WorkingSet /
+  PrivateBytes), `GetProcessTimes` (CPU%), thread + handle counts. We are in-process; each is one
+  call. Effort **S** · Risk none.
+
+- **Tier 3 — real FPS / frame time: hook `IDXGISwapChain::Present`.** The only engine-version-
+  independent, accurate source (true frametime, 1% low, pacing, present mode). **Shares its entire
+  hook infrastructure with P2 of the output-monitor-pin evaluation above** — these two must be
+  decided together and funded once, not twice. Effort **M-L** (joint) · Risk med (overlay-shaped
+  behaviour; per-graphics-API work).
+
+- **Tier 3.5 — `GAverageFPS` / `GAverageMS` via AOB.** These are plain engine globals
+  (`GAverageFPS = 1000/GAverageMS`), **not** gated by `STATS`, so they survive Shipping, and Himmel's
+  128-pattern infrastructure could carry a signature. But it is a per-version/per-compiler signature
+  to maintain and yields the engine's *smoothed average*, strictly worse than the Present hook. Keep
+  only as the fallback if we decide never to hook DXGI.
+
+- **Tier 4 — reflected time values.** `AWorldSettings::TimeDilation` (Hemmung already reads it) and
+  `UWorld::TimeSeconds` / `RealTimeSeconds` / `DeltaTimeSeconds` (not `UPROPERTY` — needs DynOff
+  probing). Caveat: `DeltaTimeSeconds` is the **game-thread** delta only (no render/GPU) and is
+  polluted by time dilation — usable as context, **not** as an FPS readout.
+
+**Recommendation: build Tier 1 + Tier 2; defer Tier 3 until the monitor-pin P2 DXGI-hook decision;
+record Tier 0 as WON'T-DO.**
+
+*Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
+(dev-log build 2156) already holds the cadence half.*
+
+-----
+
+## `.CT` delivery — kill the two-stage table load + the blind 15 s wait — EVALUATED (2026-07-23)
+
+**Verdict: the push mechanism the user wants already exists and already ships — it just was never
+pointed at the bootstrap script. Both halves are small and immediately actionable.**
+
+### (a) Two-stage table load — three existing escapes, one small gap
+
+Today the user must open **our** `.CT` to inject, then open the **game's** table — CE holds one table
+at a time, so the injection entry disappears. But:
+
+1. **`CreateAAScript`** ([aobmaker-integration.md](aobmaker-integration.md) §3) already creates an AA
+   memory record **in the address list CE currently has open**, with `group` folder nesting. Teleport
+   and LiveWalker invoke already use it (`IAobMakerBridge.CreateAAScriptAsync`).
+2. **`InjectTableFile`** (§4) already embeds an arbitrary Lua file into the **currently open** table
+   (`Tools → Inject Helper into Current CE Table`).
+3. The UI can inject with no CE at all — `WindowsPlatformService.InjectDll` is
+   CreateRemoteThread + `LoadLibraryW`, with an `InjectDllElevated` sibling.
+
+⇒ **The `.CT` is not required.** The gap is only that the `ue5_inject()` body (the `[ENABLE]` block
+of `scripts/UE5CEDumper.CT`) has no generator behind `CreateAAScript`. Add one, push with
+`group = "UE5CEDumper (DLL)"` exactly like the Teleport card, and inherit the existing CE-XML
+clipboard fallback for users without the AOBMaker plugin. Effort **S** · Risk low.
+
+Surface the preference order in the UI: **proxy DLL (no CE at all) > UI Inject button + push the AA
+record into the current table > standalone `.CT` (kept for no-AOBMaker users)**.
+
+Worth evaluating as a 4th route: **CE's `autorun` folder** — a `.lua` dropped in
+`Cheat Engine/autorun/` defines `ue5_inject()` for **every** table permanently, needs no AOBMaker
+plugin, and the UI can write the file. Effort **S**, but verify first that the CE APIs we rely on are
+available that early in CE startup.
+
+### (b) The 15 s wait is a blind countdown — make it poll
+
+`scripts/UE5CEDumper.CT` (~line 257) has **no readiness check at all**:
+
+```lua
+local WAIT_SEC = 15
+for i = WAIT_SEC, 1, -1 do sleep(1000) ... end
+```
+
+then prints "complete (or failed — check DLL log)". Its own comment states the timeline is "1 s
+thread delay + ~2-8 s AOB scan", so 15 s is a worst-case constant that wastes 5-10 s on every normal
+run *and* reports success even on failure.
+
+Replace with poll-until-ready: check every 250 ms, break on ready, cap at 20-25 s, and **report an
+actual error on timeout**. Readiness signal, in preference order (per CLAUDE.md, **confirm the CE Lua
+API exists before using it — do not invent one**):
+
+- **Preferred — the Mimic mailbox.** Have the DLL write a ready magic into the mailbox once init
+  completes; CE Lua polls it with `getAddress()` + `readInteger`. **A pure memory read, no remote
+  thread** — which matters, because the `.CT`'s own comment (~line 244) says `executeCodeEx` was
+  deliberately avoided during init since games may block `CreateRemoteThread`. May need a new ready
+  field in Mimic (DLL side **XS**).
+- Second — poll `ue5_callDLL("UE5_IsInitialized", "bool")`; same remote-thread exposure.
+- **Do not** assume CE exposes a named-pipe client API to probe for the pipe — unverified.
+
+Free side-benefit: printing the real ready time yields a per-host "how long does the AOB scan
+actually take" measurement — exactly a Tier 1 input for the performance-counter item above.
+
+Effort **S** (Lua loop) + **XS** (DLL ready flag) · Risk low. **Best effort-to-payoff of the three
+2026-07-23 evaluations — do this first.**
+
+*Parent: AOBMaker bridge `CreateAAScript` / `InjectTableFile` (aobmaker-integration.md §3-4);
+project-ce-lua-output-hygiene.*
+
+-----
+
 ## Speculative — pick if the active plan finishes ahead of schedule
 
 Not yet committed to:
