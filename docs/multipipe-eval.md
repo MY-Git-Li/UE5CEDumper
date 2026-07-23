@@ -391,3 +391,65 @@ streaming `Utf8JsonReader` and/or smaller chunks (already noted in todo).
   - Cancellation: "trip global Tot only for heavy-in-flight connection" (proposed) vs full
     per-connection cancel tokens (cleaner, more work).
   - Whether to also tag Pipe Activity entries by lane now (small, recommended).
+
+-----
+
+## 10. MEASURED (2026-07-23, build 2324) — the dispatcher is NOT the bottleneck
+
+This document's core claim — that DLL-side serial-dispatch head-of-line blocking is what makes the
+UI lag — was reasoned, never measured. `Sense` (build 2308) plus the automatic PERF records
+(build 2320) finally measured it, on two games spanning both engine generations: **The Adventures
+of Elliot (UE 5.4)** and **SEED BATTLE DESTINY REMASTERED (UE 4.27)**.
+
+| Operation | wall | dispatcher busy | busy % | dispatches | dominant command |
+|---|---:|---:|---:|---:|---|
+| Copy CE Field | 486.5 ms | 120.4 ms | 24.7% | 740 | `walk_instance` (100%) |
+| Copy CE XML | 224.4 ms | 59.5 ms | 26.5% | 386 | `walk_instance` (100%) |
+| Copy CE Field | 534.5 ms | 144.1 ms | 27.0% | 793 | `walk_instance` (100%) |
+| **Copy CE XML** | **5,362.7 ms** | **1,651.3 ms** | **30.8%** | **20,357** | `walk_instance` (100%) |
+| Copy CE Field | 570.1 ms | 163.6 ms | 28.7% | 1,902 | `walk_instance` (100%) |
+| **aggregate** | **7,178 ms** | **2,139 ms** | **29.8%** | **24,178** | |
+
+### 10.1 Verdict: do NOT build Phase 1
+
+Three independent readings of the same data say the dispatch model is not the problem:
+
+- **The dispatcher is idle ~70% of wall-clock**, and the ratio is strikingly stable (22–31%) across
+  operations spanning 2.6 ms to 5.4 s. Making dispatch non-blocking can only ever recover a slice of
+  the busy 30% — and only if something else were queued behind it, which in a single-user export
+  there is not.
+- **No head-of-line spike exists to remove.** The worst *single* dispatch across 24,178 of them was
+  **14.3 ms**. Phase 1's entire premise is a long-blocking command holding the read loop; nothing
+  here holds it for more than a frame.
+- **Phase 1 is expensive.** It was shipped and reverted once already (build 1840, §8), and a correct
+  version needs overlapped/async pipe I/O. Paying that to chase a 30% slice of a non-blocking
+  workload is not a trade worth making.
+
+### 10.2 What the data says the real lever is: CALL COUNT
+
+`walk_instance` is **100% of the dispatcher cost in every row**, and one Copy CE XML issued
+**20,357** of them. Per round-trip:
+
+- **0.088 ms inside the DLL** (the actual work)
+- **0.208 ms everywhere else** — pipe latency, JSON envelope, UI-side deserialise — i.e. **2.4× the
+  work is overhead**
+
+That is the *pipe round-trip amortisation* win this document already describes in §5's sibling
+material, and the repo already has the pattern twice: `search_properties_batch` (build 685) and
+`walk_class_batch` (build 693). Batching `walk_instance` at the established ~200/call chunk size
+would collapse 24,178 round-trips to ~121.
+
+**Honest limit on that estimate:** this data cannot decompose the 0.208 ms into pipe latency (which
+batching removes) versus UI-side per-result work (which it does not). The trend across runs is
+suggestive — per-call overhead falls from 0.427 ms at 386 calls to 0.182 ms at 20,357, consistent
+with fixed costs amortising — but the split must be measured before promising a figure.
+`walk_class_batch` is the precedent to compare against, since it too gets only the round-trip win.
+
+### 10.3 Status change
+
+- **Phase 1 — WON'T DO** on the evidence above. Revisit only if a workload appears whose *single*
+  dispatches actually block for hundreds of ms (a full `Dump All`, or a `value_scan` on a huge pool,
+  neither of which is in this sample).
+- **Phase 2 — unchanged** (still speculative, still gated on the concurrency-safety prerequisites).
+- **New candidate, better founded than Phase 1: `walk_instance` batching.** Measure the
+  latency/UI-work split first.

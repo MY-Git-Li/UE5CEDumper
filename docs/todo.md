@@ -1330,15 +1330,24 @@ snapshots and logs the delta as a `PERF` line in the `view` log. Better than the
 session it replaces: a deliberate test only covers the scenario somebody thought of, and only if they
 remembered to reset first — this accumulates evidence from real use.
 
-**⚠ Read numbers from build 2324 or later.** The first live run (2321) used `GetTickCount64`, whose
-15.6 ms granularity floored sub-ms commands to zero, and counted the probe's own `get_diagnostics`
-in the busy total — so those lines understate per-command cost and overstate short operations
-(a 57.7 ms op reported 161% busy). Both fixed in 2324.
+**✅ ANSWERED (2026-07-23, build 2324) — and the answer is "don't build Phase 1".** Measured on
+Elliot (UE 5.4) + SEED (UE 4.27), 24,178 dispatches across 5 real Copy CE XML / Copy CE Field runs.
+Full table and reasoning in [multipipe-eval.md](multipipe-eval.md) §10.
 
-**Still open: read the numbers.** The point of Tier 1 is to decide multipipe Phase 1. Now that every
-heavy operation self-records, just use the tool normally on a game that lags and grep the `view` log
-for `PERF`. **High `dispatcher busy %` ⇒ build Phase 1; low ⇒ the lag is elsewhere** (UI thread,
-serialisation, or the game thread) **and Phase 1 would not help.** Effort **0** (read only).
+- **Dispatcher busy 29.8%** — idle ~70% of wall-clock, and the ratio holds (22-31%) across
+  operations from 2.6 ms to 5.4 s. Non-blocking dispatch can only recover a slice of the busy 30%,
+  and only if something were queued behind it — in a single-user export nothing is.
+- **Worst SINGLE dispatch: 14.3 ms** out of 24,178. Phase 1's premise is a long-blocking command
+  holding the read loop; no such command exists here.
+- Phase 1 was already **shipped and reverted once** (build 1840) and a correct version needs
+  overlapped/async pipe I/O. Not a trade worth making for this.
+
+**The real lever is CALL COUNT.** `walk_instance` is 100% of dispatcher cost in every row, and one
+Copy CE XML issued **20,357** of them: **0.088 ms in the DLL vs 0.208 ms of round-trip overhead —
+2.4x the work is overhead.** Batching it at the established ~200/call chunk (as
+`search_properties_batch` / `walk_class_batch` already do) would collapse 24,178 round-trips to
+~121. **Effort M · Risk low-med** — but *first* measure how much of the 0.208 ms is pipe latency
+(batching removes it) versus UI-side per-result work (it does not); this data cannot separate them.
 
 *Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
 (dev-log build 2156) already holds the cadence half.*

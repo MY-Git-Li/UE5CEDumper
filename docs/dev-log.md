@@ -20,6 +20,45 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — MEASURED: the dispatcher is not the bottleneck; Phase 1 is WON'T-DO (build 2324; docs)
+
+The question this whole diagnostics chain was built to answer, answered. `multipipe-eval.md`'s core
+claim — that DLL-side serial-dispatch head-of-line blocking is what makes the UI lag — was reasoned
+in 2026-06 and never measured. It is now, on two games spanning both engine generations: **Elliot
+(UE 5.4)** and **SEED BATTLE DESTINY REMASTERED (UE 4.27)**, 24,178 dispatches across five real
+Copy CE XML / Copy CE Field runs.
+
+**Dispatcher busy: 29.8% aggregate**, and remarkably stable — 22-31% across operations spanning
+2.6 ms to 5.4 s. **Worst single dispatch out of 24,178: 14.3 ms.**
+
+**Verdict: do not build Phase 1.** Three independent readings agree. The dispatcher is idle ~70% of
+wall-clock, so non-blocking dispatch can only recover a slice of the busy 30% — and only if
+something were queued behind it, which in a single-user export there is not. There is no
+head-of-line spike to remove: nothing holds the read loop for more than a frame. And Phase 1 is
+expensive — it was shipped and reverted once already (build 1840) and a correct version needs
+overlapped/async pipe I/O.
+
+**What the data says the real lever is: call count.** `walk_instance` is 100% of the dispatcher cost
+in every single row, and one Copy CE XML issued **20,357** of them. Per round-trip: **0.088 ms
+inside the DLL, 0.208 ms everywhere else** — pipe latency, JSON envelope, UI-side deserialise. **2.4x
+the actual work is overhead.** Batching at the established ~200/call chunk (the pattern
+`search_properties_batch` and `walk_class_batch` already use) would collapse 24,178 round-trips to
+~121.
+
+**Stated limit on that estimate:** this data cannot decompose the 0.208 ms into pipe latency (which
+batching removes) and UI-side per-result work (which it does not). The trend is suggestive —
+per-call overhead falls from 0.427 ms at 386 calls to 0.182 ms at 20,357 — but the split must be
+measured before promising a number. Recorded as a candidate with that caveat rather than as a plan.
+
+Written up in [multipipe-eval.md](multipipe-eval.md) §10 with the full table; Phase 1's status in
+that document changes from "phased recommendation" to **WON'T-DO**, revisit only if a workload
+appears whose *single* dispatches block for hundreds of ms.
+
+**Also confirmed this run:** the winmm proxy on a second game — SEED is **UE 4.27**, so the proxy is
+now verified across both engine generations, 180/180 exports forwarded on each.
+
+-----
+
 ## 2026-07-23 — winmm proxy LIVE-VERIFIED; the PERF records immediately found two of their own bugs (build 2324; dev)
 
 **winmm proxy works.** First live run, The Adventures of Elliot (UE 5.4):
