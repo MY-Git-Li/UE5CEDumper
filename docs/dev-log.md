@@ -20,6 +20,58 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — The batching was aimed at the wrong loop; fixed at the struct tree (build 2335; dev, UI-only)
+
+Build 2329 shipped `walk_instance_batch` and batched the CE export's object-pointer
+drilldown. The next live run showed **no change at all** — 22,522 dispatches, still
+`walk_instance 22,521x`, and no fallback warnings, so the batch command was simply never
+called:
+
+```
+PERF Copy CE XML: wall 5,893.3 ms · busy 1,751.7 ms (29.7%) · 22522 dispatches
+   · split dll 1,751.7 / ipc 3,531.7 / ui 609.9 ms · top: walk_instance 1,751.7ms/22521x
+```
+
+**The calls come from the STRUCT tree, not the pointer drilldown.**
+`ResolveStructFieldsIntoAsync` → `ResolveStructRecursiveAsync` issues one
+`walk_instance` per `StructProperty` and recurses into nested structs — and a UE class is
+full of them (FVector, FTransform, custom structs, each nesting further). The
+object-pointer loop that got batched is a minor contributor by comparison.
+
+**Why the fix isn't "batch that recursion too".** `ResolveStructRecursiveAsync` produces a
+**depth-first flattened list**, and that traversal order — with its accumulated
+`Parent.Child` name prefixes and summed offsets — *is* the emitted CE XML's field order.
+Restructuring it breadth-first would reorder every exported struct.
+
+So: a separate **breadth-first prefetch** (`PrefetchStructTreeAsync`) walks the tree one
+batched call per level, bounded by the same `MaxStructDepth`, and the **unchanged**
+depth-first emit reads from that cache. Output order is preserved by construction, because
+the emit traversal is literally the same code.
+
+Details worth keeping:
+- **One shared predicate** (`IsRecursableStruct`) decides both what the prefetch fetches and
+  what the emit recurses into, so the two can't drift. A mismatch is harmless either way — a
+  superset wastes a walk, a subset falls back to a live call — but matching is what makes it pay.
+- **The cache is a pure optimisation.** Any miss (older DLL, failed batch, an unanticipated
+  shape) walks live exactly as before. `PrefetchStructTreeAsync` swallows batch failures and
+  returns what it has.
+- **Dedup doubles as the cycle guard**: a self-referential struct is fetched once, then the
+  depth bound stops the descent.
+- Cache key includes the class address — the same data address walked as a different class is
+  a different walk.
+
+**Verification:** 2911 tests green (+4), the important one comparing batched vs
+batch-disabled output field-for-field (names, types, offsets, order) over a deliberately
+asymmetric tree. AOT publish clean. **Not verified: the speed-up** — that needs another live
+Copy CE XML, and this time the check is simple: `top:` should show `walk_instance_batch`,
+not `walk_instance`.
+
+**Process note:** build 2329's claim rested on the round-trip count alone; a single grep of
+the next PERF line for `walk_instance_batch` would have caught the miss immediately. That
+check is now the stated acceptance criterion rather than the projection.
+
+-----
+
 ## 2026-07-23 — `walk_instance_batch`: act on the measurement (build 2329; dev, DLL + UI)
 
 Implements what §10.4 concluded. A Copy CE XML issued **20,357** single `walk_instance` calls whose

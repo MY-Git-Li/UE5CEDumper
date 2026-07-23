@@ -785,6 +785,93 @@ public static class CeXmlExportService
     /// StructDataAddr). Used both for top-level resolution and for cascading
     /// into drilled pointer targets — letting one dict cover the whole tree.
     /// </summary>
+    /// <summary>Cache key for a prefetched struct walk. Includes the class address:
+    /// the same data address walked as a different class is a different walk.</summary>
+    private static string StructCacheKey(string addr, string? classAddr)
+        => addr + "|" + (classAddr ?? "");
+
+    /// <summary>Does this field recurse in <see cref="ResolveStructRecursiveAsync"/>?
+    /// One predicate, so the prefetch fetches EXACTLY the set the emit pass asks
+    /// for. A mismatch is harmless (a superset wastes a walk, a subset falls back
+    /// to a live call) but a match is what makes the batching pay off.</summary>
+    private static bool IsRecursableStruct(LiveFieldValue f)
+        => f.TypeName == "StructProperty"
+           && !string.IsNullOrEmpty(f.StructClassAddr)
+           && !string.IsNullOrEmpty(f.StructDataAddr)
+           && f.StructDataAddr != "0x0";
+
+    /// <summary>
+    /// Walk the struct tree BREADTH-first with one batched call per level and
+    /// return every result keyed by <see cref="StructCacheKey"/>.
+    ///
+    /// <para><b>Why a separate prefetch pass instead of batching the recursion.</b>
+    /// <see cref="ResolveStructRecursiveAsync"/> produces a DEPTH-first flattened
+    /// list whose order -- and whose accumulated name prefixes and offsets -- ARE
+    /// the export's field order. Restructuring it breadth-first would change the
+    /// output. Prefetching leaves the emit traversal exactly as it was and only
+    /// changes where its data comes from.</para>
+    ///
+    /// <para>MEASURED motivation (multipipe-eval.md 10.4): this tree, not the
+    /// object-pointer drilldown, is where a Copy CE XML's ~22,500 walk_instance
+    /// calls come from -- each carrying 0.16-0.21 ms of round-trip overhead
+    /// against 0.08 ms of actual work.</para>
+    /// </summary>
+    private static async Task<Dictionary<string, InstanceWalkResult>> PrefetchStructTreeAsync(
+        IDumpService dump,
+        IReadOnlyList<(string Addr, string ClassAddr)> roots,
+        int arrayLimit,
+        CancellationToken ct)
+    {
+        var cache = new Dictionary<string, InstanceWalkResult>(StringComparer.Ordinal);
+        var level = new List<(string Addr, string ClassAddr)>(roots);
+
+        // Same bound as the emit recursion (depth 0..MaxStructDepth-1), so the
+        // prefetch covers exactly the levels that will be asked for.
+        for (int depth = 0; depth < MaxStructDepth && level.Count > 0; depth++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var todo = new List<(string Addr, string? ClassAddr)>();
+            var keys = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var (a, c) in level)
+            {
+                var k = StructCacheKey(a, c);
+                // Dedup against earlier levels AND within this one. Doubles as the
+                // cycle guard: a self-referential struct is fetched once, then the
+                // depth bound stops the descent.
+                if (cache.ContainsKey(k) || !seen.Add(k)) continue;
+                keys.Add(k);
+                todo.Add((a, c));
+            }
+            if (todo.Count == 0) break;
+
+            IReadOnlyList<InstanceWalkResult> walked;
+            try
+            {
+                walked = await dump.WalkInstanceBatchAsync(todo, arrayLimit, ct: ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch
+            {
+                // Prefetch is an optimisation, never a requirement: on any failure
+                // return what we have and let the emit pass walk the rest live.
+                return cache;
+            }
+
+            var next = new List<(string Addr, string ClassAddr)>();
+            for (int i = 0; i < keys.Count && i < walked.Count; i++)
+            {
+                cache[keys[i]] = walked[i];
+                foreach (var f in walked[i].Fields)
+                    if (IsRecursableStruct(f))
+                        next.Add((f.StructDataAddr, f.StructClassAddr));
+            }
+            level = next;
+        }
+        return cache;
+    }
+
     private static async Task ResolveStructFieldsIntoAsync(
         IDumpService dump,
         IReadOnlyList<LiveFieldValue> fields,
@@ -792,6 +879,24 @@ public static class CeXmlExportService
         int arrayLimit,
         CancellationToken ct = default)
     {
+        // Collect this call's struct roots and prefetch the whole tree with batched
+        // per-level calls, so the depth-first emit below reads from memory instead
+        // of issuing one round-trip per struct.
+        var roots = new List<(string Addr, string ClassAddr)>();
+        foreach (var field in fields)
+        {
+            var isStructRoot = (field.TypeName == "StructProperty"
+                                || field.TypeName == "OptionalProperty")
+                               && !string.IsNullOrEmpty(field.StructClassAddr)
+                               && !string.IsNullOrEmpty(field.StructDataAddr)
+                               && field.StructDataAddr != "0x0"
+                               && !resolved.ContainsKey(field.StructDataAddr);
+            if (isStructRoot) roots.Add((field.StructDataAddr, field.StructClassAddr));
+        }
+        var prefetch = roots.Count > 0
+            ? await PrefetchStructTreeAsync(dump, roots, arrayLimit, ct)
+            : null;
+
         foreach (var field in fields)
         {
             // Abort promptly between per-field struct walks when the export is cancelled.
@@ -814,7 +919,7 @@ public static class CeXmlExportService
             try
             {
                 await ResolveStructRecursiveAsync(dump, field.StructDataAddr, field.StructClassAddr,
-                    "", 0, subResolved, 0, arrayLimit, ct);
+                    "", 0, subResolved, 0, arrayLimit, ct, prefetch);
             }
             // A cancel unwinds the whole export; only genuine failures leave the struct
             // empty (emit falls back to a placeholder). OperationCanceledException covers
@@ -832,12 +937,20 @@ public static class CeXmlExportService
     private static async Task ResolveStructRecursiveAsync(
         IDumpService dump, string dataAddr, string classAddr,
         string namePrefix, int baseOffset, List<LiveFieldValue> output, int depth,
-        int arrayLimit = 64, CancellationToken ct = default)
+        int arrayLimit = 64, CancellationToken ct = default,
+        Dictionary<string, InstanceWalkResult>? prefetch = null)
     {
         if (depth >= MaxStructDepth) return;
 
         ct.ThrowIfCancellationRequested();
-        var walkResult = await dump.WalkInstanceAsync(dataAddr, classAddr, arrayLimit: arrayLimit, ct: ct);
+        // Prefetched by PrefetchStructTreeAsync when available; a miss (older DLL,
+        // failed batch, or a shape the prefetch predicate did not anticipate) walks
+        // live, exactly as before batching existed.
+        InstanceWalkResult walkResult;
+        if (prefetch != null && prefetch.TryGetValue(StructCacheKey(dataAddr, classAddr), out var cached))
+            walkResult = cached;
+        else
+            walkResult = await dump.WalkInstanceAsync(dataAddr, classAddr, arrayLimit: arrayLimit, ct: ct);
 
         foreach (var f in walkResult.Fields)
         {
@@ -851,7 +964,7 @@ public static class CeXmlExportService
             {
                 // Nested struct — recurse and flatten into the same list
                 await ResolveStructRecursiveAsync(dump, f.StructDataAddr, f.StructClassAddr,
-                    displayName, absOffset, output, depth + 1, arrayLimit, ct);
+                    displayName, absOffset, output, depth + 1, arrayLimit, ct, prefetch);
             }
             else if (f.IsPointerNavigation)
             {

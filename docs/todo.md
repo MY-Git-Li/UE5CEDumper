@@ -1354,7 +1354,14 @@ equivalence test comparing both paths field-for-field. The CE export now walks b
 level. A failed batch — or a short/long reply, which would otherwise mis-pair results with addresses
 — replays the chunk as single calls.
 
-**Still open: confirm the actual speed-up.** Projection was 2.4-3.5x but is an UPPER bound (it
+**⚠ Build 2329 batched the WRONG loop** (the object-pointer drilldown); the ~22,500 calls
+actually come from the STRUCT tree (`ResolveStructRecursiveAsync`, one walk per
+`StructProperty`, recursing). Fixed in **build 2335** with a breadth-first
+`PrefetchStructTreeAsync` feeding the unchanged depth-first emit — the emit could not simply
+be reordered, because its traversal order IS the exported field order.
+
+**Still open: confirm the actual speed-up.** First check `top:` names
+`walk_instance_batch` — build 2329 looked plausible but the batch was never called. Projection was 2.4-3.5x but is an UPPER bound (it
 assumes batching adds nothing, while a larger payload costs something on both sides). The next live
 Copy CE XML prints its own `split dll / ipc / ui` line — compare against the build-2327 baseline in
 [multipipe-eval.md](multipipe-eval.md) §10.4. Effort **0** (read only).
