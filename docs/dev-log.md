@@ -91,8 +91,9 @@ routes?"** recipe leads [tips.md](tips.md).
 
 **Verification:** 2834 tests green (+12). The generated Lua was parsed with a real Lua parser (whole
 file for the autorun helper, per-`{$lua}`-block for the record) — the shape assertions alone would
-not catch a syntax error. Not verified: that Cheat Engine actually picks the file up and renders the
-menu entry. That needs a live CE and is flagged in [todo.md](todo.md).
+not catch a syntax error. **LIVE-VERIFIED 2026-07-23** — Cheat Engine picks the file up at start-up
+and the route works end to end, which also settles the early-startup API question the evaluation
+flagged: `getMainForm().Menu` is reachable from `autorun\`.
 
 -----
 
@@ -136,7 +137,9 @@ needing no AOBMaker plugin); the Deploy / Inject / Tools-bootstrap tooltips each
 so the ordering stays consistent. In-panel rather than tooltip-only on purpose — that panel is where
 the decision happens, and a tooltip is only found by someone who already knew to look.
 
-**Verification:** 2822 tests green (+17). `CeMailboxLayout` gained `OffInitState` + the five
+**Verification:** 2822 tests green (+17). **LIVE-VERIFIED 2026-07-23** — the pushed
+*UE5CEDumper: Inject DLL + Start Pipe Server* record was ticked in a real CE table and injected +
+came up correctly. `CeMailboxLayout` gained `OffInitState` + the five
 `InitState` values so the offsets stay single-sourced. The emitted Lua was additionally checked by
 running both `{$lua}` blocks through a real Lua parser — the shape assertions alone would not have
 caught a syntax error. For the route-guidance strings the tests prove nothing (no string-resource
@@ -156,7 +159,10 @@ comment lines and asserts on the bare identifier against code only.
 ## 2026-07-23 — CE `.CT` inject: poll for readiness instead of sleeping 15 s; double-inject guard learns dinput8/dxgi (build 2291; dev)
 
 Two small fixes to the Cheat-Engine injection path, both from the 2026-07-23 evaluation batch
-in [todo.md](todo.md). **Needs in-game verification** — CE Lua is not unit-testable.
+in [todo.md](todo.md). **LIVE-VERIFIED 2026-07-23** — the `.CT` route was run against a real game
+(CE Lua is not unit-testable, so this was the only way to confirm it). The `Methode.cpp` half of the
+double-inject guard is only reachable via CE's *Inject && Connect* plugin menu item and has not been
+exercised.
 
 **1. The 15 s blind wait is now a 250 ms poll.** `scripts/UE5CEDumper.CT` `ue5_inject()` used to
 `sleep(1000)` fifteen times and then print "complete (or failed — check DLL log)" **without ever

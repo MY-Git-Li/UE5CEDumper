@@ -22,7 +22,9 @@ state.
 >   drifting. Also: the double-inject guards learned `dinput8`/`dxgi` (they still tested the old
 >   `version`+`winmm` pair), and **Undeploy is type-agnostic** — it sweeps every proxy flavour of
 >   ours rather than only the selected radio, while never touching another program's DLL.
->   **LIVE-VERIFIED:** `.CT` + autorun routes.
+>   **LIVE-VERIFIED: all three CE routes** — standalone `.CT`, the pushed *Inject DLL* record, and
+>   the `autorun\` helper (which also settles the evaluation's open question: `getMainForm().Menu`
+>   *is* reachable that early in CE start-up).
 > - builds **2220 + 2238 (2026-07-19)** — **MindsEye licensee-fork support** (Build A Rocket
 >   Boy, UE 5.4.4). Two independent failures solved: **GObjects** was reported `OK` **on
 >   garbage** (the AOB found the real array but the preset was written one struct-level down,
