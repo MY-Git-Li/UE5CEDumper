@@ -17,7 +17,7 @@ namespace UE5DumpUI.Services;
 ///
 /// <para><b>Readiness, not a fixed sleep.</b> <c>[ENABLE]</c> polls the DLL's
 /// <c>initState</c> in the Mimic mailbox (<see cref="CeMailboxLayout.OffInitState"/>)
-/// every <see cref="PollIntervalMs"/> ms. That is a pure memory read through the
+/// every <see cref="CeReadinessLua.PollIntervalMs"/> ms. That is a pure memory read through the
 /// exported <c>g_invokeMailbox</c> symbol — deliberately NOT <c>executeCodeEx</c>,
 /// which needs <c>CreateRemoteThread</c> and is exactly what games block during
 /// start-up. A timeout is an ERROR (the window stays open), never a silent
@@ -33,20 +33,6 @@ namespace UE5DumpUI.Services;
 /// </summary>
 public static class CeInjectScriptGenerator
 {
-    /// <summary>Mailbox poll interval while waiting for the DLL to finish start-up.</summary>
-    public const int PollIntervalMs = 250;
-
-    /// <summary>Upper bound on the readiness wait. Higher than the standalone
-    /// <c>.CT</c>'s old flat 15 s budget because this one only ever *reaches* the
-    /// bound when something is genuinely wedged — the normal path exits as soon as
-    /// the DLL publishes READY.</summary>
-    public const int ReadyTimeoutMs = 25000;
-
-    /// <summary>How long to keep retrying <c>getAddress('g_invokeMailbox')</c>
-    /// before concluding the symbol will never appear (very old DLL build, or CE's
-    /// symbol handler is not cooperating).</summary>
-    public const int SymbolGraceMs = 5000;
-
     /// <summary>Description used for the CE address-list record.</summary>
     public const string RecordDescription = "UE5CEDumper: Inject DLL + Start Pipe Server";
 
@@ -118,51 +104,19 @@ public static class CeInjectScriptGenerator
         Line(sb, "end");
         Line(sb);
 
-        // ── 2. Poll for readiness ──
-        Line(sb, "-- Wait by POLLING the DLL's initState, not by sleeping a fixed budget.");
-        Line(sb, "-- This is a pure memory read via the exported g_invokeMailbox symbol --");
-        Line(sb, "-- NOT executeCodeEx, which needs CreateRemoteThread and is exactly what");
-        Line(sb, "-- games block during start-up.");
-        Line(sb, $"local INIT_READY, INIT_FAILED, INIT_SKIPPED = {CeMailboxLayout.InitReady}, " +
-                 $"{CeMailboxLayout.InitFailed}, {CeMailboxLayout.InitSkipped}");
-        Line(sb, "local mb, waited, state = nil, 0, " + CeMailboxLayout.InitIdle);
-        Line(sb, $"while waited < {ReadyTimeoutMs} do");
-        Line(sb, "  if mb == nil then");
-        // Resolve inside the loop: CE's symbol handler may not see the fresh module yet.
-        Line(sb, "    local okSym, addr = pcall(getAddress, 'g_invokeMailbox')");
-        Line(sb, "    if okSym and addr and addr ~= 0 then");
-        Line(sb, "      mb = addr");
-        Line(sb, $"    elseif waited >= {SymbolGraceMs} then");
-        Line(sb, "      break   -- symbol never appeared");
-        Line(sb, "    end");
-        Line(sb, "  end");
-        Line(sb, "  if mb ~= nil then");
-        Line(sb, $"    local okRead, v = pcall(readInteger, mb + {CeMailboxLayout.OffInitState})");
-        Line(sb, $"    state = (okRead and v) or {CeMailboxLayout.InitIdle}");
-        Line(sb, "    if state == INIT_READY or state == INIT_FAILED or state == INIT_SKIPPED then");
-        Line(sb, "      break");
-        Line(sb, "    end");
-        Line(sb, "  end");
-        Line(sb, $"  sleep({PollIntervalMs})");
-        Line(sb, $"  waited = waited + {PollIntervalMs}");
-        Line(sb, "end");
+        // ── 2. Poll for readiness (shared emitter — see CeReadinessLua) ──
+        CeReadinessLua.AppendPollLoop(sb);
         Line(sb);
 
         // ── 3. Report. Every failure path returns BEFORE the success-close. ──
         Line(sb, "if mb == nil then");
-        Line(sb, "  showMessage('[UE5CEDumper] The DLL loaded but never published its state.\\n\\n' ..");
-        Line(sb, "    'This build may predate the readiness flag. Check the DLL log:\\n' ..");
-        Line(sb, "    '  %LOCALAPPDATA%\\\\UE5CEDumper\\\\Logs')");
+        Line(sb, $"  showMessage({CeReadinessLua.SymbolNeverAppearedMessage})");
         Line(sb, "  return");
         Line(sb, "elseif state == INIT_FAILED then");
-        Line(sb, "  showMessage('[UE5CEDumper] The DLL initialised but the Pipe Server FAILED to start.\\n\\n' ..");
-        Line(sb, "    'Most likely another process already owns \\\\\\\\.\\\\pipe\\\\UE5DumpBfx.\\n' ..");
-        Line(sb, "    'Check the DLL log:\\n  %LOCALAPPDATA%\\\\UE5CEDumper\\\\Logs')");
+        Line(sb, $"  showMessage({CeReadinessLua.PipeFailedMessage})");
         Line(sb, "  return");
         Line(sb, "elseif state ~= INIT_READY and state ~= INIT_SKIPPED then");
-        Line(sb, "  showMessage('[UE5CEDumper] Timed out waiting for the DLL to finish starting up.\\n\\n' ..");
-        Line(sb, "    'The AOB scan may be wedged, or the game may be blocking our thread.\\n' ..");
-        Line(sb, "    'Check the DLL log:\\n  %LOCALAPPDATA%\\\\UE5CEDumper\\\\Logs')");
+        Line(sb, $"  showMessage({CeReadinessLua.TimedOutMessage})");
         Line(sb, "  return");
         Line(sb, "end");
         Line(sb);

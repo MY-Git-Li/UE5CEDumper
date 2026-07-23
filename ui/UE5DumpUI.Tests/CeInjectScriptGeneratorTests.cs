@@ -53,8 +53,8 @@ public class CeInjectScriptGeneratorTests
     {
         var e = Enable(CeInjectScriptGenerator.Generate(Dll));
         Assert.Contains("readInteger, mb + 0x0C", e);          // MailboxData.initState
-        Assert.Contains($"sleep({CeInjectScriptGenerator.PollIntervalMs})", e);
-        Assert.Contains($"while waited < {CeInjectScriptGenerator.ReadyTimeoutMs} do", e);
+        Assert.Contains($"sleep({CeReadinessLua.PollIntervalMs})", e);
+        Assert.Contains($"while waited < {CeReadinessLua.ReadyTimeoutMs} do", e);
         // The old .CT behaviour we are replacing must not reappear.
         Assert.DoesNotContain("sleep(1000)", e);
         Assert.DoesNotContain("sleep(15000)", e);
@@ -86,7 +86,7 @@ public class CeInjectScriptGeneratorTests
         var loopBody = e.Substring(loopStart);
         // CE's symbol handler may not see the just-injected module on the first try.
         Assert.Contains("pcall(getAddress, 'g_invokeMailbox')", loopBody);
-        Assert.Contains($"elseif waited >= {CeInjectScriptGenerator.SymbolGraceMs} then", loopBody);
+        Assert.Contains($"elseif waited >= {CeReadinessLua.SymbolGraceMs} then", loopBody);
     }
 
     [Fact]

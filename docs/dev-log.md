@@ -20,6 +20,48 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — CE autorun helper: every table gets `ue5_inject()`, permanently (build 2297; dev, UI-only)
+
+The fourth and last delivery route, and the only one needing **neither** the standalone `.CT`
+**nor** the AOBMaker plugin. **Tools → Install CE autorun Helper** writes `ue5_autorun.lua` into
+`<CheatEngine>\autorun\`, which CE executes at start-up — so `ue5_inject()` / `ue5_shutdown()` then
+exist in **every** table, plus a **UE5CEDumper: Inject DLL** entry in CE's main menu. Takes effect on
+the next CE start.
+
+**Finding Cheat Engine without new plumbing.** The install directory comes from a *running* CE
+process via the existing `GameProcessInfo.Path` (`ListGameProcessesAsync(showAll: true)` — CE isn't a
+UE game, so the UE-only filter would hide it), falling back to the save dialog when CE isn't running.
+Deliberately not the registry: that would need a new platform-abstraction surface, and a running CE
+is both the common case and the authoritative answer for *which* install of several is in play.
+
+**The early-startup API risk is designed out, not tested away.** Autorun runs before any process is
+attached, so the file **only defines things at load time** — every process-dependent call sits inside
+a function the user invokes later. A unit test enforces it by parsing top-level statements and
+rejecting `injectDLL` / `getOpenedProcessID` / `readInteger` / `executeCodeEx` / `showMessage` there.
+The one genuinely uncertain call, `getMainForm().Menu`, is `pcall`-wrapped: if the form isn't ready
+the menu is simply absent and `ue5_inject()` still works from the Lua console — a cosmetic extra must
+never break someone's CE start-up. The menu API shape (`createMenuItem` / `parent.add` / `.Caption` /
+`.OnClick`) is copied from the verified precedent in `vendor/UE4 Dumper.CT` rather than invented, per
+the CE-API rule. A `ue5_menuAdded` global makes a manual re-run idempotent.
+
+**Shared readiness emitter.** With two generators plus the `.CT` all needing the same
+"wait until the DLL is actually up" loop, it now lives in one place —
+`Services/CeReadinessLua.cs` — so the offsets, timeouts, and the two properties that matter
+(pure memory read, never `executeCodeEx`; symbol resolved *inside* the loop) cannot drift.
+`CeInjectScriptGenerator` was refactored onto it; the three failure messages are shared too, so both
+routes give the same diagnosis for the same state.
+
+**Route ranking updated to four** across the Proxy Deploy panel line and the Deploy / Inject /
+bootstrap / autorun tooltips, and a new **"Getting `UE5Dumper.dll` into the game — which of the four
+routes?"** recipe leads [tips.md](tips.md).
+
+**Verification:** 2834 tests green (+12). The generated Lua was parsed with a real Lua parser (whole
+file for the autorun helper, per-`{$lua}`-block for the record) — the shape assertions alone would
+not catch a syntax error. Not verified: that Cheat Engine actually picks the file up and renders the
+menu entry. That needs a live CE and is flagged in [todo.md](todo.md).
+
+-----
+
 ## 2026-07-23 — Push the "Inject DLL" record into the CE table you already have open (build 2295; dev, UI-only)
 
 Kills the two-stage table load. Cheat Engine holds **one table at a time**, so using the standalone

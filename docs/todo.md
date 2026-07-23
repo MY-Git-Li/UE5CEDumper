@@ -1287,10 +1287,21 @@ Tools-bootstrap tooltips each name their own rank so the ordering is consistent 
 standing. Deliberately not tooltip-only in the panel: that is the screen where the choice is made,
 and a tooltip is only found by someone who already knew to look.
 
-**Still open — CE's `autorun` folder as a 4th route.** A `.lua` dropped in `Cheat Engine/autorun/`
-would define `ue5_inject()` for **every** table permanently and needs no AOBMaker plugin; the UI can
-write the file. Effort **S**, but verify first that the CE APIs we rely on are available that early
-in CE start-up. Lower priority now that (a) has landed — this only helps users without the plugin.
+**✅ DONE — CE's `autorun` folder as a 4th route** (build 2297).
+`Services/CeAutorunScriptGenerator.cs` emits `ue5_autorun.lua`; **Tools → Install CE autorun Helper**
+writes it into `<CheatEngine>\autorun\`, auto-locating the install from a *running* CE process
+(`GameProcessInfo.Path`) with a save-dialog fallback. Every table then has `ue5_inject()` /
+`ue5_shutdown()` plus a CE main-menu entry, with no `.CT` and no AOBMaker plugin.
+
+The early-startup API question that gated this is resolved **by design, not by testing**: the file
+only *defines* things at load time (autorun runs before any process is attached — a unit test
+enforces that no `injectDLL` / `getOpenedProcessID` / `readInteger` / `executeCodeEx` / `showMessage`
+appears at top level), and the one genuinely uncertain call, `getMainForm().Menu`, is `pcall`-wrapped
+so a not-ready form leaves the menu absent while `ue5_inject()` still works from the Lua console. The
+menu API shape is copied from the verified precedent in `vendor/UE4 Dumper.CT` (`createMenuItem` /
+`parent.add` / `.Caption` / `.OnClick`); a `ue5_menuAdded` global makes a manual re-run idempotent.
+**Needs in-game verify** — specifically that CE picks the file up and the menu entry appears;
+*delete this note afterwards.*
 
 ### (b) ✅ DONE — the 15 s blind countdown is now a 250 ms poll
 

@@ -2933,6 +2933,114 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Locate a Cheat Engine installation from a RUNNING CE process. Deliberately
+    /// not the registry: that would need a new platform-abstraction surface, and a
+    /// running CE is both the common case (the user is about to use it) and the
+    /// authoritative answer for WHICH install of several is in play.
+    /// Returns the install directory, or null when CE isn't running.
+    /// </summary>
+    private async Task<string?> TryFindCheatEngineDirAsync()
+    {
+        if (ProxyDeploy == null) return null;
+        try
+        {
+            // showAll: CE is not a UE game, so the UE-only filter would hide it.
+            var procs = await ProxyDeploy.ListGameProcessesAsync(showAll: true);
+            foreach (var p in procs)
+            {
+                if (string.IsNullOrEmpty(p.Path)) continue;
+                var name = Path.GetFileNameWithoutExtension(p.Path);
+                // cheatengine-x86_64.exe / cheatengine-i386.exe / "Cheat Engine.exe"
+                if (name.Replace(" ", "").StartsWith("cheatengine", StringComparison.OrdinalIgnoreCase))
+                    return Path.GetDirectoryName(p.Path);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Locate Cheat Engine failed: {ex.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Tools menu: install the autorun helper into Cheat Engine's <c>autorun\</c>
+    /// folder (<see cref="Services.CeAutorunScriptGenerator"/>). CE runs that folder
+    /// at start-up, so <c>ue5_inject()</c> then exists in EVERY table permanently —
+    /// the only delivery route needing neither the standalone <c>.CT</c> nor the
+    /// AOBMaker plugin.
+    ///
+    /// Writes straight into a running CE's install when we can find one; otherwise
+    /// falls back to the save dialog so the user can place it by hand.
+    /// </summary>
+    [RelayCommand]
+    private async Task InstallCeAutorunAsync()
+    {
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        var dllPath = Path.Combine(exeDir, "UE5Dumper.dll");
+        if (!File.Exists(dllPath))
+        {
+            StatusText = $"Install CE autorun: UE5Dumper.dll not found next to the app ({dllPath})";
+            return;
+        }
+
+        StatusText = "Locating Cheat Engine...";
+
+        try
+        {
+            var content = Services.CeAutorunScriptGenerator.Generate(dllPath);
+            var fileName = Services.CeAutorunScriptGenerator.DefaultFileName;
+
+            var ceDir = await TryFindCheatEngineDirAsync();
+            string? target = null;
+
+            if (ceDir != null)
+            {
+                var autorunDir = Path.Combine(
+                    ceDir, Services.CeAutorunScriptGenerator.AutorunFolderName);
+                // CE ships the folder, but a portable/trimmed copy may not have it —
+                // creating it is safe and is what CE itself expects to find.
+                Directory.CreateDirectory(autorunDir);
+                target = Path.Combine(autorunDir, fileName);
+            }
+            else
+            {
+                // No running CE to point at — let the user place the file. The
+                // dialog default name matches what CE expects to find.
+                StatusText = "Cheat Engine not running — choose its autorun folder...";
+                target = await _platform.ShowSaveFileDialogAsync(
+                    defaultFileName: fileName,
+                    filterName: "CE autorun Lua (*.lua)",
+                    filterExtension: ".lua");
+                if (string.IsNullOrEmpty(target))
+                {
+                    StatusText = "Install CE autorun: cancelled";
+                    return;
+                }
+            }
+
+            await File.WriteAllTextAsync(target, content);
+            _log.Info($"Installed CE autorun helper: {target} ({content.Length:N0} chars, " +
+                      $"dll={dllPath}, autoLocated={ceDir != null})");
+
+            // Whether auto-located or hand-placed, the file only takes effect on the
+            // NEXT CE start — say so, or the user will click and see nothing happen.
+            var placed = Path.GetDirectoryName(target) ?? target;
+            var looksRight = string.Equals(
+                Path.GetFileName(placed),
+                Services.CeAutorunScriptGenerator.AutorunFolderName,
+                StringComparison.OrdinalIgnoreCase);
+            StatusText = looksRight
+                ? $"CE autorun helper installed to {placed} — restart Cheat Engine, then use ue5_inject()"
+                : $"⚠ Written to {placed}, which is not an 'autorun' folder — CE only runs files inside <CheatEngine>\\autorun\\";
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Install CE autorun failed", ex);
+            StatusText = $"Install CE autorun failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
     /// Tools menu: stream the embedded <c>ue5_freeze_helper.lua</c> to a
     /// user-chosen file. Manual-fallback companion to
     /// <see cref="InjectFreezeHelperLuaAsync"/> for cases where AOBMaker
