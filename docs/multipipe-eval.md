@@ -502,3 +502,48 @@ the cost is `ipc` (59–73%). It would have been aimed at the smaller half of th
 `walk_class_batch` / `search_properties_batch` precedent — including their safety net: a DLL-side
 batch that is a trivial `for` loop over the single-call path, one shared serialiser between single
 and batch dispatch, and an equivalence test proving byte-identical output.
+
+
+### 10.5 RESULT (build 2335) - 1.71x measured, and the IPC model was wrong
+
+Same Copy CE XML on SEED, before (build 2327) and after the struct-tree batching:
+
+| | before | after | change |
+|---|---:|---:|---|
+| **wall** | 5,893.3 ms | **3,437.1 ms** | **1.71x faster** (-2,456 ms) |
+| dispatches | 22,522 | **1,355** | 16.6x fewer |
+| dll | 1,751.7 ms | 1,505.5 ms | 1.16x (the actual walking - expected to be flat) |
+| **ipc** | 3,531.7 ms | **1,278.4 ms** | **2.76x** (-2,253 ms) |
+| ui | 609.9 ms | 653.2 ms | 0.93x - **slightly worse**, as predicted |
+
+`top:` now names `walk_instance_batch`, which was the acceptance criterion.
+
+**The projection was 2.4-3.5x; reality is 1.71x.** Section 10.4 flagged it as an upper bound
+because it assumed batching adds nothing. It adds, and the data says exactly where:
+
+**IPC is NOT purely a per-round-trip cost.** If it were, 1,355 calls at the old 0.157 ms/call
+would be ~212 ms. It is **1,278 ms**. So of the original 3,532 ms:
+
+- **~2,253 ms was fixed per-round-trip overhead** - removed by batching.
+- **~1,066 ms is payload-proportional** - the same bytes still cross the pipe regardless of how
+  many messages carry them, and batching cannot touch it.
+
+Per-call IPC rose 0.157 -> 0.945 ms for the same reason: each call now carries ~16x the payload.
+`ui` rose too (610 -> 653 ms) - bigger JSON documents cost more to parse, which is the other half
+of "batching adds something".
+
+**Two secondary observations worth recording:**
+
+- **Average batch size is only ~16.6 instances**, far below the 200 chunk cap. The limit is the
+  *fan-out* - a struct has a handful of nested structs, not hundreds - so raising the chunk size
+  would achieve nothing. Batching across roots rather than per `ResolveStructFieldsIntoAsync` call
+  would grow the batches, but since the residual IPC is mostly payload-proportional, the return
+  would be far smaller than the round-trip arithmetic suggests.
+- **Worst single dispatch rose 14.5 ms -> 85.2 ms** (a batch does ~16 walks). Still nowhere near a
+  problem, but it is the metric Phase 1 cared about, and batching moves it the *wrong* way. Another
+  reason not to pair those two ideas.
+
+**Where the remaining 3,437 ms sits:** dll 1,506 (real work) + ipc 1,278 (mostly payload) + ui 653
+(parse). **The next lever is BYTES, not messages** - trimming fields the export never reads would
+attack both the payload-proportional IPC and the UI parse cost at once. Unquantified: nobody has
+measured what fraction of a `walk_instance` payload the CE export actually consumes.

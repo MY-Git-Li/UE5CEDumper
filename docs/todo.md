@@ -1354,17 +1354,24 @@ equivalence test comparing both paths field-for-field. The CE export now walks b
 level. A failed batch — or a short/long reply, which would otherwise mis-pair results with addresses
 — replays the chunk as single calls.
 
-**⚠ Build 2329 batched the WRONG loop** (the object-pointer drilldown); the ~22,500 calls
-actually come from the STRUCT tree (`ResolveStructRecursiveAsync`, one walk per
-`StructProperty`, recursing). Fixed in **build 2335** with a breadth-first
-`PrefetchStructTreeAsync` feeding the unchanged depth-first emit — the emit could not simply
-be reordered, because its traversal order IS the exported field order.
+**✅ DONE + MEASURED (build 2335): 1.71x faster.** Copy CE XML on SEED went **5,893 -> 3,437 ms**,
+dispatches **22,522 -> 1,355**, IPC **3,532 -> 1,278 ms**. `top:` names `walk_instance_batch`.
+(Build 2329 had batched the wrong loop - the calls come from the STRUCT tree, not the
+object-pointer drilldown; fixed with a breadth-first `PrefetchStructTreeAsync` feeding the
+unchanged depth-first emit, since that emit's order IS the exported field order.)
 
-**Still open: confirm the actual speed-up.** First check `top:` names
-`walk_instance_batch` — build 2329 looked plausible but the batch was never called. Projection was 2.4-3.5x but is an UPPER bound (it
-assumes batching adds nothing, while a larger payload costs something on both sides). The next live
-Copy CE XML prints its own `split dll / ipc / ui` line — compare against the build-2327 baseline in
-[multipipe-eval.md](multipipe-eval.md) §10.4. Effort **0** (read only).
+**The 2.4-3.5x projection was wrong, and usefully so - IPC is not purely per-round-trip.** At the
+old 0.157 ms/call, 1,355 calls should have cost ~212 ms of IPC; they cost **1,278 ms**. So of the
+original 3,532 ms, ~2,253 ms was fixed per-round-trip cost (removed) and **~1,066 ms is
+payload-proportional** (untouchable by batching - the same bytes still cross). `ui` rose 610 -> 653
+ms for the same reason. Full table in [multipipe-eval.md](multipipe-eval.md) section 10.5.
+
+**Next lever, if anyone wants more: BYTES, not messages.** Remaining 3,437 ms = dll 1,506 (real
+work) + ipc 1,278 (mostly payload) + ui 653 (parse). Trimming fields the CE export never reads would
+hit the payload-proportional IPC *and* the parse cost together. **Unquantified** - nobody has
+measured what fraction of a `walk_instance` payload the export actually consumes; measure that
+before committing. Note also that raising the batch chunk would achieve nothing: average batch size
+is ~16.6 (fan-out-limited), not near the 200 cap.
 
 *Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
 (dev-log build 2156) already holds the cadence half.*

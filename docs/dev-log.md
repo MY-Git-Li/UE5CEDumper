@@ -20,6 +20,41 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 - RESULT: struct-tree batching is 1.71x, and the IPC cost model was wrong (build 2335)
+
+`top:` names `walk_instance_batch` - the acceptance criterion - and the same Copy CE XML on SEED
+went **5,893.3 -> 3,437.1 ms (1.71x)**, dispatches **22,522 -> 1,355 (16.6x fewer)**.
+
+| | before | after |
+|---|---:|---:|
+| wall | 5,893.3 ms | **3,437.1 ms** |
+| dll | 1,751.7 | 1,505.5 |
+| **ipc** | **3,531.7** | **1,278.4** |
+| ui | 609.9 | 653.2 |
+
+**The projection was 2.4-3.5x; reality is 1.71x - and the gap is informative.** Section 10.4 flagged
+the projection as an upper bound because it assumed batching adds nothing. The data now says
+precisely what it adds: **IPC is not purely a per-round-trip cost.** At the old 0.157 ms/call, 1,355
+calls should have cost ~212 ms; they cost 1,278 ms. Of the original 3,532 ms, **~2,253 ms was fixed
+per-round-trip overhead (removed)** and **~1,066 ms is payload-proportional** - the same bytes still
+cross the pipe however many messages carry them. `ui` rose 610 -> 653 ms for the same reason: bigger
+JSON documents cost more to parse.
+
+Two secondary findings, recorded in [multipipe-eval.md](multipipe-eval.md) section 10.5:
+- **Average batch size is ~16.6**, far below the 200 chunk cap - the limit is struct fan-out, not
+  the cap, so raising the chunk would achieve nothing.
+- **Worst single dispatch rose 14.5 -> 85.2 ms** (a batch does ~16 walks). Harmless at that scale,
+  but it is the exact metric Phase 1 cared about, and batching moves it the wrong way - one more
+  reason those two ideas do not belong together.
+
+**Next lever is BYTES, not messages.** The residual 3,437 ms is dll 1,506 (real work) + ipc 1,278
+(mostly payload) + ui 653 (parse); trimming fields the export never reads would attack the last two
+together. Left unquantified on purpose - nobody has measured what share of a `walk_instance` payload
+the CE export actually consumes, and this cycle already showed what happens when a projection
+outruns its measurement.
+
+-----
+
 ## 2026-07-23 — The batching was aimed at the wrong loop; fixed at the struct tree (build 2335; dev, UI-only)
 
 Build 2329 shipped `walk_instance_batch` and batched the CE export's object-pointer
