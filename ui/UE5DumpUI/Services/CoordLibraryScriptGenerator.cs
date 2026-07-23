@@ -50,12 +50,42 @@ public static class CoordLibraryScriptGenerator
     /// <summary>Description used for the CE memory record.</summary>
     public const string RecordDescription = "Teleport: Coordinate Library (picker)";
 
+    /// <summary>Which teleport mechanism the emitted picker uses.</summary>
+    public enum Flavour
+    {
+        /// <summary>Engine invoke via the DLL mailbox. Full fidelity: rotation is
+        /// restored, and the current map is readable so the picker can guard against
+        /// a cross-map jump.</summary>
+        Dll,
+
+        /// <summary>Raw memory write through the standalone trainer's baked offsets.
+        /// No DLL needed, but weaker: the map name is unavailable (so the map guard
+        /// degrades to a label), the offsets go stale when the game is patched, and on
+        /// games that do not refresh the cached world transform the coordinates change
+        /// without the character visibly moving.</summary>
+        NoDll,
+    }
+
+    /// <summary>Description for the no-DLL record (kept distinct so both flavours can
+    /// coexist in one cheat table).</summary>
+    public const string NoDllRecordDescription = "UE5 Trainer: Coordinate Library (picker, no DLL)";
+
     /// <summary>
     /// Build the full [ENABLE]/[DISABLE] AA script.
     /// </summary>
     /// <param name="entries">Entries to bake. Pre-sorted here, so the Lua never sorts.</param>
     /// <param name="foldedGroups">Receives group names that did NOT get a radio button.</param>
     public static string Generate(IEnumerable<CoordEntry> entries, out List<string> foldedGroups)
+        => Generate(entries, Flavour.Dll, out foldedGroups);
+
+    /// <summary>
+    /// Build the script for a specific <see cref="Flavour"/>. Both flavours share the
+    /// SAME fenced data block and the same form skeleton — only the teleport call and
+    /// the map handling differ. Sharing matters: a divergent data block would break
+    /// the round trip for one of the two.
+    /// </summary>
+    public static string Generate(
+        IEnumerable<CoordEntry> entries, Flavour flavour, out List<string> foldedGroups)
     {
         var list = entries?.ToList() ?? new List<CoordEntry>();
 
@@ -85,12 +115,22 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "if syntaxcheck then return end");
         CeLuaHygiene.AppendDebugPreamble(sb);
         Line(sb, $"-- {CeLuaHygiene.Attribution}");
+        if (flavour == Flavour.NoDll)
+        {
+            Line(sb, "-- NO-DLL flavour: teleport is a RAW memory write through the standalone");
+            Line(sb, "-- trainer's baked offsets. Weaker than the DLL path -- on games that do");
+            Line(sb, "-- not refresh the cached world transform the coordinates change but the");
+            Line(sb, "-- character may not visibly move, and the offsets go stale when the game");
+            Line(sb, "-- is patched. The current map cannot be read without the DLL, so entries");
+            Line(sb, "-- from other maps are listed but NOT guarded -- check the Map column.");
+            Line(sb, "-- Requires 'UE5 Trainer: Setup' to have been enabled first.");
+        }
         Line(sb);
         AppendDataBlock(sb, list, shownGroups);
         Line(sb);
         Line(sb, GeneratedSeparator);
         Line(sb);
-        AppendPickerForm(sb, shownGroups.Count);
+        AppendPickerForm(sb, shownGroups.Count, flavour);
         Line(sb, "{$asm}");
         Line(sb, "[DISABLE]");
         Line(sb, "{$lua}");
@@ -141,14 +181,18 @@ public static class CoordLibraryScriptGenerator
 
     // ── The generic picker form ─────────────────────────────────────────
 
-    private static void AppendPickerForm(StringBuilder sb, int groupCount)
+    private static void AppendPickerForm(StringBuilder sb, int groupCount, Flavour flavour)
     {
-        // Offsets come from CeMailboxLayout (the single source of truth mirroring
-        // dll/src/Mimic.h) -- never hand-written here.
-        Line(sb, $"local MB_CMD, MB_STATUS, MB_RESULT = {CeMailboxLayout.OffCmd}, " +
-                 $"{CeMailboxLayout.OffStatus}, {CeMailboxLayout.OffResult}");
-        Line(sb, $"local MB_UFUNC, MB_INST, MB_PARAMS = {CeMailboxLayout.OffUfuncAddr}, " +
-                 $"{CeMailboxLayout.OffInstanceAddr}, {CeMailboxLayout.OffParamsData}");
+        bool dll = flavour == Flavour.Dll;
+        if (dll)
+        {
+            // Offsets come from CeMailboxLayout (the single source of truth mirroring
+            // dll/src/Mimic.h) -- never hand-written here.
+            Line(sb, $"local MB_CMD, MB_STATUS, MB_RESULT = {CeMailboxLayout.OffCmd}, " +
+                     $"{CeMailboxLayout.OffStatus}, {CeMailboxLayout.OffResult}");
+            Line(sb, $"local MB_UFUNC, MB_INST, MB_PARAMS = {CeMailboxLayout.OffUfuncAddr}, " +
+                     $"{CeMailboxLayout.OffInstanceAddr}, {CeMailboxLayout.OffParamsData}");
+        }
         Line(sb, "local DISPLAY_CAP = 2000   -- rows rendered at once; filter to narrow");
         Line(sb);
         Line(sb, "-- Reuse the window if it is already open (re-enabling the record).");
@@ -156,52 +200,91 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  UE5CD_form.show(); UE5CD_form.BringToFront(); return");
         Line(sb, "end");
         Line(sb);
-        Line(sb, "local function mailbox()");
-        Line(sb, "  local mb = getAddressSafe('g_invokeMailbox')");
-        Line(sb, "  if not mb or mb == 0 then mb = getAddressSafe('UE5Dumper.g_invokeMailbox') end");
-        Line(sb, "  if not mb or mb == 0 then return nil end");
-        Line(sb, "  return mb");
-        Line(sb, "end");
-        Line(sb);
-        Line(sb, "-- Round-trip one mailbox command. Returns the Wirbel result code, or nil");
-        Line(sb, "-- on timeout / no DLL. A timeout is an ERROR: never fall through to a close.");
-        Line(sb, "local function call(op, writeParams)");
-        Line(sb, "  local mb = mailbox()");
-        Line(sb, "  if mb == nil then return nil, 'g_invokeMailbox not found -- is UE5Dumper.dll injected?' end");
-        Line(sb, "  if readInteger(mb + MB_CMD) ~= 0 then return nil, 'the DLL mailbox is busy' end");
-        Line(sb, "  if writeParams then writeParams(mb + MB_PARAMS) end");
-        Line(sb, "  writeQword(mb + MB_UFUNC, 0)");
-        Line(sb, "  writeQword(mb + MB_INST, op)");
-        Line(sb, "  writeInteger(mb + MB_STATUS, 0)");
-        Line(sb, $"  writeInteger(mb + MB_CMD, {CmdTeleport})   -- write LAST");
-        Line(sb, "  local waited = 0");
-        Line(sb, "  while readInteger(mb + MB_STATUS) ~= 1 do");
-        Line(sb, "    sleep(1); waited = waited + 1");
-        Line(sb, $"    if waited >= {CeMailboxLayout.MailboxPollTimeoutMs} then return nil, 'the DLL did not respond' end");
-        Line(sb, "  end");
-        Line(sb, "  return readInteger(mb + MB_RESULT), nil, mb");
-        Line(sb, "end");
-        Line(sb);
-        Line(sb, "-- Current map, read from GET_POSE's pose block (map name at params+48).");
-        Line(sb, "local function currentMap()");
-        Line(sb, $"  local code, err, mb = call({OpGetPose}, nil)");
-        Line(sb, "  if code ~= 0 or mb == nil then return nil end");
-        Line(sb, "  return readString(mb + MB_PARAMS + 48, 127, false)");
-        Line(sb, "end");
-        Line(sb);
-        Line(sb, "local function teleport(e)");
-        Line(sb, $"  local code, err = call({OpExplicit}, function(pd)");
-        Line(sb, "    writeDouble(pd + 0,  e.x)");
-        Line(sb, "    writeDouble(pd + 8,  e.y)");
-        Line(sb, "    writeDouble(pd + 16, e.z)");
-        Line(sb, "    writeDouble(pd + 24, e.pitch)");
-        Line(sb, "    writeDouble(pd + 32, e.yaw)");
-        Line(sb, "    writeDouble(pd + 40, e.roll)");
-        Line(sb, "    writeBytes(pd + 48, 1)   -- hasRot: restore the saved rotation");
-        Line(sb, "  end)");
-        Line(sb, "  return code, err");
-        Line(sb, "end");
-        Line(sb);
+        if (dll)
+        {
+            Line(sb, "local function mailbox()");
+            Line(sb, "  local mb = getAddressSafe('g_invokeMailbox')");
+            Line(sb, "  if not mb or mb == 0 then mb = getAddressSafe('UE5Dumper.g_invokeMailbox') end");
+            Line(sb, "  if not mb or mb == 0 then return nil end");
+            Line(sb, "  return mb");
+            Line(sb, "end");
+            Line(sb);
+            Line(sb, "-- Round-trip one mailbox command. Returns the Wirbel result code, or nil");
+            Line(sb, "-- on timeout / no DLL. A timeout is an ERROR: never fall through to a close.");
+            Line(sb, "local function call(op, writeParams)");
+            Line(sb, "  local mb = mailbox()");
+            Line(sb, "  if mb == nil then return nil, 'g_invokeMailbox not found -- is UE5Dumper.dll injected?' end");
+            Line(sb, "  if readInteger(mb + MB_CMD) ~= 0 then return nil, 'the DLL mailbox is busy' end");
+            Line(sb, "  if writeParams then writeParams(mb + MB_PARAMS) end");
+            Line(sb, "  writeQword(mb + MB_UFUNC, 0)");
+            Line(sb, "  writeQword(mb + MB_INST, op)");
+            Line(sb, "  writeInteger(mb + MB_STATUS, 0)");
+            Line(sb, $"  writeInteger(mb + MB_CMD, {CmdTeleport})   -- write LAST");
+            Line(sb, "  local waited = 0");
+            Line(sb, "  while readInteger(mb + MB_STATUS) ~= 1 do");
+            Line(sb, "    sleep(1); waited = waited + 1");
+            Line(sb, $"    if waited >= {CeMailboxLayout.MailboxPollTimeoutMs} then return nil, 'the DLL did not respond' end");
+            Line(sb, "  end");
+            Line(sb, "  return readInteger(mb + MB_RESULT), nil, mb");
+            Line(sb, "end");
+            Line(sb);
+            Line(sb, "-- Current map, read from GET_POSE's pose block (map name at params+48).");
+            Line(sb, "local function currentMap()");
+            Line(sb, $"  local code, err, mb = call({OpGetPose}, nil)");
+            Line(sb, "  if code ~= 0 or mb == nil then return nil end");
+            Line(sb, "  return readString(mb + MB_PARAMS + 48, 127, false)");
+            Line(sb, "end");
+            Line(sb);
+            Line(sb, "local function teleport(e)");
+            Line(sb, $"  local code, err = call({OpExplicit}, function(pd)");
+            Line(sb, "    writeDouble(pd + 0,  e.x)");
+            Line(sb, "    writeDouble(pd + 8,  e.y)");
+            Line(sb, "    writeDouble(pd + 16, e.z)");
+            Line(sb, "    writeDouble(pd + 24, e.pitch)");
+            Line(sb, "    writeDouble(pd + 32, e.yaw)");
+            Line(sb, "    writeDouble(pd + 40, e.roll)");
+            Line(sb, "    writeBytes(pd + 48, 1)   -- hasRot: restore the saved rotation");
+            Line(sb, "  end)");
+            Line(sb, "  return code, err");
+            Line(sb, "end");
+            Line(sb);
+        }
+        else
+        {
+            // No-DLL flavour: teleport is a raw write to RootComponent.RelativeLocation
+            // through the standalone trainer's baked offsets + helpers (UE5T_*), which
+            // the "UE5 Trainer: Setup" record must have defined first.
+            Line(sb, "-- The map name is only readable through the DLL, so this flavour has no");
+            Line(sb, "-- map guard: entries from other maps are listed, not blocked.");
+            Line(sb, "local function currentMap() return nil end");
+            Line(sb);
+            Line(sb, "local function teleport(e)");
+            Line(sb, "  if not UE5T_ready then");
+            Line(sb, "    return nil, 'enable \'UE5 Trainer: Setup\' first'");
+            Line(sb, "  end");
+            Line(sb, "  local p = UE5T_pawn()");
+            Line(sb, "  local rc = p and UE5T_deref(p, UE5T.rootOff)");
+            Line(sb, "  if not rc then return nil, 'could not resolve pawn/RootComponent' end");
+            Line(sb, "  local a = rc + UE5T.relLocOff");
+            Line(sb, "  UE5T_wrv(a, e.x)");
+            Line(sb, "  UE5T_wrv(a + UE5T.vecWidth, e.y)");
+            Line(sb, "  UE5T_wrv(a + 2 * UE5T.vecWidth, e.z)");
+            Line(sb, "  -- Rotation via the Controller back-ref, when Setup resolved it.");
+            Line(sb, "  if UE5T.controllerOff and UE5T.controllerOff >= 0");
+            Line(sb, "     and UE5T.ctrlRotOff and UE5T.ctrlRotOff >= 0 then");
+            Line(sb, "    local ctrl = UE5T_deref(p, UE5T.controllerOff)");
+            Line(sb, "    if ctrl then");
+            Line(sb, "      local r = ctrl + UE5T.ctrlRotOff");
+            Line(sb, "      UE5T_wrv(r, e.pitch)");
+            Line(sb, "      UE5T_wrv(r + UE5T.vecWidth, e.yaw)");
+            Line(sb, "      UE5T_wrv(r + 2 * UE5T.vecWidth, e.roll)");
+            Line(sb, "    end");
+            Line(sb, "  end");
+            Line(sb, "  return 0, nil");
+            Line(sb, "end");
+            Line(sb);
+        }
+
         Line(sb, "-- space = AND over label + group + map, matching the app's filter rule.");
         Line(sb, "for i = 1, #COORDS do");
         Line(sb, "  local e = COORDS[i]");
@@ -234,7 +317,7 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  -- order and the alClient control must be created LAST.");
         Line(sb, "  local pnlTop = createPanel(UE5CD_form)");
         Line(sb, "  pnlTop.Align = 'alTop'");
-        Line(sb, "  pnlTop.Height = " + (groupCount > 0 ? "96" : "40"));
+        Line(sb, "  pnlTop.Height = " + (groupCount > 0 ? "96" : (dll ? "40" : "16")));
         Line(sb, "  pnlTop.BevelOuter = 'bvNone'");
         Line(sb);
         Line(sb, "  local lblFilter = createLabel(pnlTop)");
@@ -247,6 +330,8 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  edtFilter.Top = 8");
         Line(sb, "  edtFilter.Width = 300");
         Line(sb);
+        if (dll)
+        {
         Line(sb, "  local rgMap = createRadioGroup(pnlTop)");
         Line(sb, "  rgMap.Left = 380");
         Line(sb, "  rgMap.Top = 2");
@@ -256,6 +341,7 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  rgMap.Items.add('Current map')");
         Line(sb, "  rgMap.Items.add('All maps')");
         Line(sb, "  rgMap.ItemIndex = (mapNow ~= nil and mapNow ~= '') and 0 or 1");
+        }
         if (groupCount > 0)
         {
             Line(sb);
@@ -333,7 +419,9 @@ public static class CoordLibraryScriptGenerator
         {
             Line(sb, "    if rgGroup.ItemIndex > 0 then wantGroup = GROUPS[rgGroup.ItemIndex] end");
         }
-        Line(sb, "    local currentOnly = (rgMap.ItemIndex == 0) and mapNow ~= nil and mapNow ~= ''");
+        Line(sb, dll
+            ? "    local currentOnly = (rgMap.ItemIndex == 0) and mapNow ~= nil and mapNow ~= ''"
+            : "    local currentOnly = false");
         Line(sb);
         Line(sb, "    lv.Items.beginUpdate()");
         Line(sb, "    lv.Items.clear()");
@@ -400,7 +488,7 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  end");
         Line(sb);
         Line(sb, "  edtFilter.OnChange = rebuild");
-        Line(sb, "  rgMap.OnClick = rebuild");
+        if (dll) Line(sb, "  rgMap.OnClick = rebuild");
         if (groupCount > 0) Line(sb, "  rgGroup.OnClick = rebuild");
         Line(sb, "  btnGo.OnClick = function() go(false) end");
         Line(sb, "  btnForce.OnClick = function() go(true) end");

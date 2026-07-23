@@ -3625,6 +3625,50 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         catch (Exception ex) { SetError(ex); _log.Error("Coord Lua file import failed", ex); }
     }
 
+    /// <summary>
+    /// Emit the NO-DLL flavour: the same data block and picker, but teleport is a raw
+    /// write through the standalone trainer's baked offsets. Depends on the trainer's
+    /// "Setup" record having been enabled first, and is weaker than the DLL path —
+    /// both facts are stated in the emitted script's own header.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportCoordLuaNoDllAsync()
+    {
+        if (_coordAll.Count == 0)
+        {
+            CoordStatus = "Nothing to export — the library is empty.";
+            return;
+        }
+        try
+        {
+            ClearError();
+            var script = CoordLibraryScriptGenerator.Generate(
+                _coordAll, CoordLibraryScriptGenerator.Flavour.NoDll, out _);
+            const string note = " Enable 'UE5 Trainer: Setup' first — this flavour uses its " +
+                                "baked offsets, has no map guard, and goes stale when the game is patched.";
+
+            bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
+            if (available && await _aobMaker!.CreateAAScriptAsync(
+                    CoordLibraryScriptGenerator.NoDllRecordDescription, script,
+                    autoActivate: false, group: CeGroupTrainer))
+            {
+                CoordStatus = $"Pushed the no-DLL picker ({_coordAll.Count} entries) to " +
+                              "Cheat Engine via AOBMaker." + note;
+                _log.Info($"Coordinate library (no-DLL) -> CE via AOBMaker ({_coordAll.Count} entries)");
+                return;
+            }
+
+            await _platform.CopyToClipboardAsync(
+                CheatTableBuilder.WrapAaScriptXml(
+                    CoordLibraryScriptGenerator.NoDllRecordDescription, script));
+            CoordStatus = (available
+                ? "AOBMaker refused the push — copied the no-DLL record as CE XML instead. "
+                : "AOBMaker not connected — copied the no-DLL record as CE XML to the clipboard. ")
+                + "Paste into Cheat Engine's address list, then enable it." + note;
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord Lua (no-DLL) export failed", ex); }
+    }
+
     /// <summary>Save the same script to a .lua file, for users who prefer a file.</summary>
     [RelayCommand]
     private async Task SaveCoordLuaAsync()

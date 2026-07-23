@@ -1,0 +1,188 @@
+using System;
+using System.Linq;
+using UE5DumpUI.Models;
+using UE5DumpUI.Services;
+using Xunit;
+
+namespace UE5DumpUI.Tests;
+
+/// <summary>
+/// P5 no-DLL flavour — docs/teleport-coord-library-spec.md §3 D5.
+/// The point of these is that the two flavours share one data block (so the round
+/// trip cannot drift) while differing exactly where they must.
+/// </summary>
+public class CoordLibraryNoDllScriptTests
+{
+    private static CoordEntry E(string label, string group = "G", string map = "Map01")
+        => new()
+        {
+            Uid = "u" + label.Length, Label = label, Group = group, Map = map,
+            X = 1.5, Y = -2.25, Z = 3, Pitch = 10, Yaw = 20, Roll = 30,
+        };
+
+    private static string NoDll(params CoordEntry[] e)
+        => CoordLibraryScriptGenerator.Generate(
+            e, CoordLibraryScriptGenerator.Flavour.NoDll, out _);
+
+    private static string Dll(params CoordEntry[] e)
+        => CoordLibraryScriptGenerator.Generate(
+            e, CoordLibraryScriptGenerator.Flavour.Dll, out _);
+
+    // ── Shared data block (the property that keeps the round trip honest) ──
+
+    [Fact]
+    public void BothFlavours_EmitTheIdenticalDataBlock()
+    {
+        var entries = new[] { E("Chest 1", "Chest"), E("Boss", "") };
+        string Block(string script)
+        {
+            int a = script.IndexOf(CoordLibraryScriptGenerator.MarkerStart, StringComparison.Ordinal);
+            int b = script.IndexOf(CoordLibraryScriptGenerator.MarkerEnd, StringComparison.Ordinal);
+            return script[a..b];
+        }
+        Assert.Equal(Block(Dll(entries)), Block(NoDll(entries)));
+    }
+
+    [Fact]
+    public void NoDllScript_RoundTripsThroughTheSameParser()
+    {
+        var entries = new[] { E("it's here", "Fields"), E("寶箱", "寶箱", "Map02") };
+        var parsed = CoordLuaParser.Parse(NoDll(entries));
+
+        Assert.Empty(parsed.Issues);
+        Assert.Equal(2, parsed.Entries.Count);
+        Assert.Contains(parsed.Entries, e => e.Label == "it's here");
+        Assert.Contains(parsed.Entries, e => e.Label == "寶箱");
+    }
+
+    // ── What must differ ─────────────────────────────────────────────────
+
+    [Fact]
+    public void NoDllScript_DoesNotTouchTheMailbox()
+    {
+        var s = NoDll(E("A"));
+        Assert.DoesNotContain("g_invokeMailbox", s);
+        Assert.DoesNotContain("MB_CMD", s);
+        Assert.DoesNotContain("writeQword", s);
+    }
+
+    [Fact]
+    public void DllScript_DoesUseTheMailbox()
+    {
+        var s = Dll(E("A"));
+        Assert.Contains("g_invokeMailbox", s);
+        Assert.Contains("MB_CMD", s);
+    }
+
+    [Fact]
+    public void NoDllScript_WritesRelativeLocationThroughTheTrainerHelpers()
+    {
+        var s = NoDll(E("A"));
+        Assert.Contains("UE5T_pawn()", s);
+        Assert.Contains("UE5T.rootOff", s);
+        Assert.Contains("UE5T.relLocOff", s);
+        Assert.Contains("UE5T_wrv(a, e.x)", s);
+        Assert.Contains("UE5T.vecWidth", s);
+    }
+
+    [Fact]
+    public void NoDllScript_RestoresRotationViaTheControllerBackRef()
+    {
+        var s = NoDll(E("A"));
+        Assert.Contains("UE5T.controllerOff", s);
+        Assert.Contains("UE5T.ctrlRotOff", s);
+        Assert.Contains("UE5T_wrv(r + UE5T.vecWidth, e.yaw)", s);
+    }
+
+    [Fact]
+    public void NoDllScript_RequiresSetupAndSaysSo()
+    {
+        var s = NoDll(E("A"));
+        Assert.Contains("UE5T_ready", s);
+        Assert.Contains("UE5 Trainer: Setup", s);
+    }
+
+    [Fact]
+    public void NoDllScript_HasNoMapGuardAndIsHonestAboutIt()
+    {
+        // The map name is only readable through the DLL. Rather than pretend, the
+        // script says the entries are listed but not guarded.
+        var s = NoDll(E("A"));
+        Assert.Contains("local function currentMap() return nil end", s);
+        Assert.Contains("NOT guarded", s);
+        Assert.DoesNotContain("rgMap", s);
+    }
+
+    [Fact]
+    public void DllScript_KeepsTheMapScopeSelector()
+        => Assert.Contains("rgMap", Dll(E("A")));
+
+    [Fact]
+    public void NoDllScript_CarriesTheWeakWriteCaveat()
+    {
+        // Same warning the existing standalone trainer gives: on some games the
+        // coordinates change but the character does not visibly move. Users must not
+        // read that as a bug.
+        var s = NoDll(E("A"));
+        Assert.Contains("may not visibly move", s);
+        Assert.Contains("go stale when the game", s);
+    }
+
+    // ── Everything else must still hold ──────────────────────────────────
+
+    [Fact]
+    public void NoDllScript_UsesOnlyVerifiedCeControls()
+    {
+        var s = NoDll(E("A"));
+        Assert.DoesNotContain("createListBox", s);
+        Assert.DoesNotContain("createComboBox", s);
+        Assert.Contains("createListView", s);
+        Assert.Contains("createForm", s);
+    }
+
+    [Fact]
+    public void NoDllScript_NeverEmitsTheAobMakerWrapperTerminator()
+        => Assert.DoesNotContain("]==]", NoDll(E("bad ]==] label")));
+
+    [Fact]
+    public void NoDllScript_KeepsTheInteractiveHygieneShape()
+    {
+        var s = NoDll(E("A"));
+        Assert.DoesNotContain(CeLuaHygiene.CloseCall, s);   // interactive: no auto-close
+        Assert.Contains("return caFree", s);
+        Assert.Contains("if syntaxcheck then return end", s);
+    }
+
+    [Fact]
+    public void NoDllScript_StillCreatesTheAlClientListViewLast()
+    {
+        var s = NoDll(E("A"));
+        int lastPanel = s.LastIndexOf("createPanel", StringComparison.Ordinal);
+        int listView = s.IndexOf("createListView", StringComparison.Ordinal);
+        Assert.True(lastPanel > 0 && listView > lastPanel);
+    }
+
+    [Fact]
+    public void NoDllScript_UsesADistinctRecordDescription()
+    {
+        // So both flavours can sit in one cheat table without colliding.
+        Assert.NotEqual(CoordLibraryScriptGenerator.RecordDescription,
+                        CoordLibraryScriptGenerator.NoDllRecordDescription);
+    }
+
+    [Fact]
+    public void NoDllScript_StillHasBothTeleportButtons()
+    {
+        var s = NoDll(E("A"));
+        Assert.Contains("'Teleport'", s);
+        Assert.Contains("'Force teleport'", s);
+    }
+
+    [Fact]
+    public void NoDllScript_GroupRadioGroupStillWorks()
+    {
+        var s = NoDll(E("A", "Chest"), E("B", "Fields"));
+        Assert.Contains("rgGroup", s);
+        Assert.Contains("'Chest'", s);
+    }
+}

@@ -1209,6 +1209,9 @@
     <sys:String x:Key="str.Tip.TP.LibImportLua">Read the coordinates back out of a script you exported earlier and hand-edited. Only the fenced @UE5CD:COORDS block is parsed; the rest of the script is ignored and never executed.</sys:String>
     <sys:String x:Key="str.Tip.TP.LibImportLuaFile">Same, but read the script from a .lua file.</sys:String>
 
+    <sys:String x:Key="str.TP.LibExportLuaNoDll">Push to CE (no DLL)</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibExportLuaNoDll">Same picker, but teleport is a raw memory write using the standalone trainer's baked offsets, so no DLL is needed. Weaker: enable "UE5 Trainer: Setup" first, there is no map guard (the map name is only readable through the DLL), and the offsets go stale when the game is patched.</sys:String>
+
     <sys:String x:Key="str.TP.CursorForceHeader">Force Mouse Cursor</sys:String>
     <sys:String x:Key="str.TP.CursorForceHint">Force the OS mouse cursor visible or hidden by writing the PlayerController's bShowMouseCursor. Handy when a game hides the cursor but you want Cursor Teleport. One-shot: a game that re-sets the flag every frame may revert it, and a captured input mode can still hide the cursor.</sys:String>
     <sys:String x:Key="str.TP.CursorStateLabel">State:</sys:String>

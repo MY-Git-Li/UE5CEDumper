@@ -647,6 +647,9 @@
               <Button Content="{StaticResource str.TP.LibSaveLua}"
                       Command="{Binding SaveCoordLuaCommand}"
                       ToolTip.Tip="{StaticResource str.Tip.TP.LibSaveLua}" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibExportLuaNoDll}"
+                      Command="{Binding ExportCoordLuaNoDllCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibExportLuaNoDll}" Padding="10,4"/>
               <CheckBox Content="{StaticResource str.TP.LibImportReplace}"
                         IsChecked="{Binding CoordImportReplace}"
                         ToolTip.Tip="{StaticResource str.Tip.TP.LibImportReplace}"
@@ -656,7 +659,7 @@
             <!-- Lua re-import: paste the whole generated AA script. Only our fenced
                  @UE5CD:COORDS block is parsed; arbitrary Lua is never evaluated. -->
             <TextBox Text="{Binding CoordLuaPasteText, Mode=TwoWay}"
-                     Watermark="{StaticResource str.TP.LibPastePlaceholder}"
+                     PlaceholderText="{StaticResource str.TP.LibPastePlaceholder}"
                      AcceptsReturn="True" TextWrapping="NoWrap" Height="70"
                      FontFamily="Consolas, Menlo, monospace" FontSize="11"/>
             <StackPanel Orientation="Horizontal" Spacing="6">
