@@ -442,13 +442,16 @@ public sealed class DumpService : IDumpService
 
     // --- Live Data Walker ---
 
-    public async Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null, int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default)
+    public async Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null, int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, bool lean = false, CancellationToken ct = default)
     {
         var req = new JsonObject { ["cmd"] = "walk_instance", ["addr"] = addr };
         if (!string.IsNullOrEmpty(classAddr)) req["class_addr"] = classAddr;
         if (arrayLimit != 64) req["array_limit"] = arrayLimit;
         if (previewLimit != 2) req["preview_limit"] = previewLimit;
         if (fillGaps) req["fill_gaps"] = true;
+        // Emitted only when set: the default request stays byte-identical to the
+        // pre-lean wire shape, so nothing else has to know the flag exists.
+        if (lean) req["lean"] = true;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -501,7 +504,7 @@ public sealed class DumpService : IDumpService
     public async Task<IReadOnlyList<InstanceWalkResult>> WalkInstanceBatchAsync(
         IReadOnlyList<(string Addr, string? ClassAddr)> items,
         int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false,
-        CancellationToken ct = default)
+        bool lean = false, CancellationToken ct = default)
     {
         var all = new List<InstanceWalkResult>(items.Count);
         for (int start = 0; start < items.Count; start += WalkInstanceBatchChunk)
@@ -527,6 +530,7 @@ public sealed class DumpService : IDumpService
             if (arrayLimit != 64) req["array_limit"] = arrayLimit;
             if (previewLimit != 2) req["preview_limit"] = previewLimit;
             if (fillGaps) req["fill_gaps"] = true;
+            if (lean) req["lean"] = true;   // batch-level; see WalkInstanceAsync
 
             List<InstanceWalkResult>? chunk = null;
             try
@@ -569,7 +573,7 @@ public sealed class DumpService : IDumpService
                 {
                     ct.ThrowIfCancellationRequested();
                     try { chunk.Add(await WalkInstanceAsync(items[i].Addr, items[i].ClassAddr,
-                                                            arrayLimit, previewLimit, fillGaps, ct)); }
+                                                            arrayLimit, previewLimit, fillGaps, lean, ct)); }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                     catch { chunk.Add(new InstanceWalkResult()); }
                 }
@@ -3246,6 +3250,8 @@ public sealed class DumpService : IDumpService
         HiddenCount = res?["hidden_count"]?.GetValue<int>() ?? 0,
         PierceCount = res?["pierce_count"]?.GetValue<int>() ?? 1,
         State       = res?["state"]?.GetValue<int>() ?? -1,
+        // Older DLLs don't send it; assume healthy so their behaviour is unchanged.
+        HookActive  = res?["hook_active"]?.GetValue<bool>() ?? true,
     };
 
     // === Teleport (Wirbel) — docs/teleport-spec.md §7 ===

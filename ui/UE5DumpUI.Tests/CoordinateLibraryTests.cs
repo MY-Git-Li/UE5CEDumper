@@ -34,8 +34,10 @@ public class CoordPrecisionTests
     [InlineData(-20380.642578125)]
     [InlineData(35.79132080078125)]
     [InlineData(1.4210855e-14)]
-    [InlineData(0.0)]
-    [InlineData(-0.0)]
+    [InlineData(0.0)]   // -0.0 is NOT a separate case here: xUnit compares InlineData by
+                        // VALUE and -0.0 == 0.0, so listing it is a duplicate (xUnit1025).
+                        // Negative zero's real contract is collapsing, covered by
+                        // Round_CollapsesNegativeZero below.
     [InlineData(100000.0)]
     [InlineData(-1234.5678)]
     public void RoundThenText_RoundTripsBitExactly(double raw)

@@ -2363,9 +2363,36 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         };
     }
 
+    /// <summary>Schlacht::STR_ERR_NO_HOOK — the DLL refused to enable because the
+    /// game-thread ProcessEvent hook is down, so the ~10 Hz tracing invokes would
+    /// have had to run off the game thread.</summary>
+    private const int SeeThroughNoHookCode = -5;
+
     private void ApplySeeThroughReadout(SeeThroughStatus st)
     {
         ApplySeeThroughState(st.Active ? 1 : 0);
+
+        // The refusal is the one state the user must be told about explicitly:
+        // nothing visibly happens, so without this the feature just looks broken.
+        // It is also RECOVERABLE — the hook install can fail on one attempt and
+        // succeed on the next — so the message says to try again rather than
+        // declaring the game unsupported.
+        // Gate on the REFUSAL code, not on HookActive alone: the hook installs
+        // lazily, so `hook_active == false` is the normal state of a fresh session
+        // that has not invoked anything yet. HookActive only decides whether the
+        // refusal still stands — once it recovers, this falls through to plain OFF,
+        // which is the "restored" signal.
+        if (!st.Active && st.Code == SeeThroughNoHookCode && !st.HookActive)
+        {
+            SeeThroughState = "Unavailable";
+            SeeThroughBadgeColor = "#C9A04E";
+            SeeThroughCurrentText =
+                "Game-thread hook unavailable — See-through needs it to trace the view, "
+                + "and running those calls off the game thread is unsafe. This can be a "
+                + "temporary failure; press Apply again to retry.";
+            return;
+        }
+
         if (!st.Active)
         {
             SeeThroughCurrentText = "—";
@@ -2387,7 +2414,12 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             IsBusy = true; ClearError();
             var st = await _dump.SeeThroughSetAsync(enable: true, count: SeeThroughPierce);
             ApplySeeThroughReadout(st);
-            StatusText = $"See-through ON — hiding the nearest {SeeThroughPierce} occluder(s) in the view.";
+            StatusText = st.Active
+                ? $"See-through ON — hiding the nearest {SeeThroughPierce} occluder(s) in the view."
+                : st.Code == SeeThroughNoHookCode
+                    ? "See-through refused: the game-thread hook is not available. "
+                      + "Press Apply again to retry — this failure is often transient."
+                    : "See-through could not be enabled.";
         }
         catch (Exception ex) { ApplySeeThroughState(-1); SetError(ex); _log.Error("Teleport ApplySeeThrough failed", ex); }
         finally { IsBusy = false; }

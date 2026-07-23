@@ -26,7 +26,8 @@ public class StubDumpService : IDumpService
         => _classResults[addr] = result;
 
     public virtual Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null,
-        int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default)
+        int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, bool lean = false,
+        CancellationToken ct = default)
     {
         if (_structResults.TryGetValue(addr, out var result))
             return Task.FromResult(result);
@@ -73,7 +74,7 @@ public class StubDumpService : IDumpService
     public virtual Task<PeProfileStartResult> PeProfileStartAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task PeProfileStopAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<PeProfileResult> PeProfileGetAsync(int limit = 200, CancellationToken ct = default) => throw new NotImplementedException();
-    public virtual Task<IReadOnlyList<InstanceWalkResult>> WalkInstanceBatchAsync(IReadOnlyList<(string Addr, string? ClassAddr)> items, int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<IReadOnlyList<InstanceWalkResult>> WalkInstanceBatchAsync(IReadOnlyList<(string Addr, string? ClassAddr)> items, int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, bool lean = false, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<DiagnosticsResult> GetDiagnosticsAsync(int limit = 25, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task ResetDiagnosticsAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<byte[]> ReadMemAsync(string addr, int size, CancellationToken ct = default) => throw new NotImplementedException();
@@ -1588,7 +1589,8 @@ public class CsxExportServiceTests
         private readonly Func<Exception> _make;
         public ThrowingWalkStub(Func<Exception> make) => _make = make;
         public override Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null,
-            int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default)
+            int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, bool lean = false,
+            CancellationToken ct = default)
             => throw _make();
     }
 

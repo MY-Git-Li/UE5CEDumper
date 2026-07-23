@@ -765,6 +765,46 @@ Field objects include all `walk_class` fields **plus** live typed values and arr
 }
 ```
 
+#### Request options
+
+| key | default | meaning |
+|---|---|---|
+| `class_addr` | resolved from the object | walk as this UClass/UScriptStruct |
+| `array_limit` | 64 | max inline elements per container |
+| `preview_limit` | 2 | max inline Map/Set entries |
+| `fill_gaps` | false | "Guess What" — synthesise leaves for unreflected holes |
+| `lean` | false | **omit the keys a CE XML export never reads** (see below) |
+
+#### `lean: true` — the export payload shape (build 2351)
+
+Measured ([multipipe-eval.md](multipipe-eval.md) §10.6): of a real Copy CE XML's
+`walk_instance` bytes, the per-instance header is **99% dead** and per-field keys are
+**16.7% unused / 18.6% CSX-only**, with inline array elements **44.6% unused** —
+`elements[].h` alone is ~9% of the whole payload. `lean` drops exactly those, which
+attacks the payload-proportional IPC *and* the UI-side JSON parse that batching
+cannot touch.
+
+It is **subtractive only** — a lean object is the full object minus keys, never a
+different encoding. Consequences that matter: a client needs no new parsing branch
+(a missing key already falls back to its default), and an **older DLL that does not
+know the flag simply returns the full shape**, which is still correct.
+
+Dropped when `lean` is set:
+
+| level | keys |
+|---|---|
+| instance | `name`, `class`, `class_addr`, `outer`, `outer_name`, `outer_class`, `is_definition`, `props_size` (kept: `addr`, `stale`) |
+| field | `hex`, `value`, `str_value`, `enum_name`, `enum_value`, `ptr_name`, `bool_mask`, `bool_byte_offset`, `array_inner_addr` |
+| `elements[]` | `h`, `pn` |
+| `elements[].sf[]` | `v`, `pn` |
+| `map_elements[]` / `set_elements[]` | `kh` (**`vh` is kept** — the exporter parses it as a little-endian int for the value DropDownList) |
+
+**Who may ask for it.** The CE XML export path only. CSX (Structure Dissect) and the
+Live Walker grid genuinely read `hex` / `value` / `bool_mask` / `bool_byte_offset`, so
+the shared resolver defaults to the full shape and only the CE XML callers opt in.
+`WalkInstanceLeanTests` pins the contract by running the same export over full and
+lean payloads and demanding byte-identical XML.
+
 ### walk_world
 
 ```jsonc
@@ -1362,8 +1402,8 @@ The DLL implementation is a **trivial loop over the single-call path**, and both
 serialiser, so each element is byte-identical to a `walk_instance` response.
 
 ```jsonc
-// Request — per-item class_addr optional; array_limit / preview_limit / fill_gaps
-// may be set per batch (defaults) and overridden per item.
+// Request — per-item class_addr optional; array_limit / preview_limit / fill_gaps /
+// lean may be set per batch (defaults) and overridden per item.
 { "id": 7, "cmd": "walk_instance_batch",
   "items": [ { "addr": "1F2A3B40", "class_addr": "1C0DE000" },
              { "addr": "1F2A3C80" } ],

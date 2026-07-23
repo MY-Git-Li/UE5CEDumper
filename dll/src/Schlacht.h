@@ -26,7 +26,16 @@ enum SeeThroughResult {
     STR_ERR_NO_PAWN    = -2,   // no local player pawn (menu / loading / cutscene)
     STR_ERR_REFLECTION = -3,   // LineTraceSingle / SetActorHiddenInGame cooked out
     STR_ERR_NO_CAMERA  = -4,   // PlayerCameraManager / GetCameraLocation unavailable
+    STR_ERR_NO_HOOK    = -5,   // game-thread ProcessEvent hook unavailable — see below
 };
+
+// STR_ERR_NO_HOOK: the worker traces the world by INVOKING LineTraceSingle, ~10x
+// a second. With the game-thread hook down those invokes would have to take the
+// direct-call-off-the-game-thread fallback, which the invoke path now refuses for
+// repeating worker calls (it is the historic crash shape). Rather than run a
+// worker whose every tick is refused, See-Through declines to enable and says so.
+// A later enable retries the hook first — a MinHook trampoline-allocation failure
+// is a VM-layout accident, not a permanent property of the game.
 
 struct SeeThroughStatus {
     int32_t code        = 0;      // last SeeThroughResult (0 = OK on the last tick)

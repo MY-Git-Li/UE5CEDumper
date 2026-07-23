@@ -6,6 +6,13 @@
     <IsPackable>false</IsPackable>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
+    <!-- Same policy as UE5DumpUI.csproj, and for the same reason: xUnit analyzer
+         warnings (xUnit1025 duplicate InlineData, xUnit1051 missing
+         TestContext.Current.CancellationToken) kept re-appearing with each new test
+         file because nothing failed the build — they were fixed once, then drifted
+         back. Warnings-as-errors is what makes "fix it when it appears" automatic
+         instead of a habit somebody has to remember. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

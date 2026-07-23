@@ -3139,7 +3139,8 @@ public class CeXmlExportServiceTests
         private readonly Func<Exception> _make;
         public ThrowingWalkStub(Func<Exception> make) => _make = make;
         public override Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null,
-            int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default)
+            int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, bool lean = false,
+            CancellationToken ct = default)
             => throw _make();
     }
 

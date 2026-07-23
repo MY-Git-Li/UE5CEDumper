@@ -319,6 +319,12 @@ public sealed class SeeThroughStatus
     /// <summary>Result of the last enable/disable (1 active / 0 off / negative),
     /// or -1 when the call carried no enable field.</summary>
     public int State { get; init; } = -1;
+    /// <summary>Whether the DLL's game-thread ProcessEvent hook is up RIGHT NOW.
+    /// See-through traces the world by invoking on the game thread, so with the
+    /// hook down the feature refuses to enable (<see cref="Code"/> -5). The hook
+    /// install can fail transiently (MinHook trampoline allocation) and recover on
+    /// a later attempt, so this is polled rather than remembered.</summary>
+    public bool HookActive { get; init; } = true;
 }
 
 /// <summary>Result of a teleport action (recall / cursor).</summary>

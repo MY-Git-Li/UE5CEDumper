@@ -27,8 +27,20 @@ public sealed class PipeClient : IPipeClient
     // alone). Cap the logged body so a huge payload is debug-logged as a short prefix +
     // length, never the whole thing.
     private const int MaxLogBodyChars = 1024;
+
+    /// <summary>Measurement escape hatch: set <c>UE5DUMP_PIPE_LOG_FULL=1</c> before
+    /// launching to log response bodies UNCAPPED, so
+    /// <c>scripts/analysis/walk_payload_audit.py</c> sees whole payloads instead of
+    /// 1 KiB prefixes (a prefix biases every per-key byte share). Off by default and
+    /// read once — the capture is enormous and slow, exactly the cost the cap exists
+    /// to avoid; turn it on for one export, then off.</summary>
+    private static readonly bool LogFullBodies =
+        Environment.GetEnvironmentVariable("UE5DUMP_PIPE_LOG_FULL") == "1";
+
     private static string LogBody(string s) =>
-        s.Length <= MaxLogBodyChars ? s : $"{s[..MaxLogBodyChars]}… ({s.Length:N0} chars)";
+        LogFullBodies || s.Length <= MaxLogBodyChars
+            ? s
+            : $"{s[..MaxLogBodyChars]}… ({s.Length:N0} chars)";
     private Task? _readLoopTask;
 
     // Lane label for the Pipe Activity log ("I" interactive / "B" bulk / "" single).

@@ -1311,10 +1311,40 @@ static uintptr_t ResolveProcessEventAddr() {
 /// rather than PE itself. Logs ERROR loudly when that happens — silent
 /// vtable-misdetection is the whole reason the bug at builds 1..647
 /// stayed buried, so we now refuse to keep that failure mode silent.
-static void TryInstallGameThreadHook() {
-    static bool s_hookAttempted = false;
-    if (s_hookAttempted) return;
-    s_hookAttempted = true;
+// Hook-install RETRY policy (live finding, Elliot 2026-07-23).
+//
+// `MH_CreateHook` can fail with MH_ERROR_MEMORY_ALLOC — MinHook could not place a
+// trampoline within reach of ProcessEvent, which depends on the process's VM
+// layout at that instant. Observed intermittently: the same address hooked fine
+// 19 minutes earlier in the same game. The old code latched a one-shot
+// `s_hookAttempted` BEFORE attempting and never cleared it, so one unlucky
+// allocation forced every later invoke in the process onto the unsafe direct
+// call — 552 of them in 19 s, driven by a 10 Hz worker.
+//
+// So: bounded, rate-limited retries instead of a permanent latch. Cheap enough to
+// sit on the lazy invoke path (a 10 Hz worker adds at most one attempt per
+// cooldown), and bounded so a genuinely unhookable game stops trying.
+static constexpr int      kMaxHookAttempts    = 8;
+static constexpr uint64_t kHookRetryCooldownMs = 5000;
+static std::atomic<int>      s_hookAttempts{0};
+static std::atomic<uint64_t> s_lastHookAttemptMs{0};
+
+// `force` = a user-initiated attempt (a feature being switched on). It skips the
+// cooldown and the attempt cap, because the user is standing there waiting and a
+// retry is cheap; the automatic lazy path stays bounded.
+static void TryInstallGameThreadHook(bool force = false) {
+    if (Stark::IsHookActive()) return;
+
+    int attempts = s_hookAttempts.load(std::memory_order_relaxed);
+    if (!force && attempts >= kMaxHookAttempts) return;
+    if (!force && attempts > 0) {
+        uint64_t now  = GetTickCount64();
+        uint64_t last = s_lastHookAttemptMs.load(std::memory_order_relaxed);
+        if (now - last < kHookRetryCooldownMs) return;   // too soon — stay quiet
+    }
+    s_hookAttempts.fetch_add(1, std::memory_order_relaxed);
+    s_lastHookAttemptMs.store(GetTickCount64(), std::memory_order_relaxed);
+    attempts += 1;
 
     uintptr_t peAddr = ResolveProcessEventAddr();
     if (!peAddr) {
@@ -1323,8 +1353,15 @@ static void TryInstallGameThreadHook() {
     }
 
     if (!Stark::InstallHook(peAddr)) {
-        LOG_WARN("GameThreadDispatch: hook install failed, invoke will use direct call (unsafe)");
+        LOG_WARN("GameThreadDispatch: hook install failed (attempt %d/%d), invoke will "
+                 "use direct call (unsafe)%s",
+                 attempts, kMaxHookAttempts,
+                 attempts < kMaxHookAttempts ? " — will retry" : " — giving up");
         return;
+    }
+    if (attempts > 1) {
+        LOG_INFO("GameThreadDispatch: hook RECOVERED on attempt %d — game-thread "
+                 "dispatch is available again", attempts);
     }
     LOG_INFO("GameThreadDispatch: hook installed at 0x%llX, validator armed (1500ms)",
              (unsigned long long)peAddr);
@@ -1367,6 +1404,14 @@ static void TryInstallGameThreadHook() {
 // window was actually contended in this game (proof the guard earns its keep).
 static std::once_flag s_peInitOnce;
 static std::atomic<int> s_peInitArrivals{0};
+// Arrival ordinal at the moment init FINISHED. Anything numbered above it turned
+// up after the once was already satisfied and contended nothing. Without this the
+// test was `arrivals > 1` — true for EVERY invoke the process ever makes: a live
+// See-Through session (one invoke per ~100 ms tick) logged 437 of these WARNs in
+// four minutes on a run whose own INFO line said "1 caller(s) arrived before init
+// began". Every one a false positive, and the diagnostic worthless precisely
+// because it always fired.
+static std::atomic<int> s_peArrivalsAtInitEnd{0};
 static void EnsureProcessEventReady() {
     int arrivals = s_peInitArrivals.fetch_add(1, std::memory_order_relaxed) + 1;
     std::call_once(s_peInitOnce, [arrivals]() {
@@ -1376,16 +1421,49 @@ static void EnsureProcessEventReady() {
                  (unsigned long)GetCurrentThreadId(), arrivals);
         s_processEventOffset = DetectProcessEventVTableOffset();
         TryInstallGameThreadHook();
+        // Publish the high-water mark INSIDE the once, so it is visible to every
+        // waiter call_once releases (and to later callers, via that same
+        // happens-before) before any of them evaluates the test below.
+        s_peArrivalsAtInitEnd.store(s_peInitArrivals.load(std::memory_order_relaxed),
+                                    std::memory_order_relaxed);
         LOG_INFO("ProcessEvent: first-time init complete — offset=%d, hook_active=%d",
                  s_processEventOffset, Stark::IsHookActive() ? 1 : 0);
     });
-    // A total > 1 means concurrent first-invokes contended the once — harmless
-    // now, but historically the double-install crash window. Logged once per
-    // contended arrival so it is greppable if a game ever hits it.
-    if (arrivals > 1) {
+    // Bounded, rate-limited retry of a FAILED install (see the policy note above).
+    // call_once cannot re-run, so the retry lives out here on the ordinary path.
+    if (s_processEventOffset >= 0 && !Stark::IsHookActive()) TryInstallGameThreadHook();
+
+    // Warn ONLY for arrivals that were genuinely in flight while init ran — that
+    // is the historic double-install crash window, and it is what this line
+    // claims to be evidence of.
+    if (arrivals > 1 &&
+        arrivals <= s_peArrivalsAtInitEnd.load(std::memory_order_relaxed)) {
         LOG_WARN("ProcessEvent: concurrent first-invoke #%d serialized behind the "
                  "one-time init (audit #3 race window observed but guarded)",
                  arrivals);
+    }
+}
+
+// (b) One line per hook-state TRANSITION, not per invoke. Starts "unknown" so the
+// first observation of either state is reported once; the count of suppressed
+// unsafe calls rides the recovery line so nothing is silently lost.
+static std::atomic<int>      s_reportedHookState{-1};   // -1 unknown, 0 down, 1 up
+static std::atomic<uint64_t> s_unsafeCallsSinceDown{0};
+static void ReportHookState(bool active) {
+    if (!active) s_unsafeCallsSinceDown.fetch_add(1, std::memory_order_relaxed);
+    int want = active ? 1 : 0;
+    int prev = s_reportedHookState.exchange(want, std::memory_order_relaxed);
+    if (prev == want) return;
+    if (active) {
+        uint64_t n = s_unsafeCallsSinceDown.exchange(0, std::memory_order_relaxed);
+        if (prev < 0) return;   // first-ever observation, and it is the healthy one
+        LOG_INFO("UE5_CallProcessEvent: game-thread hook is ACTIVE again — invokes are "
+                 "dispatched to the game thread (%llu invoke(s) took the fallback while "
+                 "it was down)", (unsigned long long)n);
+    } else {
+        LOG_WARN("UE5_CallProcessEvent: game-thread hook NOT active — invokes fall back to "
+                 "a direct call off the game thread (unsafe). Logged once per transition; "
+                 "repeating WORKER invokes are refused outright.");
     }
 }
 
@@ -1398,20 +1476,31 @@ extern "C" int32_t UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc,
                                           uintptr_t params, uint32_t paramsSize) {
     if (!instance || !ufunc) return -1;
 
-    // Lazy, race-safe one-time detection + hook install (audit #3).
+    // Lazy, race-safe one-time detection + (retryable) hook install (audit #3).
     EnsureProcessEventReady();
     if (s_processEventOffset < 0) return -3;
 
     // Prefer game-thread dispatch via hook
     if (Stark::IsHookActive()) {
+        ReportHookState(true);
         LOG_INFO("UE5_CallProcessEvent: dispatching to game thread inst=0x%llX func=0x%llX",
                  (unsigned long long)instance, (unsigned long long)ufunc);
         return Stark::EnqueueInvoke(instance, ufunc, params, paramsSize);
     }
 
-    // Fallback: direct call from current thread (unsafe for state-changing functions)
-    LOG_WARN("UE5_CallProcessEvent: hook not active, using direct call (unsafe)");
+    // Hook is down. Log the fallback ONCE per state transition, not once per
+    // invoke: the per-invoke version produced 552 identical WARN+INFO triplets in
+    // 19 s on a live run and buried everything else in the log.
+    ReportHookState(false);
 
+    // (c) A REPEATING worker invoke must not take the unsafe path. A user's
+    // one-shot invoke accepting that risk is their call; a re-assert / feature
+    // worker calling ProcessEvent off the game thread ~10x/s for minutes is not a
+    // trade anyone opted into — and it is the historic crash shape. Refuse, and
+    // let the feature surface "unavailable" instead of quietly gambling.
+    if (Tot::IsBackgroundWorker()) return -8;
+
+    // Fallback: direct call from current thread (unsafe for state-changing functions)
     // Read vtable from the target instance
     uintptr_t vtable = 0;
     if (!Macht::ReadSafe(instance, vtable) || !vtable) return -2;
@@ -1422,22 +1511,22 @@ extern "C" int32_t UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc,
     typedef void (__fastcall *FnProcessEvent)(void*, void*, void*);
     auto pProcessEvent = reinterpret_cast<FnProcessEvent>(peAddr);
 
-    LOG_INFO("UE5_CallProcessEvent: direct call inst=0x%llX func=0x%llX pe=0x%llX",
-             (unsigned long long)instance, (unsigned long long)ufunc,
-             (unsigned long long)peAddr);
-
     __try {
         pProcessEvent(reinterpret_cast<void*>(instance),
                       reinterpret_cast<void*>(ufunc),
                       reinterpret_cast<void*>(params));
     } __except(EXCEPTION_EXECUTE_HANDLER) {
-        LOG_ERROR("UE5_CallProcessEvent: EXCEPTION during direct ProcessEvent call!");
+        // An exception is per-call news, so this one stays unconditional.
+        LOG_ERROR("UE5_CallProcessEvent: EXCEPTION during direct ProcessEvent call! "
+                  "inst=0x%llX func=0x%llX pe=0x%llX",
+                  (unsigned long long)instance, (unsigned long long)ufunc,
+                  (unsigned long long)peAddr);
         return -4;
     }
-
-    LOG_INFO("UE5_CallProcessEvent: direct call success (warn: not game-thread)");
     return 0;
 }
+
+extern "C" bool UE5_IsGameThreadHookActive() { return Stark::IsHookActive(); }
 
 int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t params) {
     // Legacy 3-arg export (CE Lua + Mimic's mailbox). Size 0 = no owned copy:
@@ -1457,18 +1546,13 @@ extern "C" bool UE5_EnsureGameThreadHook() {
 
     // The first install can fail transiently — e.g. MH_ERROR_MEMORY_ALLOC, when MinHook
     // can't place a trampoline near ProcessEvent this session (reachable ±2GB region
-    // occupied by another injected tool / a stale prior injection). The call_once above
-    // won't re-run and TryInstallGameThreadHook has its own one-shot guard, so retry the
-    // INSTALL directly here (detection already cached the offset). Stark::InstallHook is
-    // idempotent + mutex-guarded, so repeated Start clicks safely re-attempt; a later
-    // attempt can succeed once memory frees up.
+    // occupied by another injected tool / a stale prior injection). Retry through the
+    // ONE install path, forced: this call is always user-initiated (a feature switching
+    // on), so it skips the automatic path's cooldown/cap. Stark::InstallHook is
+    // idempotent + mutex-guarded, so repeated clicks safely re-attempt.
     if (s_processEventOffset < 0) return false;   // detection genuinely failed — nothing to retry
-    uintptr_t peAddr = ResolveProcessEventAddr();
-    if (!peAddr) return false;
-    bool ok = Stark::InstallHook(peAddr);
-    if (ok) LOG_INFO("GameThreadDispatch: hook install succeeded on retry at 0x%llX",
-                     (unsigned long long)peAddr);
-    return ok;
+    TryInstallGameThreadHook(/*force=*/true);
+    return Stark::IsHookActive();
 }
 
 // ProcessEvent vtable offset once detected (>=0), or a negative sentinel (-2 not

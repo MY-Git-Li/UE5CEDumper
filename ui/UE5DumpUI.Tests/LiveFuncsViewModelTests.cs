@@ -466,7 +466,7 @@ public class LiveFuncsViewModelTests
 
         vm.OnLeavingTab();
         // Auto-stop is fire-and-forget; give the continuation a beat to run.
-        await Task.Delay(50);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
 
         Assert.False(vm.IsRecording);
         Assert.True(dump.StopCalls >= 1);

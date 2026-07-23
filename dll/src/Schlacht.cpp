@@ -39,6 +39,9 @@ extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc,
                                             uintptr_t params, uint32_t size);
 // Resolve a class CDO/instance by short name (KismetSystemLibrary for the trace).
 extern "C" uintptr_t UE5_FindInstanceOfClass(const char* className);
+// Force the game-thread ProcessEvent hook up (user-initiated, so it retries a
+// transient MinHook failure) and report whether it is available.
+extern "C" bool      UE5_EnsureGameThreadHook();
 
 namespace {
 
@@ -279,6 +282,11 @@ bool InvokeSetHidden(uintptr_t actor, bool hidden) {
     return true;
 }
 
+// Bumped by every SetEnabled(true). CollectOccluders keys its resolved-once
+// KismetSystemLibrary cache off it, so a re-enable (or a game that reloaded its
+// object pool between enables) re-resolves instead of trusting a stale CDO.
+std::atomic<int> s_enableGen{0};
+
 // Trace along the view direction and collect the first `pierceN` NON-Pawn
 // occluders. Reuses LineTraceSingle iteratively: after each hit we advance the ray
 // start just past the impact point (fwd·STEP) and trace again, so we pierce through
@@ -289,14 +297,35 @@ void CollectOccluders(uintptr_t pawn, const double start0[3], const double fwd[3
                       const double end[3], int32_t pierceN,
                       std::unordered_set<uintptr_t>& out) {
     out.clear();
-    uintptr_t ksl = UE5_FindInstanceOfClass("KismetSystemLibrary");
-    if (!ksl) return;
-    FunctionInfo lt;
-    if (!FindFuncByName(Ubel::GetClass(ksl), "LineTraceSingle", lt) || lt.parmsSize <= 0) {
-        static bool s_warned = false;   // one-shot: cooked-out setter is a persistent condition
-        if (!s_warned) { s_warned = true; LOG_WARN("SeeThrough: LineTraceSingle not found (cooked out?) — no occluder detection"); }
-        return;
+
+    // The KismetSystemLibrary CDO + LineTraceSingle signature are resolved ONCE
+    // per enable, not per tick. `UE5_FindInstanceOfClass` is a full GObjects scan
+    // (it only stops early on a non-CDO hit, and a function library has none), so
+    // the pre-cache version paid one whole-pool scan per trace: measured on The
+    // Adventures of Elliot (326K objects) at ~5 scans/second for the whole 29 s
+    // the feature was on, plus a class walk each time. A native function-library
+    // CDO is rooted for the process lifetime, so caching it is safe; the
+    // generation counter re-resolves on the next enable anyway.
+    // Only the worker thread reaches here, so the cache itself needs no lock.
+    static uintptr_t   s_ksl = 0;
+    static FunctionInfo s_lt;
+    static int         s_cachedGen = -1;
+    int gen = s_enableGen.load(std::memory_order_relaxed);
+    if (s_cachedGen != gen) {
+        s_ksl = 0;
+        s_lt = FunctionInfo{};
+        uintptr_t ksl = UE5_FindInstanceOfClass("KismetSystemLibrary");
+        if (ksl && FindFuncByName(Ubel::GetClass(ksl), "LineTraceSingle", s_lt)
+            && s_lt.parmsSize > 0) {
+            s_ksl = ksl;
+        } else if (ksl) {
+            LOG_WARN("SeeThrough: LineTraceSingle not found (cooked out?) — no occluder detection");
+        }
+        s_cachedGen = gen;   // cache the FAILURE too: don't rescan 10x/s on a game that lacks it
     }
+    if (!s_ksl) return;
+    const uintptr_t ksl = s_ksl;
+    const FunctionInfo& lt = s_lt;
     const FunctionParam* hr = FindParam(lt, "OutHit");
     if (!hr) return;
     const FunctionParam* rv = FindReturnParam(lt);
@@ -444,6 +473,21 @@ int32_t SetEnabled(bool enable) {
         // inherits it and its first live tick's diff un-hides anything no longer
         // occluding — moving+clearing it here without un-hiding would orphan those
         // actors (they'd stay SetActorHiddenInGame with nothing tracking them). (M1/M2)
+        // The worker's whole job is invoking LineTraceSingle ~10x/s. Those invokes
+        // are refused when the game-thread hook is down (the direct-call fallback
+        // off the game thread is the historic crash shape), so a worker started
+        // now would tick uselessly. Force one hook attempt — this is a
+        // user-initiated enable, so a transient MinHook failure gets retried — and
+        // decline loudly if it still isn't up, rather than pretending to work.
+        if (!UE5_EnsureGameThreadHook()) {
+            std::lock_guard<std::mutex> lk(s_mutex);
+            s_state.code  = STR_ERR_NO_HOOK;
+            s_state.state = STR_ERR_NO_HOOK;
+            LOG_WARN("SeeThrough: refusing to enable — game-thread hook unavailable "
+                     "(the tracing invokes would have to run off the game thread)");
+            return STR_ERR_NO_HOOK;
+        }
+
         bool responsive = Stark::IsGameThreadResponsive();
         std::unordered_set<uintptr_t> leftover;
         {
@@ -464,6 +508,9 @@ int32_t SetEnabled(bool enable) {
             s_state.code = STR_OK;
             s_state.state = 1;
         }
+        // Invalidate CollectOccluders' resolved-once KismetSystemLibrary cache
+        // before the worker's first tick reads it.
+        s_enableGen.fetch_add(1, std::memory_order_relaxed);
         StartWorkerLocked();   // s_workerMutex held, s_mutex released
         LOG_INFO("SeeThrough: enabled (pierce=%d)", n);
         return 1;

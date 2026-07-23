@@ -40,8 +40,13 @@ the row here when it ships.
   un-finalised row is *usable* — the fix relies on deletion, not on it being auto-cleaned); the outer catch
   was deliberately **not** filtered (that would reroute to the non-deleting generic handler and re-leave a
   usable partial — M7's separate concern). Regression test
-  `Capture_DisconnectMidStream_DoesNotSaveUsablePartial`; 2526 green. *Delete this row after the audit batch
-  is merged to main.* *Parent: audit-2026-07-14-findings §H1.*
+  `Capture_DisconnectMidStream_DoesNotSaveUsablePartial`; 2526 green.
+  > **✅ LIVE-VERIFIED 2026-07-23 (Elliot, the real kill).** Snapshot #1 created 22:43:48, 12 chunks
+  > in, chunk `offset 90112 / total 356407` (25%) sent and never answered because the GAME WAS CLOSED
+  > → `Pipe: ReadLine returned null (disconnected)` → **`SnapshotStore: deleted snapshot #1 (reclaimed
+  > disk)`** at 22:44:03. No usable partial survived, the UI did not wedge, and it shut down cleanly
+  > afterwards. This is exactly the H1 scenario, executed for real rather than simulated.
+  *Delete this row after the audit batch is merged to main.* *Parent: audit-2026-07-14-findings §H1.*
 
 - **[✅ ALL MEDIUMs DONE — 1 HIGH + 10 MED shipped on `dev`; DLL M1–M5 await in-game verify]** — the entire
   audit-#3 HIGH+MEDIUM set is fixed. Remaining audit work = the **13 LOW** batch (below) + optional/cosmetic
@@ -89,6 +94,52 @@ the row here when it ships.
   > Regression test `AutoSnapshot_DisconnectMidCapture_StopsLoopWithoutWedge`; 2527 green. *Delete after the
   > audit batch is merged to main.*
 
+- **Audit #3 DLL batch — what the Elliot 2026-07-23 22:19-22:28 session DID exercise** —
+  The user drove the checklist. Commands seen: `seethrough_set` on→off, `set_time_dilation` x4
+  (global 0.5 + pawn 2.0, twice), `set_foreground_lock` on, `pe_profile_start/stop/get` + a second
+  start, `get_current_target` x2, `get_related_objects` x3, `find_path_from_gworld`. Results:
+  > **✅ M1 verified with evidence.** `SeeThrough: worker stopped` is logged BEFORE
+  > `SeeThrough: disabled (1 restored)` — the disable joins the worker first, then restores, and the
+  > one hidden actor was genuinely un-hidden. Enable→disable window 29.3 s at the 100 ms tick.
+  > **✅ Disconnect with holds active.** Both sessions ended with a clean two-lane
+  > `Client disconnected`, with a Hemmung dual-lane hold, the Grausam foreground lock, and a running
+  > Linie recording all still active — the M4 worker-cancel-latch and the deliberate
+  > "holds persist across disconnect" behaviour, with **zero errors** in any category.
+  > **⛔ Still NOT exercised: M5** — the game was never closed (no `PipeServer: Stopped` /
+  > `UE5_Shutdown` in this session), so the shutdown-window worker-revive gate is still unproven.
+  > Also untouched: Solide force-field (L2/L3/L4), Laufen, Solitar, Dunste.
+  > **The session surfaced two NEW defects** (both fixed below, both need an in-game re-check).
+  *Parent: audit-2026-07-14-findings; log review 2026-07-23.*
+
+- **✅ FIXED (build 2354) — See-Through re-scanned the whole GObjects pool ~5x/second** —
+  Effort: **S** · Risk: low. **Found by reading the Elliot log, not by a test.**
+  `Schlacht::CollectOccluders` called `UE5_FindInstanceOfClass("KismetSystemLibrary")` **per trace**,
+  and that is a full `Aura::FindInstancesByClass` scan which only exits early on a NON-CDO hit — a
+  function library has none, so every call walked all **326,363** objects, plus a `FindFuncByName`
+  class walk. Measured from the log: **145 of those scans in the 29 s** the feature was on (~5/s).
+  Fix: resolve the CDO + `LineTraceSingle` signature ONCE per enable, keyed off a generation counter
+  bumped in `SetEnabled(true)` (so a re-enable re-resolves); the failure case is cached too, so a game
+  that cooked the function out no longer rescans 10x/s. **Re-check in-game:** enable See-Through on a
+  big game and confirm the `only CDO` WARN now appears once per enable instead of continuously — and
+  that occluders still hide/restore.
+  > **✅ VERIFIED on the next run (Elliot, build 2356): 145 full-pool scans in 29 s → 1 in 19 s**, and
+  > See-Through still behaves (`enabled (pierce=1)` → worker → `worker stopped` → `disabled
+  > (1 restored)`). The single scan is visible as one
+  > `FindInstancesByClass class='KismetSystemLibrary': 1 found, scanned=352851`.
+  *Parent: Schlacht build 1991; log review 2026-07-23.*
+
+- **✅ FIXED (build 2354) — the "concurrent first-invoke" WARN fired on EVERY invoke** —
+  Effort: **S** · Risk: low. `Frieren::EnsureProcessEventReady` tested `arrivals > 1`, where
+  `arrivals` is the all-time invoke ordinal — so every invoke after the very first logged
+  `ProcessEvent: concurrent first-invoke #N serialized behind the one-time init (audit #3 race window
+  observed but guarded)`. The Elliot session logged **437** of them in four minutes (one per
+  See-Through tick) on a run whose own INFO line said **"1 caller(s) arrived before init began"**,
+  i.e. there was no contention at all. Beyond the log spam, the diagnostic was worthless because it
+  could never be false. Fix: publish the arrival high-water mark inside the `call_once` lambda and
+  warn only for `arrivals <= thatMark` — genuine in-flight contention only.
+  > **✅ VERIFIED on the next run (Elliot, build 2356): 436 WARNs → 0**, on a session that made 552
+  > invokes. *Parent: audit #3 ProcessEvent double-install guard; log review 2026-07-23.*
+
 - **[✅ ALL 13 LOWs DONE] Audit #3 low-severity batch** — SHIPPED on `dev` in four commits:
   UI L13–L17 (`8bd33f8`, +2 tests), Solide L2/L3/L4 (`408fd2d`), DLL L1/L5/L8/L10/L12 (`7f3898f`), and the
   adversarial-verify followups (`3362636`: L4 prune-guard for >256-instance churn + L10 GFW-hook re-subclass
@@ -111,13 +162,16 @@ the row here when it ships.
 
 ## ▶ Next up (genuinely actionable now)
 
-- **Multi-pipe Phase 1 — residual verification (low priority; lane split SHIPPED PR #396)** —
+- **Multi-pipe Phase 1 — residual verification: only the WATCH item is left** —
   Effort: **S** · Risk: low. The two-connection lane split shipped + in-game verified for §9.6 items
-  1–5 (dev-log 2026-06-28). Two checklist items weren't explicitly exercised: (6) **watch-event
-  delivery** to the interactive lane (System-tab / address watch still pushes correctly), and the
-  **single-lane-independent-drop edge** (§9.7 — one lane errors while the other lives; the UI router
-  should tear down both for a clean reconnect, and a stray interactive disconnect shouldn't cancel a
-  running bulk scan). Verify opportunistically. *Parent: multipipe-eval §9 (PR #396).*
+  1–5 (dev-log 2026-06-28).
+  > **✅ The lane-drop edge is now verified (Elliot 2026-07-23).** Closing the game mid-snapshot
+  > dropped the bulk lane and the router did exactly what §9.7 specifies:
+  > `Pipe lane dropped — tearing down both lanes for a clean reconnect` → `Pipe disconnected`, with the
+  > in-flight snapshot faulting into H1's delete path rather than half-finishing. No wedge, no orphan.
+  Still open: (6) **watch-event delivery** to the interactive lane (System-tab / address watch still
+  pushes correctly while the bulk lane is busy). Verify opportunistically.
+  *Parent: multipipe-eval §9 (PR #396).*
   The build-1836 single-handle worker-pool was REVERTED (deadlocked on the synchronous pipe, §8.1).
   The sister repo `D:\Github\discrete` runs a proven alternative: the UI opens **two** client
   connections (interactive + bulk) to a `maxInstances≥2` server that serves **each connection on
@@ -193,12 +247,13 @@ the row here when it ships.
   Open sub-question: the packed **SerialNumber** offset (currently best-effort `0x0C`) is unpinned.
   *Parent: PackedItem.h + Aura packed mode + set_packed_consts shipped build 1108 (dev-log 2026-06-14).*
 
-- **DLL cancellation — live-game verification** — Effort: **0** (verify only) · Risk:
-  low. Confirm in-game that (a) disabling the script / closing the game while a long
-  scan runs no longer hangs, (b) closing the UI mid-scan stops the DLL and a reopened
-  UI reconnects promptly.
-  *Parent: cooperative cancel + shutdown-abort + disconnect monitor shipped build
-  936-937, PR #238 (dev-log 2026-06-06).*
+- **✅ DONE — DLL cancellation live-verified (Elliot 2026-07-23).** (a) **Closing the game while a
+  snapshot streamed** ended with a clean DLL-side `PipeServer: Stopped` 5 s after the last answered
+  chunk, and the UI tore both lanes down and deleted the partial instead of hanging. (b) closing the
+  UI mid-scan + prompt reconnect was already covered by the two back-to-back sessions earlier that
+  evening (disconnect at 22:25:11 → reconnect at 22:25:13, 2 s). *Delete after the batch merges to
+  main. Parent: cooperative cancel + shutdown-abort + disconnect monitor shipped build 936-937,
+  PR #238 (dev-log 2026-06-06).*
 
 - **Guess? "missing" mid-object data — RESOLVED (working as designed; diagnostic kept).** The
   `WALK:guess` diagnostic (build 1364+, `Ubel.cpp` `WalkInstance` fillGaps block, one line per
@@ -232,7 +287,12 @@ the row here when it ships.
   *Parent: P0–P3 shipped on dev (this session); builds on value_search_caveats, the `Orden`
   seam (group-value-scan-spec §3.1), and the "Guess What" build (commit 75ea723).*
 
-- **Snapshot capture too slow on huge games (FF7 Rebirth ~433K objects) — esp. with Native-C** —
+- **[✅ IMPROVED — parked unless it bites again] Snapshot capture too slow on huge games** —
+  User re-tested 2026-07-23 **on a smaller title rather than FF7 Rebirth and confirms the four
+  changes below improved it**, so the item is parked. What that does NOT settle is the original
+  433K-object case — keep the notes below for when it recurs; the untried levers are class-scoped
+  capture (only a chosen class's instances) and a clearer "X% captured" progress.
+  **Native-C P3 verification is no longer blocked by this.**
   Effort: **M-L** · Risk: med (touches the hot capture path). FF7 Rebirth snapshot with
   Native-C ON ran **16+ min and left >50% of objects uncaptured**, so P3 couldn't be verified
   there. Likely causes, in order: (1) **Native-C `AppendRawHoleFields` calls `Ubel::GuessGapTypes`,
@@ -280,6 +340,55 @@ the row here when it ships.
   already covers that calibration first — don't regress StructProperty struct-name resolution), or
   make the calibrated offsets `std::atomic<int>` with relaxed loads. *Parent: parallel-snapshot race audit, this session.*
 
+- **NEW (Elliot 2026-07-23) — a transient `MH_CreateHook` failure permanently poisons the session
+  into the "unsafe direct call" path** — Effort: **S-M** · Risk: **med** (touches the hook path, the
+  most crash-prone code in the DLL). **Observed once, on the run right after a session where the same
+  hook installed fine at the same address:**
+  > `[ERROR] GameThreadDispatch: MH_CreateHook failed: MH_ERROR_MEMORY_ALLOC`
+  > `[WARN]  GameThreadDispatch: hook install failed, invoke will use direct call (unsafe)`
+  > `ProcessEvent: first-time init complete — offset=608, hook_active=0`
+
+  `MH_ERROR_MEMORY_ALLOC` means MinHook could not place a trampoline within reach of the target, which
+  depends on the process's VM layout at that instant — i.e. it is **intermittent by nature**
+  (22:24 install at `0x1415968E0` succeeded; 22:43 the same address failed). Two problems follow:
+
+  1. **It is latched forever.** `TryInstallGameThreadHook` sets `static bool s_hookAttempted = true`
+     **before** attempting and never clears it on failure, and `EnsureProcessEventReady` wraps the
+     whole thing in `std::call_once`. So one unlucky allocation means *every* invoke for the rest of
+     the process life takes the fallback — even when the user re-enables the feature minutes later,
+     when the VM layout may well have room again.
+  2. **The fallback is the historically crash-prone path**, and a WORKER-driven feature hammers it:
+     See-Through logged **552** × `UE5_CallProcessEvent: hook not active, using direct call (unsafe)`
+     in 19 seconds (~10 ProcessEvent calls/second from a non-game thread). It happened to survive
+     here, but a one-shot user invoke and a 10 Hz re-assert worker are very different exposures.
+
+  **✅ FIXED (build 2358) — (a)+(b)+(c) all built, with the UI reflecting failure AND recovery:**
+  - **(a) Retry instead of latch.** One install path (`TryInstallGameThreadHook`), no permanent
+    `s_hookAttempted`: it returns early when the hook is already up, otherwise retries up to 8 times
+    with a 5 s cooldown. Cheap enough to sit on the lazy invoke path (a 10 Hz worker adds at most one
+    attempt per cooldown) and bounded so a genuinely unhookable game stops trying. A user-initiated
+    enable calls it with `force`, skipping cooldown and cap. Recovery logs
+    `hook RECOVERED on attempt N`.
+  - **(b) One line per transition.** `ReportHookState` logs the fallback once when the hook goes
+    down and once when it comes back, carrying the count of invokes that took the fallback meanwhile.
+    The per-invoke `direct call inst=…` / `direct call success` INFO pair is gone (the exception path
+    still logs unconditionally — that IS per-call news).
+  - **(c) Worker invokes refuse the unsafe path.** `Tot::IsBackgroundWorker()` (the thread-local the
+    M4 fix already set on every re-assert worker) gates it: with the hook down, a worker invoke
+    returns **-8** instead of calling ProcessEvent off the game thread. `Schlacht::SetEnabled(true)`
+    forces one hook attempt and, if it still isn't up, declines with **`STR_ERR_NO_HOOK` (-5)**
+    without starting a worker that could only tick uselessly.
+  - **UI.** `seethrough_set`/`get_state` now carry `hook_active`; the See-through card shows
+    "Unavailable" + *"Game-thread hook unavailable … press Apply again to retry"* on a refusal, and
+    a later Refresh CLEARS it once the hook recovers. Gated on the refusal CODE, not on `hook_active`
+    alone — the hook installs lazily, so "not installed yet" is the normal state of a fresh session
+    and must not read as a failure. Three tests pin exactly that (refusal / recovery / lazy).
+
+  **Re-check in-game:** the failure is intermittent, so it may not reproduce. What to look for if it
+  does: the log should show at most 8 install attempts (not one), a single fallback WARN instead of
+  hundreds, and See-through should refuse with a visible message rather than silently doing nothing.
+  *Parent: Stark::InstallHook / Frieren::TryInstallGameThreadHook; log review 2026-07-23.*
+
 -----
 
 ## Bookmarks + Options persistence + CE-export filter — follow-ups (shipped PR #359, builds 1652-1663)
@@ -310,9 +419,29 @@ The three persistence features (CE-export system-component filter, global panel-
 
 Phase 1 (the "Related" tab: given an actor, list Self/Class/Outer + Controller↔Pawn + owned components/ASC/AttributeSet via a depth-3 owned walk; 🌍 GWorld / Live Walker / finder / copy per row; 🔗 Related handoff from Instance Finder / Value Search / Live Walker) + the Instance Finder **"Newest first"** opt-in shipped builds 1323-1326. **In-game VERIFIED on TQ2:** `bp_ai_default_character_C` → Related lists 58 objects incl. `TQ2AIController`, `GrimAbilitySystemComponent` (ASC), `bp_tq2_character_stats_component_C` (AttributesComponent) → `AttributeSetHealth.CurrentHealth` = live HP (73.57). **Phase 2 (`Edel` current-target auto-detect) SHIPPED build 1400** (dev-log 2026-06-20) — `🎯 Detect target` button resolves GWorld→PC→Pawn, scores the player's outgoing object-ptr fields (structural is-Actor gate + keyword boost), auto-loads the top candidate; the `Edel` roster name is now 🟢. Remaining follow-ups, in order:
 
-- **Phase 2 Edel — in-game verification + tuning** — Effort: **0** (verify only) · Risk: low. Built + unit-tested + AOT-green but unproven live. Verify on a **lock-on / soft-target action title** (the target lives in a `UPROPERTY` object field): click 🎯 Detect target → confirm the top candidate IS the focused enemy and its AttributeSet/HP shows in the grid; confirm the 🌍 Locate-in-GWorld now resolves for that target (it should — the player references it). On the named JP/CN test games (TQ2/SEED/DQ7R, mostly no target `UPROPERTY`) confirm the **graceful fallback** fires (note = "no clear target / weak guesses", nothing auto-loaded) rather than feeding a wrong actor. Tune the score constants / keyword tables only if a real game motivates it. *Parent: Edel shipped build 1400, dev-log 2026-06-20.*
+- **Phase 2 Edel — HALF VERIFIED (graceful fallback, Elliot 2026-07-23); the positive case is what's left** —
+  Effort: **0** (verify only) · Risk: low. **The fallback works exactly as designed.** Two 🎯 Detect
+  target runs on The Adventures of Elliot both returned `resolved=False candidates=8`: nothing was
+  auto-loaded, and the ranked list was surfaced instead. The ranking is also sane — top candidate
+  `BP_SupportFairy_C` (score 45, reason `is-Pawn`, reached via `BP_PlayerCharacter_C.SupportCharacter`),
+  then `DefaultPhysicsVolume` (30, `is-Actor`), then a gameplay-cue actor. That top hit is the player's
+  COMPANION, not a target — i.e. precisely the plausible-but-wrong pick that auto-loading would have
+  gotten wrong, and the confidence bar correctly refused it. **Still open: the positive case** — a
+  lock-on / soft-target action title where the target really does live in a `UPROPERTY`, to confirm the
+  top candidate IS the focused enemy and its AttributeSet/HP loads. Tune the score constants only if
+  such a game motivates it. *Original note:* Built + unit-tested + AOT-green but unproven live. Verify on a **lock-on / soft-target action title** (the target lives in a `UPROPERTY` object field): click 🎯 Detect target → confirm the top candidate IS the focused enemy and its AttributeSet/HP shows in the grid; confirm the 🌍 Locate-in-GWorld now resolves for that target (it should — the player references it). On the named JP/CN test games (TQ2/SEED/DQ7R, mostly no target `UPROPERTY`) confirm the **graceful fallback** fires (note = "no clear target / weak guesses", nothing auto-loaded) rather than feeding a wrong actor. Tune the score constants / keyword tables only if a real game motivates it. *Parent: Edel shipped build 1400, dev-log 2026-06-20.*
 
-- **Locate in GWorld — streaming / World-Partition actors — ADDRESSED via the world's level list (build 1405); in-game verify pending** — Effort: **0** (verify only) · Risk: low. `Aura::RecoverViaWorldLevel` now recovers a `not_reachable` actor through its owning `ULevel` (reached by the `ULevel::OwningWorld` back-reference, since an actor's Outer IS its level), emitting `world →(WorldLevel)→ ULevel → Actors[k] → actor [→ target]` with status `ok_via_level`. This makes ANY actor that belongs to the current world locatable + navigable in Live Walker (and a bounded tail BFS reaches an owned AttributeSet/HP), regardless of how its level was streamed in — closing the Elliot "weapons map, enemies don't" case. **Verify in-game:** on a streaming/WP title, 🌍 on a just-spawned enemy now lands (status note: "via the world's level list"); confirm the breadcrumb spine reaches the enemy and you can drill to its HP. Two honest residual limits (acceptable, not bugs): (1) the chain is NOT a clean CE static-pointer chain (the world→level hop is a back-reference) — it's for in-tool navigation; (2) a truly unreferenced actor not in ANY world level still returns `not_reachable` (correct). Edel (build 1400) remains the complementary path when the player references the target. *Parent: Related Objects Phase 1 in-game test (dev-log 2026-06-19); recovery dev-log 2026-06-20.*
+- **Locate in GWorld — streaming / World-Partition actors — the `ok_via_level` RECOVERY is still the
+  unverified half (Elliot 2026-07-23 exercised the normal path instead)** — Effort: **0** (verify only) ·
+  Risk: low. A 🌍 on Elliot **succeeded through the ordinary forward BFS**: `status: "ok"`, `found: true`,
+  depth 5, 28 ms, 3,065 nodes visited, root `MainField_A2` — path `GWorld > GameState > PlayerArray[0]
+  > PawnPrivate > SupportCharacter > DamageHit`. Worth banking: that request carried `deep: true` +
+  `container_depth: 4` and the path hops **through a container ELEMENT** (`PlayerArray` ArrayProperty,
+  `element_index: 0`), so the deep / container-element descent is verified live. What it does NOT
+  exercise is `RecoverViaWorldLevel`: the target was reachable normally, so `ok_via_level` never fired.
+  **To exercise it:** 🌍 on an actor the forward BFS cannot reach — a just-spawned or streamed-in enemy
+  (the original Elliot "weapons map, enemies don't" case). Look for the status note "via the world's
+  level list" and confirm the breadcrumb spine still drills to its HP. *Original note:* `Aura::RecoverViaWorldLevel` now recovers a `not_reachable` actor through its owning `ULevel` (reached by the `ULevel::OwningWorld` back-reference, since an actor's Outer IS its level), emitting `world →(WorldLevel)→ ULevel → Actors[k] → actor [→ target]` with status `ok_via_level`. This makes ANY actor that belongs to the current world locatable + navigable in Live Walker (and a bounded tail BFS reaches an owned AttributeSet/HP), regardless of how its level was streamed in — closing the Elliot "weapons map, enemies don't" case. **Verify in-game:** on a streaming/WP title, 🌍 on a just-spawned enemy now lands (status note: "via the world's level list"); confirm the breadcrumb spine reaches the enemy and you can drill to its HP. Two honest residual limits (acceptable, not bugs): (1) the chain is NOT a clean CE static-pointer chain (the world→level hop is a back-reference) — it's for in-tool navigation; (2) a truly unreferenced actor not in ANY world level still returns `not_reachable` (correct). Edel (build 1400) remains the complementary path when the player references the target. *Parent: Related Objects Phase 1 in-game test (dev-log 2026-06-19); recovery dev-log 2026-06-20.*
 
 - **Locate from GEngine — alternate root for UI-widget / GameInstance-owned objects** — ✅ **DONE (builds 1542-1544, MERGED main PR #345 `f488592`; in-game VERIFIED)** — shipped as **Locate in GameEngine** (⚙ icon on all 10 🌍 surfaces). The existing `find_path_from_gworld` handler gained a `root_kind` field (`engine` → `rootObj = Genau::FindGameEngine().engineAddr`, `no_engine` when absent); `FindObjectGraphPath` was already root-agnostic so it was untouched. Reaches engine-layer objects (GameInstance / LocalPlayer / GameViewport / UMG widgets — the Octopath `PartyCharacterPanel_C` case) that no GWorld chain reaches; a deliberate complement to 🌍 (weaker for world actors, since `RecoverViaWorldLevel`/`ok_via_level` is World-root-gated). See dev-log 2026-06-22. *Residual: `deadline_ms` still hardcoded 20000ms in `FindObjectGraphPath` — optional follow-up.*
 
@@ -386,33 +515,41 @@ Design contract: **[teleport-coord-library-spec.md](teleport-coord-library-spec.
 Write-up: [dev-log.md](dev-log.md) 2026-07-23. All five phases are on `dev`, 2777 tests green,
 **zero DLL/pipe change**. What remains is verification that unit tests structurally cannot do.
 
-- **VERIFY IN-GAME — the teleport itself** — Effort: **S** · Risk: low.
-  Save current pos → move → Teleport selected → land back. Then the map guard: save on map A, load
-  map B, confirm plain Teleport refuses and Force is the only way through. Watch for `Tier == 2`
-  (raw-write fallback) in the status line — the game may snap the pawn back, which is expected and
-  already surfaced. *Parent: P1.*
+> **User verification pass 2026-07-23:** the **DLL-flavour** emitted Lua **WORKS in CE** (picker
+> opens, list + filter + teleport), **CSV export/import was exercised**, and the group/label round
+> trip was driven from the Lua picker UI. Two results came out of it — the DLL flavour is verified,
+> and the **no-DLL (standalone) flavour does NOT work on the tested title**. The remaining VERIFY
+> rows are the ones that pass was not aimed at. *(Which title the standalone failed on still needs
+> filling in here.)*
 
-- **VERIFY IN CE — the emitted picker (both flavours)** — Effort: **M** · Risk: med.
-  **Nothing has executed a single line of the emitted Lua.** Push to CE → enable the record → the
-  form should open with the ListView filled, the filter narrowing on space-AND, both RadioGroups
-  live, Teleport working and Force bypassing the map guard. Highest-risk items, in order:
-  (a) the CE control/property set — verified from `CrimsonDesert.CT` CheatEntry 357, not from CE's
-  own docs, so `lv.ItemIndex`, `readString(mb + params + 48, 127, false)` and
-  `rgGroup.Items.add` are the ones most likely to be wrong;
-  (b) panel creation order actually producing the intended layout;
-  (c) the no-DLL flavour's raw write, which additionally needs "UE5 Trainer: Setup" enabled first
-  and has the known may-not-visibly-move caveat. *Parent: P3 + P5.*
+- **✅ VERIFIED — the emitted picker, DLL flavour (2026-07-23).** Form opens, ListView fills, filter
+  narrows, Teleport works from the picker. That confirms the CE control/property set lifted from
+  `CrimsonDesert.CT` (`lv.ItemIndex`, `readString(mb + params + 48, 127, false)`, `rgGroup.Items.add`)
+  against a real CE — the highest-risk unknown in P3/P5. *Delete after the batch merges to main.*
 
-- **VERIFY — CSV against a real spreadsheet** — Effort: **S** · Risk: low.
-  Export → open in Excel (check CJK renders, i.e. the BOM did its job) → edit a label → save →
-  re-import and confirm the two-stage preview shows the change *before* committing. Deliberately
-  try a group named `1-2` and a label starting `=` — the first should show up in the diff as an
-  Excel date mangling, the second should survive the armouring round trip. *Parent: P2.*
+- **✅ VERIFIED — CSV export/import (2026-07-23).** Round trip exercised. NOT separately confirmed:
+  the two deliberate hostile cases (a group named `1-2` that Excel mangles into a date; a label
+  starting `=` surviving the formula armouring). Retry those only if a real library corrupts.
 
-- **VERIFY — the quick-jump menu label** — Effort: **S** · Risk: low.
-  The tab's right-click menu takes a card's label from the first `SemiBold` TextBlock descendant of
-  a direct-child `Border`. The new card puts that TextBlock inside an `Expander.Header`; confirm the
-  walk still resolves "Coordinate Library" rather than a wrong label. Spec §7 flags this. *Parent: P1.*
+- **BUG / LIMIT — the no-DLL (standalone) flavour does not teleport on the tested title** —
+  Effort: **M** · Risk: med. Confirmed by the user 2026-07-23. The spec already carries the caveat
+  ("needs *UE5 Trainer: Setup* enabled first; may not visibly move"), so this is that caveat firing
+  rather than a surprise: the standalone flavour writes the pawn's location RAW, and a game that
+  re-asserts its own transform every tick simply overwrites it. **Decide between** (a) documenting it
+  as a hard limitation of the no-DLL flavour (cheap, honest), or (b) having the standalone picker
+  DETECT the snap-back — read the location back N ms after the write and, if it drifted back, say so
+  in the status line instead of silently doing nothing. (b) is what stops the next user concluding
+  the feature is broken. *Parent: P5; teleport-coord-library-spec.md §10.*
+
+- **VERIFY IN-GAME — the teleport itself, from the APP (not the CE picker)** — Effort: **S** · Risk: low.
+  Still open: save current pos → move → Teleport selected → land back, then the **map guard** (save on
+  map A, load map B; plain Teleport must refuse and Force must be the only way through). Watch for
+  `Tier == 2` (raw-write fallback) in the status line. *Parent: P1.*
+
+- **✅ VERIFIED — the quick-jump menu label (2026-07-23).** The Teleport tab's right-click menu shows
+  "Coordinate Library" and the user has been navigating with it, so the `SemiBold`-TextBlock walk still
+  resolves a card whose label lives inside an `Expander.Header` (spec §7's worry). *Delete after the
+  batch merges to main.*
 
 - **VERIFY — DataGrid behaviour at scale** — Effort: **S** · Risk: med.
   The grid carries `MaxHeight="260"` precisely because `ContentRoot` is a vertically unbounded
@@ -1368,10 +1505,51 @@ ms for the same reason. Full table in [multipipe-eval.md](multipipe-eval.md) sec
 
 **Next lever, if anyone wants more: BYTES, not messages.** Remaining 3,437 ms = dll 1,506 (real
 work) + ipc 1,278 (mostly payload) + ui 653 (parse). Trimming fields the CE export never reads would
-hit the payload-proportional IPC *and* the parse cost together. **Unquantified** - nobody has
-measured what fraction of a `walk_instance` payload the export actually consumes; measure that
-before committing. Note also that raising the batch chunk would achieve nothing: average batch size
-is ~16.6 (fan-out-limited), not near the 200 cap.
+hit the payload-proportional IPC *and* the parse cost together. Note also that raising the batch
+chunk would achieve nothing: average batch size is ~16.6 (fan-out-limited), not near the 200 cap.
+
+**✅ MEASURED (build 2339) — `scripts/analysis/walk_payload_audit.py`.** Byte-accounted a real
+Copy CE XML on SEED against a key-by-key map of what the exporters read (full table in
+[multipipe-eval.md](multipipe-eval.md) section 10.6):
+
+- Per-field keys (52.7% of the sample): **60.9% used / 18.6% CSX-only / 16.7% unused.**
+- Inline array elements (20.3%): **43.9% used / 44.6% unused** — `elem.h` (element raw hex) alone
+  is 9.0% of the whole payload and no exporter reads it.
+- The per-instance header (`name` / `class` / `outer_*` / `props_size` / even `addr`) is **99%
+  dead** — the export touches `result.Fields` and nothing else.
+- Verdict: **~24% of the payload-scaling bytes are droppable outright, ~38% if CSX opts out of
+  `hex` too.** Biggest single items: `elem.h`, `field.hex` (CSX-only), `field.value`,
+  `field.array_inner_addr`.
+
+**✅ SHIPPED (build 2351) — `lean: true`.** `walk_instance` / `walk_instance_batch` take a `lean`
+flag that omits exactly those keys (drop list in [pipe-protocol.md](pipe-protocol.md); design notes
+in [multipipe-eval.md](multipipe-eval.md) section 10.7). Subtractive only, so an older DLL that
+ignores it stays correct. Wired to the CE XML export path ONLY — CSX shares the same
+`ResolveDrilldownAsync` and genuinely reads `hex` / `bool_mask` / `bool_byte_offset`, so the default
+stays full-fat. `WalkInstanceLeanTests` proves lean and full payloads produce **byte-identical XML**
+(mutation-checked: blanking a key the exporter does read fails it).
+
+**✅ IN-GAME VERIFIED (build 2353, SEED).** Same object exported before (DLL 2338) and after
+(DLL 2353): **payload 1,982,875 -> 1,168,944 bytes over the same 134 batch responses = -41.0%**,
+matching section 10.6's prediction. The XML is unchanged — 149,621 lines / 14,326 leaves both
+sides, 15 differing lines and every one a per-session value (root address + FName ComparisonIndex,
+name half identical). DLL serialise time -20% (146.7 -> 116-119 ms), consistent across both runs.
+
+**Still open — the wall-clock.** On that small export `ipc` did NOT move (207 -> 213-216 ms) even
+though the bytes nearly halved: at ~15 KB/response over 134 calls, IPC is dominated by fixed
+per-call cost.
+
+A **bigger lean run exists** (2026-07-23 22:09, SEED `BP_LifeGameInstance_C`, depth 4, 13,845 structs
+/ 54 pointers): wall **2,086.6 ms**, 302 dispatches, split **dll 832.4 (39.9%) / ipc 704.3 / ui
+549.9 ms**, and **10.16 MB of lean payload** across 241 batch + 65 single responses (~39 KB per batch
+response — 4x the small run). It has **no before-side**, so it measures where the time sits now
+(DLL-bound) rather than what lean saved. Two cheap ways to close it:
+(a) re-run the same export against the pre-lean DLL (build 2338) for a true A/B; or
+(b) export the **same object as CSX**, which goes through the same `ResolveDrilldownAsync` with
+`lean:false` — caveat: CSX additionally drills object-arrays / DataTable rows, so its walk set is a
+SUPERSET and the comparison is an upper bound, not an equality.
+While at it, re-run the payload audit with `UE5DUMP_PIPE_LOG_FULL=1` for an untruncated sample — the
+1024-char body-log cap makes the whole-payload split read a flattering 39%.
 
 *Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
 (dev-log build 2156) already holds the cadence half.*

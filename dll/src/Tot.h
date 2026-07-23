@@ -60,6 +60,12 @@ inline std::atomic<bool> g_shutdown{false};
 inline thread_local bool t_backgroundWorker = false;
 inline void MarkBackgroundWorker() { t_backgroundWorker = true; }
 
+/// True on a re-assert / feature worker thread. Read by the invoke path to refuse
+/// the "direct ProcessEvent call off the game thread" fallback for REPEATING
+/// worker invokes: a user's one-shot invoke risking that path is a trade they
+/// asked for, a 10 Hz worker silently taking it for minutes is not.
+inline bool IsBackgroundWorker() { return t_backgroundWorker; }
+
 // True when any in-flight long-running operation should abort. On a background
 // worker thread only real shutdown aborts (see MarkBackgroundWorker); on a pipe
 // command thread a mid-command client disconnect (per-command) aborts too — so
