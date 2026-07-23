@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     UE5CEDumper unified build script — C++ DLL + C# Avalonia UI
 
