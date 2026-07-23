@@ -262,6 +262,39 @@ public class CoordLibraryScriptTests
     }
 
     [Fact]
+    public void Generate_UsesTheReferenceProvenRadioGroupHeight()
+    {
+        // 56 is the ONE height proven by the reference form (its group is always a
+        // single item row). Anything smaller clipped the caption and the buttons.
+        var s = Gen(E("A", "Chest"));
+        Assert.Contains("rgMap.Height = 56", s);
+        Assert.DoesNotContain("rgMap.Height = 40", s);
+        Assert.DoesNotContain("rgGroup.Height = 52", s);
+    }
+
+    [Fact]
+    public void Generate_ButtonsAreWideEnoughAndDoNotOverlap()
+    {
+        // "Force teleport" at 130 rendered as "orce telepor". Widths are generous and
+        // the Lefts are chained off them, so widening one can never overlap the next.
+        var s = Gen(E("A"));
+        Assert.Contains("btnForce.Width = 200", s);
+        Assert.Contains("btnForce.Left = bx", s);
+        Assert.Contains("btnClose.Left = bx", s);
+        Assert.DoesNotContain("btnClose.Left = 290", s);
+    }
+
+    [Fact]
+    public void Generate_MeasuresThePanelFromRealControlHeights()
+    {
+        // Control heights come from CE's font metrics, which cannot be known here --
+        // so the panel is sized from what the children actually occupy.
+        var s = Gen(E("A", "Chest"));
+        Assert.Contains("local lastTop = rgGroup.Top + rgGroup.Height", s);
+        Assert.Contains("pnlTop.Height = lastTop + 8", s);
+    }
+
+    [Fact]
     public void Generate_NoControlKeepsAHardcodedWidthWiderThanTheForm()
     {
         // The specific clipping bug: a 790px-wide radio group inside a form that

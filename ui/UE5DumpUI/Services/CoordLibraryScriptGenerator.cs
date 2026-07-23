@@ -42,6 +42,10 @@ public static class CoordLibraryScriptGenerator
     /// the search key), and the caller is told what was folded.</summary>
     public const int MaxGroupButtons = 8;
 
+    /// <summary>Radio buttons per row in the group selector. Drives the emitted
+    /// RadioGroup height, so it must match what the Lua sets.</summary>
+    public const int GroupColumns = 5;
+
     // Mailbox layout — dll/src/Mimic.h (MailboxData / TeleportOp).
     private const int CmdTeleport = 8;
     private const int OpExplicit = 13;   // TP_OP_EXPLICIT
@@ -69,6 +73,12 @@ public static class CoordLibraryScriptGenerator
     /// <summary>Description for the no-DLL record (kept distinct so both flavours can
     /// coexist in one cheat table).</summary>
     public const string NoDllRecordDescription = "UE5 Trainer: Coordinate Library (picker, no DLL)";
+
+    /// <summary>The Lua global holding this flavour's form. MUST differ per flavour:
+    /// a shared global makes the second record enabled re-show the first's window and
+    /// return early, so its own picker is never created.</summary>
+    internal static string FormGlobal(Flavour f) =>
+        f == Flavour.Dll ? "UE5CD_form" : "UE5CD_form_nodll";
 
     /// <summary>
     /// Build the full [ENABLE]/[DISABLE] AA script.
@@ -109,6 +119,11 @@ public static class CoordLibraryScriptGenerator
         var shownGroups = groups.Take(MaxGroupButtons).ToList();
         foldedGroups = groups.Skip(MaxGroupButtons).ToList();
 
+        // Each flavour owns its OWN form global. Sharing one made the second record
+        // to be enabled re-show the first's window and return, so its own picker was
+        // never built -- and left [DISABLE] able to touch a caFree'd form.
+        string formVar = FormGlobal(flavour);
+
         var sb = new StringBuilder(4096 + list.Count * 128);
         Line(sb, "[ENABLE]");
         Line(sb, "{$lua}");
@@ -134,8 +149,9 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "{$asm}");
         Line(sb, "[DISABLE]");
         Line(sb, "{$lua}");
+        Line(sb, "if syntaxcheck then return end");
         Line(sb, "-- Close the picker if it is still open.");
-        Line(sb, "if UE5CD_form ~= nil and not UE5CD_form.Destroyed then UE5CD_form.close() end");
+        Line(sb, $"if {formVar} ~= nil and not {formVar}.Destroyed then {formVar}.close() end");
         Line(sb, "{$asm}");
         return sb.ToString();
     }
@@ -184,6 +200,7 @@ public static class CoordLibraryScriptGenerator
     private static void AppendPickerForm(StringBuilder sb, int groupCount, Flavour flavour)
     {
         bool dll = flavour == Flavour.Dll;
+        string formVar = FormGlobal(flavour);
         if (dll)
         {
             // Offsets come from CeMailboxLayout (the single source of truth mirroring
@@ -196,8 +213,8 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "local DISPLAY_CAP = 2000   -- rows rendered at once; filter to narrow");
         Line(sb);
         Line(sb, "-- Reuse the window if it is already open (re-enabling the record).");
-        Line(sb, "if UE5CD_form ~= nil and not UE5CD_form.Destroyed then");
-        Line(sb, "  UE5CD_form.show(); UE5CD_form.BringToFront(); return");
+        Line(sb, $"if {formVar} ~= nil and not {formVar}.Destroyed then");
+        Line(sb, $"  {formVar}.show(); {formVar}.BringToFront(); return");
         Line(sb, "end");
         Line(sb);
         if (dll)
@@ -283,6 +300,16 @@ public static class CoordLibraryScriptGenerator
             Line(sb, "      UE5T_wrv(r + 2 * UE5T.vecWidth, e.roll)");
             Line(sb, "    end");
             Line(sb, "  end");
+            Line(sb, "  -- Read the position back. A raw RelativeLocation write is the WEAK path:");
+            Line(sb, "  -- on games that do not refresh the cached world transform, or where the");
+            Line(sb, "  -- movement component re-integrates, the value simply does not stick. Say so");
+            Line(sb, "  -- instead of reporting a success the user cannot see -- an unverifiable");
+            Line(sb, "  -- 'Teleported to X' next to a motionless character is worse than an error.");
+            Line(sb, "  local backX = UE5T_rdv(a)");
+            Line(sb, "  if backX == nil or math.abs(backX - e.x) > 1.0 then");
+            Line(sb, "    return nil, 'the write did not stick (the game reverted it) -- this is the'");
+            Line(sb, "      .. ' known weakness of the no-DLL path; use the DLL flavour for this game'");
+            Line(sb, "  end");
             Line(sb, "  return 0, nil");
             Line(sb, "end");
             Line(sb);
@@ -310,45 +337,49 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "synchronize(function()");
         Line(sb, "  local mapNow = currentMap()");
         Line(sb);
-        Line(sb, "  UE5CD_form = createForm(false)");
-        Line(sb, "  UE5CD_form.Caption = 'UE5CEDumper -- Coordinate Library'");
-        Line(sb, "  UE5CD_form.Width = 900");
-        Line(sb, "  UE5CD_form.Height = 600");
-        Line(sb, "  UE5CD_form.Position = 'poScreenCenter'");
+        Line(sb, $"  {formVar} = createForm(false)");
+        Line(sb, $"  {formVar}.Caption = 'UE5CEDumper -- Coordinate Library'");
+        Line(sb, $"  {formVar}.Width = 900");
+        Line(sb, $"  {formVar}.Height = 600");
+        Line(sb, $"  {formVar}.Position = 'poScreenCenter'");
         Line(sb, "  -- Resizable, and every control below is laid out from ClientWidth rather");
         Line(sb, "  -- than hardcoded pixels: the form does not always get the width it asks");
         Line(sb, "  -- for (observed 2269 -- a ~577px window clipped the map selector), and a");
         Line(sb, "  -- relative layout survives that as well as any user resize.");
-        Line(sb, "  UE5CD_form.BorderStyle = bsSizeable");   // bare, per InvokeScriptGenerator
-        Line(sb, "  local CW = UE5CD_form.ClientWidth");
+        Line(sb, $"  {formVar}.BorderStyle = bsSizeable");   // bare, per InvokeScriptGenerator
+        Line(sb, $"  local CW = {formVar}.ClientWidth");
         Line(sb);
         Line(sb, "  -- Panel creation order is load-bearing: alTop panels stack in creation");
         Line(sb, "  -- order and the alClient control must be created LAST.");
-        Line(sb, "  local pnlTop = createPanel(UE5CD_form)");
+        Line(sb, $"  local pnlTop = createPanel({formVar})");
         Line(sb, "  pnlTop.Align = 'alTop'");
-        // Rows: filter (36) + map selector (44, DLL only) + group selector (56).
-        Line(sb, "  pnlTop.Height = " +
-                 (36 + (dll ? 44 : 0) + (groupCount > 0 ? 56 : 0)).ToString(
-                     System.Globalization.CultureInfo.InvariantCulture));
+        // Placeholder: the real height is measured from the controls once they exist
+        // (see the "pnlTop.Height =" assignment after the last row is created). Guessing
+        // it up front is what clipped the selectors.
+        Line(sb, "  pnlTop.Height = 40");
         Line(sb, "  pnlTop.BevelOuter = 'bvNone'");
         Line(sb);
         Line(sb, "  local lblFilter = createLabel(pnlTop)");
         Line(sb, "  lblFilter.Caption = 'Filter:'");
         Line(sb, "  lblFilter.Left = 10");
-        Line(sb, "  lblFilter.Top = 12");
+        Line(sb, "  lblFilter.Top = 14");
         Line(sb);
         Line(sb, "  local edtFilter = createEdit(pnlTop)");
         Line(sb, "  edtFilter.Left = 60");
-        Line(sb, "  edtFilter.Top = 8");
+        Line(sb, "  edtFilter.Top = 10");
         Line(sb, "  edtFilter.Width = math.max(120, CW - 70)");
+        Line(sb, "  -- Leave the TEdit height at its default: the reference form never sets");
+        Line(sb, "  -- one, and a hardcoded value is what clipped it before.");
         Line(sb);
         if (dll)
         {
         Line(sb, "  local rgMap = createRadioGroup(pnlTop)");
         Line(sb, "  rgMap.Left = 10");
-        Line(sb, "  rgMap.Top = 36");
+        Line(sb, "  rgMap.Top = 40");
         Line(sb, "  rgMap.Width = math.max(240, CW - 20)");
-        Line(sb, "  rgMap.Height = 40");
+        // 56 = the reference form's working height for a CAPTIONED RadioGroup with one
+        // item row (CrimsonDesert.CT rgList). 40 clipped both caption and items.
+        Line(sb, "  rgMap.Height = 56");
         Line(sb, "  rgMap.Caption = 'Map'");
         Line(sb, "  rgMap.Columns = 2");
         Line(sb, "  rgMap.Items.add('Current map')");
@@ -359,18 +390,31 @@ public static class CoordLibraryScriptGenerator
         {
             Line(sb);
             Line(sb, "  local rgGroup = createRadioGroup(pnlTop)");
+            // "All" + one button per group, wrapped at GroupColumns per row. Height is
+            // 32 (caption band + margins) + 24 per item ROW, calibrated so a single row
+            // lands on the reference's proven 56.
+            int groupRows = (groupCount + 1 + GroupColumns - 1) / GroupColumns;
             Line(sb, "  rgGroup.Left = 10");
-            Line(sb, dll ? "  rgGroup.Top = 80" : "  rgGroup.Top = 36");
+            Line(sb, dll ? "  rgGroup.Top = 100" : "  rgGroup.Top = 40");
             Line(sb, "  rgGroup.Width = math.max(240, CW - 20)");
-            Line(sb, "  rgGroup.Height = 52");
+            Line(sb, $"  rgGroup.Height = {32 + groupRows * 24}");
             Line(sb, "  rgGroup.Caption = 'Group'");
-            Line(sb, "  rgGroup.Columns = 5");
+            Line(sb, $"  rgGroup.Columns = {GroupColumns}");
             Line(sb, "  rgGroup.Items.add('All')");
             Line(sb, "  for i = 1, #GROUPS do rgGroup.Items.add(GROUPS[i]) end");
             Line(sb, "  rgGroup.ItemIndex = 0");
         }
         Line(sb);
-        Line(sb, "  local pnlStatus = createPanel(UE5CD_form)");
+        Line(sb);
+        Line(sb, "  -- Size the top panel from what the controls ACTUALLY occupy. Guessing this");
+        Line(sb, "  -- up front is what clipped the selectors: control heights come from CE's");
+        Line(sb, "  -- font metrics, which we cannot know here.");
+        Line(sb, "  local lastTop = " + (groupCount > 0
+                 ? "rgGroup.Top + rgGroup.Height"
+                 : (dll ? "rgMap.Top + rgMap.Height" : "edtFilter.Top + edtFilter.Height")));
+        Line(sb, "  pnlTop.Height = lastTop + 8");
+        Line(sb);
+        Line(sb, $"  local pnlStatus = createPanel({formVar})");
         Line(sb, "  pnlStatus.Align = 'alTop'");
         Line(sb, "  pnlStatus.Height = 24");
         Line(sb, "  pnlStatus.BevelOuter = 'bvNone'");
@@ -378,34 +422,41 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  lblCount.Align = 'alClient'");
         Line(sb, "  lblCount.Caption = 'Type to filter (space = AND)'");
         Line(sb);
-        Line(sb, "  local pnlBottom = createPanel(UE5CD_form)");
+        Line(sb, $"  local pnlBottom = createPanel({formVar})");
         Line(sb, "  pnlBottom.Align = 'alBottom'");
         Line(sb, "  pnlBottom.Height = 50");
         Line(sb, "  pnlBottom.BevelOuter = 'bvNone'");
         Line(sb);
+        Line(sb, "  -- Button widths are generous on purpose. 'Force teleport' at 130 rendered");
+        Line(sb, "  -- as 'orce telepor': CE's font metrics are not knowable here, and a clipped");
+        Line(sb, "  -- caption on the button that OVERRIDES a safety guard is the worst place to");
+        Line(sb, "  -- be stingy. Lefts are chained off the previous width so they cannot drift.");
+        Line(sb, "  local bx, bw = 10, 150");
         Line(sb, "  local btnGo = createButton(pnlBottom)");
         Line(sb, "  btnGo.Caption = 'Teleport'");
-        Line(sb, "  btnGo.Left = 10");
+        Line(sb, "  btnGo.Left = bx");
         Line(sb, "  btnGo.Top = 8");
-        Line(sb, "  btnGo.Width = 120");
+        Line(sb, "  btnGo.Width = bw");
         Line(sb, "  btnGo.Height = 32");
+        Line(sb, "  bx = bx + bw + 10");
         Line(sb);
         Line(sb, "  local btnForce = createButton(pnlBottom)");
         Line(sb, "  btnForce.Caption = 'Force teleport'");
-        Line(sb, "  btnForce.Left = 140");
+        Line(sb, "  btnForce.Left = bx");
         Line(sb, "  btnForce.Top = 8");
-        Line(sb, "  btnForce.Width = 130");
+        Line(sb, "  btnForce.Width = 200");
         Line(sb, "  btnForce.Height = 32");
+        Line(sb, "  bx = bx + 200 + 10");
         Line(sb);
         Line(sb, "  local btnClose = createButton(pnlBottom)");
         Line(sb, "  btnClose.Caption = 'Close'");
-        Line(sb, "  btnClose.Left = 290");
+        Line(sb, "  btnClose.Left = bx");
         Line(sb, "  btnClose.Top = 8");
-        Line(sb, "  btnClose.Width = 90");
+        Line(sb, "  btnClose.Width = 110");
         Line(sb, "  btnClose.Height = 32");
         Line(sb);
         Line(sb, "  -- alClient LAST so it fills what is left.");
-        Line(sb, "  local lv = createListView(UE5CD_form)");
+        Line(sb, $"  local lv = createListView({formVar})");
         Line(sb, "  lv.Align = 'alClient'");
         Line(sb, "  lv.ViewStyle = 'vsReport'");
         Line(sb, "  lv.RowSelect = true");
@@ -509,7 +560,7 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  btnGo.OnClick = function() go(false) end");
         Line(sb, "  btnForce.OnClick = function() go(true) end");
         Line(sb, "  lv.OnDblClick = function() go(false) end");
-        Line(sb, "  btnClose.OnClick = function() UE5CD_form.close() end");
+        Line(sb, $"  btnClose.OnClick = function() {formVar}.close() end");
         Line(sb);
         Line(sb, "  -- Interactive form: the untick + window close belong on OnClose, NOT on a");
         Line(sb, "  -- momentary timer -- the window must stay open while the user is using it.");
@@ -519,15 +570,15 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  -- can still see -- re-entering OnClose and hanging CE (observed 2269).");
         Line(sb, "  -- Nil-ing it first makes [DISABLE]'s guard fail, so the close happens once.");
         Line(sb, "  -- It also stops [DISABLE] touching a caFree'd form object later.");
-        Line(sb, "  UE5CD_form.OnClose = function(sender)");
-        Line(sb, "    UE5CD_form = nil");
+        Line(sb, $"  {formVar}.OnClose = function(sender)");
+        Line(sb, $"    {formVar} = nil");
         Line(sb, "    if memrec ~= nil and memrec.Active then memrec.Active = false end");
         Line(sb, "    return caFree");
         Line(sb, "  end");
         Line(sb);
         Line(sb, "  rebuild()");
-        Line(sb, "  UE5CD_form.ActiveControl = edtFilter");
-        Line(sb, "  UE5CD_form.show()");
+        Line(sb, $"  {formVar}.ActiveControl = edtFilter");
+        Line(sb, $"  {formVar}.show()");
         Line(sb, "end)");
     }
 

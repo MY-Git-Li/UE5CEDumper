@@ -451,11 +451,21 @@ Project rule: **never invent a CE Lua API.**
 | `createEdit` | `.Left .Top .Width .Text .OnChange` |
 | `createRadioGroup` | `.Caption .Top .Left .Width .Height .Columns .Items.add(str) .ItemIndex .OnClick` |
 | `createButton` | `.Caption .Left .Top .Width .Height .OnClick` |
-| `createListView` | `.Align .ViewStyle('vsReport') .RowSelect .ReadOnly .MultiSelect .SelCount .Selected` · `.Columns.add().Caption`, `.Columns[i].Width` (0-based) · `.Items.beginUpdate()/.clear()/.add()/.endUpdate()/.Count/[i]` · row `.Caption`, `.SubItems.add(str)`, `.Selected` · `.OnDblClick`, `.OnKeyDown(sender,key,shift)` |
+| `createListView` | `.Align .ViewStyle('vsReport') .RowSelect .ReadOnly .MultiSelect .SelCount .Selected .ItemIndex` · `.Columns.add().Caption`, `.Columns[i].Width` (0-based) · `.Items.beginUpdate()/.clear()/.add()/.endUpdate()/.Count/[i]` · row `.Caption`, `.SubItems.add(str)`, `.Selected` · `.OnDblClick`, `.OnKeyDown(sender,key,shift)` |
 | globals | `synchronize(fn)`, `showMessage`, `writeToClipboard`, `caFree`, `syntaxcheck` |
 
 **Build only from that set: `createListView` + `createRadioGroup`. No ListBox, no
 ComboBox, no CheckBox.**
+
+> ⚠ **This table is a whitelist of what we have SEEN work, not the CE API surface.**
+> Absence from it is not evidence that something does not exist. `ListView.ItemIndex`
+> was missing here and a later investigation concluded from that absence that it was
+> an invented API and the root cause of a bug — wrong on both counts. It is
+> documented (`celua.txt` "Listview Class", *"ItemIndex: integer — the currently
+> selected index, -1 if nothing is selected"*) and explicitly registered in CE's own
+> source (`LuaListview.pas`, `luaclass_addPropertyToTable(... 'ItemIndex' ...)`), so
+> it returns an integer and can never raise "unknown property".
+> **Before declaring an API invented, check `celua.txt` and CE's source — not this table.**
 
 ### Layout rules from the reference
 

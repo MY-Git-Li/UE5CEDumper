@@ -217,6 +217,61 @@ public class CoordLibraryNoDllScriptTests
         }
     }
     [Fact]
+    public void BothFlavours_UseDifferentFormGlobals()
+    {
+        // Shipped broken: both flavours emitted the SAME "UE5CD_form" global, so the
+        // re-open guard made whichever record was enabled SECOND just re-show the
+        // other flavour's window and return -- its own picker was never built. Both
+        // records were pushed in the reported session, so this was reachable.
+        var dllScript = Dll(E("A"));
+        var noDllScript = NoDll(E("A"));
+
+        Assert.Contains("UE5CD_form_nodll", noDllScript);
+        Assert.DoesNotContain("UE5CD_form_nodll", dllScript);
+        // The DLL flavour must not accidentally match the no-DLL global either.
+        Assert.Contains("UE5CD_form = createForm", dllScript);
+        Assert.Contains("UE5CD_form_nodll = createForm", noDllScript);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void BothFlavours_DisableBlockGuardsSyntaxCheck(bool dllFlavour)
+    {
+        // The ENABLE block had the guard, DISABLE did not.
+        var s = dllFlavour ? Dll(E("A")) : NoDll(E("A"));
+        int disable = s.IndexOf("[DISABLE]", StringComparison.Ordinal);
+        Assert.Contains("if syntaxcheck then return end", s[disable..]);
+    }
+
+    [Fact]
+    public void NoDllScript_VerifiesTheWriteStuckInsteadOfClaimingSuccess()
+    {
+        // The raw RelativeLocation write is the known-weak path: on games that do
+        // not refresh the cached world transform it silently does not stick. Reading
+        // back turns an invisible failure into a diagnosis, and stops the picker
+        // reporting "Teleported to X" next to a motionless character.
+        var s = NoDll(E("A"));
+        Assert.Contains("local backX = UE5T_rdv(a)", s);
+        Assert.Contains("did not stick", s);
+    }
+
+    [Fact]
+    public void NoDllScript_PositionWriteMatchesTheTrainerTpRecall()
+    {
+        // The user's own acceptance criterion: if the logic matches
+        // "UE5 Trainer: TP Recall position", it passes. Same helper, same deref
+        // chain, same base, same three strides.
+        var s = NoDll(E("A"));
+        Assert.Contains("local p = UE5T_pawn()", s);
+        Assert.Contains("local rc = p and UE5T_deref(p, UE5T.rootOff)", s);
+        Assert.Contains("local a = rc + UE5T.relLocOff", s);
+        Assert.Contains("UE5T_wrv(a, e.x)", s);
+        Assert.Contains("UE5T_wrv(a + UE5T.vecWidth, e.y)", s);
+        Assert.Contains("UE5T_wrv(a + 2 * UE5T.vecWidth, e.z)", s);
+    }
+
+    [Fact]
     public void NoDllScript_StillHasBothTeleportButtons()
     {
         var s = NoDll(E("A"));
