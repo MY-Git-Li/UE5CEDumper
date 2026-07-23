@@ -10,6 +10,7 @@
 > implementation had to correct it, the text says so inline (see §5.2 on
 > precision) — nothing here is aspirational any more except the open questions
 > in §10.
+>
 > Parent contract: [teleport-spec.md](teleport-spec.md) (Wirbel markers / POV /
 > coord TP). This document covers the **UI-side unlimited coordinate list** and
 > its CE-Lua + CSV export/import.
