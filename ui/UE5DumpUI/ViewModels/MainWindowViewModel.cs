@@ -2861,6 +2861,78 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Tools menu: push the DLL-injection bootstrap into the CE table the user
+    /// ALREADY has open, as an [ENABLE]/[DISABLE] memory record
+    /// (<see cref="Services.CeInjectScriptGenerator"/>), so they never have to
+    /// open the standalone <c>UE5CEDumper.CT</c> first. Cheat Engine holds one
+    /// table at a time, which is what made the <c>.CT</c> route a two-stage load;
+    /// the <c>.CT</c> stays shipped as the developer / no-AOBMaker path.
+    ///
+    /// Falls back to CE record XML on the clipboard when the AOBMaker plugin
+    /// isn't reachable — the same pattern the Teleport / invoke pushes use.
+    /// </summary>
+    [RelayCommand]
+    private async Task InjectCeBootstrapAsync()
+    {
+        // The injectable DLL sits next to the UI exe (dist\UE5Dumper.dll) — the
+        // same resolution ProxyDeployViewModel.InjectIntoRunningGameAsync uses.
+        // Resolve it HERE rather than in the generator so a missing file is a
+        // clear error instead of a script that fails inside Cheat Engine.
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        var dllPath = Path.Combine(exeDir, "UE5Dumper.dll");
+        if (!File.Exists(dllPath))
+        {
+            StatusText = $"Inject bootstrap: UE5Dumper.dll not found next to the app ({dllPath})";
+            return;
+        }
+
+        StatusText = "Building CE inject bootstrap...";
+
+        try
+        {
+            var script = Services.CeInjectScriptGenerator.Generate(dllPath);
+            var description = Services.CeInjectScriptGenerator.RecordDescription;
+
+            // Sample availability before sending so "pipe broke mid-send" reads
+            // differently from "CE was never running".
+            if (_aobMaker != null)
+                await _aobMaker.CheckAvailabilityAsync();
+            bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+
+            bool sentToCe = false;
+            if (_aobMaker != null && wasAvailable)
+            {
+                // autoActivate stays false: this injects a DLL, so the user ticks
+                // it deliberately.
+                sentToCe = await _aobMaker.CreateAAScriptAsync(
+                    description, script, autoActivate: false,
+                    group: Services.CeInjectScriptGenerator.RecordGroup);
+            }
+
+            if (!sentToCe)
+            {
+                // A bare AA body can't be pasted into a record — wrap as CE
+                // memory-record XML.
+                await _platform.CopyToClipboardAsync(
+                    Services.CheatTableBuilder.WrapAaScriptXml(description, script));
+            }
+
+            StatusText = sentToCe
+                ? "Inject bootstrap added to the current CE table — tick it to inject"
+                : wasAvailable
+                    ? "⚠ AOBMaker pipe broke (CE closed?) — bootstrap copied as CE XML, paste into your address list"
+                    : "AOBMaker not connected — bootstrap copied as CE XML, paste into your address list";
+            _log.Info($"CE inject bootstrap {(sentToCe ? "sent to CE" : "to clipboard")} " +
+                      $"(dll={dllPath}, wasAvailable={wasAvailable})");
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Inject CE bootstrap failed", ex);
+            StatusText = $"Inject bootstrap failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
     /// Tools menu: stream the embedded <c>ue5_freeze_helper.lua</c> to a
     /// user-chosen file. Manual-fallback companion to
     /// <see cref="InjectFreezeHelperLuaAsync"/> for cases where AOBMaker

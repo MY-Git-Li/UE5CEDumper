@@ -21,9 +21,23 @@ internal static class CeMailboxLayout
     public const string OffCmd          = "0x00";   // cmd (write LAST to trigger)
     public const string OffStatus       = "0x04";   // status (poll == 1)
     public const string OffResult       = "0x08";   // result / observed state
+    public const string OffInitState    = "0x0C";   // initState (DLL-written auto-start readiness)
     public const string OffInstanceAddr = "0x10";   // instanceAddr / op / knobId / request
     public const string OffUfuncAddr    = "0x18";   // ufuncAddr / value / slot / show flag
     public const string OffParamsData   = "0x328";  // params_data[0..]
+
+    // Auto-start readiness values written to OffInitState (must match Mimic.h
+    // InitState). Unlike every other field here this one is NOT part of a
+    // command round-trip — the DLL publishes it once during start-up so a CE Lua
+    // bootstrap can poll for readiness with a pure memory read instead of
+    // sleeping a fixed budget (no executeCodeEx ⇒ no CreateRemoteThread, which
+    // games block).
+    public const int InitIdle    = 0;   // DLL mapped; auto-start has not begun
+    public const int InitRunning = 1;   // AOB scan / pipe-server start in progress
+    public const int InitReady   = 2;   // init finished AND the pipe server is up
+    public const int InitFailed  = 3;   // init finished but the pipe server failed
+    public const int InitSkipped = 4;   // deliberately skipped — CE plugin host, or
+                                        // another instance already owns the pipe
 
     // Cmd opcodes (must match Mimic.h Cmd enum).
     public const int CmdSetDebugCamera = 7;   // CMD_SET_DEBUG_CAMERA

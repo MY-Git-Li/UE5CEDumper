@@ -736,6 +736,7 @@
 
     <!-- Tools (always-available menu; doesn't depend on a DLL connection) -->
     <sys:String x:Key="str.Toolbar.Tools">Tools</sys:String>
+    <sys:String x:Key="str.Tools.InjectCeBootstrap">Add "Inject DLL" Record to Current CE Table</sys:String>
     <sys:String x:Key="str.Tools.InjectCeHelperLua">Inject Helper into Current CE Table</sys:String>
     <sys:String x:Key="str.Tools.ExportCeHelperLua">Export CE Helper Lua File...</sys:String>
     <sys:String x:Key="str.Tools.InjectFreezeHelperLua">Inject Freeze Helper into Current CE Table</sys:String>
@@ -1276,6 +1277,7 @@
     <sys:String x:Key="str.Tip.Toolbar.Options">Export-shape settings: pointer-node collapse, array/dropdown/preview limits, drill depth. Set once per session.</sys:String>
     <sys:String x:Key="str.Tip.Export">Export object data in various formats</sys:String>
     <sys:String x:Key="str.Tip.Tools">Tools that don't depend on a live DLL connection (helper file export/inject, etc.)</sys:String>
+    <sys:String x:Key="str.Tip.Tools.InjectCeBootstrap">Adds an [ENABLE]/[DISABLE] record that injects UE5Dumper.dll and starts the pipe server, straight into the CE table you already have open — so you never have to load the standalone UE5CEDumper.CT first (Cheat Engine holds one table at a time). Tick the record to inject; it polls the DLL for readiness instead of sleeping a fixed 15s, and reports a real error on failure. The standalone .CT is still shipped for developer use. Needs the AOBMaker CE Plugin; without it the record is copied to the clipboard as CE XML to paste in.</sys:String>
     <sys:String x:Key="str.Tip.Tools.InjectCeHelperLua">One-click: send ue5_invoke_helper.lua straight into the currently open CE table via the AOBMaker plugin. Replaces existing copy if present. Skips the manual save-to-disk + Table -&gt; Add File... dance. Requires the AOBMaker CE Plugin to be loaded (open Cheat Engine first); falls back gracefully if unavailable.</sys:String>
     <sys:String x:Key="str.Tip.Tools.ExportCeHelperLua">Save ue5_invoke_helper.lua to a file you can drop next to your .CT and add via Cheat Engine's Table -&gt; Add File... menu. Required by every "Copy AA Script (Baked)" output -- one-time setup per cheat table.</sys:String>
     <sys:String x:Key="str.Tip.Tools.InjectFreezeHelperLua">One-click: send ue5_freeze_helper.lua into the currently open CE table via the AOBMaker plugin. Required once per .CT by every Property Search "Freeze" script. Coexists with ue5_invoke_helper.lua.</sys:String>

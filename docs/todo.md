@@ -1260,37 +1260,35 @@ record Tier 0 as WON'T-DO.**
 
 -----
 
-## `.CT` delivery — kill the two-stage table load + the blind 15 s wait — EVALUATED (2026-07-23); **(b) SHIPPED**
+## `.CT` delivery — kill the two-stage table load + the blind 15 s wait — EVALUATED (2026-07-23); **BOTH SHIPPED**
 
 **Verdict: the push mechanism the user wants already exists and already ships — it just was never
 pointed at the bootstrap script. Both halves are small and immediately actionable.**
-**(b) shipped in build 2291; (a) is still open.**
+**(b) shipped in build 2291, (a) in build 2295.** Two small follow-ups remain under (a); delete this
+whole section once they land (or are dropped) and the in-game verify passes.
 
-### (a) Two-stage table load — three existing escapes, one small gap
+### (a) ✅ DONE — the bootstrap is now pushed into the table CE already has open
 
-Today the user must open **our** `.CT` to inject, then open the **game's** table — CE holds one table
-at a time, so the injection entry disappears. But:
+SHIPPED build 2295 (dev-log 2026-07-23). New `Services/CeInjectScriptGenerator.cs` emits the
+`[ENABLE]`/`[DISABLE]` bootstrap and **Tools → "Add \"Inject DLL\" Record to Current CE Table"**
+pushes it via the existing `CreateAAScript`, grouped under `UE5CEDumper (DLL)`, with a CE-XML
+clipboard fallback. No DLL / pipe / CE-plugin change. **The standalone `.CT` is unchanged and still
+shipped** as the developer / no-AOBMaker path, per the explicit call to keep it.
 
-1. **`CreateAAScript`** ([aobmaker-integration.md](aobmaker-integration.md) §3) already creates an AA
-   memory record **in the address list CE currently has open**, with `group` folder nesting. Teleport
-   and LiveWalker invoke already use it (`IAobMakerBridge.CreateAAScriptAsync`).
-2. **`InjectTableFile`** (§4) already embeds an arbitrary Lua file into the **currently open** table
-   (`Tools → Inject Helper into Current CE Table`).
-3. The UI can inject with no CE at all — `WindowsPlatformService.InjectDll` is
-   CreateRemoteThread + `LoadLibraryW`, with an `InjectDllElevated` sibling.
+Improvements over the `.CT` route, both worth keeping if this code is ever touched: the DLL path is
+**baked in** by the UI (no run-time directory search; a missing DLL is caught before generating), and
+`[DISABLE]` is a **quiet no-op when nothing was ever loaded** (`[ENABLE]`'s bail-outs untick the
+record, which makes CE run `[DISABLE]` against a DLL that never loaded). **Needs in-game verify**;
+*delete this note afterwards.*
 
-⇒ **The `.CT` is not required.** The gap is only that the `ue5_inject()` body (the `[ENABLE]` block
-of `scripts/UE5CEDumper.CT`) has no generator behind `CreateAAScript`. Add one, push with
-`group = "UE5CEDumper (DLL)"` exactly like the Teleport card, and inherit the existing CE-XML
-clipboard fallback for users without the AOBMaker plugin. Effort **S** · Risk low.
+**Still open — the preference order isn't surfaced in the UI.** Users have no signpost that the
+routes rank **proxy DLL (no CE at all) > UI Inject button / pushed AA record > standalone `.CT`**.
+Effort **XS** (tooltip / status wording).
 
-Surface the preference order in the UI: **proxy DLL (no CE at all) > UI Inject button + push the AA
-record into the current table > standalone `.CT` (kept for no-AOBMaker users)**.
-
-Worth evaluating as a 4th route: **CE's `autorun` folder** — a `.lua` dropped in
-`Cheat Engine/autorun/` defines `ue5_inject()` for **every** table permanently, needs no AOBMaker
-plugin, and the UI can write the file. Effort **S**, but verify first that the CE APIs we rely on are
-available that early in CE startup.
+**Still open — CE's `autorun` folder as a 4th route.** A `.lua` dropped in `Cheat Engine/autorun/`
+would define `ue5_inject()` for **every** table permanently and needs no AOBMaker plugin; the UI can
+write the file. Effort **S**, but verify first that the CE APIs we rely on are available that early
+in CE start-up. Lower priority now that (a) has landed — this only helps users without the plugin.
 
 ### (b) ✅ DONE — the 15 s blind countdown is now a 250 ms poll
 

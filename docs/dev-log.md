@@ -20,6 +20,50 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — Push the "Inject DLL" record into the CE table you already have open (build 2295; dev, UI-only)
+
+Kills the two-stage table load. Cheat Engine holds **one table at a time**, so using the standalone
+`scripts/UE5CEDumper.CT` meant: open ours → inject → open the game's own table → the injection entry
+is gone. New **Tools → "Add \"Inject DLL\" Record to Current CE Table"** generates the same bootstrap
+as an `[ENABLE]`/`[DISABLE]` memory record and pushes it into whatever table CE currently has open,
+via the AOBMaker plugin's existing `CreateAAScript` (grouped under `UE5CEDumper (DLL)` so it doesn't
+litter the user's root). **The standalone `.CT` is unchanged and still shipped** — it stays the
+developer / no-AOBMaker path.
+
+**Zero new plumbing.** `CreateAAScript` already wrote into the open address list (Teleport and
+LiveWalker invoke have used it for builds); the bootstrap simply had no generator behind it. New
+`Services/CeInjectScriptGenerator.cs` + one Tools command; no DLL, pipe, or CE-plugin change.
+
+Carried over from the build-2291 `.CT` work, so both routes behave identically: **polls the DLL's
+mailbox `initState` instead of sleeping a fixed budget** (pure memory read via `g_invokeMailbox`,
+never `executeCodeEx` — games block `CreateRemoteThread` during start-up), resolves the symbol
+**inside** the poll loop (CE's symbol handler may not see the fresh module on the first try), and
+treats a timeout as a real error rather than printing "probably fine". `[DISABLE]` may use
+`executeCodeEx` because by then the game is running normally.
+
+Improvements over the `.CT` version:
+- **The DLL path is baked in.** The UI already knows where `dist\UE5Dumper.dll` is (same resolution
+  as `ProxyDeployViewModel.InjectIntoRunningGameAsync`), so there is no run-time directory search,
+  and a missing DLL is reported by the UI *before* generating rather than failing inside CE.
+- **`[DISABLE]` is a quiet no-op when nothing was ever loaded.** `[ENABLE]`'s early bail-outs set
+  `memrec.Active = false`, which makes CE run `[DISABLE]` against a DLL that never loaded; it now
+  probes for `UE5_StopPipeServer` first and stays silent instead of reporting a false failure.
+- Falls back to CE record XML on the clipboard when AOBMaker isn't reachable, distinguishing "pipe
+  broke mid-send" from "CE was never running".
+
+**Verification:** 2822 tests green (+17). `CeMailboxLayout` gained `OffInitState` + the five
+`InitState` values so the offsets stay single-sourced. The emitted Lua was additionally checked by
+running both `{$lua}` blocks through a real Lua parser — the shape assertions alone would not have
+caught a syntax error.
+
+Two test-only traps worth remembering: `Assert.DoesNotContain("\0", s)` **always fails** — the string
+overload is culture-sensitive and under ICU a NUL has zero collation weight, so it "matches" at
+position 0 of any string (use the `char` overload, which is ordinal); and asserting
+`DoesNotContain("executeCodeEx(")` misses `pcall(executeCodeEx, ...)`, so the check now strips Lua
+comment lines and asserts on the bare identifier against code only.
+
+-----
+
 ## 2026-07-23 — CE `.CT` inject: poll for readiness instead of sleeping 15 s; double-inject guard learns dinput8/dxgi (build 2291; dev)
 
 Two small fixes to the Cheat-Engine injection path, both from the 2026-07-23 evaluation batch

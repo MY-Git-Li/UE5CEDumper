@@ -299,6 +299,10 @@
                           Padding="8,3" FontSize="12">
             <DropDownButton.Flyout>
               <MenuFlyout>
+                <MenuItem Header="{StaticResource str.Tools.InjectCeBootstrap}"
+                          Command="{Binding InjectCeBootstrapCommand}"
+                          ToolTip.Tip="{StaticResource str.Tip.Tools.InjectCeBootstrap}"/>
+                <Separator/>
                 <MenuItem Header="{StaticResource str.Tools.InjectCeHelperLua}"
                           Command="{Binding InjectCeHelperLuaCommand}"
                           ToolTip.Tip="{StaticResource str.Tip.Tools.InjectCeHelperLua}"/>
