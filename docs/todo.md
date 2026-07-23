@@ -40,8 +40,13 @@ the row here when it ships.
   un-finalised row is *usable* — the fix relies on deletion, not on it being auto-cleaned); the outer catch
   was deliberately **not** filtered (that would reroute to the non-deleting generic handler and re-leave a
   usable partial — M7's separate concern). Regression test
-  `Capture_DisconnectMidStream_DoesNotSaveUsablePartial`; 2526 green. *Delete this row after the audit batch
-  is merged to main.* *Parent: audit-2026-07-14-findings §H1.*
+  `Capture_DisconnectMidStream_DoesNotSaveUsablePartial`; 2526 green.
+  > **✅ LIVE-VERIFIED 2026-07-23 (Elliot, the real kill).** Snapshot #1 created 22:43:48, 12 chunks
+  > in, chunk `offset 90112 / total 356407` (25%) sent and never answered because the GAME WAS CLOSED
+  > → `Pipe: ReadLine returned null (disconnected)` → **`SnapshotStore: deleted snapshot #1 (reclaimed
+  > disk)`** at 22:44:03. No usable partial survived, the UI did not wedge, and it shut down cleanly
+  > afterwards. This is exactly the H1 scenario, executed for real rather than simulated.
+  *Delete this row after the audit batch is merged to main.* *Parent: audit-2026-07-14-findings §H1.*
 
 - **[✅ ALL MEDIUMs DONE — 1 HIGH + 10 MED shipped on `dev`; DLL M1–M5 await in-game verify]** — the entire
   audit-#3 HIGH+MEDIUM set is fixed. Remaining audit work = the **13 LOW** batch (below) + optional/cosmetic
@@ -116,7 +121,12 @@ the row here when it ships.
   bumped in `SetEnabled(true)` (so a re-enable re-resolves); the failure case is cached too, so a game
   that cooked the function out no longer rescans 10x/s. **Re-check in-game:** enable See-Through on a
   big game and confirm the `only CDO` WARN now appears once per enable instead of continuously — and
-  that occluders still hide/restore. *Parent: Schlacht build 1991; log review 2026-07-23.*
+  that occluders still hide/restore.
+  > **✅ VERIFIED on the next run (Elliot, build 2356): 145 full-pool scans in 29 s → 1 in 19 s**, and
+  > See-Through still behaves (`enabled (pierce=1)` → worker → `worker stopped` → `disabled
+  > (1 restored)`). The single scan is visible as one
+  > `FindInstancesByClass class='KismetSystemLibrary': 1 found, scanned=352851`.
+  *Parent: Schlacht build 1991; log review 2026-07-23.*
 
 - **✅ FIXED (build 2354) — the "concurrent first-invoke" WARN fired on EVERY invoke** —
   Effort: **S** · Risk: low. `Frieren::EnsureProcessEventReady` tested `arrivals > 1`, where
@@ -127,7 +137,8 @@ the row here when it ships.
   i.e. there was no contention at all. Beyond the log spam, the diagnostic was worthless because it
   could never be false. Fix: publish the arrival high-water mark inside the `call_once` lambda and
   warn only for `arrivals <= thatMark` — genuine in-flight contention only.
-  *Parent: audit #3 ProcessEvent double-install guard; log review 2026-07-23.*
+  > **✅ VERIFIED on the next run (Elliot, build 2356): 436 WARNs → 0**, on a session that made 552
+  > invokes. *Parent: audit #3 ProcessEvent double-install guard; log review 2026-07-23.*
 
 - **[✅ ALL 13 LOWs DONE] Audit #3 low-severity batch** — SHIPPED on `dev` in four commits:
   UI L13–L17 (`8bd33f8`, +2 tests), Solide L2/L3/L4 (`408fd2d`), DLL L1/L5/L8/L10/L12 (`7f3898f`), and the
@@ -151,13 +162,16 @@ the row here when it ships.
 
 ## ▶ Next up (genuinely actionable now)
 
-- **Multi-pipe Phase 1 — residual verification (low priority; lane split SHIPPED PR #396)** —
+- **Multi-pipe Phase 1 — residual verification: only the WATCH item is left** —
   Effort: **S** · Risk: low. The two-connection lane split shipped + in-game verified for §9.6 items
-  1–5 (dev-log 2026-06-28). Two checklist items weren't explicitly exercised: (6) **watch-event
-  delivery** to the interactive lane (System-tab / address watch still pushes correctly), and the
-  **single-lane-independent-drop edge** (§9.7 — one lane errors while the other lives; the UI router
-  should tear down both for a clean reconnect, and a stray interactive disconnect shouldn't cancel a
-  running bulk scan). Verify opportunistically. *Parent: multipipe-eval §9 (PR #396).*
+  1–5 (dev-log 2026-06-28).
+  > **✅ The lane-drop edge is now verified (Elliot 2026-07-23).** Closing the game mid-snapshot
+  > dropped the bulk lane and the router did exactly what §9.7 specifies:
+  > `Pipe lane dropped — tearing down both lanes for a clean reconnect` → `Pipe disconnected`, with the
+  > in-flight snapshot faulting into H1's delete path rather than half-finishing. No wedge, no orphan.
+  Still open: (6) **watch-event delivery** to the interactive lane (System-tab / address watch still
+  pushes correctly while the bulk lane is busy). Verify opportunistically.
+  *Parent: multipipe-eval §9 (PR #396).*
   The build-1836 single-handle worker-pool was REVERTED (deadlocked on the synchronous pipe, §8.1).
   The sister repo `D:\Github\discrete` runs a proven alternative: the UI opens **two** client
   connections (interactive + bulk) to a `maxInstances≥2` server that serves **each connection on
@@ -233,12 +247,13 @@ the row here when it ships.
   Open sub-question: the packed **SerialNumber** offset (currently best-effort `0x0C`) is unpinned.
   *Parent: PackedItem.h + Aura packed mode + set_packed_consts shipped build 1108 (dev-log 2026-06-14).*
 
-- **DLL cancellation — live-game verification** — Effort: **0** (verify only) · Risk:
-  low. Confirm in-game that (a) disabling the script / closing the game while a long
-  scan runs no longer hangs, (b) closing the UI mid-scan stops the DLL and a reopened
-  UI reconnects promptly.
-  *Parent: cooperative cancel + shutdown-abort + disconnect monitor shipped build
-  936-937, PR #238 (dev-log 2026-06-06).*
+- **✅ DONE — DLL cancellation live-verified (Elliot 2026-07-23).** (a) **Closing the game while a
+  snapshot streamed** ended with a clean DLL-side `PipeServer: Stopped` 5 s after the last answered
+  chunk, and the UI tore both lanes down and deleted the partial instead of hanging. (b) closing the
+  UI mid-scan + prompt reconnect was already covered by the two back-to-back sessions earlier that
+  evening (disconnect at 22:25:11 → reconnect at 22:25:13, 2 s). *Delete after the batch merges to
+  main. Parent: cooperative cancel + shutdown-abort + disconnect monitor shipped build 936-937,
+  PR #238 (dev-log 2026-06-06).*
 
 - **Guess? "missing" mid-object data — RESOLVED (working as designed; diagnostic kept).** The
   `WALK:guess` diagnostic (build 1364+, `Ubel.cpp` `WalkInstance` fillGaps block, one line per
@@ -324,6 +339,37 @@ the row here when it ships.
   but technically UB. Lowest-risk fix: drop the redundant `~4288` write (verify `CorrectSubclassOffsets`
   already covers that calibration first — don't regress StructProperty struct-name resolution), or
   make the calibrated offsets `std::atomic<int>` with relaxed loads. *Parent: parallel-snapshot race audit, this session.*
+
+- **NEW (Elliot 2026-07-23) — a transient `MH_CreateHook` failure permanently poisons the session
+  into the "unsafe direct call" path** — Effort: **S-M** · Risk: **med** (touches the hook path, the
+  most crash-prone code in the DLL). **Observed once, on the run right after a session where the same
+  hook installed fine at the same address:**
+  > `[ERROR] GameThreadDispatch: MH_CreateHook failed: MH_ERROR_MEMORY_ALLOC`
+  > `[WARN]  GameThreadDispatch: hook install failed, invoke will use direct call (unsafe)`
+  > `ProcessEvent: first-time init complete — offset=608, hook_active=0`
+
+  `MH_ERROR_MEMORY_ALLOC` means MinHook could not place a trampoline within reach of the target, which
+  depends on the process's VM layout at that instant — i.e. it is **intermittent by nature**
+  (22:24 install at `0x1415968E0` succeeded; 22:43 the same address failed). Two problems follow:
+
+  1. **It is latched forever.** `TryInstallGameThreadHook` sets `static bool s_hookAttempted = true`
+     **before** attempting and never clears it on failure, and `EnsureProcessEventReady` wraps the
+     whole thing in `std::call_once`. So one unlucky allocation means *every* invoke for the rest of
+     the process life takes the fallback — even when the user re-enables the feature minutes later,
+     when the VM layout may well have room again.
+  2. **The fallback is the historically crash-prone path**, and a WORKER-driven feature hammers it:
+     See-Through logged **552** × `UE5_CallProcessEvent: hook not active, using direct call (unsafe)`
+     in 19 seconds (~10 ProcessEvent calls/second from a non-game thread). It happened to survive
+     here, but a one-shot user invoke and a 10 Hz re-assert worker are very different exposures.
+
+  **Fix shape:** (a) latch `s_hookAttempted` only on SUCCESS and allow a bounded, rate-limited retry
+  (e.g. at most N attempts, no more often than every few seconds, or simply re-attempt on the next
+  *user-initiated enable* rather than per invoke) — MinHook state after a failed `MH_CreateHook` is
+  clean, so retrying is safe; (b) log the unsafe-fallback line **once per state transition** instead
+  of once per invoke; (c) consider refusing the direct-call fallback for *repeating worker* invokes
+  specifically (Schlacht/Solide/Hemmung re-assert), where the risk/benefit is worst — a feature that
+  quietly declines is better than one that quietly risks the game. **Decide (c) before building.**
+  *Parent: Stark::InstallHook / Frieren::TryInstallGameThreadHook; log review 2026-07-23.*
 
 -----
 
