@@ -675,7 +675,9 @@ public partial class ProxyDeployViewModel : ViewModelBase
             ct.ThrowIfCancellationRequested();
             StatusText = $"Removing from {game.Name}...";
 
-            bool success = await _deploy.UndeployAsync(game, SelectedProxyType, ct);
+            // Type-agnostic: removes every proxy flavour of ours in the folder, not
+            // just SelectedProxyType (that radio governs deploying).
+            bool success = await _deploy.UndeployAsync(game, ct);
             if (success) ok++;
             else fail++;
         }

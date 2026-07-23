@@ -8,6 +8,21 @@ state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
 > build 2246 (PR #448, 2026-07-20).** Newer work lives in [dev-log.md](dev-log.md):
+> - builds **2291–2299 (2026-07-23)** — **four ranked DLL-delivery routes**, and the ranking is
+>   now stated in the UI (Proxy Deploy header line + every button tooltip) and leads
+>   [tips.md](tips.md). **① proxy DLL > ② in-UI inject > ③ from Cheat Engine > ④ standalone
+>   `.CT`.** ③ gained both flavours: **Tools → Install CE autorun Helper** (writes
+>   `ue5_autorun.lua` into `<CheatEngine>\autorun\`, auto-locating the install from a running CE
+>   process — every table then has `ue5_inject()` permanently, no `.CT` and no AOBMaker plugin)
+>   and **Tools → Add "Inject DLL" Record** (pushes the bootstrap into the table already open via
+>   `CreateAAScript`). The blind 15 s wait is gone everywhere: all routes poll the DLL's new
+>   `Mimic::InitState` (mailbox `+0x0C`, a pure memory read — never `executeCodeEx`, which needs
+>   `CreateRemoteThread` that games block at start-up), and a timeout is now a real error instead
+>   of "complete (or failed)". Shared emitter `CeReadinessLua` keeps the three call sites from
+>   drifting. Also: the double-inject guards learned `dinput8`/`dxgi` (they still tested the old
+>   `version`+`winmm` pair), and **Undeploy is type-agnostic** — it sweeps every proxy flavour of
+>   ours rather than only the selected radio, while never touching another program's DLL.
+>   **LIVE-VERIFIED:** `.CT` + autorun routes.
 > - builds **2220 + 2238 (2026-07-19)** — **MindsEye licensee-fork support** (Build A Rocket
 >   Boy, UE 5.4.4). Two independent failures solved: **GObjects** was reported `OK` **on
 >   garbage** (the AOB found the real array but the preset was written one struct-level down,

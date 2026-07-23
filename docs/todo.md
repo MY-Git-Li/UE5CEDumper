@@ -1194,13 +1194,11 @@ prove the reverse either, since a dynamic `LoadLibrary("dxgi.dll")` also searche
 `xinput1_4` — 109 functions but only **8 named, the rest ordinal-only**, so the `.def` needs
 `NONAME` + ordinal mapping, for only 3/7 coverage.
 
-**✅ DONE — latent bug found while measuring (independent of this item).** The double-inject guards
-only knew the *old* proxy pair: `Methode.cpp` `IsAlreadyLoadedInTarget` and
-`scripts/UE5CEDumper.CT` `ue5_isAlreadyLoaded` both tested `version.dll` / `winmm.dll` and
-**neither checked `dinput8.dll` or `dxgi.dll`**, the two proxies we actually ship — so a dxgi or
-dinput8 deployment had no guard and could double-map. Both now drive off a named list
-(`kProxyDllNames` / `UE5_PROXY_DLL_NAMES`) with cross-references so a 4th flavour can't desync them.
-SHIPPED build 2291 (dev-log 2026-07-23). *Delete this note after in-game verify.*
+**Note for whoever adds winmm:** the double-inject guards are now driven off a shared named list
+(`Methode.cpp` `kProxyDllNames` / `UE5CEDumper.CT` `UE5_PROXY_DLL_NAMES`) rather than the old
+hardcoded `version` + `winmm` pair — add the 4th flavour to **both** or the guard silently stops
+covering it (shipped build 2291; the `.CT` half is in-game verified, the `Methode.cpp` CE-plugin half
+is only reachable via CE's *Inject && Connect* menu item and has not been exercised).
 
 Effort **M** · Risk low (after the BLOCKER fix). **Prereq before committing:** re-run the import
 measurement across the 30+ titles in [test-games.md](test-games.md) using the repo's own
@@ -1257,68 +1255,6 @@ record Tier 0 as WON'T-DO.**
 
 *Parent: multipipe-eval.md Phase 1 (non-blocking dispatch) needs Tier 1 to be decidable; Linie
 (dev-log build 2156) already holds the cadence half.*
-
------
-
-## `.CT` delivery — kill the two-stage table load + the blind 15 s wait — EVALUATED (2026-07-23); **BOTH SHIPPED**
-
-**Verdict: the push mechanism the user wants already exists and already ships — it just was never
-pointed at the bootstrap script. Both halves are small and immediately actionable.**
-**(b) shipped in build 2291, (a) in build 2295.** Two small follow-ups remain under (a); delete this
-whole section once they land (or are dropped) and the in-game verify passes.
-
-### (a) ✅ DONE — the bootstrap is now pushed into the table CE already has open
-
-SHIPPED build 2295 (dev-log 2026-07-23). New `Services/CeInjectScriptGenerator.cs` emits the
-`[ENABLE]`/`[DISABLE]` bootstrap and **Tools → "Add \"Inject DLL\" Record to Current CE Table"**
-pushes it via the existing `CreateAAScript`, grouped under `UE5CEDumper (DLL)`, with a CE-XML
-clipboard fallback. No DLL / pipe / CE-plugin change. **The standalone `.CT` is unchanged and still
-shipped** as the developer / no-AOBMaker path, per the explicit call to keep it.
-
-Improvements over the `.CT` route, both worth keeping if this code is ever touched: the DLL path is
-**baked in** by the UI (no run-time directory search; a missing DLL is caught before generating), and
-`[DISABLE]` is a **quiet no-op when nothing was ever loaded** (`[ENABLE]`'s bail-outs untick the
-record, which makes CE run `[DISABLE]` against a DLL that never loaded). **Needs in-game verify**;
-*delete this note afterwards.*
-
-**✅ DONE — the preference order is surfaced in the UI** (build 2296). An always-visible line in the
-Proxy Deploy panel (`str.ProxyDeploy.RouteOrder`) ranks the three routes, and the Deploy / Inject /
-Tools-bootstrap tooltips each name their own rank so the ordering is consistent wherever the user is
-standing. Deliberately not tooltip-only in the panel: that is the screen where the choice is made,
-and a tooltip is only found by someone who already knew to look.
-
-**✅ DONE — CE's `autorun` folder as a 4th route** (build 2297).
-`Services/CeAutorunScriptGenerator.cs` emits `ue5_autorun.lua`; **Tools → Install CE autorun Helper**
-writes it into `<CheatEngine>\autorun\`, auto-locating the install from a *running* CE process
-(`GameProcessInfo.Path`) with a save-dialog fallback. Every table then has `ue5_inject()` /
-`ue5_shutdown()` plus a CE main-menu entry, with no `.CT` and no AOBMaker plugin.
-
-The early-startup API question that gated this is resolved **by design, not by testing**: the file
-only *defines* things at load time (autorun runs before any process is attached — a unit test
-enforces that no `injectDLL` / `getOpenedProcessID` / `readInteger` / `executeCodeEx` / `showMessage`
-appears at top level), and the one genuinely uncertain call, `getMainForm().Menu`, is `pcall`-wrapped
-so a not-ready form leaves the menu absent while `ue5_inject()` still works from the Lua console. The
-menu API shape is copied from the verified precedent in `vendor/UE4 Dumper.CT` (`createMenuItem` /
-`parent.add` / `.Caption` / `.OnClick`); a `ue5_menuAdded` global makes a manual re-run idempotent.
-**Needs in-game verify** — specifically that CE picks the file up and the menu entry appears;
-*delete this note afterwards.*
-
-### (b) ✅ DONE — the 15 s blind countdown is now a 250 ms poll
-
-SHIPPED build 2291 (dev-log 2026-07-23). New `Mimic::InitState`
-(`IDLE`/`RUNNING`/`READY`/`FAILED`/`SKIPPED`) published by `UE5_AutoStart` + both
-`AutoStartThreadProc` flavours, read by the `.CT` via `getAddress("g_invokeMailbox")` +
-`readInteger` — a pure memory read, no `CreateRemoteThread`. Timeout and `FAILED` are now real
-errors instead of a success message. `initState` reuses the former `reserved` slot at `+0x0C`, so
-no `.def` or UI offset changed. The symbol is resolved **inside** the poll loop because CE's symbol
-handler may not see the just-injected module yet. **Needs in-game verify** (CE Lua isn't
-unit-testable); *delete this note afterwards.*
-
-Free side-benefit now available: the script prints the real ready time, giving a per-host "how long
-does the AOB scan actually take" measurement — a Tier 1 input for the performance-counter item above.
-
-*Parent: AOBMaker bridge `CreateAAScript` / `InjectTableFile` (aobmaker-integration.md §3-4);
-project-ce-lua-output-hygiene.*
 
 -----
 

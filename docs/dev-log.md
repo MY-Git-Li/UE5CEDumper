@@ -20,6 +20,40 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — Undeploy removes every proxy flavour of ours, not just the selected one (build 2299; dev, UI-only)
+
+**Reported bug.** With `dxgi.dll` deployed and the radio switched to `version.dll`, *Undeploy* did
+nothing — `UndeployAsync` only ever looked at `proxyType.GetDllName()`. The user was left unable to
+remove the proxy at all, while the grid cheerfully reported `DeployedOtherType` at them (the
+*detection* side has handled all flavours since build 2134 via `deployedProxyNames`; only the removal
+was type-scoped).
+
+**Fix: undeploy is type-agnostic.** The radio governs what to *deploy*; undeploy is a clean-up, so it
+now sweeps every flavour we ship. `UndeployAsync` lost its `ProxyType` parameter entirely rather than
+keeping a misleading one. It still only deletes files that are **ours** (`IsOurProxyDll` →
+`FileVersionInfo.ProductName`); a foreign `version.dll`/`dxgi.dll` (mod loader, another tool) is left
+alone and named in the message.
+
+Three decisions worth keeping:
+- **Per-file try/catch.** One locked DLL must not abandon the rest — removing what we can is the
+  point, and the locked one is reported by name.
+- **Refusing a foreign DLL is only a FAILURE when we removed nothing of ours.** Otherwise it's a note
+  on an otherwise successful clean-up (`NotDeployed` + "Left another program's version.dll").
+  A locked file outranks both, since it's the actionable one.
+- **The policy is pure and separately testable.** `PlanUndeploy` (which files) and
+  `ResolveUndeployOutcome` (status/message/success) are static and side-effect free, because
+  ownership is decided by a PE version resource — fabricating one in a unit test would test the
+  fixture, not the policy. `AllProxyDllNames()` is now shared with the refresh path.
+
+**Verification:** 2846 tests green (+12 pure-policy cases covering the exact reported combination,
+the all-three sweep, the foreign-DLL spare, and the locked/foreign precedence). The real
+file-touching path was additionally exercised once against the **actual built proxies** in
+`dist\proxy\` (real `ProductName`, so `IsOurProxyDll` ran for real): both of ours deleted, a foreign
+`version.dll` kept and named. That integration check was not kept as a test — it would depend on
+build outputs being present.
+
+-----
+
 ## 2026-07-23 — CE autorun helper: every table gets `ue5_inject()`, permanently (build 2297; dev, UI-only)
 
 The fourth and last delivery route, and the only one needing **neither** the standalone `.CT`

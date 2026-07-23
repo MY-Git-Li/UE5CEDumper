@@ -80,12 +80,23 @@ public interface IProxyDeployService
         bool force = false, CancellationToken ct = default);
 
     /// <summary>
-    /// Undeploy (delete) the proxy DLL of the given type from a game's
-    /// Binaries directory. Only removes our DLL (checks ProductName).
-    /// Returns true on success.
+    /// Undeploy (delete) our proxy DLLs from a game's Binaries directory.
+    ///
+    /// <para><b>Type-agnostic on purpose.</b> It sweeps EVERY proxy flavour we ship,
+    /// not the one currently selected in the UI: the radio button chooses what to
+    /// <i>deploy</i>, whereas undeploy is a clean-up. Scoping it to the selection
+    /// left a user who deployed <c>dxgi.dll</c> and later switched the radio to
+    /// <c>version.dll</c> unable to remove it at all — while the grid reported
+    /// <see cref="ProxyDeployStatus.DeployedOtherType"/> at them.</para>
+    ///
+    /// <para>Only ever deletes files that are OURS (<c>ProductName</c> check via
+    /// <c>IsOurProxyDll</c>); a foreign <c>version.dll</c>/<c>dxgi.dll</c> — a mod
+    /// loader, another tool — is always left alone.</para>
+    ///
+    /// Returns true when nothing of ours is left behind (including the case where
+    /// there was nothing to remove).
     /// </summary>
-    Task<bool> UndeployAsync(DetectedGame game, ProxyType proxyType,
-        CancellationToken ct = default);
+    Task<bool> UndeployAsync(DetectedGame game, CancellationToken ct = default);
 
     /// <summary>
     /// Compute a per-game proxy suggestion for each detected game and write it to

@@ -678,12 +678,7 @@ public sealed class ProxyDeployService : IProxyDeployService
             string? sourceVersion = GetDllVersion(sourceDllPath);
 
             string selectedDllName = proxyType.GetDllName();
-            // All distinct proxy DLL file names (Distinct guards against a
-            // future enum value whose switch arm fell back to the default).
-            string[] allProxyNames = Enum.GetValues<ProxyType>()
-                .Select(t => t.GetDllName())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            string[] allProxyNames = AllProxyDllNames();
 
             foreach (var game in games)
             {
@@ -814,43 +809,118 @@ public sealed class ProxyDeployService : IProxyDeployService
         }, ct);
     }
 
-    public Task<bool> UndeployAsync(DetectedGame game, ProxyType proxyType,
-        CancellationToken ct = default)
+    /// <summary>All distinct proxy DLL file names we ship. <c>Distinct</c> guards
+    /// against a future enum value whose switch arm falls back to the default.</summary>
+    public static string[] AllProxyDllNames() =>
+        Enum.GetValues<ProxyType>()
+            .Select(t => t.GetDllName())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    /// <summary>What an undeploy sweep decided to do, per file.</summary>
+    /// <param name="ToDelete">Ours — safe to remove.</param>
+    /// <param name="ForeignSkipped">Present but NOT ours (a mod loader, another
+    /// tool, or the genuine Windows DLL). Never touched.</param>
+    public readonly record struct UndeployPlan(
+        IReadOnlyList<string> ToDelete,
+        IReadOnlyList<string> ForeignSkipped);
+
+    /// <summary>
+    /// Decide which proxy DLLs an undeploy should remove. Pure so the policy can be
+    /// tested without fabricating PE files with version resources
+    /// (<see cref="IsOurProxyDll"/> reads <c>FileVersionInfo.ProductName</c>).
+    /// </summary>
+    public static UndeployPlan PlanUndeploy(
+        IEnumerable<(string Name, bool Exists, bool IsOurs)> candidates)
+    {
+        var toDelete = new List<string>();
+        var foreign = new List<string>();
+        foreach (var (name, exists, isOurs) in candidates)
+        {
+            if (!exists) continue;
+            if (isOurs) toDelete.Add(name);
+            else foreign.Add(name);
+        }
+        return new UndeployPlan(toDelete, foreign);
+    }
+
+    /// <summary>
+    /// Turn the outcome of an undeploy sweep into a status / message / success
+    /// triple. Pure, and the single place the precedence rules live:
+    /// a locked file outranks everything (it is the actionable failure); refusing
+    /// to touch a foreign DLL is only a FAILURE when we removed nothing of ours,
+    /// otherwise it is a note on an otherwise successful clean-up.
+    /// </summary>
+    public static (ProxyDeployStatus Status, string? Message, bool Success) ResolveUndeployOutcome(
+        int removed, IReadOnlyList<string> foreignSkipped, IReadOnlyList<string> locked)
+    {
+        if (locked.Count > 0)
+            return (ProxyDeployStatus.ErrorLocked,
+                    $"File locked (game running?): {string.Join(", ", locked)}", false);
+
+        if (removed == 0 && foreignSkipped.Count > 0)
+            return (ProxyDeployStatus.OtherProxy,
+                    $"Refused: not our proxy DLL ({string.Join(", ", foreignSkipped)})", false);
+
+        if (foreignSkipped.Count > 0)
+            return (ProxyDeployStatus.NotDeployed,
+                    $"Left another program's {string.Join(", ", foreignSkipped)}", true);
+
+        // removed >= 0 with nothing foreign: a clean folder is just as much a
+        // success as one we emptied.
+        return (ProxyDeployStatus.NotDeployed, null, true);
+    }
+
+    public Task<bool> UndeployAsync(DetectedGame game, CancellationToken ct = default)
     {
         return Task.Run(() =>
         {
             try
             {
-                string targetDll = Path.Combine(game.BinariesDir, proxyType.GetDllName());
-
-                if (!File.Exists(targetDll))
+                // Sweep EVERY proxy flavour, not just the one selected in the UI.
+                // The radio button picks what to DEPLOY; undeploy is a clean-up, and
+                // a user who deployed dxgi.dll and later switched the radio to
+                // version.dll would otherwise be unable to remove it at all — while
+                // the grid happily reported DeployedOtherType.
+                var plan = PlanUndeploy(AllProxyDllNames().Select(name =>
                 {
-                    game.Status = ProxyDeployStatus.NotDeployed;
-                    game.InstalledVersion = null;
-                    return true;
+                    string p = Path.Combine(game.BinariesDir, name);
+                    bool exists = File.Exists(p);
+                    return (name, exists, exists && IsOurProxyDll(p));
+                }));
+
+                var locked = new List<string>();
+                int removed = 0;
+                foreach (var name in plan.ToDelete)
+                {
+                    // Per-file try/catch: one locked DLL must not abandon the rest.
+                    // Removing what we can is what the user asked for; the locked
+                    // one is reported by name.
+                    try
+                    {
+                        File.Delete(Path.Combine(game.BinariesDir, name));
+                        removed++;
+                        _log.Info("ProxyDeploy", $"Undeployed {name} from {game.Name}");
+                    }
+                    catch (IOException ex) when (ex.HResult == unchecked((int)0x80070020) /* SHARING_VIOLATION */
+                                              || ex.Message.Contains("being used", StringComparison.OrdinalIgnoreCase))
+                    {
+                        locked.Add(name);
+                        _log.Warn("ProxyDeploy", $"Undeploy {name} from {game.Name} failed: file locked");
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        locked.Add(name);
+                        _log.Warn("ProxyDeploy", $"Undeploy {name} from {game.Name} denied: {ex.Message}");
+                    }
                 }
 
-                // Refuse to delete another program's proxy DLL
-                if (!IsOurProxyDll(targetDll))
-                {
-                    game.Status = ProxyDeployStatus.OtherProxy;
-                    game.ErrorMessage = "Refused: not our proxy DLL";
-                    return false;
-                }
-
-                File.Delete(targetDll);
-                game.Status = ProxyDeployStatus.NotDeployed;
-                game.InstalledVersion = null;
-                game.ErrorMessage = null;
-                _log.Info("ProxyDeploy", $"Undeployed {proxyType.GetDisplayName()} from {game.Name}: {targetDll}");
-                return true;
-            }
-            catch (IOException ex) when (ex.Message.Contains("being used", StringComparison.OrdinalIgnoreCase))
-            {
-                game.Status = ProxyDeployStatus.ErrorLocked;
-                game.ErrorMessage = "File locked (game running?)";
-                _log.Warn("ProxyDeploy", $"Undeploy from {game.Name} failed: file locked");
-                return false;
+                var (status, message, success) =
+                    ResolveUndeployOutcome(removed, plan.ForeignSkipped, locked);
+                game.Status = status;
+                game.ErrorMessage = message;
+                if (removed > 0) game.InstalledVersion = null;
+                return success;
             }
             catch (Exception ex)
             {
