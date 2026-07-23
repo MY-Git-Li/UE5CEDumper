@@ -2934,6 +2934,19 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void LoadCoordLibraryForGame(string? moduleName)
     {
+        // Drop any un-applied import preview FIRST, before the no-store early-out: it
+        // was diffed against the PREVIOUS game's library, so applying it here would
+        // write those rows into this game's file. The card may even be hidden
+        // (experimental gate off) while this fires, so the stale preview would not be
+        // visible to cancel. Whether a store exists is irrelevant to that.
+        if (_pendingImport != null || _pendingChanges != null)
+        {
+            _pendingImport = null;
+            _pendingChanges = null;
+            CoordImportPreview = "";
+            OnPropertyChanged(nameof(HasPendingCoordImport));
+        }
+
         if (_coordStore == null) return;
         _activeCoordKey = CoordinateLibraryStore.KeyFor(moduleName);
         _suppressCoordPersist = true;
@@ -3843,6 +3856,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 // otherwise keep writing game memory with no visible way to stop it. (M9)
                 if (StealthState == StealthHoldingState) _ = ResetStealthCommand.ExecuteAsync(null);
             }
+            // The Coordinate Library holds no live game-side state, so there is
+            // nothing to force off -- but an un-applied import preview must not
+            // survive behind a hidden card, where the user can neither see it nor
+            // cancel it. The library itself stays on disk; only the pending diff goes.
+            if (HasPendingCoordImport) CancelCoordImportCommand.Execute(null);
             UnregisterExperimentalHotkeys();
         }
     }

@@ -97,6 +97,17 @@ CSV `Write` did not round, so an entry built by any path other than a pose captu
 hand-wrote mailbox offsets and got all but one wrong (they now come from `CeMailboxLayout`, with a
 test).
 
+**Experimental-gated (build 2269, user call).** The card carries
+`IsVisible="{Binding ExperimentalEnabled}"` like the other five Teleport cards. The design draft
+had argued it should *not* be gated ("a coordinate bookmark list is not combat-affecting") — too
+narrow, since it writes the pawn position live and emits CE scripts that do the same. Gating also
+fixes the quick-jump menu for free: the code-behind already skips a card that is not
+`IsEffectivelyVisible`. Two lifecycle consequences fell out, both fixed: an un-applied import
+preview is cancelled when the gate goes off (it would otherwise sit behind a hidden card where the
+user can neither see nor cancel it), and — **a pre-existing bug the gating work surfaced** — it is
+also dropped when the active game changes, since the diff was computed against the *previous*
+game's library and applying it would have written those rows into the new game's file.
+
 **NOT yet verified in-game.** Nothing here has executed a line of the emitted Lua, and the teleport
 itself needs a live game. The CSV path has not met a real spreadsheet.
 

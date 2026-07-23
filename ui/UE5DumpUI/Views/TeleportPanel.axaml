@@ -513,9 +513,12 @@
            is still the first SemiBold descendant of this Border).
            The DataGrid MUST carry a MaxHeight: ContentRoot is a vertically unbounded
            ScrollViewer, so an unconstrained grid would not virtualize and 4000 rows
-           would materialize at once. -->
+           would materialize at once.
+           Experimental-gated: it writes the pawn position live and emits CE scripts
+           that do the same, so it stays hidden unless the user has opted in. -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
-              CornerRadius="4" Padding="10">
+              CornerRadius="4" Padding="10"
+              IsVisible="{Binding ExperimentalEnabled}">
         <Expander IsExpanded="{Binding CoordLibraryExpanded, Mode=TwoWay}"
                   Background="Transparent" BorderThickness="0" Padding="0">
           <Expander.Header>

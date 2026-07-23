@@ -611,9 +611,17 @@ in, and the import-report machinery it forces is reused by P4.
 2. **ListView throughput** — the reference's 2 000-row display cap is an unverified
    guess. Measure before treating it as meaningful.
 3. **Which `MainWindowViewModel` fan-out sites are reachable** for the store load. (§8)
-4. **Experimental gating** — five Teleport cards are gated on `ExperimentalEnabled`.
-   A coordinate bookmark list is not combat-affecting, so it likely should **not**
-   be gated; confirm.
+4. ~~**Experimental gating**~~ — **DECIDED: gated** (user call, 2026-07-23). The
+   card carries `IsVisible="{Binding ExperimentalEnabled}"` like the other five.
+   The draft's reasoning ("a coordinate bookmark list is not combat-affecting")
+   was too narrow: it writes the pawn position live and emits CE scripts that do
+   the same. Gating also gets the quick-jump menu right for free — the code-behind
+   already skips a card that is not `IsEffectivelyVisible`.
+   Two lifecycle consequences, both implemented: an un-applied import preview is
+   cancelled when the gate goes off (it would otherwise sit behind a hidden card
+   where the user can neither see nor cancel it), and — a pre-existing bug the
+   gating work surfaced — it is also dropped when the active game changes, since
+   the diff was computed against the previous game's library.
 5. **CE Lua `readString`** — the DLL-flavour picker reads the map name from
    `mailbox + 0x358`. Confirm against CE's API reference before use.
 6. **Client-side pre-flight size check** — `AobMakerBridgeService.WriteMessageAsync`

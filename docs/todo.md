@@ -421,9 +421,12 @@ Write-up: [dev-log.md](dev-log.md) 2026-07-23. All five phases are on `dev`, 277
   ListView actually stutters — the picker's 2 000-row display cap is inherited from the reference
   table as an unverified guess. *Parent: P1 + P3.*
 
-- **Experimental gating — decide** — Effort: **S** · Risk: low.
-  Five Teleport cards are gated on `ExperimentalEnabled`. A coordinate bookmark list is not
-  combat-affecting so it currently is NOT gated; confirm that is what you want. *Parent: spec §10.4.*
+- **VERIFY — experimental gating** (DECIDED + implemented, build 2269) — Effort: **S** · Risk: low.
+  The card is now gated on `ExperimentalEnabled` like the other five. Confirm the whole card
+  appears/disappears with the System-tab checkbox, that it is absent from the tab's right-click
+  quick-jump menu while hidden (the code-behind skips a card that is not `IsEffectivelyVisible`),
+  and that toggling the gate off mid-preview clears a pending CSV/Lua import. *Parent: user call
+  2026-07-23; spec §10.4.*
 
 - **Unrelated finding, worth doing anyway** — Effort: **S** · Risk: low.
   `AobMakerBridgeService.WriteMessageAsync` (`:495-506`) has **no send-side size check**, and the
