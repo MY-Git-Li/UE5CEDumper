@@ -1367,6 +1367,14 @@ static void TryInstallGameThreadHook() {
 // window was actually contended in this game (proof the guard earns its keep).
 static std::once_flag s_peInitOnce;
 static std::atomic<int> s_peInitArrivals{0};
+// Arrival ordinal at the moment init FINISHED. Anything numbered above it turned
+// up after the once was already satisfied and contended nothing. Without this the
+// test was `arrivals > 1` — true for EVERY invoke the process ever makes: a live
+// See-Through session (one invoke per ~100 ms tick) logged 437 of these WARNs in
+// four minutes on a run whose own INFO line said "1 caller(s) arrived before init
+// began". Every one a false positive, and the diagnostic worthless precisely
+// because it always fired.
+static std::atomic<int> s_peArrivalsAtInitEnd{0};
 static void EnsureProcessEventReady() {
     int arrivals = s_peInitArrivals.fetch_add(1, std::memory_order_relaxed) + 1;
     std::call_once(s_peInitOnce, [arrivals]() {
@@ -1376,13 +1384,19 @@ static void EnsureProcessEventReady() {
                  (unsigned long)GetCurrentThreadId(), arrivals);
         s_processEventOffset = DetectProcessEventVTableOffset();
         TryInstallGameThreadHook();
+        // Publish the high-water mark INSIDE the once, so it is visible to every
+        // waiter call_once releases (and to later callers, via that same
+        // happens-before) before any of them evaluates the test below.
+        s_peArrivalsAtInitEnd.store(s_peInitArrivals.load(std::memory_order_relaxed),
+                                    std::memory_order_relaxed);
         LOG_INFO("ProcessEvent: first-time init complete — offset=%d, hook_active=%d",
                  s_processEventOffset, Stark::IsHookActive() ? 1 : 0);
     });
-    // A total > 1 means concurrent first-invokes contended the once — harmless
-    // now, but historically the double-install crash window. Logged once per
-    // contended arrival so it is greppable if a game ever hits it.
-    if (arrivals > 1) {
+    // Warn ONLY for arrivals that were genuinely in flight while init ran — that
+    // is the historic double-install crash window, and it is what this line
+    // claims to be evidence of.
+    if (arrivals > 1 &&
+        arrivals <= s_peArrivalsAtInitEnd.load(std::memory_order_relaxed)) {
         LOG_WARN("ProcessEvent: concurrent first-invoke #%d serialized behind the "
                  "one-time init (audit #3 race window observed but guarded)",
                  arrivals);

@@ -89,21 +89,45 @@ the row here when it ships.
   > Regression test `AutoSnapshot_DisconnectMidCapture_StopsLoopWithoutWedge`; 2527 green. *Delete after the
   > audit batch is merged to main.*
 
-- **What the 2026-07-23 SEED + Elliot sessions do and do NOT tell us about the DLL batch** —
-  Checked both games' logs (`init` / `pipe` / `walk`, all four rotations). The command mix is
-  walk/export only — `walk_instance(_batch)`, `walk_functions`, `walk_world`, `get_object_list`,
-  `get_diagnostics`, plus **read-only** `teleport_get_markers` / `get_time_state` on tab load. **No
-  Schlacht / Solide / Hemmung-set / Laufen / Solitar / Dunste / Grausam / Linie worker was ever
-  started**, so the audit-#3 DLL cluster (M1-M5 + L1-L12 — almost all about those modules'
-  enable/disable/shutdown lifecycle) was **not exercised**: this is not evidence of health. What the
-  logs DO show clean: `UE5_Init` + offsets validated on both, a clean two-lane `Client disconnected`
-  → `PipeServer: Stopped` shutdown, and **zero errors**. The only warnings are 46 benign
-  `WalkInstance: instance 0x3f80000040400000 not readable (freed?), skipping` in one Elliot session —
-  the SEH guard refusing an ObjectProperty slot that actually held float data, which is the guard
-  working. **To actually exercise the batch:** toggle See-through on/off (M1/M2/M3), leave a Solide
-  force-field held while disconnecting the UI (M4/L2/L3/L4), set + reset a time dilation and a
-  movement multiplier, toggle the foreground lock (L10), run a PE-profile Start/Stop (L7), then close
-  the game while a scan runs (M5). *Parent: audit-2026-07-14-findings; log review 2026-07-23.*
+- **Audit #3 DLL batch — what the Elliot 2026-07-23 22:19-22:28 session DID exercise** —
+  The user drove the checklist. Commands seen: `seethrough_set` on→off, `set_time_dilation` x4
+  (global 0.5 + pawn 2.0, twice), `set_foreground_lock` on, `pe_profile_start/stop/get` + a second
+  start, `get_current_target` x2, `get_related_objects` x3, `find_path_from_gworld`. Results:
+  > **✅ M1 verified with evidence.** `SeeThrough: worker stopped` is logged BEFORE
+  > `SeeThrough: disabled (1 restored)` — the disable joins the worker first, then restores, and the
+  > one hidden actor was genuinely un-hidden. Enable→disable window 29.3 s at the 100 ms tick.
+  > **✅ Disconnect with holds active.** Both sessions ended with a clean two-lane
+  > `Client disconnected`, with a Hemmung dual-lane hold, the Grausam foreground lock, and a running
+  > Linie recording all still active — the M4 worker-cancel-latch and the deliberate
+  > "holds persist across disconnect" behaviour, with **zero errors** in any category.
+  > **⛔ Still NOT exercised: M5** — the game was never closed (no `PipeServer: Stopped` /
+  > `UE5_Shutdown` in this session), so the shutdown-window worker-revive gate is still unproven.
+  > Also untouched: Solide force-field (L2/L3/L4), Laufen, Solitar, Dunste.
+  > **The session surfaced two NEW defects** (both fixed below, both need an in-game re-check).
+  *Parent: audit-2026-07-14-findings; log review 2026-07-23.*
+
+- **✅ FIXED (build 2354) — See-Through re-scanned the whole GObjects pool ~5x/second** —
+  Effort: **S** · Risk: low. **Found by reading the Elliot log, not by a test.**
+  `Schlacht::CollectOccluders` called `UE5_FindInstanceOfClass("KismetSystemLibrary")` **per trace**,
+  and that is a full `Aura::FindInstancesByClass` scan which only exits early on a NON-CDO hit — a
+  function library has none, so every call walked all **326,363** objects, plus a `FindFuncByName`
+  class walk. Measured from the log: **145 of those scans in the 29 s** the feature was on (~5/s).
+  Fix: resolve the CDO + `LineTraceSingle` signature ONCE per enable, keyed off a generation counter
+  bumped in `SetEnabled(true)` (so a re-enable re-resolves); the failure case is cached too, so a game
+  that cooked the function out no longer rescans 10x/s. **Re-check in-game:** enable See-Through on a
+  big game and confirm the `only CDO` WARN now appears once per enable instead of continuously — and
+  that occluders still hide/restore. *Parent: Schlacht build 1991; log review 2026-07-23.*
+
+- **✅ FIXED (build 2354) — the "concurrent first-invoke" WARN fired on EVERY invoke** —
+  Effort: **S** · Risk: low. `Frieren::EnsureProcessEventReady` tested `arrivals > 1`, where
+  `arrivals` is the all-time invoke ordinal — so every invoke after the very first logged
+  `ProcessEvent: concurrent first-invoke #N serialized behind the one-time init (audit #3 race window
+  observed but guarded)`. The Elliot session logged **437** of them in four minutes (one per
+  See-Through tick) on a run whose own INFO line said **"1 caller(s) arrived before init began"**,
+  i.e. there was no contention at all. Beyond the log spam, the diagnostic was worthless because it
+  could never be false. Fix: publish the arrival high-water mark inside the `call_once` lambda and
+  warn only for `arrivals <= thatMark` — genuine in-flight contention only.
+  *Parent: audit #3 ProcessEvent double-install guard; log review 2026-07-23.*
 
 - **[✅ ALL 13 LOWs DONE] Audit #3 low-severity batch** — SHIPPED on `dev` in four commits:
   UI L13–L17 (`8bd33f8`, +2 tests), Solide L2/L3/L4 (`408fd2d`), DLL L1/L5/L8/L10/L12 (`7f3898f`), and the
@@ -331,9 +355,29 @@ The three persistence features (CE-export system-component filter, global panel-
 
 Phase 1 (the "Related" tab: given an actor, list Self/Class/Outer + Controller↔Pawn + owned components/ASC/AttributeSet via a depth-3 owned walk; 🌍 GWorld / Live Walker / finder / copy per row; 🔗 Related handoff from Instance Finder / Value Search / Live Walker) + the Instance Finder **"Newest first"** opt-in shipped builds 1323-1326. **In-game VERIFIED on TQ2:** `bp_ai_default_character_C` → Related lists 58 objects incl. `TQ2AIController`, `GrimAbilitySystemComponent` (ASC), `bp_tq2_character_stats_component_C` (AttributesComponent) → `AttributeSetHealth.CurrentHealth` = live HP (73.57). **Phase 2 (`Edel` current-target auto-detect) SHIPPED build 1400** (dev-log 2026-06-20) — `🎯 Detect target` button resolves GWorld→PC→Pawn, scores the player's outgoing object-ptr fields (structural is-Actor gate + keyword boost), auto-loads the top candidate; the `Edel` roster name is now 🟢. Remaining follow-ups, in order:
 
-- **Phase 2 Edel — in-game verification + tuning** — Effort: **0** (verify only) · Risk: low. Built + unit-tested + AOT-green but unproven live. Verify on a **lock-on / soft-target action title** (the target lives in a `UPROPERTY` object field): click 🎯 Detect target → confirm the top candidate IS the focused enemy and its AttributeSet/HP shows in the grid; confirm the 🌍 Locate-in-GWorld now resolves for that target (it should — the player references it). On the named JP/CN test games (TQ2/SEED/DQ7R, mostly no target `UPROPERTY`) confirm the **graceful fallback** fires (note = "no clear target / weak guesses", nothing auto-loaded) rather than feeding a wrong actor. Tune the score constants / keyword tables only if a real game motivates it. *Parent: Edel shipped build 1400, dev-log 2026-06-20.*
+- **Phase 2 Edel — HALF VERIFIED (graceful fallback, Elliot 2026-07-23); the positive case is what's left** —
+  Effort: **0** (verify only) · Risk: low. **The fallback works exactly as designed.** Two 🎯 Detect
+  target runs on The Adventures of Elliot both returned `resolved=False candidates=8`: nothing was
+  auto-loaded, and the ranked list was surfaced instead. The ranking is also sane — top candidate
+  `BP_SupportFairy_C` (score 45, reason `is-Pawn`, reached via `BP_PlayerCharacter_C.SupportCharacter`),
+  then `DefaultPhysicsVolume` (30, `is-Actor`), then a gameplay-cue actor. That top hit is the player's
+  COMPANION, not a target — i.e. precisely the plausible-but-wrong pick that auto-loading would have
+  gotten wrong, and the confidence bar correctly refused it. **Still open: the positive case** — a
+  lock-on / soft-target action title where the target really does live in a `UPROPERTY`, to confirm the
+  top candidate IS the focused enemy and its AttributeSet/HP loads. Tune the score constants only if
+  such a game motivates it. *Original note:* Built + unit-tested + AOT-green but unproven live. Verify on a **lock-on / soft-target action title** (the target lives in a `UPROPERTY` object field): click 🎯 Detect target → confirm the top candidate IS the focused enemy and its AttributeSet/HP shows in the grid; confirm the 🌍 Locate-in-GWorld now resolves for that target (it should — the player references it). On the named JP/CN test games (TQ2/SEED/DQ7R, mostly no target `UPROPERTY`) confirm the **graceful fallback** fires (note = "no clear target / weak guesses", nothing auto-loaded) rather than feeding a wrong actor. Tune the score constants / keyword tables only if a real game motivates it. *Parent: Edel shipped build 1400, dev-log 2026-06-20.*
 
-- **Locate in GWorld — streaming / World-Partition actors — ADDRESSED via the world's level list (build 1405); in-game verify pending** — Effort: **0** (verify only) · Risk: low. `Aura::RecoverViaWorldLevel` now recovers a `not_reachable` actor through its owning `ULevel` (reached by the `ULevel::OwningWorld` back-reference, since an actor's Outer IS its level), emitting `world →(WorldLevel)→ ULevel → Actors[k] → actor [→ target]` with status `ok_via_level`. This makes ANY actor that belongs to the current world locatable + navigable in Live Walker (and a bounded tail BFS reaches an owned AttributeSet/HP), regardless of how its level was streamed in — closing the Elliot "weapons map, enemies don't" case. **Verify in-game:** on a streaming/WP title, 🌍 on a just-spawned enemy now lands (status note: "via the world's level list"); confirm the breadcrumb spine reaches the enemy and you can drill to its HP. Two honest residual limits (acceptable, not bugs): (1) the chain is NOT a clean CE static-pointer chain (the world→level hop is a back-reference) — it's for in-tool navigation; (2) a truly unreferenced actor not in ANY world level still returns `not_reachable` (correct). Edel (build 1400) remains the complementary path when the player references the target. *Parent: Related Objects Phase 1 in-game test (dev-log 2026-06-19); recovery dev-log 2026-06-20.*
+- **Locate in GWorld — streaming / World-Partition actors — the `ok_via_level` RECOVERY is still the
+  unverified half (Elliot 2026-07-23 exercised the normal path instead)** — Effort: **0** (verify only) ·
+  Risk: low. A 🌍 on Elliot **succeeded through the ordinary forward BFS**: `status: "ok"`, `found: true`,
+  depth 5, 28 ms, 3,065 nodes visited, root `MainField_A2` — path `GWorld > GameState > PlayerArray[0]
+  > PawnPrivate > SupportCharacter > DamageHit`. Worth banking: that request carried `deep: true` +
+  `container_depth: 4` and the path hops **through a container ELEMENT** (`PlayerArray` ArrayProperty,
+  `element_index: 0`), so the deep / container-element descent is verified live. What it does NOT
+  exercise is `RecoverViaWorldLevel`: the target was reachable normally, so `ok_via_level` never fired.
+  **To exercise it:** 🌍 on an actor the forward BFS cannot reach — a just-spawned or streamed-in enemy
+  (the original Elliot "weapons map, enemies don't" case). Look for the status note "via the world's
+  level list" and confirm the breadcrumb spine still drills to its HP. *Original note:* `Aura::RecoverViaWorldLevel` now recovers a `not_reachable` actor through its owning `ULevel` (reached by the `ULevel::OwningWorld` back-reference, since an actor's Outer IS its level), emitting `world →(WorldLevel)→ ULevel → Actors[k] → actor [→ target]` with status `ok_via_level`. This makes ANY actor that belongs to the current world locatable + navigable in Live Walker (and a bounded tail BFS reaches an owned AttributeSet/HP), regardless of how its level was streamed in — closing the Elliot "weapons map, enemies don't" case. **Verify in-game:** on a streaming/WP title, 🌍 on a just-spawned enemy now lands (status note: "via the world's level list"); confirm the breadcrumb spine reaches the enemy and you can drill to its HP. Two honest residual limits (acceptable, not bugs): (1) the chain is NOT a clean CE static-pointer chain (the world→level hop is a back-reference) — it's for in-tool navigation; (2) a truly unreferenced actor not in ANY world level still returns `not_reachable` (correct). Edel (build 1400) remains the complementary path when the player references the target. *Parent: Related Objects Phase 1 in-game test (dev-log 2026-06-19); recovery dev-log 2026-06-20.*
 
 - **Locate from GEngine — alternate root for UI-widget / GameInstance-owned objects** — ✅ **DONE (builds 1542-1544, MERGED main PR #345 `f488592`; in-game VERIFIED)** — shipped as **Locate in GameEngine** (⚙ icon on all 10 🌍 surfaces). The existing `find_path_from_gworld` handler gained a `root_kind` field (`engine` → `rootObj = Genau::FindGameEngine().engineAddr`, `no_engine` when absent); `FindObjectGraphPath` was already root-agnostic so it was untouched. Reaches engine-layer objects (GameInstance / LocalPlayer / GameViewport / UMG widgets — the Octopath `PartyCharacterPanel_C` case) that no GWorld chain reaches; a deliberate complement to 🌍 (weaker for world actors, since `RecoverViaWorldLevel`/`ok_via_level` is World-root-gated). See dev-log 2026-06-22. *Residual: `deadline_ms` still hardcoded 20000ms in `FindObjectGraphPath` — optional follow-up.*
 
@@ -438,13 +482,10 @@ Write-up: [dev-log.md](dev-log.md) 2026-07-23. All five phases are on `dev`, 277
   map A, load map B; plain Teleport must refuse and Force must be the only way through). Watch for
   `Tier == 2` (raw-write fallback) in the status line. *Parent: P1.*
 
-- **VERIFY — the quick-jump menu label** — Effort: **S** · Risk: low.
-  **This is NOT the coordinate group/label.** It is the **Teleport TAB's own right-click menu** in the
-  Avalonia app, which lists that tab's cards so you can jump to one. It reads a card's name from the
-  first `SemiBold` TextBlock descendant of a direct-child `Border`; the Coordinate Library card puts
-  that TextBlock inside an `Expander.Header`, so the walk may resolve a wrong label (or none).
-  Right-click the Teleport tab and confirm the entry reads "Coordinate Library". Spec §7 flags it.
-  *Parent: P1.*
+- **✅ VERIFIED — the quick-jump menu label (2026-07-23).** The Teleport tab's right-click menu shows
+  "Coordinate Library" and the user has been navigating with it, so the `SemiBold`-TextBlock walk still
+  resolves a card whose label lives inside an `Expander.Header` (spec §7's worry). *Delete after the
+  batch merges to main.*
 
 - **VERIFY — DataGrid behaviour at scale** — Effort: **S** · Risk: med.
   The grid carries `MaxHeight="260"` precisely because `ContentRoot` is a vertically unbounded
