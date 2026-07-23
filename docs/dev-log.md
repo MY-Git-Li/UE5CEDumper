@@ -20,6 +20,38 @@ builds ≤696 in
 
 -----
 
+## 2026-07-23 — Diagnostics card: auto-refresh toggle + resizable columns (build 2315; dev, UI-only)
+
+Two things the first live run made obvious.
+
+**Auto-refresh (5 s), off by default.** The interval is deliberately unhurried, and the reason is
+specific to this card: **every poll is itself a dispatch**, so a fast timer would inflate the very
+numbers being reported — `get_diagnostics` already appears in its own table (8.6% of busy time on
+the user's first run, from a single call). 5 s stays in the noise while making CPU% meaningful, since
+that needs two samples to difference.
+
+Three guards, all for the same reason — the measurement must not perturb what it measures:
+- **Pauses on tab-leave, resumes on tab-enter** (`OnLeavingTab` / `OnEnteringTab`, wired the same way
+  Live Funcs auto-stops its recording). A forgotten toggle would otherwise keep adding pipe traffic
+  while the user works elsewhere. The checkbox stays ticked.
+- **Never stacks requests** — a tick is skipped while one is in flight. The first snapshot measured
+  125 ms; queuing polls behind each other would turn a timer into a burst.
+- Toggling on fires one refresh immediately rather than making the user wait a full interval.
+
+**Resizable columns.** The numeric columns had been sized to their content and were clipping their
+own headers ("Cou", "% bu") with no way to widen them — `CanUserResizeColumns` was never set. Now
+explicit, with `MinWidth` so a dragged column can't collapse. **Sorting is explicitly OFF**: Avalonia's
+DataGrid sort is reflection-based (an AOT hazard — see `ui-avalonia12-pinvoke-gotchas`), the rows
+already arrive ranked by total time, and switching it off reclaims the header space the sort glyph
+was reserving, which is part of why the headers fit now.
+
+One self-inflicted compile break worth noting: adding `vm.Pointers?.OnLeavingTab()` made the
+compiler treat `vm.Pointers` as nullable from that point on, breaking a pre-existing non-null
+dereference three lines later. `Pointers` is a non-nullable property; the `?.` was wrong, not the
+old code.
+
+-----
+
 ## 2026-07-23 — Diagnostics fix: a UINT64_MAX sentinel on the wire blanked the whole card (build 2311; dev, DLL + UI)
 
 First live run of the new Diagnostics card failed outright with *"An element of type 'Number'

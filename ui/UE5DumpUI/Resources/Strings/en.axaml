@@ -426,6 +426,8 @@
     <sys:String x:Key="str.System.Diag.Header">Diagnostics — DLL dispatch cost</sys:String>
     <sys:String x:Key="str.System.Diag.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.System.Diag.Reset">Reset counters</sys:String>
+    <sys:String x:Key="str.System.Diag.Auto">Auto (5s)</sys:String>
+    <sys:String x:Key="str.System.Diag.AutoTip">Re-read every 5 seconds. Deliberately unhurried: each poll is itself a dispatch, so a faster timer would inflate the very numbers shown here (get_diagnostics already appears in its own table). It also makes CPU% meaningful, since that needs two samples to difference. Pauses automatically while you are on another tab and resumes when you come back.</sys:String>
     <sys:String x:Key="str.System.Diag.RefreshTip">Read a fresh snapshot: how long each pipe command has occupied the DLL's dispatcher, plus process memory / CPU / thread counts and game-thread health. Read-only and safe to click repeatedly. CPU% needs two samples, so it shows a dash on the first read.</sys:String>
     <sys:String x:Key="str.System.Diag.ResetTip">Clear the counters and restart the uptime clock, so the next measurement covers one deliberate action instead of the whole session. Counters also reset automatically when the last client disconnects.</sys:String>
     <sys:String x:Key="str.System.Diag.Summary">{0} dispatches over {1}s — dispatcher busy {2}% of wall-clock · GObjects {3:N0}</sys:String>

@@ -639,6 +639,13 @@ public partial class MainWindow : Window
         // call) and flushes its filter-keyword memory.
         if (tag != "LiveFuncs")  vm.LiveFuncs?.OnLeavingTab();
 
+        // Same discipline for the System tab's Diagnostics auto-refresh: a forgotten
+        // toggle would keep adding pipe traffic while the user works elsewhere — and
+        // since every poll is itself a dispatch, it would skew the very numbers the
+        // card reports. The checkbox stays ticked, so returning resumes the poll.
+        if (tag != "Pointers") vm.Pointers.OnLeavingTab();
+        else                   vm.Pointers.OnEnteringTab();
+
         // Opening any experimental tab while enabled permanently commits the
         // opt-in: the System-tab checkbox can no longer be unticked from here
         // on. The gate persists the lock; LockExperimental is idempotent and a

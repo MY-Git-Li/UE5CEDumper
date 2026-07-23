@@ -953,6 +953,59 @@ public partial class PointerPanelViewModel : ViewModelBase
     [ObservableProperty] private string _diagStatus = "";
     [ObservableProperty] private bool _diagBusy;
 
+    /// <summary>Poll interval for auto-refresh. Deliberately unhurried: every poll is
+    /// itself a dispatch, so a fast timer would inflate the very numbers it reports
+    /// (<c>get_diagnostics</c> already shows up in its own table). 5 s is slow enough
+    /// to stay in the noise while still making CPU% — which needs two samples to
+    /// difference — meaningful over a rolling window.</summary>
+    private const int DiagAutoRefreshSeconds = 5;
+
+    private DispatcherTimer? _diagTimer;
+
+    [ObservableProperty] private bool _diagAutoRefresh;
+
+    partial void OnDiagAutoRefreshChanged(bool value)
+    {
+        if (value)
+        {
+            _diagTimer ??= new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(DiagAutoRefreshSeconds),
+            };
+            // Re-subscribe defensively: the timer instance is reused across
+            // toggles, and a double subscription would double the poll rate.
+            _diagTimer.Tick -= OnDiagTimerTick;
+            _diagTimer.Tick += OnDiagTimerTick;
+            _diagTimer.Start();
+            _ = RefreshDiagnosticsAsync();   // don't make the user wait one interval
+        }
+        else
+        {
+            _diagTimer?.Stop();
+        }
+    }
+
+    private void OnDiagTimerTick(object? sender, EventArgs e)
+    {
+        // Never stack requests: a slow snapshot (the first one measured 125 ms) must
+        // not queue up behind itself and turn the poll into a burst.
+        if (DiagBusy) return;
+        _ = RefreshDiagnosticsAsync();
+    }
+
+    /// <summary>Called when the user navigates away from the System tab. Stops the
+    /// poll so a forgotten toggle doesn't keep adding pipe traffic — and skewing the
+    /// dispatch numbers — while the user works somewhere else. The checkbox stays
+    /// ticked, so returning to the tab resumes.</summary>
+    public void OnLeavingTab() => _diagTimer?.Stop();
+
+    /// <summary>Called when the user navigates INTO the System tab: resume the poll
+    /// if it was left enabled.</summary>
+    public void OnEnteringTab()
+    {
+        if (DiagAutoRefresh) _diagTimer?.Start();
+    }
+
     /// <summary>Per-command dispatch cost, heaviest total first.</summary>
     public ObservableCollection<DiagnosticsCommandEntry> DiagCommands { get; } = new();
 
