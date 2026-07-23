@@ -3585,6 +3585,46 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         catch (Exception ex) { SetError(ex); _log.Error("Coord Lua export failed", ex); }
     }
 
+    /// <summary>
+    /// Stage 1 of the Lua re-import (R7): paste a previously generated AA script and
+    /// see what it WOULD change. Shares the CSV preview/commit path, so both formats
+    /// get the same per-line diagnostics, cell-level diff and .preimport.bak.
+    /// </summary>
+    /// <summary>Where the user pastes a whole generated AA script. Only our own
+    /// fenced region is parsed — the surrounding Lua is ignored, never evaluated.</summary>
+    [ObservableProperty] private string _coordLuaPasteText = "";
+
+    [RelayCommand]
+    private void PreviewCoordLuaImport()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(CoordLuaPasteText))
+            {
+                CoordStatus = "Paste a generated script into the box first.";
+                return;
+            }
+            BuildImportPreview(CoordLuaParser.Parse(CoordLuaPasteText), "pasted script");
+            CoordLibraryExpanded = true;
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord Lua import preview failed", ex); }
+    }
+
+    /// <summary>Same, but from a .lua / .CT file on disk.</summary>
+    [RelayCommand]
+    private async Task PreviewCoordLuaFileImportAsync()
+    {
+        try
+        {
+            var path = await _platform.ShowOpenFileDialogAsync("Lua script", "lua");
+            if (string.IsNullOrEmpty(path)) return;
+            BuildImportPreview(CoordLuaParser.Parse(File.ReadAllText(path!)),
+                               System.IO.Path.GetFileName(path!));
+            CoordLibraryExpanded = true;
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Coord Lua file import failed", ex); }
+    }
+
     /// <summary>Save the same script to a .lua file, for users who prefer a file.</summary>
     [RelayCommand]
     private async Task SaveCoordLuaAsync()

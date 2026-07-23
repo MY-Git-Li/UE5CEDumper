@@ -1203,6 +1203,12 @@
     <sys:String x:Key="str.Tip.TP.LibExportLua">Emit the whole library as a Cheat Engine AA script with its own filterable picker, and push it into CE via AOBMaker (or copy it as paste-able CE XML when AOBMaker is not connected).</sys:String>
     <sys:String x:Key="str.Tip.TP.LibSaveLua">Write the same AA script to a .lua file instead of pushing it into Cheat Engine.</sys:String>
 
+    <sys:String x:Key="str.TP.LibImportLua">Parse pasted script</sys:String>
+    <sys:String x:Key="str.TP.LibImportLuaFile">Import .lua…</sys:String>
+    <sys:String x:Key="str.TP.LibPastePlaceholder">Paste a previously generated coordinate script here (the whole thing — only the @UE5CD:COORDS block is read)</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibImportLua">Read the coordinates back out of a script you exported earlier and hand-edited. Only the fenced @UE5CD:COORDS block is parsed; the rest of the script is ignored and never executed.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibImportLuaFile">Same, but read the script from a .lua file.</sys:String>
+
     <sys:String x:Key="str.TP.CursorForceHeader">Force Mouse Cursor</sys:String>
     <sys:String x:Key="str.TP.CursorForceHint">Force the OS mouse cursor visible or hidden by writing the PlayerController's bShowMouseCursor. Handy when a game hides the cursor but you want Cursor Teleport. One-shot: a game that re-sets the flag every frame may revert it, and a captured input mode can still hide the cursor.</sys:String>
     <sys:String x:Key="str.TP.CursorStateLabel">State:</sys:String>

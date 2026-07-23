@@ -653,6 +653,21 @@
                         Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
             </StackPanel>
 
+            <!-- Lua re-import: paste the whole generated AA script. Only our fenced
+                 @UE5CD:COORDS block is parsed; arbitrary Lua is never evaluated. -->
+            <TextBox Text="{Binding CoordLuaPasteText, Mode=TwoWay}"
+                     Watermark="{StaticResource str.TP.LibPastePlaceholder}"
+                     AcceptsReturn="True" TextWrapping="NoWrap" Height="70"
+                     FontFamily="Consolas, Menlo, monospace" FontSize="11"/>
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Button Content="{StaticResource str.TP.LibImportLua}"
+                      Command="{Binding PreviewCoordLuaImportCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibImportLua}" Padding="10,4"/>
+              <Button Content="{StaticResource str.TP.LibImportLuaFile}"
+                      Command="{Binding PreviewCoordLuaFileImportCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.LibImportLuaFile}" Padding="10,4"/>
+            </StackPanel>
+
             <Border Background="#2D2D30" CornerRadius="3" Padding="8"
                     IsVisible="{Binding HasPendingCoordImport}">
               <StackPanel Spacing="6">
