@@ -16,7 +16,21 @@ Two scripts share the same dump corpus:
   changes. Saves cheat-table maintainers from binary-searching offsets
   by hand when a patch silently breaks their working table.
 
-A third script needs no dump corpus at all — it reads installed games directly:
+A third script needs no dump corpus either — it reads the UI's own pipe logs:
+
+- **`walk_payload_audit.py`** — payload-utilisation audit. Byte-accounts every
+  JSON key of the `walk_instance` / `walk_instance_batch` responses in a
+  `pipe-*.log` against a key-by-key classification of what the CE XML / CSX
+  exporters actually read, and reports the used / conditional / CSX-only /
+  **unused** split plus the worst offenders by bytes. Answers "how much of the
+  payload would a lean export mode be allowed to drop" with measured bytes
+  instead of reasoning — the follow-on question left open by
+  [multipipe-eval.md §10.5](../../docs/multipipe-eval.md), answered in §10.6.
+  Run `--self-test` after editing it. Logged bodies are capped at 1024 chars, so
+  a default run samples prefixes; set `UE5DUMP_PIPE_LOG_FULL=1` before launching
+  UE5DumpUI for an uncapped (unbiased) capture.
+
+A fourth script needs no dump corpus at all — it reads installed games directly:
 
 - **`scan_proxy_imports.py`** — proxy-viability census. Walks every installed
   UE game and reports which hijackable system DLLs (`version` / `dinput8` /
