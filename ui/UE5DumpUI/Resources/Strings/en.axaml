@@ -1154,7 +1154,7 @@
     <sys:String x:Key="str.TP.CoordXyz">X / Y / Z:</sys:String>
     <sys:String x:Key="str.TP.CoordPyr">Pitch / Yaw / Roll:</sys:String>
     <sys:String x:Key="str.TP.CoordGo">Teleport to coordinates</sys:String>
-    <sys:String x:Key="str.TP.CoordFill">Fill from current</sys:String>
+    <sys:String x:Key="str.TP.CoordFill">Fill from current pos</sys:String>
     <sys:String x:Key="str.TP.CoordSetRot">Also set rotation</sys:String>
     <sys:String x:Key="str.Tip.TP.CoordGo">Force-teleport the pawn to the exact world X/Y/Z below. No map check, so you can jump anywhere on the current level. Undo with Recall last.</sys:String>
     <sys:String x:Key="str.Tip.TP.CoordFill">Read the current pose and fill the X/Y/Z (and Pitch/Yaw/Roll) boxes with it — a quick way to nudge from where you are.</sys:String>
@@ -1200,7 +1200,7 @@
 
     <sys:String x:Key="str.TP.LibExportLua">Push to CE</sys:String>
     <sys:String x:Key="str.TP.LibSaveLua">Save .lua</sys:String>
-    <sys:String x:Key="str.Tip.TP.LibExportLua">Emit the whole library as a Cheat Engine AA script with its own filterable picker, and push it into CE via AOBMaker (or copy it as paste-able CE XML when AOBMaker is not connected).</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibExportLua">Emit the whole library as a Cheat Engine AA script with its own filterable picker. Delivery is via the AOBMaker CE plugin; without it the script is copied to the clipboard as paste-able CE XML instead. The generated script needs UE5Dumper.dll injected — it teleports through the DLL mailbox.</sys:String>
     <sys:String x:Key="str.Tip.TP.LibSaveLua">Write the same AA script to a .lua file instead of pushing it into Cheat Engine.</sys:String>
 
     <sys:String x:Key="str.TP.LibImportLua">Parse pasted script</sys:String>
@@ -1210,7 +1210,7 @@
     <sys:String x:Key="str.Tip.TP.LibImportLuaFile">Same, but read the script from a .lua file.</sys:String>
 
     <sys:String x:Key="str.TP.LibExportLuaNoDll">Push to CE (no DLL)</sys:String>
-    <sys:String x:Key="str.Tip.TP.LibExportLuaNoDll">Same picker, but teleport is a raw memory write using the standalone trainer's baked offsets, so no DLL is needed. Weaker: enable "UE5 Trainer: Setup" first, there is no map guard (the map name is only readable through the DLL), and the offsets go stale when the game is patched.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibExportLuaNoDll">Same picker, but the generated script teleports by raw memory write, so UE5Dumper.dll does NOT have to be injected. "No DLL" refers to that only — delivery still goes through the AOBMaker CE plugin (or the clipboard when it is not connected), exactly like the button on its left. The script lands in the "UE5CEDumper (no-DLL trainer)" group and needs "UE5 Trainer: Setup" enabled first, since it uses the offsets that record bakes. Weaker than the DLL path: no map guard (the map name is only readable through the DLL), and the offsets go stale when the game is patched.</sys:String>
 
     <sys:String x:Key="str.TP.CursorForceHeader">Force Mouse Cursor</sys:String>
     <sys:String x:Key="str.TP.CursorForceHint">Force the OS mouse cursor visible or hidden by writing the PlayerController's bShowMouseCursor. Handy when a game hides the cursor but you want Cursor Teleport. One-shot: a game that re-sets the flag every frame may revert it, and a captured input mode can still hide the cursor.</sys:String>

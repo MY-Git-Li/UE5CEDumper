@@ -260,7 +260,10 @@ public static class CoordLibraryScriptGenerator
             Line(sb);
             Line(sb, "local function teleport(e)");
             Line(sb, "  if not UE5T_ready then");
-            Line(sb, "    return nil, 'enable \'UE5 Trainer: Setup\' first'");
+            // Lua DOUBLE quotes here: the message itself contains single quotes, and
+            // C#'s \' escape collapses to a bare ' -- which silently produced an
+            // unterminated Lua string (in-game syntax error, build 2269).
+            Line(sb, "    return nil, \"enable 'UE5 Trainer: Setup' first\"");
             Line(sb, "  end");
             Line(sb, "  local p = UE5T_pawn()");
             Line(sb, "  local rc = p and UE5T_deref(p, UE5T.rootOff)");
@@ -309,15 +312,24 @@ public static class CoordLibraryScriptGenerator
         Line(sb);
         Line(sb, "  UE5CD_form = createForm(false)");
         Line(sb, "  UE5CD_form.Caption = 'UE5CEDumper -- Coordinate Library'");
-        Line(sb, "  UE5CD_form.Width = 820");
-        Line(sb, "  UE5CD_form.Height = 560");
+        Line(sb, "  UE5CD_form.Width = 900");
+        Line(sb, "  UE5CD_form.Height = 600");
         Line(sb, "  UE5CD_form.Position = 'poScreenCenter'");
+        Line(sb, "  -- Resizable, and every control below is laid out from ClientWidth rather");
+        Line(sb, "  -- than hardcoded pixels: the form does not always get the width it asks");
+        Line(sb, "  -- for (observed 2269 -- a ~577px window clipped the map selector), and a");
+        Line(sb, "  -- relative layout survives that as well as any user resize.");
+        Line(sb, "  UE5CD_form.BorderStyle = bsSizeable");   // bare, per InvokeScriptGenerator
+        Line(sb, "  local CW = UE5CD_form.ClientWidth");
         Line(sb);
         Line(sb, "  -- Panel creation order is load-bearing: alTop panels stack in creation");
         Line(sb, "  -- order and the alClient control must be created LAST.");
         Line(sb, "  local pnlTop = createPanel(UE5CD_form)");
         Line(sb, "  pnlTop.Align = 'alTop'");
-        Line(sb, "  pnlTop.Height = " + (groupCount > 0 ? "96" : (dll ? "40" : "16")));
+        // Rows: filter (36) + map selector (44, DLL only) + group selector (56).
+        Line(sb, "  pnlTop.Height = " +
+                 (36 + (dll ? 44 : 0) + (groupCount > 0 ? 56 : 0)).ToString(
+                     System.Globalization.CultureInfo.InvariantCulture));
         Line(sb, "  pnlTop.BevelOuter = 'bvNone'");
         Line(sb);
         Line(sb, "  local lblFilter = createLabel(pnlTop)");
@@ -328,15 +340,16 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  local edtFilter = createEdit(pnlTop)");
         Line(sb, "  edtFilter.Left = 60");
         Line(sb, "  edtFilter.Top = 8");
-        Line(sb, "  edtFilter.Width = 300");
+        Line(sb, "  edtFilter.Width = math.max(120, CW - 70)");
         Line(sb);
         if (dll)
         {
         Line(sb, "  local rgMap = createRadioGroup(pnlTop)");
-        Line(sb, "  rgMap.Left = 380");
-        Line(sb, "  rgMap.Top = 2");
-        Line(sb, "  rgMap.Width = 260");
-        Line(sb, "  rgMap.Height = 36");
+        Line(sb, "  rgMap.Left = 10");
+        Line(sb, "  rgMap.Top = 36");
+        Line(sb, "  rgMap.Width = math.max(240, CW - 20)");
+        Line(sb, "  rgMap.Height = 40");
+        Line(sb, "  rgMap.Caption = 'Map'");
         Line(sb, "  rgMap.Columns = 2");
         Line(sb, "  rgMap.Items.add('Current map')");
         Line(sb, "  rgMap.Items.add('All maps')");
@@ -347,8 +360,8 @@ public static class CoordLibraryScriptGenerator
             Line(sb);
             Line(sb, "  local rgGroup = createRadioGroup(pnlTop)");
             Line(sb, "  rgGroup.Left = 10");
-            Line(sb, "  rgGroup.Top = 40");
-            Line(sb, "  rgGroup.Width = 790");
+            Line(sb, dll ? "  rgGroup.Top = 80" : "  rgGroup.Top = 36");
+            Line(sb, "  rgGroup.Width = math.max(240, CW - 20)");
             Line(sb, "  rgGroup.Height = 52");
             Line(sb, "  rgGroup.Caption = 'Group'");
             Line(sb, "  rgGroup.Columns = 5");
@@ -397,18 +410,21 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  lv.ViewStyle = 'vsReport'");
         Line(sb, "  lv.RowSelect = true");
         Line(sb, "  lv.ReadOnly = true");
+        Line(sb, "  -- Column widths are a share of the real client width, so the numbers");
+        Line(sb, "  -- stay readable in a narrow window instead of being cut off.");
+        Line(sb, "  local colW = math.max(60, math.floor((CW - 40) / 6))");
         Line(sb, "  lv.Columns.add().Caption = 'Label'");
-        Line(sb, "  lv.Columns[0].Width = 220");
+        Line(sb, "  lv.Columns[0].Width = math.floor(colW * 1.5)");
         Line(sb, "  lv.Columns.add().Caption = 'Group'");
-        Line(sb, "  lv.Columns[1].Width = 120");
+        Line(sb, "  lv.Columns[1].Width = math.floor(colW * 0.8)");
         Line(sb, "  lv.Columns.add().Caption = 'Map'");
-        Line(sb, "  lv.Columns[2].Width = 150");
+        Line(sb, "  lv.Columns[2].Width = math.floor(colW * 1.2)");
         Line(sb, "  lv.Columns.add().Caption = 'X'");
-        Line(sb, "  lv.Columns[3].Width = 100");
+        Line(sb, "  lv.Columns[3].Width = math.floor(colW * 0.85)");
         Line(sb, "  lv.Columns.add().Caption = 'Y'");
-        Line(sb, "  lv.Columns[4].Width = 100");
+        Line(sb, "  lv.Columns[4].Width = math.floor(colW * 0.85)");
         Line(sb, "  lv.Columns.add().Caption = 'Z'");
-        Line(sb, "  lv.Columns[5].Width = 90");
+        Line(sb, "  lv.Columns[5].Width = math.floor(colW * 0.8)");
         Line(sb);
         Line(sb, "  local shown = {}   -- listview row index -> COORDS entry");
         Line(sb);
@@ -497,8 +513,15 @@ public static class CoordLibraryScriptGenerator
         Line(sb);
         Line(sb, "  -- Interactive form: the untick + window close belong on OnClose, NOT on a");
         Line(sb, "  -- momentary timer -- the window must stay open while the user is using it.");
+        Line(sb, "  --");
+        Line(sb, "  -- Dropping the global FIRST is load-bearing, not tidiness: setting");
+        Line(sb, "  -- memrec.Active = false runs the [DISABLE] block, which closes the form it");
+        Line(sb, "  -- can still see -- re-entering OnClose and hanging CE (observed 2269).");
+        Line(sb, "  -- Nil-ing it first makes [DISABLE]'s guard fail, so the close happens once.");
+        Line(sb, "  -- It also stops [DISABLE] touching a caFree'd form object later.");
         Line(sb, "  UE5CD_form.OnClose = function(sender)");
-        Line(sb, "    if memrec ~= nil then memrec.Active = false end");
+        Line(sb, "    UE5CD_form = nil");
+        Line(sb, "    if memrec ~= nil and memrec.Active then memrec.Active = false end");
         Line(sb, "    return caFree");
         Line(sb, "  end");
         Line(sb);

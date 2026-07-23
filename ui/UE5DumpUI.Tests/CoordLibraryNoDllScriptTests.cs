@@ -170,6 +170,52 @@ public class CoordLibraryNoDllScriptTests
                         CoordLibraryScriptGenerator.NoDllRecordDescription);
     }
 
+    // ── Regressions from the first in-game run (build 2269) ──────
+
+    [Fact]
+    public void NoDllScript_SetupMessage_DoesNotBreakItsOwnLuaString()
+    {
+        // Shipped broken: the C# source wrote the message inside a Lua SINGLE-quoted
+        // string while the message itself contains apostrophes. C# collapses its own
+        // \' escape to a bare quote, so the emitted Lua was an unterminated string and
+        // the whole script failed to compile in CE ("'end' expected"). The Lua literal
+        // must therefore be DOUBLE-quoted.
+        var s = NoDll(E("A"));
+        Assert.Contains("\"enable 'UE5 Trainer: Setup' first\"", s);
+        Assert.DoesNotContain("'enable 'UE5", s);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void BothFlavours_HaveBalancedSingleQuotesOnEveryLine(bool dllFlavour)
+    {
+        // Structural guard for the class of bug above: an unterminated single-quoted
+        // Lua string takes the whole generated script down in CE. Walk each line as
+        // Lua would -- a "--" only starts a comment when it is OUTSIDE a string, which
+        // matters because several emitted messages contain "--" themselves.
+        var script = dllFlavour ? Dll(E("A")) : NoDll(E("A"));
+        var lines = script.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            char quote = '\0';   // current string delimiter, or NUL outside one
+            for (int c = 0; c < line.Length; c++)
+            {
+                char ch = line[c];
+                if (quote != '\0')
+                {
+                    if (ch == '\\') { c++; continue; }        // escaped char
+                    if (ch == quote) quote = '\0';
+                    continue;
+                }
+                if (ch == '\'' || ch == '\"') { quote = ch; continue; }
+                if (ch == '-' && c + 1 < line.Length && line[c + 1] == '-') break;  // comment
+            }
+            Assert.True(quote == '\0',
+                $"line {i + 1} leaves a string literal open: {lines[i]}");
+        }
+    }
     [Fact]
     public void NoDllScript_StillHasBothTeleportButtons()
     {

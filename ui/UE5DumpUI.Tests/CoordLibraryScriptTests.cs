@@ -214,6 +214,62 @@ public class CoordLibraryScriptTests
         Assert.Contains("BringToFront", s);
     }
 
+    // ── Regressions from the first in-game run (build 2269) ──────────────
+
+    [Fact]
+    public void Generate_OnClose_DropsTheGlobalBeforeUntickingTheRecord()
+    {
+        // Shipped broken: OnClose set memrec.Active = false, which runs the
+        // [DISABLE] block, which closed the form it could still see through the
+        // global -- re-entering OnClose and HANGING Cheat Engine. Nil-ing the
+        // global first makes [DISABLE]'s guard fail, so the close happens once. It
+        // also stops [DISABLE] touching a caFree'd form object afterwards.
+        var s = Gen(E("A"));
+        int nilGlobal = s.IndexOf("UE5CD_form = nil", StringComparison.Ordinal);
+        // Match the CODE line, not the explanatory comment above it (which also
+        // contains the words "memrec.Active = false").
+        int untick = s.IndexOf("if memrec ~= nil and memrec.Active then", StringComparison.Ordinal);
+        Assert.True(nilGlobal > 0, "OnClose must drop the global");
+        Assert.True(untick > nilGlobal,
+            "the global must be nil-ed BEFORE the untick that triggers [DISABLE]");
+    }
+
+    [Fact]
+    public void Generate_DisableBlock_GuardsOnTheGlobalBeingPresent()
+    {
+        var s = Gen(E("A"));
+        int disable = s.IndexOf("[DISABLE]", StringComparison.Ordinal);
+        var tail = s[disable..];
+        Assert.Contains("if UE5CD_form ~= nil and not UE5CD_form.Destroyed", tail);
+    }
+
+    [Fact]
+    public void Generate_LaysOutFromClientWidthNotHardcodedPixels()
+    {
+        // Shipped broken: control positions assumed the form got the 820px it asked
+        // for. It did not (a ~577px window), so the map selector was clipped. Every
+        // width is now a function of the REAL client width, which also survives a
+        // user resize.
+        var s = Gen(E("A", "Chest"));
+        Assert.Contains("local CW = UE5CD_form.ClientWidth", s);
+        Assert.Contains("bsSizeable", s);
+        // No unverified control properties: CE Lua raises on an unknown one, which
+        // would take the whole script down. "Anchor" was tried and removed.
+        Assert.DoesNotContain(".Anchor", s);
+        Assert.Contains("math.max(240, CW - 20)", s);      // radio groups
+        Assert.Contains("math.max(120, CW - 70)", s);      // filter edit
+        Assert.Contains("math.floor((CW - 40) / 6)", s);   // list columns
+    }
+
+    [Fact]
+    public void Generate_NoControlKeepsAHardcodedWidthWiderThanTheForm()
+    {
+        // The specific clipping bug: a 790px-wide radio group inside a form that
+        // turned out to be ~577px. Nothing may assert a fixed width like that again.
+        var s = Gen(E("A", "Chest"));
+        foreach (var bad in new[] { ".Width = 790", ".Width = 300", ".Width = 260" })
+            Assert.DoesNotContain(bad, s);
+    }
     // ── Mailbox protocol ─────────────────────────────────────────────────
 
     [Fact]

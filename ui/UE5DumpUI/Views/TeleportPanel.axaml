@@ -13,7 +13,7 @@
     <ScrollViewer.ContextMenu>
       <ContextMenu Opening="OnJumpMenuOpening"/>
     </ScrollViewer.ContextMenu>
-    <StackPanel x:Name="ContentRoot" Margin="10" Spacing="10" MaxWidth="720" HorizontalAlignment="Left">
+    <StackPanel x:Name="ContentRoot" Margin="10" Spacing="10" MaxWidth="1100" HorizontalAlignment="Left">
 
       <!-- Single-player warning -->
       <TextBlock Text="{StaticResource str.TP.Warning}"
@@ -473,18 +473,18 @@
             <TextBlock Grid.Row="0" Grid.Column="0" Text="{StaticResource str.TP.CoordXyz}"
                        Foreground="#999999" Margin="0,0,8,4" VerticalAlignment="Center"/>
             <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-              <NumericUpDown Value="{Binding CoordX}" Increment="10" Width="135" FormatString="0.###"/>
-              <NumericUpDown Value="{Binding CoordY}" Increment="10" Width="135" FormatString="0.###"/>
-              <NumericUpDown Value="{Binding CoordZ}" Increment="10" Width="135" FormatString="0.###"/>
+              <NumericUpDown Value="{Binding CoordX}" Increment="10" Width="180" FormatString="0.###"/>
+              <NumericUpDown Value="{Binding CoordY}" Increment="10" Width="180" FormatString="0.###"/>
+              <NumericUpDown Value="{Binding CoordZ}" Increment="10" Width="180" FormatString="0.###"/>
             </StackPanel>
             <TextBlock Grid.Row="1" Grid.Column="0" Text="{StaticResource str.TP.CoordPyr}"
                        Foreground="#999999" Margin="0,4,8,0" VerticalAlignment="Center"/>
             <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
-              <NumericUpDown Value="{Binding CoordPitch}" Increment="1" Width="135" FormatString="0.##"
+              <NumericUpDown Value="{Binding CoordPitch}" Increment="1" Width="180" FormatString="0.##"
                              IsEnabled="{Binding CoordSetRotation}"/>
-              <NumericUpDown Value="{Binding CoordYaw}" Increment="1" Width="135" FormatString="0.##"
+              <NumericUpDown Value="{Binding CoordYaw}" Increment="1" Width="180" FormatString="0.##"
                              IsEnabled="{Binding CoordSetRotation}"/>
-              <NumericUpDown Value="{Binding CoordRoll}" Increment="1" Width="135" FormatString="0.##"
+              <NumericUpDown Value="{Binding CoordRoll}" Increment="1" Width="180" FormatString="0.##"
                              IsEnabled="{Binding CoordSetRotation}"/>
             </StackPanel>
           </Grid>
@@ -571,7 +571,7 @@
 
             <DataGrid ItemsSource="{Binding CoordResults}"
                       SelectedItem="{Binding SelectedCoord, Mode=TwoWay}"
-                      MaxHeight="260"
+                      MaxHeight="300"
                       IsReadOnly="True" CanUserResizeColumns="True"
                       GridLinesVisibility="Horizontal" BorderThickness="0"
                       Background="#1E1E1E" Foreground="#D4D4D4"
