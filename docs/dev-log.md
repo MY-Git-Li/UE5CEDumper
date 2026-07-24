@@ -409,8 +409,8 @@ The 4th proxy. **Built on the slot-contention trigger, not the coverage one** â€
 (build 2313) stands: winmm and dxgi both cover 100% of installed UE games and winmm reaches exactly
 zero that dxgi misses. What justifies it is the other half of that finding: **a proxy only works if
 its filename is free.** `dxgi.dll` is the name ReShade and many mod loaders take, `version.dll` is
-likewise often occupied (P3R ships its own), and with both gone the only remaining choice was
-dinput8 at 2/24. winmm is the spare universally-viable slot, so users now get a real dxgi/winmm
+likewise a common ASI/mod-loader name (e.g. Ultimate ASI Loader), and with both gone the only
+remaining choice was dinput8 at 2/24. winmm is the spare universally-viable slot, so users now get a real dxgi/winmm
 choice.
 
 **Generated, never hand-written.** New `scripts/gen_proxy_forwarders.py` reads the export table of
