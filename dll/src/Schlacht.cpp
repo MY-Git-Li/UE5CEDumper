@@ -459,6 +459,77 @@ void StopWorkerLocked() {
     s_worker.join();   // s_mutex must NOT be held here (the worker locks it per tick)
 }
 
+// ---- deferred restore (the leftover-hidden fix) ----
+//
+// A disable while the game thread is paused CANNOT un-hide, and that is the
+// COMMON case, not an edge one: IsGameThreadResponsive is driven by ProcessEvent
+// fire times and UE throttles a backgrounded window — so clicking in the UI to
+// switch See-through off (or to disconnect) is itself what pauses the thread.
+// Observed live: a disconnect left one actor invisible with the user's only
+// recovery being "reconnect and toggle the feature twice".
+//
+// So instead of leaving the record for a hypothetical later enable, poll for the
+// game thread to come back and restore the moment it does — which is the instant
+// the user clicks back into the game, i.e. exactly when they would notice.
+std::thread       s_pendingWorker;
+std::atomic<bool> s_pendingStop{false};
+std::atomic<bool> s_pendingRunning{false};
+
+void PendingRestoreLoop() {
+    Tot::MarkBackgroundWorker();   // shutdown-only cancel, like every re-assert worker (M4)
+    LOG_INFO("SeeThrough: waiting for the game thread to resume so the leftover "
+             "hidden actor(s) can be restored");
+    int waited = 0;
+    for (;;) {
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(Grimoire::SCHLACHT_PENDING_TICK_MS));
+        waited += Grimoire::SCHLACHT_PENDING_TICK_MS;
+        if (s_pendingStop.load() || Tot::ShutdownRequested()) break;
+
+        // Re-enabled, or someone else already restored: nothing left to do.
+        bool nothingToDo;
+        { std::lock_guard<std::mutex> lk(s_mutex);
+          nothingToDo = s_state.active || s_state.hiddenActors.empty(); }
+        if (nothingToDo) break;
+
+        if (!Stark::IsGameThreadResponsive()) {
+            if (waited >= Grimoire::SCHLACHT_PENDING_MAX_MS) {
+                LOG_WARN("SeeThrough: gave up waiting for the game thread (%d s) — any "
+                         "leftover hidden actor(s) stay hidden until See-through is "
+                         "enabled and disabled again with the game running",
+                         Grimoire::SCHLACHT_PENDING_MAX_MS / 1000);
+                break;
+            }
+            continue;
+        }
+
+        std::unordered_set<uintptr_t> restore;
+        { std::lock_guard<std::mutex> lk(s_mutex);
+          restore = std::move(s_state.hiddenActors);
+          s_state.hiddenActors.clear();
+          s_state.hiddenCount = 0; }
+        for (uintptr_t a : restore) InvokeSetHidden(a, false);
+        LOG_INFO("SeeThrough: game thread resumed after %d ms — restored %zu "
+                 "leftover hidden actor(s)", waited, restore.size());
+        break;
+    }
+    s_pendingRunning.store(false);
+}
+
+void StartPendingLocked() {   // s_workerMutex held
+    if (s_pendingRunning.load()) return;                     // already waiting
+    if (s_pendingWorker.joinable()) s_pendingWorker.join();  // reap a finished one
+    if (Tot::ShutdownRequested()) return;                    // M5 spawn chokepoint
+    s_pendingStop.store(false);
+    s_pendingRunning.store(true);
+    s_pendingWorker = std::thread(PendingRestoreLoop);
+}
+void StopPendingLocked() {    // s_workerMutex held; never called FROM the worker
+    if (!s_pendingWorker.joinable()) return;
+    s_pendingStop.store(true);
+    s_pendingWorker.join();
+}
+
 } // anonymous namespace
 
 namespace Schlacht {
@@ -466,6 +537,10 @@ namespace Schlacht {
 int32_t SetEnabled(bool enable) {
     // lock order: s_workerMutex (outer) → s_mutex (inner).
     std::lock_guard<std::mutex> wlk(s_workerMutex);
+    // Either direction supersedes a deferred restore: enable recovers the leftover
+    // itself, and a fresh disable re-decides. Joined here so only one path ever
+    // owns hiddenActors.
+    StopPendingLocked();
     if (enable) {
         // Recover any actors left hidden by a prior stalled disable. Only pull the
         // leftover OUT of hiddenActors when we can actually un-hide it now (game thread
@@ -548,8 +623,9 @@ int32_t SetEnabled(bool enable) {
             kept = s_state.hiddenActors.size();
             s_state.hiddenCount = static_cast<int32_t>(kept);
         }
-        LOG_WARN("SeeThrough: disabled but %zu actor(s) remain hidden (game thread unresponsive); "
-                 "re-enable after the game resumes to restore them", kept);
+        LOG_WARN("SeeThrough: disabled but %zu actor(s) remain hidden (game thread unresponsive) "
+                 "— waiting for it to resume to restore them", kept);
+        if (kept > 0) StartPendingLocked();
     }
     return 0;
 }
@@ -579,6 +655,7 @@ bool IsActive() {
 
 void StopWorker() {
     std::lock_guard<std::mutex> lk(s_workerMutex);
+    StopPendingLocked();
     StopWorkerLocked();
 }
 

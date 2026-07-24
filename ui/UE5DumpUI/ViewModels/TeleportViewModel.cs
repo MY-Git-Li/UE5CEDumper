@@ -2393,11 +2393,22 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        // Leftover-hidden: must be tested BEFORE the plain-off early-return below,
+        // and kept on the card rather than only in the one-shot status line.
+        if (!st.Active && st.HiddenCount > 0)
+        {
+            SeeThroughCurrentText =
+                $"Off — {st.HiddenCount} actor(s) still hidden (the game thread was paused). "
+                + "Click back into the game and they reappear; Keep Foreground avoids this.";
+            return;
+        }
+
         if (!st.Active)
         {
             SeeThroughCurrentText = "—";
             return;
         }
+
         SeeThroughCurrentText = st.HasTarget
             ? (st.HiddenCount > 0
                 ? "Active — hiding the occluder in front of your character."
@@ -2434,7 +2445,16 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             IsBusy = true; ClearError();
             var st = await _dump.SeeThroughSetAsync(enable: false, count: null);
             ApplySeeThroughReadout(st);
-            StatusText = "See-through OFF.";
+            // A disable while the game thread is paused/backgrounded CANNOT un-hide:
+            // the DLL keeps the record (so a later enable restores it) and reports the
+            // leftover in HiddenCount. Observed live — clicking in the UI backgrounds
+            // the game, which is exactly when this fires — so saying only "OFF" would
+            // leave an actor invisible in the game with no hint why.
+            StatusText = st.HiddenCount > 0
+                ? $"See-through OFF — {st.HiddenCount} actor(s) are still hidden because the game "
+                  + "thread is paused (game in the background?). They are restored automatically as "
+                  + "soon as you click back into the game. Keep Foreground prevents this."
+                : "See-through OFF.";
         }
         catch (Exception ex) { ApplySeeThroughState(-1); SetError(ex); _log.Error("Teleport ResetSeeThrough failed", ex); }
         finally { IsBusy = false; }
