@@ -332,6 +332,103 @@ static void Test_SanitizeAnsi_NulAndBounds() {
                   Utf8Helpers::SanitizeAnsiName(nul0, sizeof(nul0)), "");
 }
 
+// ----- DecodeFStringBuffer tests ---------------------------------------------
+
+// The exact bytes CE dumped for Star Trek Voyager (stock UE5.6): the FText
+// display string "在维修期间继续探索星系" stored as UTF-8 (33 bytes) + NUL.
+// numUnits for a 1-byte buffer = byte count incl. NUL = 34.
+static const uint8_t kUtf8Cjk[] = {
+    0xE5,0x9C,0xA8, 0xE7,0xBB,0xB4, 0xE4,0xBF,0xAE, 0xE6,0x9C,0x9F,
+    0xE9,0x97,0xB4, 0xE7,0xBB,0xA7, 0xE7,0xBB,0xAD, 0xE6,0x8E,0xA2,
+    0xE7,0xB4,0xA2, 0xE6,0x98,0x9F, 0xE7,0xB3,0xBB, 0x00
+};
+static const char* kUtf8CjkExpected =
+    "\xE5\x9C\xA8\xE7\xBB\xB4\xE4\xBF\xAE\xE6\x9C\x9F\xE9\x97\xB4"
+    "\xE7\xBB\xA7\xE7\xBB\xAD\xE6\x8E\xA2\xE7\xB4\xA2\xE6\x98\x9F\xE7\xB3\xBB";
+
+static void Test_Decode_Utf8CjkExactBuffer() {
+    // Read exactly Num bytes (near-page-end fallback path).
+    EXPECT_EQ_STR("UTF-8 CJK, buffer == Num bytes",
+                  Utf8Helpers::DecodeFStringBuffer(kUtf8Cjk, sizeof(kUtf8Cjk), 34),
+                  kUtf8CjkExpected);
+}
+
+static void Test_Decode_Utf8CjkWithTrailingHeapBytes() {
+    // Production reads Num*2 (=68) bytes: 34 real + 34 adjacent heap. The heap
+    // tail must NOT put a NUL pair at the UTF-16 terminator position [66,67],
+    // or the UTF-16 hypothesis would false-fire. These are the real dump bytes
+    // that follow (…7B 09 at [66,67]).
+    uint8_t buf[68];
+    for (size_t i = 0; i < 34; ++i) buf[i] = kUtf8Cjk[i];
+    // Arbitrary non-terminating filler; [66],[67] deliberately non-zero.
+    for (size_t i = 34; i < 68; ++i) buf[i] = static_cast<uint8_t>(0x40 + (i & 0x1F));
+    buf[66] = 0x7B; buf[67] = 0x09;
+    EXPECT_EQ_STR("UTF-8 CJK, buffer == Num*2 bytes with heap tail",
+                  Utf8Helpers::DecodeFStringBuffer(buf, sizeof(buf), 34),
+                  kUtf8CjkExpected);
+}
+
+static void Test_Decode_Utf16Cjk() {
+    // 中文 as UTF-16LE + NUL unit → num = 3.  中=0x4E2D 文=0x6587.
+    const uint8_t buf[] = { 0x2D,0x4E, 0x87,0x65, 0x00,0x00 };
+    EXPECT_EQ_STR("UTF-16 CJK 中文",
+                  Utf8Helpers::DecodeFStringBuffer(buf, sizeof(buf), 3),
+                  "\xE4\xB8\xAD\xE6\x96\x87");
+}
+
+static void Test_Decode_Utf16Ascii() {
+    // "OK" UTF-16LE + NUL → num = 3. buf[2]='K' (non-zero) so the UTF-8 gate
+    // does not fire; UTF-16 wins.
+    const uint8_t buf[] = { 'O',0x00, 'K',0x00, 0x00,0x00 };
+    EXPECT_EQ_STR("UTF-16 ASCII OK",
+                  Utf8Helpers::DecodeFStringBuffer(buf, sizeof(buf), 3), "OK");
+}
+
+static void Test_Decode_Utf8Ascii() {
+    // "OK" UTF-8 + NUL → num = 3, read as Num*2=6 bytes with heap tail.
+    const uint8_t buf[] = { 'O','K',0x00, 0x11,0x22,0x33 };
+    EXPECT_EQ_STR("UTF-8 ASCII OK",
+                  Utf8Helpers::DecodeFStringBuffer(buf, sizeof(buf), 3), "OK");
+}
+
+static void Test_Decode_Utf16AsciiEvenLenInteriorNull() {
+    // "ABC" UTF-16LE + NUL → num = 4. buf[n-1]=buf[3]=0x00 (high byte of 'B')
+    // WOULD trip a naive UTF-8 terminator check — the interior-null gate
+    // (buf[1]=0x00) must route this to the UTF-16 path instead.
+    const uint8_t buf[] = { 'A',0x00, 'B',0x00, 'C',0x00, 0x00,0x00 };
+    EXPECT_EQ_STR("UTF-16 ASCII ABC (even len, interior null gate)",
+                  Utf8Helpers::DecodeFStringBuffer(buf, sizeof(buf), 4), "ABC");
+}
+
+static void Test_Decode_RejectsEmptyAndGarbage() {
+    const uint8_t buf[] = { 0x00,0x00,0x00,0x00 };
+    EXPECT_EQ_STR("num < 2 is empty",
+                  Utf8Helpers::DecodeFStringBuffer(buf, sizeof(buf), 1), "");
+    EXPECT_EQ_STR("null buffer is empty",
+                  Utf8Helpers::DecodeFStringBuffer(nullptr, 10, 5), "");
+    // No terminator at either candidate position → "".
+    const uint8_t noTerm[] = { 0x41,0x42,0x43,0x44,0x45,0x46 };
+    EXPECT_EQ_STR("no terminator anywhere → empty",
+                  Utf8Helpers::DecodeFStringBuffer(noTerm, sizeof(noTerm), 3), "");
+    // UTF-16 buffer whose decode is mostly replacement chars → rejected by
+    // LooksLikeDecodedText (lone surrogates everywhere).
+    const uint8_t surrogates[] = { 0x00,0xD8, 0x00,0xD8, 0x00,0xD8, 0x00,0x00 };
+    EXPECT_EQ_STR("mostly-replacement UTF-16 rejected",
+                  Utf8Helpers::DecodeFStringBuffer(surrogates, sizeof(surrogates), 4), "");
+}
+
+static void Test_LooksLikeDecodedText() {
+    EXPECT("plain text looks like text",
+           Utf8Helpers::LooksLikeDecodedText("hello"));
+    EXPECT("CJK looks like text",
+           Utf8Helpers::LooksLikeDecodedText("\xE4\xB8\xAD\xE6\x96\x87"));
+    EXPECT("one literal ? in a sentence still passes",
+           Utf8Helpers::LooksLikeDecodedText("Ready?"));
+    EXPECT("all replacements rejected",
+           !Utf8Helpers::LooksLikeDecodedText("????"));
+    EXPECT("empty rejected", !Utf8Helpers::LooksLikeDecodedText(""));
+}
+
 // ----- main ------------------------------------------------------------------
 
 int main() {
@@ -366,6 +463,15 @@ int main() {
     Test_SanitizeAnsi_CleanNamePassthrough();
     Test_SanitizeAnsi_RejectsJunkRun();
     Test_SanitizeAnsi_NulAndBounds();
+
+    Test_Decode_Utf8CjkExactBuffer();
+    Test_Decode_Utf8CjkWithTrailingHeapBytes();
+    Test_Decode_Utf16Cjk();
+    Test_Decode_Utf16Ascii();
+    Test_Decode_Utf8Ascii();
+    Test_Decode_Utf16AsciiEvenLenInteriorNull();
+    Test_Decode_RejectsEmptyAndGarbage();
+    Test_LooksLikeDecodedText();
 
     std::printf("---------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

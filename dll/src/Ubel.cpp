@@ -185,10 +185,15 @@ std::vector<LiveFieldValue::EnumEntry> GetEnumEntries(uintptr_t enumAddr) {
 // ============================================================
 static std::string ReadFString(uintptr_t instanceAddr, int32_t offset) {
     // FString = TArray<wchar_t> = { wchar_t* Data (8B), int32 Count (4B), int32 Max (4B) }
+    // Read Data+Count in ONE shot: two separate reads can pair a fresh Data
+    // pointer with a stale Count if the string reallocs between them, giving an
+    // out-of-bounds buffer read. 12 bytes cover {Data, Count}.
+    uint8_t hdr[12];
+    if (!Macht::ReadBytesSafe(instanceAddr + offset, hdr, sizeof(hdr))) return "";
     uintptr_t data = 0;
     int32_t count = 0;
-    Macht::ReadSafe(instanceAddr + offset, data);
-    Macht::ReadSafe(instanceAddr + offset + 8, count);
+    std::memcpy(&data, hdr, sizeof(data));
+    std::memcpy(&count, hdr + 8, sizeof(count));
 
     if (!data || count <= 0 || count > 256) return "";
 
@@ -222,10 +227,13 @@ static std::string ReadFString(uintptr_t instanceAddr, int32_t offset) {
 // over-long string. Used for both new UE5.5+ string property variants.
 // ============================================================
 static std::string ReadFUtf8String(uintptr_t instanceAddr, int32_t offset) {
+    // Single-shot {Data, Count} read — same torn-read guard as ReadFString.
+    uint8_t hdr[12];
+    if (!Macht::ReadBytesSafe(instanceAddr + offset, hdr, sizeof(hdr))) return "";
     uintptr_t data = 0;
     int32_t count = 0;
-    Macht::ReadSafe(instanceAddr + offset, data);
-    Macht::ReadSafe(instanceAddr + offset + 8, count);
+    std::memcpy(&data, hdr, sizeof(data));
+    std::memcpy(&count, hdr + 8, sizeof(count));
 
     if (!data || count <= 0 || count > 256) return "";
 
@@ -279,11 +287,67 @@ static std::string ReadSoftObjectPath(uintptr_t addr) {
 }
 
 // ============================================================
+// TryDecodeFStringAt — read a { Data(8B), Num(4B), Max(4B) } FString header at
+// `addr`, read its buffer, and decode it as UTF-16 OR UTF-8 (element width
+// auto-detected by Utf8Helpers::DecodeFStringBuffer). Used only by the FText
+// reader, so it carries a higher length cap than the 256-char hot-path
+// ReadFString — dialogue / UI lines are long — WITHOUT widening that hot path
+// (its 256 cap protects the value-scan / snapshot / walk callers).
+// Returns "" if `addr` does not hold a plausible, decodable FString.
+// ============================================================
+static std::string TryDecodeFStringAt(uintptr_t addr) {
+    if (!addr) return "";
+
+    // Single-shot 16-byte header read: {Data(8), Num(4), Max(4)}.
+    uint8_t hdr[16];
+    if (!Macht::ReadBytesSafe(addr, hdr, sizeof(hdr))) return "";
+    uintptr_t data = 0;
+    int32_t num = 0, cap = 0;
+    std::memcpy(&data, hdr, sizeof(data));
+    std::memcpy(&num, hdr + 8, sizeof(num));
+    std::memcpy(&cap, hdr + 12, sizeof(cap));
+
+    // Plausibility gate for a real FString header (steps the probe over
+    // garbage): non-null Data, Num in [2, 8192] (includes the trailing null
+    // unit), Max in [Num, 4*Num+256]. The Max window is generous — a localized
+    // dialogue FString can carry reserved capacity — because the real
+    // discriminators are the null-terminator position + content check inside
+    // DecodeFStringBuffer, not Max. Data must also look like a user-space
+    // heap pointer, which rejects most non-FString 16-byte regions cheaply.
+    if (!data || num < 2 || num > 8192) return "";
+    if (cap < num || cap > num * 4 + 256) return "";
+    if (data < 0x10000 || data >= 0x7FFFFFFFFFFFull) return "";
+
+    // Read up to Num*2 bytes so the UTF-16 hypothesis can be tested; fall back
+    // to Num bytes when the buffer sits near the end of a committed page.
+    const size_t wantWide = static_cast<size_t>(num) * 2;
+    std::vector<uint8_t> buf(wantWide, 0);
+    size_t got = 0;
+    if (Macht::ReadBytesSafe(data, buf.data(), wantWide)) {
+        got = wantWide;
+    } else if (Macht::ReadBytesSafe(data, buf.data(), static_cast<size_t>(num))) {
+        got = static_cast<size_t>(num);
+    } else {
+        return "";
+    }
+    return Utf8Helpers::DecodeFStringBuffer(buf.data(), got, num);
+}
+
+// ============================================================
 // ReadFTextString — read the display string from an FText.
 //
 // FText = { ITextData* Data (8B); void* SharedRefController (8B); ... }
-// ITextData contains an FString at a version-dependent offset.
-// We probe common offsets within ITextData to find the FString.
+// The display FString lives at a version/fork-dependent spot inside ITextData,
+// in one of two shapes:
+//   (a) INLINE   — the FString sits by value at ITextData+offset (UE4 / UE5.0
+//                  FTextHistory_Base source string / by-value display string).
+//   (b) INDIRECT — ITextData+offset holds a POINTER to a ref-counted block
+//                  carrying the FString: TSharedPtr<FString> (UE<=5.3) has it
+//                  at +0x00; FRefCountedDisplayString {atomic refcount; FString}
+//                  (UE5.4+) has it at +0x08.
+// Each candidate FString is decoded width-agnostically (UTF-16 OR UTF-8 — some
+// cooked builds, e.g. stock UE5.6, store the display string as UTF-8, which a
+// blind UTF-16 decode turned into 亂碼 / an empty result before).
 // ============================================================
 static std::string ReadFTextString(uintptr_t ftextAddr) {
     if (!ftextAddr) return "";
@@ -292,26 +356,33 @@ static std::string ReadFTextString(uintptr_t ftextAddr) {
     uintptr_t textDataPtr = 0;
     if (!Macht::ReadSafe(ftextAddr, textDataPtr) || !textDataPtr) return "";
 
-    // Probe ITextData at multiple offsets for a valid FString
-    // FString = { wchar_t* Data (8B), int32 Count (4B), int32 Max (4B) }
-    static const int probeOffsets[] = { 0x28, 0x30, 0x38, 0x40, 0x20, 0x48 };
+    // Bounded, layout-agnostic scan of the FTextData object. We don't hardcode
+    // per-version offsets because the display FString lands in different spots
+    // across UE4 / UE5.0 inline histories, the UE5.4+ ref-counted pointer, and
+    // licensee forks. FTextData is small, so an 8-byte-strided window from just
+    // past the vtable to 0x90 covers every observed layout; the strict header
+    // gate in TryDecodeFStringAt keeps false positives negligible.
+    const int kScanBegin = 0x08;   // skip the vtable at +0x00
+    const int kScanEnd   = 0x90;
 
-    for (int offset : probeOffsets) {
-        uintptr_t strData = 0;
-        int32_t   strCount = 0;
-        int32_t   strMax = 0;
+    // Pass 1: FString stored INLINE at FTextData+offset (UE4 / UE5.0 by-value
+    // display or source string). Ascending order → the earliest real header
+    // wins, matching how a by-value display string precedes trailing fields.
+    for (int off = kScanBegin; off <= kScanEnd; off += 8) {
+        std::string s = TryDecodeFStringAt(textDataPtr + off);
+        if (!s.empty()) return s;
+    }
 
-        if (!Macht::ReadSafe(textDataPtr + offset, strData) || !strData) continue;
-        if (!Macht::ReadSafe(textDataPtr + offset + 8, strCount)) continue;
-        if (!Macht::ReadSafe(textDataPtr + offset + 12, strMax)) continue;
-
-        // Validate: reasonable FString (non-null data, positive count, count <= max)
-        if (strCount <= 0 || strCount > 4096 || strMax < strCount) continue;
-
-        // Try to read the FString at this offset
-        std::string result = ReadFString(textDataPtr, offset);
-        if (!result.empty())
-            return result;
+    // Pass 2: pointer INDIRECTION (UE<=5.3 TSharedPtr<FString> at inner +0x00;
+    // UE5.4+ FRefCountedDisplayString {atomic refcount; FString} at inner +0x08).
+    // Only reached when no inline FString resolved.
+    for (int off = kScanBegin; off <= kScanEnd; off += 8) {
+        uintptr_t inner = 0;
+        if (!Macht::ReadSafe(textDataPtr + off, inner) || !inner) continue;
+        for (int io = 0x00; io <= 0x18; io += 8) {
+            std::string s = TryDecodeFStringAt(inner + io);
+            if (!s.empty()) return s;
+        }
     }
 
     return "";

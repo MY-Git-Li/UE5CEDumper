@@ -188,4 +188,85 @@ inline std::string EncodeUtf16(const wchar_t* data, size_t len) {
     return result;
 }
 
+// Cheap "did this decode to real text?" guard for DecodeFStringBuffer. A buffer
+// decoded at the WRONG element width is dominated by Sanitize's '?' replacement
+// marker; genuine text is not. Counts decoded CHARACTERS (skipping UTF-8
+// continuation bytes so a multi-byte CJK glyph counts once) and rejects when
+// more than a third of them are replacements. A handful of legitimate literal
+// '?' in a real sentence still passes.
+inline bool LooksLikeDecodedText(const std::string& s) {
+    if (s.empty()) return false;
+    size_t total = 0, bad = 0;
+    for (unsigned char c : s) {
+        if ((c & 0xC0) == 0x80) continue;   // UTF-8 continuation — same char
+        ++total;
+        if (c == '?') ++bad;
+    }
+    if (total == 0) return false;
+    return bad * 3 < total;
+}
+
+// ============================================================
+// DecodeFStringBuffer — decode a raw FString / FUtf8String buffer whose
+// element WIDTH is unknown, choosing UTF-8 (1-byte: FUtf8String, or a game
+// that stores its FText display string as UTF-8) vs UTF-16 (2-byte TCHAR).
+//
+//   buf       raw bytes read from the string's Data pointer
+//   bufLen    how many bytes were actually read (ideally >= numUnits*2 so the
+//             UTF-16 hypothesis can be tested; >= numUnits is enough for UTF-8)
+//   numUnits  the FString header's Num — a code-UNIT count INCLUDING the
+//             trailing null (Len = Num - 1)
+//
+// Width is decided by where the null terminator sits, gated by an interior-null
+// check:
+//   * UTF-8  : byte[numUnits-1] == 0 AND no 0x00 in [0, numUnits-1). The
+//              interior-null gate is what separates a genuine 1-byte buffer
+//              from a UTF-16 ASCII buffer, whose high bytes are 0x00.
+//   * UTF-16 : the unit at index numUnits-1 is 0x0000 (bytes at 2*(N-1)).
+// UTF-8 is tried first because its gate is stricter; a real UTF-16 string
+// (CJK high bytes non-zero, or ASCII with interspersed 0x00 interior nulls)
+// never satisfies it. This is what lets the FText reader recover UTF-8 display
+// strings that a blind UTF-16 decode turns into 亂碼.
+//
+// Returns sanitized UTF-8, or "" if neither hypothesis yields a
+// null-terminated, mostly-textual string.
+// ============================================================
+inline std::string DecodeFStringBuffer(const uint8_t* buf, size_t bufLen, int32_t numUnits) {
+    if (!buf || numUnits < 2) return "";   // < 2 units = empty (just the null)
+    const size_t n = static_cast<size_t>(numUnits);
+
+    // --- UTF-8 hypothesis: n bytes, terminator at [n-1], no interior null ---
+    if (bufLen >= n && buf[n - 1] == 0) {
+        bool interiorNull = false;
+        for (size_t i = 0; i + 1 < n; ++i) {
+            if (buf[i] == 0) { interiorNull = true; break; }
+        }
+        if (!interiorNull) {
+            std::string decoded =
+                Sanitize(std::string(reinterpret_cast<const char*>(buf), n - 1));
+            if (LooksLikeDecodedText(decoded)) return decoded;
+        }
+    }
+
+    // --- UTF-16 hypothesis: n wchar_t units, terminating unit at [n-1] ---
+    if (bufLen >= n * 2) {
+        const size_t termByte = (n - 1) * 2;
+        if (buf[termByte] == 0 && buf[termByte + 1] == 0) {
+            // Recombine little-endian byte pairs into UTF-16 units without
+            // assuming buf is 2-byte aligned.
+            std::wstring w;
+            w.reserve(n);
+            for (size_t i = 0; i < n; ++i) {
+                uint16_t u = static_cast<uint16_t>(buf[i * 2]) |
+                             (static_cast<uint16_t>(buf[i * 2 + 1]) << 8);
+                w.push_back(static_cast<wchar_t>(u));
+            }
+            std::string decoded = Sanitize(EncodeUtf16(w.data(), w.size()));
+            if (LooksLikeDecodedText(decoded)) return decoded;
+        }
+    }
+
+    return "";
+}
+
 } // namespace Utf8Helpers
