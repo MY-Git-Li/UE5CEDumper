@@ -19,6 +19,30 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## In-game text: S2T conversion + local-LLM translation — EVALUATED (2026-07-24), mostly NOT BUILT
+
+Full 41-agent evaluation in [text-translation-eval.md](text-translation-eval.md) (all 12 load-bearing
+claims refuted or qualified). **In-memory text rewrite = rejected** (three UE-source-level walls: a
+ProcessEvent hook can't see `SetText` §3-3; an in-place same-length overwrite doesn't repaint §3-4; and
+`FString::Data` can't be repointed without corrupting GMalloc §3-1 — on top of the first-order **font
+glyph-coverage** risk). The **offline `.locres` route wins outright** for the S2T half; LLM translation
+belongs in an **offline pre-pass** (extract → translate on any GPU incl. a remote box → re-import), never
+a live path. Open follow-ons, in priority order:
+
+- **Phase 3 (SHIPPED, build 2368)** — `ReadFTextString` now decodes UTF-8 *and* UTF-16 display strings
+  (`Utf8Helpers::DecodeFStringBuffer`) + UE5.4+ pointer-indirection probe; `ReadFString`/`ReadFUtf8String`
+  torn-read fixed. ⚠️ **In-game-unverified**: whether STVoyager's UE5.6 ITextData header lands on a probed
+  offset — if a re-test returns empty, CE-pointer-scan `2E1097B7000` for the offset chain (risk #3). **M · low**
+- **Phase 1 — Locale switcher** (`Lektüre` module: `SetCurrentCulture` invoke + `locale_get`/`locale_set`
+  + one UI card). Zero-write, solves "game has zh-Hant but the menu won't let me pick it". Smallest useful
+  slice; validate on stock UE5.6 (Satisfactory / STVoyager). **S · low**
+- **Phase 2 — Font coverage probe** (`UFont::FontCacheType` + composite-font cmap parse → Offline/covered/
+  missing-N). Useful diagnostic even if translation is never built. **M · low**
+- **Phase 0 (SHIPPED here)** — the one-page offline S2T/LLM workflow lives in
+  [text-translation-eval.md](text-translation-eval.md) §附錄. **done**
+
+-----
+
 ## 🔎 Audit #3 fixes (build 2168 — 2026-07-14; full detail in [audit-2026-07-14-findings.md](audit-2026-07-14-findings.md))
 
 Third bug/leak audit of the post-b1872 code (Solide/Hemmung/Linie/Schlacht/Grausam + Auto-Snapshot/
