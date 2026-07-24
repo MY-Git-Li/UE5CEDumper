@@ -1654,6 +1654,29 @@ public class TeleportViewModelTests
         Assert.DoesNotContain("hook", vm.SeeThroughCurrentText, StringComparison.OrdinalIgnoreCase);
     }
 
+    // Disabling while the game thread is paused CANNOT un-hide; the DLL keeps the
+    // record and reports the leftover in HiddenCount. Observed live on Elliot --
+    // clicking in the UI backgrounds the game, which is exactly when this fires -- so
+    // reporting only "OFF" would leave an actor invisible with no hint why.
+    [Fact]
+    public async Task ResetSeeThrough_with_actors_left_hidden_says_so_and_how_to_recover()
+    {
+        var fake = new FakeDumpService
+        {
+            NextSeeThroughStatus = new() { Active = false, HiddenCount = 1 }
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.ResetSeeThroughCommand.ExecuteAsync(null);
+
+        Assert.Equal("OFF", vm.SeeThroughState);
+        Assert.Contains("still hidden", vm.StatusText);
+        Assert.Contains("stay hidden", vm.SeeThroughCurrentText);
+        // The recovery instruction is the point -- without it the message is just bad news.
+        Assert.Contains("Focus the game", vm.SeeThroughCurrentText);
+    }
+
     [Fact]
     public async Task Changing_pierce_depth_while_active_pushes_it_live()
     {

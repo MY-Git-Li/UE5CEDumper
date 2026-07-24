@@ -57,16 +57,34 @@ the row here when it ships.
   > by `Fern::Start`. **Adversarially verified** (5 lenses: no deadlock / lock-order / M3↔M5 / M4↔M5
   > regression; `EnqueueInvoke` gates on Stark's hook flag not `g_shutdown` so the M3 un-hide survives). The
   > same pass caught + fixed a leak in the M1/M2 enable-recovery (un-responsive re-enable orphaned the
-  > leftover). *Delete after in-game verify.*
-  > **✅ DONE — M1/M2/M3** (SHIPPED commit `0f6f6e0`, build 2188, **needs in-game verify**). All Schlacht:
-  > disable now joins the worker *before* snapshot/restore (M1); an unresponsive game thread keeps the hidden
+  > leftover). **⛔ STILL NOT EXERCISED after four live sessions** — every one ended with the UI
+  > disconnecting (`Client disconnected`), never with the game closing, so `UE5_Shutdown` /
+  > `Tot::RequestShutdown()` never ran and the shutdown-window worker-revive gate is unproven. **To hit it:**
+  > leave a re-assert feature ON (time dilation / GodMode / See-through) and **close the GAME** — the log
+  > should end with `PipeServer: Stopped` and no worker restart after it. *Delete after in-game verify.*
+  > **✅ DONE + LIVE-VERIFIED — M1 / M2 / M3** (SHIPPED commit `0f6f6e0`, build 2188). All Schlacht:
+  > disable joins the worker *before* snapshot/restore (M1); an unresponsive game thread keeps the hidden
   > record + recovers it on the next enable instead of discarding it (M2); `SetEnabled(false)` is called from
-  > Fern last-client cleanup + `UE5_Shutdown` with a cheap no-op early-out (M3). *Delete after in-game verify.*
+  > Fern last-client cleanup + `UE5_Shutdown` with a cheap no-op early-out (M3).
+  > **M1 verified (Elliot 2026-07-23):** `SeeThrough: worker stopped` is logged BEFORE
+  > `SeeThrough: disabled (1 restored)` — join, then restore, and the hidden actor really came back.
+  > **M3 verified (Elliot 2026-07-24):** the session sent **one** `seethrough_set` (the enable) and never a
+  > disable, yet `SeeThrough: worker stopped` fired at 09:51:30.235 — the same instant as the second
+  > `Client disconnected`. That disable came from the last-client cleanup, which is exactly M3.
+  > **M2 half-verified (same run):** the unresponsive branch fired for real —
+  > `disabled but 1 actor(s) remain hidden (game thread unresponsive)` — so the record is KEPT rather than
+  > discarded. The other half (a later enable actually restores them) is still unproven; see the leftover
+  > row below. *Delete after the batch merges to main.*
   > **✅ DONE — M4** (SHIPPED commit `7edea28`, build 2187, **needs in-game verify**). `Tot::MarkBackgroundWorker()`
   > thread-local marks each re-assert worker (Solide/Hemmung/Laufen/Solitar/Dunste/Schlacht) so `Tot::Requested()`
   > returns `g_shutdown`-only on those threads → workers no longer freeze on the per-command cancel latch while
   > a pipe command still honours it. Did NOT reset `g_perCommand` on disconnect (would regress the
-  > orphaned-scan abort). *Delete after batch merged + in-game verified.*
+  > orphaned-scan abort). **Exercised but not conclusively verified (Elliot 2026-07-24):** the UI
+  > disconnected with a Hemmung dual-lane hold (world 0.5 + pawn 2.0) and a Laufen jump multiplier live, so
+  > the per-command cancel was tripped with re-assert workers running — and nothing errored. But the DLL log
+  > ends at the disconnect, so "the workers kept re-asserting afterwards" is not directly shown. To close it:
+  > disconnect with a hold on, then look at the GAME (does the hold still apply?) or reconnect and read
+  > `get_time_state`. *Delete after batch merged + in-game verified.*
   > **~~M6~~ dropped by double-confirm** — "Solide hold unstoppable after UI crash" is working-as-designed:
   > hold persistence across disconnect is deliberate and family-uniform (Solitar/Laufen/Hemmung/Wirbel also
   > persist), and an off-switch exists (reconnect → `reset_all_fields`, or game restart). The real disconnect
@@ -111,6 +129,28 @@ the row here when it ships.
   > **The session surfaced two NEW defects** (both fixed below, both need an in-game re-check).
   *Parent: audit-2026-07-14-findings; log review 2026-07-23.*
 
+- **NEW (Elliot 2026-07-24) — "See-through OFF" could leave an actor invisible with no hint why; UI now
+  says so. The DEEPER fix is still open.** Effort: **M** · Risk: med.
+  Switching See-through off while the game thread is paused cannot un-hide anything: the DLL keeps the
+  record (M2) and warns, and the actors stay invisible until a later enable restores them. **This is not an
+  edge case — it is the default path.** `Stark::IsGameThreadResponsive()` is driven by ProcessEvent
+  fire times, and UE throttles a backgrounded window, so *clicking in the UI to switch the feature off (or
+  to disconnect) is itself what pauses the game thread.* Live: the 2026-07-24 disconnect left exactly one
+  actor hidden.
+  > **Half-fixed (build 2362):** the leftover count was already on the wire (`hidden_count`), the UI just
+  > ignored it and said "See-through OFF." It now reports *"OFF — but N actor(s) are still hidden because
+  > the game thread is paused… focus the game, then toggle See-through on and off once"* in both the status
+  > line and the card, with a test. The user is no longer left guessing.
+
+  **Still open — actually restoring them.** Options, cheapest first: (a) leave it (documented, user-driven
+  recovery — what ships today); (b) on a USER-initiated disable, retry the restore briefly (the user is
+  waiting anyway) — but note a bounded wait probably does NOT help, since the game thread stays throttled
+  while the UI has focus, so the retry would have to be deferred rather than blocking; (c) keep a tiny
+  "pending restore" that the NEXT connect drains, so reconnecting is enough and no re-enable is needed —
+  the most user-friendly, and it also closes M2's unverified recovery half; (d) note that **Keep Foreground
+  (Grausam) already prevents the whole situation** and cross-link it from the See-through card. **Decide
+  (c) vs (a)+(d) before building.** *Parent: audit-2026-07-14-findings §M2; log review 2026-07-24.*
+
 - **✅ FIXED (build 2354) — See-Through re-scanned the whole GObjects pool ~5x/second** —
   Effort: **S** · Risk: low. **Found by reading the Elliot log, not by a test.**
   `Schlacht::CollectOccluders` called `UE5_FindInstanceOfClass("KismetSystemLibrary")` **per trace**,
@@ -122,7 +162,8 @@ the row here when it ships.
   that cooked the function out no longer rescans 10x/s. **Re-check in-game:** enable See-Through on a
   big game and confirm the `only CDO` WARN now appears once per enable instead of continuously — and
   that occluders still hide/restore.
-  > **✅ VERIFIED on the next run (Elliot, build 2356): 145 full-pool scans in 29 s → 1 in 19 s**, and
+  > **✅ VERIFIED TWICE.** Build 2356 (19 s window): 145 full-pool scans → 1. Build 2361 (2026-07-24, a
+  > **105 s** window — 5x longer, so the old code would have logged ~500): still exactly **1**, and
   > See-Through still behaves (`enabled (pierce=1)` → worker → `worker stopped` → `disabled
   > (1 restored)`). The single scan is visible as one
   > `FindInstancesByClass class='KismetSystemLibrary': 1 found, scanned=352851`.
@@ -137,8 +178,8 @@ the row here when it ships.
   i.e. there was no contention at all. Beyond the log spam, the diagnostic was worthless because it
   could never be false. Fix: publish the arrival high-water mark inside the `call_once` lambda and
   warn only for `arrivals <= thatMark` — genuine in-flight contention only.
-  > **✅ VERIFIED on the next run (Elliot, build 2356): 436 WARNs → 0**, on a session that made 552
-  > invokes. *Parent: audit #3 ProcessEvent double-install guard; log review 2026-07-23.*
+  > **✅ VERIFIED TWICE: 436 WARNs → 0** (build 2356, 552 invokes), and **0 again** on the build-2361
+  > run. *Parent: audit #3 ProcessEvent double-install guard; log review 2026-07-23.*
 
 - **[✅ ALL 13 LOWs DONE] Audit #3 low-severity batch** — SHIPPED on `dev` in four commits:
   UI L13–L17 (`8bd33f8`, +2 tests), Solide L2/L3/L4 (`408fd2d`), DLL L1/L5/L8/L10/L12 (`7f3898f`), and the
@@ -387,6 +428,12 @@ the row here when it ships.
   **Re-check in-game:** the failure is intermittent, so it may not reproduce. What to look for if it
   does: the log should show at most 8 install attempts (not one), a single fallback WARN instead of
   hundreds, and See-through should refuse with a visible message rather than silently doing nothing.
+  > **Not reproduced on the build-2361 run (2026-07-24)** — the hook installed first try at the same
+  > address (`0x1415968E0`) that failed on 07-23, which is consistent with "VM-layout accident, not a
+  > property of the game". Zero fallback invokes, zero retries needed. Worth banking from the same run:
+  > the post-install validator reported **`hook fired 10238 times in 1500ms`**, i.e. the pattern-based
+  > vtable detection (`vtable+0x260`) landed on the RIGHT slot on Elliot — the failure mode recorded in
+  > `feedback-pe-vtable-wrong` for ES2 / Geri.
   *Parent: Stark::InstallHook / Frieren::TryInstallGameThreadHook; log review 2026-07-23.*
 
 -----
