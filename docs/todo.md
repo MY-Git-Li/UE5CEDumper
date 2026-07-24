@@ -73,8 +73,9 @@ the row here when it ships.
   > `Client disconnected`. That disable came from the last-client cleanup, which is exactly M3.
   > **M2 half-verified (same run):** the unresponsive branch fired for real —
   > `disabled but 1 actor(s) remain hidden (game thread unresponsive)` — so the record is KEPT rather than
-  > discarded. The other half (a later enable actually restores them) is still unproven; see the leftover
-  > row below. *Delete after the batch merges to main.*
+  > discarded. The other half is no longer a user-visible risk: build 2364's deferred restore (see the
+  > leftover row below) un-hides automatically once the game thread resumes, so it no longer waits on a
+  > later enable. *Delete after the batch merges to main.*
   > **✅ DONE — M4** (SHIPPED commit `7edea28`, build 2187, **needs in-game verify**). `Tot::MarkBackgroundWorker()`
   > thread-local marks each re-assert worker (Solide/Hemmung/Laufen/Solitar/Dunste/Schlacht) so `Tot::Requested()`
   > returns `g_shutdown`-only on those threads → workers no longer freeze on the per-command cancel latch while
@@ -142,14 +143,23 @@ the row here when it ships.
   > the game thread is paused… focus the game, then toggle See-through on and off once"* in both the status
   > line and the card, with a test. The user is no longer left guessing.
 
-  **Still open — actually restoring them.** Options, cheapest first: (a) leave it (documented, user-driven
-  recovery — what ships today); (b) on a USER-initiated disable, retry the restore briefly (the user is
-  waiting anyway) — but note a bounded wait probably does NOT help, since the game thread stays throttled
-  while the UI has focus, so the retry would have to be deferred rather than blocking; (c) keep a tiny
-  "pending restore" that the NEXT connect drains, so reconnecting is enough and no re-enable is needed —
-  the most user-friendly, and it also closes M2's unverified recovery half; (d) note that **Keep Foreground
-  (Grausam) already prevents the whole situation** and cross-link it from the See-through card. **Decide
-  (c) vs (a)+(d) before building.** *Parent: audit-2026-07-14-findings §M2; log review 2026-07-24.*
+  > **✅ FULLY FIXED (build 2364) — (c) deferred restore + (d) cross-link.**
+  > **(c)** A disable that cannot un-hide now hands off to a short-lived `PendingRestoreLoop` that polls
+  > `Stark::IsGameThreadResponsive()` every 250 ms and restores the moment the thread comes back — i.e.
+  > the instant the user clicks into the game, which is exactly when they would have noticed. It is a
+  > proper member of the worker family: `Tot::MarkBackgroundWorker()` (M4), spawn gated on
+  > `Tot::ShutdownRequested()` (M5), joined by `StopWorker()`, and superseded by either direction of
+  > `SetEnabled` so only one path ever owns `hiddenActors`. Bounded at 5 minutes (a thread that outlives
+  > everything is what audit #3 was about; past that the game is realistically closed, which makes the
+  > leftover moot) with an explicit give-up WARN.
+  > **NOTE — the connect-time drain first proposed as (c) would NOT have worked:** reconnecting means
+  > clicking in the UI, which backgrounds the game again, so the drain would fail for the same reason
+  > the original disable did. Waiting on the game thread is the only trigger that actually fires.
+  > **(d)** The card hint and both messages now say recovery is automatic and point at **Keep Foreground**,
+  > which prevents the pause entirely.
+  > **This also closes M2's recovery half** — the leftover no longer depends on a user remembering to
+  > re-enable.
+  *Parent: audit-2026-07-14-findings §M2; log review 2026-07-24.*
 
 - **✅ FIXED (build 2354) — See-Through re-scanned the whole GObjects pool ~5x/second** —
   Effort: **S** · Risk: low. **Found by reading the Elliot log, not by a test.**

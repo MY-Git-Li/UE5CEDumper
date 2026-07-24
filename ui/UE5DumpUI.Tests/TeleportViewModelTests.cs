@@ -1672,9 +1672,13 @@ public class TeleportViewModelTests
 
         Assert.Equal("OFF", vm.SeeThroughState);
         Assert.Contains("still hidden", vm.StatusText);
-        Assert.Contains("stay hidden", vm.SeeThroughCurrentText);
-        // The recovery instruction is the point -- without it the message is just bad news.
-        Assert.Contains("Focus the game", vm.SeeThroughCurrentText);
+        Assert.Contains("still hidden", vm.SeeThroughCurrentText);
+        // Recovery is AUTOMATIC now (the DLL waits for the game thread), so the message
+        // must say that rather than hand the user a chore -- and it points at the
+        // feature that avoids the situation entirely.
+        Assert.Contains("automatically", vm.StatusText);
+        Assert.Contains("Keep Foreground", vm.StatusText);
+        Assert.Contains("Keep Foreground", vm.SeeThroughCurrentText);
     }
 
     [Fact]

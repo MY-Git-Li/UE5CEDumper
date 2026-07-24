@@ -2398,8 +2398,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         if (!st.Active && st.HiddenCount > 0)
         {
             SeeThroughCurrentText =
-                $"Off, but {st.HiddenCount} actor(s) stay hidden — the game thread was paused when "
-                + "it was switched off. Focus the game, then toggle See-through on and off again.";
+                $"Off — {st.HiddenCount} actor(s) still hidden (the game thread was paused). "
+                + "Click back into the game and they reappear; Keep Foreground avoids this.";
             return;
         }
 
@@ -2451,9 +2451,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             // the game, which is exactly when this fires — so saying only "OFF" would
             // leave an actor invisible in the game with no hint why.
             StatusText = st.HiddenCount > 0
-                ? $"See-through OFF — but {st.HiddenCount} actor(s) are still hidden because the "
-                  + "game thread is paused (game in the background?). Focus the game, then enable "
-                  + "and disable See-through once to restore them."
+                ? $"See-through OFF — {st.HiddenCount} actor(s) are still hidden because the game "
+                  + "thread is paused (game in the background?). They are restored automatically as "
+                  + "soon as you click back into the game. Keep Foreground prevents this."
                 : "See-through OFF.";
         }
         catch (Exception ex) { ApplySeeThroughState(-1); SetError(ex); _log.Error("Teleport ResetSeeThrough failed", ex); }
