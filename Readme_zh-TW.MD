@@ -87,7 +87,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
 > **注意**: 請勿同時使用兩種方式。若 Proxy DLL 已放在遊戲目錄中，請勿再透過 CE 注入 `UE5Dumper.dll`。DLL 會偵測重複實例並跳過自動啟動以避免衝突。
 
-> **該用哪個 Proxy DLL？** 先試 `version.dll`（`build.ps1 -Target ProxyDLL`）。若遊戲能啟動但 UI 無法連接，通常代表該 EXE 沒有匯入 `version.dll` — 改試 **`dxgi.dll`**（`-Target ProxyDxgi`，每款 D3D11/D3D12 UE 遊戲都會匯入），或 `dinput8.dll`（`-Target ProxyDinput8`）。`build.ps1`（預設 `-Target All`）會把三種都建置到 `dist\proxy\`，而 **Proxy Deploy** 分頁可讓你為每款遊戲挑選類型並自動部署（Steam 遊戲，或指定磁碟掃描任何位置 — Epic / GOG / 手動安裝）。只要某款遊戲曾成功用過，表格的 **Suggested proxy** 欄位就會直接告訴你該選哪個。
+> **該用哪個 Proxy DLL？** 先試 `version.dll`（`build.ps1 -Target ProxyDLL`）。若遊戲能啟動但 UI 無法連接，通常代表該 EXE 沒有匯入 `version.dll` — 改試 **`dxgi.dll`**（`-Target ProxyDxgi`，每款 D3D11/D3D12 UE 遊戲都會匯入）。**`winmm.dll`**（`-Target ProxyWinmm`）涵蓋的遊戲與 `dxgi.dll` 完全相同 — 並非更廣的覆蓋率，而是一個**備用槽位**：當 `dxgi.dll`（或 `version.dll`）這個檔名已被 ReShade 或其他 mod loader 佔用時改用它。`dinput8.dll`（`-Target ProxyDinput8`）為最後手段 — 少有 UE EXE 會匯入它。`build.ps1`（預設 `-Target All`）會把四種都建置到 `dist\proxy\`，而 **Proxy Deploy** 分頁可讓你為每款遊戲挑選類型並自動部署（Steam 遊戲，或指定磁碟掃描任何位置 — Epic / GOG / 手動安裝）。只要某款遊戲曾成功用過，表格的 **Suggested proxy** 欄位就會直接告訴你該選哪個。
 
 ### 方式 C：對執行中的遊戲注入（免 CE、免重開）
 

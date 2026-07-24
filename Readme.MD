@@ -89,11 +89,11 @@ The full table-maker feature list — one row per feature (AOB scanning, DynOff,
 
 > **Note**: Do not use both methods simultaneously. If the proxy DLL is in the game folder, do not also inject `UE5Dumper.dll` via CE. The DLL detects duplicate instances and skips auto-start to prevent conflicts.
 
-> **Which proxy DLL?** Start with `version.dll` (`build.ps1 -Target ProxyDLL`). If the game launches but the UI can't connect, the EXE probably doesn't import `version.dll` — try **`dxgi.dll`** (`-Target ProxyDxgi`), which every D3D11/D3D12 UE game imports, or `dinput8.dll` (`-Target ProxyDinput8`). `build.ps1` (default `-Target All`) builds all three into `dist\proxy\`, and the **Proxy Deploy** tab lets you pick the type per game and deploy it for you (Steam games, or any drive you point it at — Epic / GOG / manual). Once a game has worked before, the grid's **Suggested proxy** column tells you which one to pick.
+> **Which proxy DLL?** Start with `version.dll` (`build.ps1 -Target ProxyDLL`). If the game launches but the UI can't connect, the EXE probably doesn't import `version.dll` — try **`dxgi.dll`** (`-Target ProxyDxgi`), which every D3D11/D3D12 UE game imports. **`winmm.dll`** (`-Target ProxyWinmm`) reaches exactly the same games as `dxgi.dll` — it isn't broader coverage but a **spare slot**: use it when the `dxgi.dll` (or `version.dll`) filename is already taken by ReShade or another mod loader. `dinput8.dll` (`-Target ProxyDinput8`) is a last resort — few UE EXEs import it. `build.ps1` (default `-Target All`) builds all four into `dist\proxy\`, and the **Proxy Deploy** tab lets you pick the type per game and deploy it for you (Steam games, or any drive you point it at — Epic / GOG / manual). Once a game has worked before, the grid's **Suggested proxy** column tells you which one to pick.
 
 ### Option C: Inject into a running game (no CE, no restart)
 
-Inject `UE5Dumper.dll` into an **already-running** game — the quickest path (no Cheat Engine, no pre-deployed proxy, no game restart). Two front-ends, one technique (`CreateRemoteThread` + `LoadLibraryW`):
+Inject `UE5Dumper.dll` into an **already-running** game — the quickest path (no Cheat Engine, no pre-deployed proxy, no game restart). Two front-ends share one technique (`CreateRemoteThread` + `LoadLibraryW`) — the **UI's Proxy Deploy tab is the easy path**, with a command-line tool for scripting / headless use:
 
 - **From the UI**: Proxy Deploy tab → **Inject into running game…** → pick the game in the process picker → **Inject**. The UI auto-connects. If the game runs as Administrator you get a UAC prompt to inject elevated — no manual restart.
 - **From the command line** — `inject-ue.ps1` (ships in `dist\` next to `UE5Dumper.dll`):

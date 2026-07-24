@@ -1336,8 +1336,8 @@ time-control evals above.*
 and dxgi both cover 100% and winmm reaches exactly zero games dxgi misses, so there was never a
 coverage case. What justifies it is the other half of that finding — **a proxy only works if its
 filename is free.** `dxgi.dll` is the name ReShade and many mod loaders take; `version.dll` is
-likewise often occupied (P3R ships one). With both taken the only remaining choice was dinput8 at
-2/24. winmm is the spare universally-viable slot.
+likewise a common ASI/mod-loader name (e.g. Ultimate ASI Loader). With both taken the only remaining
+choice was dinput8 at 2/24. winmm is the spare universally-viable slot.
 
 **Generated, not hand-written** (`scripts/gen_proxy_forwarders.py winmm`): 180 exports across
 `Lugner_Winmm.cpp` / `.asm` / `ProxyWinmm.def`. Re-run with `--check` to verify they are current.
@@ -1382,8 +1382,8 @@ all, so it never bore on this decision.
 
 **The one surviving trigger: slot contention, not coverage.** A proxy only helps if its filename is
 *free*. Two real cases: **ReShade** commonly installs itself as `dxgi.dll` (or `d3d11.dll`), and
-**P3R already ships its own `version.dll`** in `Binaries\Win64\`. A user with ReShade on dxgi *and*
-something on version has only dinput8 left, which is 2/24. **Build winmm if, and only if, that
+**ASI / mod loaders** (e.g. Ultimate ASI Loader) commonly install as `version.dll`. A user with
+ReShade on dxgi *and* an ASI loader on version has only dinput8 left, which is 2/24. **Build winmm if, and only if, that
 combination shows up in practice** — it would then be a genuinely free 100%-coverage slot. Until
 then it is M-effort for a case nobody has reported.
 

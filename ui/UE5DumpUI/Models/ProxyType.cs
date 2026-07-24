@@ -36,8 +36,9 @@ public enum ProxyType
     /// <para>It exists as a second free <b>slot</b>, not for coverage: a proxy
     /// only works if its filename is unused, and <c>dxgi.dll</c> is the name
     /// ReShade and many mod loaders take, while <c>version.dll</c> is likewise
-    /// often occupied (P3R ships one). When both are taken, winmm is the
-    /// remaining universally-importable choice — dinput8 is only 2/24.</para>
+    /// a common ASI/mod-loader name (e.g. Ultimate ASI Loader). When both are
+    /// taken, winmm is the remaining universally-importable choice — dinput8 is
+    /// only 2/24.</para>
     /// </summary>
     Winmm,
 }
