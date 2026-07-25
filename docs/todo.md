@@ -81,11 +81,20 @@ the row here when it ships.
   > by `Fern::Start`. **Adversarially verified** (5 lenses: no deadlock / lock-order / M3↔M5 / M4↔M5
   > regression; `EnqueueInvoke` gates on Stark's hook flag not `g_shutdown` so the M3 un-hide survives). The
   > same pass caught + fixed a leak in the M1/M2 enable-recovery (un-responsive re-enable orphaned the
-  > leftover). **⛔ STILL NOT EXERCISED after four live sessions** — every one ended with the UI
-  > disconnecting (`Client disconnected`), never with the game closing, so `UE5_Shutdown` /
-  > `Tot::RequestShutdown()` never ran and the shutdown-window worker-revive gate is unproven. **To hit it:**
-  > leave a re-assert feature ON (time dilation / GodMode / See-through) and **close the GAME** — the log
-  > should end with `PipeServer: Stopped` and no worker restart after it. *Delete after in-game verify.*
+  > leftover). **⚠️ EXERCISED at last (Solarpunk, 2026-07-25) — and it revealed a DIFFERENT crash, now
+  > FIXED (build 2389).** Leaving See-through ON and closing the game fail-fasted the DLL (`0xc0000409`).
+  > A WER minidump showed the fault was on OUR worker thread (pure `version.dll` stack): the per-tick
+  > invoke sizes `std::vector(fi.parmsSize)` with no upper bound, so a garbage UFunction ParmsSize read
+  > during the game's shutdown throws `bad_alloc`, which escapes the unguarded `WorkerLoop` →
+  > `std::terminate`. Fixed by capping ParmsSize in `FindFuncByName` + a `try/catch` around the worker
+  > tick, in **Schlacht AND Dunste** (the Fly twin). **Note also confirmed:** `UE5_Shutdown` is NOT
+  > called on a game-close (`DllMain(DETACH)` is a no-op, no proxy-graceful-exit hook), so `PipeServer:
+  > Stopped` never logs and the shutdown-window worker-revive gate itself is still unproven — but the
+  > actual risk it was meant to cover (a worker misbehaving at close) is now handled by the crash fix.
+  > **✅ crash fix LIVE-VERIFIED (build 2389, DEBUG build, 2026-07-25):** re-ran the repro (See-through +
+  > a Time re-assert worker both live → close game) → no crash / no dump / no event-log error; the 2384
+  > run produced all three. *Delete the shutdown-gate half after a real game-close is shown to leave no
+  > worker running; the crash half is done + verified.*
   > **✅ DONE + LIVE-VERIFIED — M1 / M2 / M3** (SHIPPED commit `0f6f6e0`, build 2188). All Schlacht:
   > disable joins the worker *before* snapshot/restore (M1); an unresponsive game thread keeps the hidden
   > record + recovers it on the next enable instead of discarding it (M2); `SetEnabled(false)` is called from

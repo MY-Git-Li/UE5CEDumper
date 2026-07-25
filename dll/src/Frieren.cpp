@@ -384,11 +384,14 @@ bool UE5_Init() {
     // static slot exists, fall back to the engine object graph — GEngine->GameViewport->&World
     // (RecoverGWorldViaEngine, a live engine-updated UWorld* field). Needs a working GObjects +
     // offsets, so it runs after the GObjects recovery + offset validation above. Gated on a real
-    // object array, so titles with a correct GWorld are unaffected.
-    if (ptrs.GObjects && ptrs.GNames && ptrs.GWorld && Aura::GetCount() > 0) {
+    // object array, so titles with a correct GWorld are unaffected. NOT gated on
+    // ptrs.GWorld != 0: the hardened ValidateGWorldBasic now REJECTS a decoy during the
+    // scan, so GWorld can legitimately be 0 here (no valid AOB, e.g. Avowed) and still
+    // needs recovery — the guarded ReadSafe below leaves gworldOk=false → recovery runs.
+    if (ptrs.GObjects && ptrs.GNames && Aura::GetCount() > 0) {
         bool gworldOk = false;
         uintptr_t uworld = 0;
-        if (Macht::ReadSafe(ptrs.GWorld, uworld) && uworld) {
+        if (ptrs.GWorld && Macht::ReadSafe(ptrs.GWorld, uworld) && uworld) {
             uintptr_t cls = 0;
             if (Macht::ReadSafe(uworld + Grimoire::OFF_UOBJECT_CLASS, cls) && cls) {
                 uint32_t cn = 0;

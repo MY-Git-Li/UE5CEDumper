@@ -4954,9 +4954,9 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             const bool haveEnable = request.contains("enable");
             if (haveEnable)
                 state = Schlacht::SetEnabled(request.value("enable", false));
-            Sein::Info("PIPE:cmd", "seethrough_set: enable=%s count=%s",
+            Sein::Info("PIPE:cmd", "seethrough_set: enable=%s count=%d",
                        haveEnable ? (request.value("enable", false) ? "1" : "0") : "-",
-                       request.contains("count") ? "y" : "-");
+                       request.contains("count") ? request.value("count", 1) : -1);
             Schlacht::SeeThroughStatus st{};
             Schlacht::GetStatus(st);
             json data = seeThroughStatusJson(st);

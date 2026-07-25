@@ -20,6 +20,124 @@ builds ≤696 in
 
 -----
 
+## 2026-07-25 - AOB priority scheme widened 0–100 → sparse 0–1000 bands (build 2393)
+
+`Himmel.h`'s AOB priorities were cramped in 0–100 with collisions (e.g. three GObjects patterns all at
+10), leaving no room to insert a new pattern between two existing ones without renumbering. Re-spread
+all 140 pattern entries across **sparse 0–1000 bands** (exports 0–30 · Tier-1 long/specific 100–290 ·
+Tier-2 medium 300–490 · Tier-3 short 500–590 · patternsleuth 600–690 · UE4/legacy 700–790 · last-resort
+800–990), stepping by 10 within a band so there's always room to slot a new pattern in. Done by a
+verified script (`scratchpad/repriority.py`): it parses each `AobSignature[]`, re-bands each entry from
+its old priority, and **asserts the new ordering is identical to the old** (`sort by new priority` ==
+`sort by (old priority, textual position)`) with no duplicates — so **scan behaviour is unchanged**;
+the only difference is that previously-tied priorities are now deterministic (a strict improvement — a
+tie was resolved by an unstable `std::sort`). Absolute values are meaningless; only per-target order
+matters. SP57 GWorld patterns are now pri 100–160 (were 10–13), SP57 Sparse 100–120 (were 15–16).
+Header comment documents the bands + "pick an unused value in the matching band" rule.
+
+-----
+
+## 2026-07-25 - PDB-mined UE5.7 GWorld + SparseDelegate AOBs; the GWorld-decoy root cause (build 2383)
+
+Solarpunk (rokaplay, `SolarpunkSteam-Win64-Shipping.exe`) is **UE 5.7 and ships a full 1.6 GB PDB** —
+our first UE5.7 symbol oracle. Its reported "GWorld AOB fails" turned out to be a precise, now
+fully cross-validated failure, and the PDB let us fix it with **verified-unique** signatures instead
+of guesses.
+
+**Root cause (two independent methods agree).** UE5.7's MSVC codegen shifted, so **all** priority-10-20
+UE5 GWorld patterns (ES2_1-6, SF_1, GH_1/2, TQ_1/2, V1) get **0 hits**. The scan reaches the generic
+`GWLD_SF_2` (pri 21), which matched a single **decoy** `.data` global `0x1478C25A8` (0xA8B0 below the
+real GWorld) that the deliberately-loose `ValidateGWorldBasic` (readable + `LooksLikeDataPtr`)
+accepted. `UE5_Init`'s secondary guard then caught it — scan-0.log / init-0.log:
+`GWLD_SF_2: Unique match -> 0x7FF655F125A8` → `GWorld=0x7FF655F125A8 does not deref to a UWorld —
+recovering...` → `recovered via instance_scan_recovery -> 0x7FF655F1CE58`. That recovered address
+equals **exactly** the PDB symbol (`GWorld` RVA `0x78CCE58` + imagebase `0x7FF64E650000`). So GWorld
+*worked via the fallback net*, but the AOB path failed and cached no fast hint (`gWorld.patternId`
+saved empty → a relaunch re-scans clean, **no cache clear needed**).
+
+**Fix (`dll/src/Himmel.h`, source tag `SP57`).** Four GWorld patterns at pri 10-13 (before the decoy
+SF_2) + two SparseDelegate patterns at pri 15-16 (`SPARSE_ES2_1` got **0/21** on this build). **Every
+candidate was scanned against the real `.text` and its every hit resolved the DLL's way before
+inclusion** — kept only `correct>=1, decoys=0` (or decoys strictly higher-addressed so the real site
+validates first):
+
+| ID | pri | anchor | hits/correct/decoy |
+|---|---|---|---|
+| `GWLD_SP57_1` | 10 | UGameEngine::Tick `cmp [rcx+2C0]` (tolerates inserted `mov rcx,[rbx+rax]`) | 1/1/0 |
+| `GWLD_SP57_2` | 11 | FMallocLeakReporter::WriteReports (`mov rsi,rcx` variant of GH_1) | 1/1/0 |
+| `GWLD_SP57_3` | 12 | UEngine::GetWorldFromContextObject fallback | 1/1/0 |
+| `GWLD_SP57_4` | 13 | UActorComponent::On*PhysicsState `mov [rax+298]` (0x298 version-specific → last) | 2/2/0 |
+| `SPARSE_SP57_1` | 15 | TSet::Find/FindOrAdd/EmplaceByHash element index (mov rdx) | 5/3/2 (decoys higher-addr) |
+| `SPARSE_SP57_2` | 16 | TSet::Remove element index (mov r8) | 1/1/0 |
+
+(The FinishDestroy twin-ref candidate was **dropped** — verification found 1 decoy.)
+
+**Reusable tooling** (`tools/ghidra/`): `dump_global_xref_aob.java` resolves UE globals by PDB name and
+dumps per-xref raw window + disp-masked AOB + read/write kind + function; `verify_aob.java` scans
+`.text` and resolves every hit exactly like `Genau::ScanForTarget`, reporting hits/decoys/correct so a
+candidate is proven before it ships. Two traps baked into the headers: a ~GB PDB OOMs headless →
+`export _JAVA_OPTIONS=-Xmx16G`; and never touch **variable** symbols (`getAddress()` lazy-loads the
+whole datatype list → OOM) — filter `SymbolType.LOCAL_VAR/PARAMETER`.
+
+**Corroborations (doc-only claims now backed by real symbols):** SparseDelegates outer key is a raw
+`UObjectBase*` (symbol `EmplaceByHash<TKeyInitializer<UObjectBase_const_*_&&>>` — confirms the
+"UE5.0+ raw-pointer key vs UE4.23-4.27 FObjectKey" note); UWorld member `+0x2C0` compared in
+UGameEngine::Tick (a 3rd version behind ES2_3/SF_1's hardcoded 2C0); GObjects tool-convention =
+symbol base **+0x10** (ObjObjects); GNames only 2 xrefs, both in `GetNamePool` (function-static).
+The AOB parser is confirmed **full-byte `??` only** (no nibble wildcards) and the scanner is AVX2
+single-anchor (`Macht::ScanRegion`), so all SP57 patterns use full-byte wildcards.
+
+**LIVE-VERIFIED (build 2384).** Redeployed + re-tested on Solarpunk: `GWLD_SP57_1: Unique match ->
+0x7FF6D4D1CE58` — the real GWorld (imagebase `0x7FF6CD450000` + RVA `0x78CCE58`), method **`aob`**, no
+"does not deref" warning, no recovery. GWorld scan **143 ms (1 batch)** vs the old **1.24 s (2
+batches)**. `SPARSE_SP57_1 -> 0x7FF6D4B1A4B0` — Sparse **found** (was `not_found`). `FindAll: Complete`
+all four `(aob)`.
+
+**Then — nibble wildcards + validator hardening (build 2387).**
+
+*Nibble match.* `Macht::ParsePattern` now accepts nibble tokens: `4?` fixes the high nibble (matches
+0x40-0x4F, i.e. any REX prefix), `?5` fixes the low nibble. Representation changed from a `{0,1}` mask
+to a per-byte AND-mask (`0x00` wildcard / `0x0F`,`0xF0` nibble / `0xFF` literal) with pre-masked
+`bytes`; every verify site is now `(mem & mask) == bytes`. **Perf is unchanged**: the AVX2 hot loop
+still broadcasts a single full-literal anchor (nibble bytes are never chosen as the anchor); nibbles
+only touch the sparse per-candidate verify. `ParsePattern` moved to `Macht.h` as `inline` (pure — no
+Win32) so `dll_helpers_test` exercises the real parser (`Test_Macht_ParsePattern_Nibble`, 875/0).
+First use: `GWLD_SP57_1`'s `?? 8B` → `4? 8B` (the inserted `mov rcx,[rbx+rax]` REX byte is 0x4A).
+
+*Validator hardening (the decoy's root fix).* `ValidateGWorldBasic` was too loose (readable +
+`LooksLikeDataPtr`) — that is what accepted the decoy in the first place. It now adds an
+offset-independent C++-object guard: a real UWorld's `[[world]]` (vtable → first virtual method) is a
+code pointer in a module image; a `.data` global that merely holds a data-shaped pointer fails it, so
+the scan rejects the decoy and continues to the real GWorld. Because a rejected decoy can leave GWorld
+= 0, the `UE5_Init` recovery gate (Frieren.cpp:388) no longer requires `ptrs.GWorld != 0` — so a
+no-valid-AOB title (Avowed) still recovers. No regression for the 30+ tested games (a real GWorld
+always passes the vtable check).
+
+**Also found + FIXED — the M5 see-through-close crash (build 2389).** Exercising the
+previously-untested M5 scenario (leave See-through ON, close the GAME) crashed the injected DLL:
+event log Id 1000, faulting module VERSION.dll, `0xc0000409` (__fastfail). A WER minidump
+(`tools/pe/minidump_triage.py`) showed the faulting thread stack was **pure `version.dll` + the ntdll
+fail-fast chain — no game-engine frames**, i.e. the fault was in OUR worker thread, in our code. Root
+cause: the See-through worker's per-tick invokes (`InvokeSetHidden`/`InvokeRetVec`) size a
+`std::vector<uint8_t> buf(fi.parmsSize)` directly from a UFunction's ParmsSize, with **no upper
+bound**. During the game's own shutdown a freed/reused UFunction reads a garbage-huge ParmsSize → the
+vector throws `std::bad_alloc` → it escapes `WorkerLoop` (no handler) → `std::terminate` →
+`__fastfail(0xC0000409)`. Fix, two levels: (1) `FindFuncByName` now rejects an out-of-range ParmsSize
+(`> 0x4000`) so the per-tick invoke is a clean no-op instead of allocating; (2) `WorkerLoop` wraps
+`Tick()` in `try/catch` so no exception class can ever `std::terminate` the host. **Dunste (Fly) had
+the identical invoke-with-parmsSize twin** (`InvokeSetCollision`) → same two fixes applied. The four
+field-writer workers (Solitar/Laufen/Hemmung/Solide) write via SEH-guarded reads/writes with no
+game-sized allocation, so they have no equivalent trigger. (`UE5_Shutdown` is still never called on a
+game-close — `DllMain(DETACH)` is a deliberate no-op — but that's now moot: the crash was the worker
+faulting during the game's shutdown window, not the missing clean teardown.)
+**LIVE-VERIFIED (build 2389, 2026-07-25, a DEBUG build — stricter):** re-ran the exact M5 repro on
+Solarpunk — `SeeThrough: worker started` + a `Time:` re-assert worker both live, then closed the game.
+**No crash, no dump, no event-log error** (vs. the 18:38 run that produced all three); the `try/catch`
+"tick threw" line never fired, so the ParmsSize cap headed off the `bad_alloc` before it could throw.
+GWorld still `aob` (GWLD_SP57_1, now a cached hint).
+
+-----
+
 ## 2026-07-23 - MEASURED then SHIPPED: the lean walk payload (builds 2339 / 2351)
 
 Build 2335 ended with "the next lever is BYTES, not messages" and an admitted blank: nobody had

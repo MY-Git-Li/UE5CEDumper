@@ -18,6 +18,8 @@ symbol/AOB exporters are Python run through the **pyghidra venv** (see their run
 | `find_gobjects.java` | Java | Anchors on the `"...disregard for GC pool"` string (in `AllocateUObjectIndex`), finds + decompiles the referencing functions, lists their writable-`.data` globals. First arg overrides the anchor string. |
 | `decompile_functions.java` | Java | Decompiles each function VA passed as an arg (+ lists writable-`.data` refs). Forces disassembly if Ghidra missed the function. Use it to read a struct layout out of a function (e.g. `FUObjectArray` offsets + item stride). |
 | `find_callers.java` | Java | For each function VA arg, lists call sites and the `LEA/MOV RCX` (`this`) set before each call — recovers a static global a method is invoked on (e.g. `LEA RCX,[GUObjectArray]; call`). |
+| `dump_global_xref_aob.java` | Java | **PDB-shipping games.** Resolves UE global symbols by name (`GWorld`, `GUObjectArray`, `NamePoolData`, `SparseDelegates`, `GEngine`, …) and, for every code xref, dumps the raw byte window + a disp-masked AOB candidate + read/write kind + containing function. Turns a symbol-rich binary into `Himmel.h` material in one pass. Filters out variable symbols (they lazy-load the whole datatype list → OOM). |
+| `verify_aob.java` | Java | **Validate a candidate before shipping it.** Scans `.text` for each candidate AOB and resolves every hit exactly like `Genau::ScanForTarget` (`match+io`/`+opc`/`+tot`), reporting hits vs decoys vs true-target. Edit the `CAND[]` table. A good pattern is `correct>=1, decoys=0`. |
 | `ExportUESymbols.ghidra.py` | pyghidra | Exports UE symbols (FName/UObject/GObjects/GNames/FNamePool) to JSON. |
 | `ExtractAOBContext.ghidra.py` | pyghidra | Extracts byte patterns around all code refs to GObjects/GNames/GWorld → JSON per game (AOB pattern mining). |
 | `run_headless_export.py` | pyghidra | Headless runner: opens one project, runs a script on one binary. |
@@ -30,6 +32,14 @@ analyzeHeadless <projLoc> <projName> -process -noanalysis -readOnly \
     -scriptPath tools/ghidra -postScript decompile_functions.java 0x147A604E0 0x14814D2F0
 analyzeHeadless <projLoc> <projName> -process -noanalysis -readOnly \
     -scriptPath tools/ghidra -postScript find_callers.java 0x14814D2F0
+
+# PDB-shipping game (symbol-rich): mine + verify AOBs. A game with a ~GB PDB needs a
+# big heap or the datatype manager OOMs — export _JAVA_OPTIONS=-Xmx16G first.
+export _JAVA_OPTIONS="-Xmx16G"
+analyzeHeadless <projLoc> <projName> -process -noanalysis -readOnly \
+    -scriptPath tools/ghidra -postScript dump_global_xref_aob.java
+analyzeHeadless <projLoc> <projName> -process -noanalysis -readOnly \
+    -scriptPath tools/ghidra -postScript verify_aob.java
 ```
 
 ## `pe/` — PE (capstone) helpers
