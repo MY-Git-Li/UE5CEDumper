@@ -64,6 +64,11 @@ public sealed class LiveWalkerUiOptions
     public bool CollapseChain { get; set; }
     public bool DescShowOffset { get; set; }
     public bool DescShowType { get; set; }
+    // AOB-anchored CE export preference (the "AOB" item in the Live Walker export-
+    // options dropdown). Persisted as the user's INTENT: a fallback-GWorld game that
+    // force-unchecks the live box must NOT overwrite this. Default OFF (matches the
+    // VM's _aobSymbolPreference). See LiveWalkerViewModel.ReconcileAobSymbol.
+    public bool UseAobSymbol { get; set; }
     public bool FlattenGasAttributes { get; set; }
     public bool FlattenLeafStructs { get; set; }
     public bool FlattenLeafRecords { get; set; }

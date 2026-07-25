@@ -319,9 +319,31 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // the Live Walker root is GWorld (the AOB symbol resolves GWorld); from any
     // other root (e.g. "Start from GameEngine" / "Open in Live Walker") the
     // export must use a direct absolute address, so the checkbox is disabled.
+    //
+    // Split into two values so the checkbox can be PERSISTED without a fallback
+    // game silently clobbering the stored choice:
+    //   • AobSymbolPreference — the user's remembered INTENT (persisted in
+    //     LiveWalkerUiOptions). Only a real checkbox click writes it.
+    //   • UseAobSymbol        — the live EFFECTIVE value the checkbox binds to and
+    //     the exporter reads = AobSymbolPreference gated by CanUseAobSymbol.
+    // When GWorld came from a FALLBACK (no AOB) or the root isn't GWorld the box is
+    // force-unchecked (CanUseAobSymbol == false), but the preference is kept intact
+    // via the _suppressAobPreferenceCapture guard — so a later game/root where the
+    // AOB *is* available restores the user's choice. See ReconcileAobSymbol().
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanUseAobSymbol))]
     private bool _useAobSymbol;
+
+    /// <summary>The PERSISTED user intent for the AOB anchor (survives a UI restart via
+    /// LiveWalkerUiOptions). Decoupled from the live <see cref="UseAobSymbol"/> so an
+    /// automatic force-uncheck (fallback GWorld / non-GWorld root) never erases it.</summary>
+    [ObservableProperty]
+    private bool _aobSymbolPreference;
+
+    /// <summary>Set while <see cref="ReconcileAobSymbol"/> writes <see cref="UseAobSymbol"/>
+    /// programmatically, so <see cref="OnUseAobSymbolChanged"/> below does NOT mistake a
+    /// gated re-derive (incl. the fallback force-uncheck) for a user click.</summary>
+    private bool _suppressAobPreferenceCapture;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanUseAobSymbol))]
@@ -337,6 +359,34 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// <summary>Gates the AOB checkbox's IsEnabled: the AOB symbol exists AND the
     /// current Live Walker root is GWorld.</summary>
     public bool CanUseAobSymbol => IsAobSymbolAvailable && IsRootGWorld;
+
+    /// <summary>A real checkbox click (the box is only enabled when CanUseAobSymbol)
+    /// records the persisted preference. Guarded so ReconcileAobSymbol's programmatic
+    /// writes — including the fallback-GWorld force-uncheck — never overwrite it.</summary>
+    partial void OnUseAobSymbolChanged(bool value)
+    {
+        if (_suppressAobPreferenceCapture) return;
+        AobSymbolPreference = value;
+    }
+
+    /// <summary>Applying the persisted preference (or the user recording a new one) re-derives
+    /// the live checkbox against the current gate, so a preference restored at startup shows up
+    /// the moment the gate is already open.</summary>
+    partial void OnAobSymbolPreferenceChanged(bool value) => ReconcileAobSymbol();
+
+    /// <summary>Re-derive the live <see cref="UseAobSymbol"/> checkbox from the persisted
+    /// <see cref="AobSymbolPreference"/> and the current <see cref="CanUseAobSymbol"/> gate,
+    /// WITHOUT capturing the write back into the preference. Force-unchecks when the gate is
+    /// closed (fallback GWorld / non-GWorld root) yet keeps the preference, and restores it
+    /// when the gate re-opens.</summary>
+    private void ReconcileAobSymbol()
+    {
+        bool desired = CanUseAobSymbol && AobSymbolPreference;
+        if (UseAobSymbol == desired) return;
+        _suppressAobPreferenceCapture = true;
+        try { UseAobSymbol = desired; }
+        finally { _suppressAobPreferenceCapture = false; }
+    }
 
     // Guess What toggle: fill gaps between known fields with heuristic guesses
     [ObservableProperty] private bool _fillGaps;
@@ -555,17 +605,19 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
     partial void OnIsAobSymbolAvailableChanged(bool value)
     {
-        if (!CanUseAobSymbol)
-            UseAobSymbol = false;
+        // AOB just became (un)available for this game: a fallback GWorld has no AOB,
+        // so the box force-unchecks; a real AOB restores the stored preference. The
+        // preference itself is untouched (ReconcileAobSymbol is guarded).
+        ReconcileAobSymbol();
     }
 
     partial void OnIsRootGWorldChanged(bool value)
     {
-        // Leaving a GWorld root (e.g. Start from GameEngine) silently un-checks
-        // the AOB option so a stale check can't drive an AOB export from a root
-        // the symbol doesn't anchor.
-        if (!CanUseAobSymbol)
-            UseAobSymbol = false;
+        // Entering/leaving a GWorld root re-derives the AOB checkbox from the stored
+        // preference: force-unchecked off a non-GWorld root (e.g. Start from GameEngine)
+        // so a stale check can't drive an AOB export the symbol doesn't anchor, and
+        // restored when GWorld is the root again. Preference untouched (guarded).
+        ReconcileAobSymbol();
     }
 
     // Guard so AutoFillGapsRetryAsync can auto-CHECK the Guess? toggle (to reflect

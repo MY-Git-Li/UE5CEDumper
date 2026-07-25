@@ -709,7 +709,8 @@ Delete-cache button; a UE version override still wins over everything.
   UClasses use a `Life` prefix (`LifeGameInstance` 15 fields,
   `BP_LifeSaveData_C`). Bandai Namco (publisher=- — no thumbprint match).
 - **Solarpunk** ✅ (stock UE 5.7, ~149K objects, rokaplay, `version.dll` proxy,
-  build 1259 user logs 2026-06-17): the real stock-UE5.7 game that exposed +
+  PE hash `ED3D085C0811F000`, build 1259 user logs 2026-06-17, **re-verified
+  build 2380 2026-07-25**): the real stock-UE5.7 game that exposed +
   live-confirmed the **`Object`@+0x08 within-item layout** (24-byte FUObjectItem:
   `FlagsAndRefCount@0, Object@8, Serial@0x10`). The classic `+0x00` pass is
   bad-dominated (`named=66 / bad=69` — a stride-16 mis-read hits Object only ~1/3
@@ -718,7 +719,13 @@ Delete-cache button; a UE version override still wins over everything.
   sanity 4/10 before the **build-1257** fix → now 10/10). GObjects `GOBJ_V13`,
   GNames `GNAM_SAT425_3`, **GWorld ✅ via instance-scan recovery** (raw deref hits
   a decoy `0x1C2D5`). ProcessEvent vtable+0x260, dispatch validated. Closes the
-  build-1064 "+0x08 needs a real stock-5.7 game" live-confirm.
+  build-1064 "+0x08 needs a real stock-5.7 game" live-confirm. **Re-verified
+  2026-07-25 on an UPDATED binary (build 2380; PE hash changed to
+  `ED3D085C0811F000`):** 149,782 objects, all still ✅ (item +0x08/24, sanity
+  10/10, no walk WARN/ERROR); GWorld again via instance-scan recovery with
+  `gworld_aob` nulled → the Live Walker AOB export toggle stays correctly
+  disabled (the fallback-GWorld case behind the AOB-toggle persistence
+  exception, dev `2a497c4`).
 - **Pionero Capital Demo** ✅ (stock UE 5.7, 117,663 objects, Pionero Games,
   `dxgi.dll` proxy, build 1.0.0.2202 user logs 2026-07-15): the **second**
   stock-UE5.7 `Object`@+0x08 title, re-confirming the +0x08 fall-through on a
