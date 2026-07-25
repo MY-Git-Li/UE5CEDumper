@@ -32,41 +32,43 @@ UE5CEDumper is a interactive inspector toolchain. It provides a **live window** 
 
 ## Highlights
 
-A quick look at what you can actually *do* with it (the full table-maker feature list is in **[Features.md](Features.md)**):
+A quick look at what you can *do* with it — the full table-maker feature list is in **[docs/Features.md](docs/Features.md)**:
 
-- **Live memory inspection** — browse the game's objects, find every instance of a class, and drill into struct / class layouts with real-time values.
-- **Value Search** — Cheat-Engine-style First Scan / Next Scan over every UE property (numbers, strings, vectors, arrays / maps / sets), so you find what to cheat without knowing offsets. A **Group mode** finds the object that holds *several* values at once (e.g. `Str + Def + Dex + Int` in one stats block) — far more selective than one value — and an opt-in **Deep** mode reaches values buried inside deeply-nested containers.
-- **Teleport** — save your position to 3 markers and recall later (BugItGo-style), or **teleport to the mouse cursor** in top-down / 2.5D games. Bind your own global hotkeys. Also reads the live **camera POV** (location / rotation / FOV) so you can see whether a game's camera follows the pawn or is driven independently.¹
-- **Player tuning** — toggle **Super Jump**, **Move Speed**, and **Gravity** with 10%–3000% sliders, plus **God Mode** (damage immunity) and **Time Dilation** (global or player-only slow-mo / freeze / fast-forward) — all forced by reflection and held against the game's per-tick overwrites, so they survive respawns. Bind global hotkeys, or export them as Cheat Engine on/off records.
-- **Debug Camera** — force the free-fly debug camera on/off in games that ship it (reliable on/off even on Shipping builds that normally get stuck).
-- **Console** — discover and one-click invoke the `fly` / `god` / `ghost` / game-specific cheat commands that many games leave in.
-- **Live function profiler** — record while you perform *one* in-game action (open a shop, dash) and see exactly which UFunctions the game dispatched, ranked by call count with baseline-diff and noise filters. Finds the function behaviour-first, when name search can't.
-- **One-click Cheat Engine export** — pointer-chain XML, Structure Dissect (CSX), SDK headers, AA scripts, and multi-row `.CT` batches.
-- **Dump Explorer** — browse an exported "Dump All" `.jsonl` offline with one keyword search across classes + properties + functions, split into ✅ *in the current game* (jump straight to the Live Walker) vs ⚠ *not in this game*.
-- **No Cheat Engine needed to inject** — drop the `version.dll` **proxy DLL** next to the game, or inject into an already-running game from the UI (**Inject into running game…**) or the **`inject-ue.ps1`** command-line tool (auto-elevates for games running as admin). The Proxy Deploy tab remembers what worked and **suggests the right proxy per game** (confirmed-working > last deployed > injection known-good).
+- **Live memory inspection** — browse objects, find every instance of a class, drill into struct / class layouts with live values.
+- **Value Search** — CE-style First Scan / Next Scan over every UE property (numbers, strings, vectors, arrays / maps / sets), so you cheat without knowing offsets. A **Group** mode finds the object holding *several* values at once (e.g. `Str + Def + Dex + Int`), and an opt-in **Deep** mode reaches into nested containers.
+- **Teleport** — 3 save/recall markers (BugItGo-style), **teleport-to-cursor** for top-down / 2.5D games, custom global hotkeys, and a read-only **camera POV** readout.¹
+- **Player tuning** — **Super Jump / Move Speed / Gravity** sliders, **God Mode**, and **Time Dilation** (global or player-only slow-mo / freeze / fast-forward) — all reflection-forced and held against per-tick overwrites, so they survive respawns. Hotkeys or CE on/off records.
+- **Debug Camera** — force the free-fly debug camera on/off, even on Shipping builds that normally get stuck.
+- **Console** — discover and one-click invoke the `fly` / `god` / `ghost` / game-specific exec commands many games leave in.
+- **Live function profiler** — record *one* in-game action (open a shop, dash) and see exactly which UFunctions fired, ranked with baseline-diff + noise filters. Behaviour-first, when name search can't.
+- **One-click CE export** — pointer-chain XML, Structure Dissect (CSX), SDK headers, AA scripts, multi-row `.CT` batches.
+- **Dump Explorer** — browse an exported "Dump All" `.jsonl` offline, one keyword search across classes + properties + functions.
+- **No Cheat Engine needed to inject** — a `version.dll` **proxy DLL**, in-UI **Inject into running game…**, or the **`inject-ue.ps1`** CLI (auto-elevates for admin games). Proxy Deploy **suggests the right proxy per game**.
 
-> ¹ Marker save/recall works broadly (including Titan Quest II, after a transform-refresh fix for engine setters that report success but don't move the actor). A few heavily-stripped Shipping builds (e.g. Titan Quest II) can't do *cursor* teleport because they remove the standard cursor / viewport / line-trace APIs and use a custom virtual cursor — see [docs/teleport-spec.md](docs/teleport-spec.md) for the details.
+> ¹ A few heavily-stripped Shipping builds (e.g. Titan Quest II) can't do *cursor* teleport — they remove the standard cursor / viewport / line-trace APIs and use a custom virtual cursor. See [docs/teleport-spec.md](docs/teleport-spec.md).
 
 ## Tested Version Matrix
 
+Games grouped by UE version range. Per-game detail — layout quirks, proxy notes, verification — lives in **[docs/test-games.md](docs/test-games.md)**. *Satisfactory* appears in two rows because its UE version moved across game versions.
+
 | UE Version | GObjects | GNames | DynOff | Verified Games |
 |---|:---:|:---:|:---:|---|
-| **4.15 – 4.17** | ✅ | ✅ | ✅ | *Extinction* |
-| **4.18 – 4.20** | ✅ | ✅ | ✅ | *FF7 Remake Intergrade, The Occupation* |
-| **4.21 – 4.24** | ✅ | ✅ | ✅ | *Star Wars Jedi, DQ XI S, IDOLM@STER STARLIT SEASON, Octopath Traveler, DQ I&II / III HD-2D Remaster* |
-| **4.25 – 4.27** | ✅ | ✅ | ✅ | *FF7 Rebirth, Stellar Blade (劍星), Tower of Mask, Hogwarts Legacy, Romancing SaGa 2 RotS, Ghostwire: Tokyo, TimeSplitters Rewind (Early Access V0.3.3), The Artisan of Glimmith, Barn Finders, MOBILE SUIT GUNDAM SEED Battle Destiny Remastered, Persona 3 Reload (女神異聞錄３ Reload — PE stripped → tool defaults 504; UE5-Extended + TaggedFFieldVariant on a 4.27-slot ProcessEvent; game idles its thread when unfocused)* |
-| **5.0 – 5.2** | ✅ | ✅ | ✅ | *Squirrel With A Gun, Caravan Sandwitch, Meltopia, Retro Rewind Demo* |
-| **5.3 – 5.4** | ✅ | ✅ | ✅ | *Satisfactory (v1.1.3.1), Colossal, Avowed (Obsidian — packed 20-byte FUObjectItem; static-struct GObjects AOB), Echoes of Aincrad Demo (Bandai Namco — dxgi.dll proxy), The Adventures of Elliot: The Millennium Tales (stripped PE → detected 4.27, runtime-reconciled to UE5.4), MindsEye (Build A Rocket Boy — licensee fork: reordered `FChunkedFixedUObjectArray`, 32-byte `FUObjectItem` with `UObject*` at +0x10, and XOR-obfuscated `FNameEntry` payloads decoded from the fork's own key table; **verified on game v7.3.1 only** — every RVA is build-specific, see [mindseye-fork-notes.md](docs/mindseye-fork-notes.md))* |
-| **5.5 – 5.7** | ✅ | ✅* | ✅** | *Titan Quest II, EverSpace 2, Lushfoil Photography Sim, Manor Lords, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT: CARRIER QUALIFICATION Demo, Solarpunk, Pionero Capital Demo, Satisfactory (v1.2.3.1), Star Trek Voyager – Across the Unknown* |
+| **4.15 – 4.17** | ✅ | ✅ | ✅ | Extinction |
+| **4.18 – 4.20** | ✅ | ✅ | ✅ | FF7 Remake Intergrade, The Occupation |
+| **4.21 – 4.24** | ✅ | ✅ | ✅ | Star Wars Jedi, DQ XI S, IDOLM@STER STARLIT SEASON, Octopath Traveler, DQ I&II / III HD-2D Remaster |
+| **4.25 – 4.27** | ✅ | ✅ | ✅ | FF7 Rebirth, Stellar Blade (劍星), Tower of Mask, Hogwarts Legacy, Romancing SaGa 2 RotS, Ghostwire: Tokyo, TimeSplitters Rewind, The Artisan of Glimmith, Barn Finders, MOBILE SUIT GUNDAM SEED Battle Destiny Remastered, Persona 3 Reload |
+| **5.0 – 5.2** | ✅ | ✅ | ✅ | Squirrel With A Gun, Caravan Sandwitch, Meltopia, Retro Rewind Demo |
+| **5.3 – 5.4** | ✅ | ✅ | ✅ | Satisfactory (v1.1.3.1), Colossal, Avowed, Echoes of Aincrad Demo, The Adventures of Elliot, MindsEye |
+| **5.5 – 5.7** | ✅ | ✅* | ✅** | Titan Quest II, EverSpace 2, Lushfoil Photography Sim, Manor Lords, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT: CARRIER QUALIFICATION Demo, Solarpunk, Pionero Capital Demo, Satisfactory (v1.2.3.1), Star Trek Voyager – Across the Unknown |
 
-*\*GNames uses .data pointer-scan fallback for 5.5+*
+*\*GNames uses .data pointer-scan fallback for 5.5+.*
 *\**DynOff supports **CasePreservingName (FName = 16 bytes)** layout.*
 
 ---
 
 ## Features for Table Makers
 
-The full table-maker feature list — one row per feature (AOB scanning, DynOff, Live Walker, Value Search single + group scan, Teleport, movement tuning + God Mode + Time Dilation, the Live function profiler, multi-format CE export, and the rest) — lives in **[Features.md](Features.md)**.
+One row per feature — AOB scanning, DynOff, Live Walker, Value Search (single + group), Teleport, movement tuning + God Mode + Time Dilation, the Live function profiler, multi-format CE export, and the rest — in **[docs/Features.md](docs/Features.md)**.
 
 ---
 
@@ -89,7 +91,7 @@ The full table-maker feature list — one row per feature (AOB scanning, DynOff,
 
 > **Note**: Do not use both methods simultaneously. If the proxy DLL is in the game folder, do not also inject `UE5Dumper.dll` via CE. The DLL detects duplicate instances and skips auto-start to prevent conflicts.
 
-> **Which proxy DLL?** Start with `version.dll` (`build.ps1 -Target ProxyDLL`). If the game launches but the UI can't connect, the EXE probably doesn't import `version.dll` — try **`dxgi.dll`** (`-Target ProxyDxgi`), which every D3D11/D3D12 UE game imports. **`winmm.dll`** (`-Target ProxyWinmm`) reaches exactly the same games as `dxgi.dll` — it isn't broader coverage but a **spare slot**: use it when the `dxgi.dll` (or `version.dll`) filename is already taken by ReShade or another mod loader. `dinput8.dll` (`-Target ProxyDinput8`) is a last resort — few UE EXEs import it. `build.ps1` (default `-Target All`) builds all four into `dist\proxy\`, and the **Proxy Deploy** tab lets you pick the type per game and deploy it for you (Steam games, or any drive you point it at — Epic / GOG / manual). Once a game has worked before, the grid's **Suggested proxy** column tells you which one to pick.
+> **Which proxy DLL?** Start with `version.dll`. If the game launches but the UI can't connect, its EXE doesn't import `version.dll` — use **`dxgi.dll`** (every D3D11/D3D12 UE game imports it), or **`winmm.dll`** as a spare when the `dxgi` / `version` filename is already taken by ReShade or another mod loader (`dinput8.dll` is a last resort). `build.ps1` builds all four into `dist\proxy\`; the **Proxy Deploy** tab deploys the right one per game, and its **Suggested proxy** column remembers what worked. All names taken, or none load? Use Option C (inject).
 
 ### Option C: Inject into a running game (no CE, no restart)
 
@@ -118,17 +120,9 @@ Inject `UE5Dumper.dll` into an **already-running** game — the quickest path (n
 
 ---
 
-### Optional: integration with AOBMaker CE DLL plugin
+### Optional: AOBMaker CE plugin integration
 
-AOBMaker is a tool used to generate AOB patterns and CE Auto Assembler scripts. It has a CE DLL plugin that can communicate with UE5CEDumper to share detected patterns and offsets. If you have AOBMaker, you can enable the integration with UE5CEDumper UI:
-- Direct browse memory region or code in CE by one-click in UI.
-- Generate CE AA scripts with dynamic GWorld AOB AA scripts directly.
-- Generate CE memory records for UE types and fields.
-- Generate dissect data for UE structs to use with CE Structure Dissect.
-
-Note: AOBMaker integration is optional and not required to use UE5CEDumper. The core features of UE5CEDumper work independently of AOBMaker.
-
-Download AOBMaker here (register is required): https://opencheattables.com/viewtopic.php?t=1788
+[AOBMaker](https://opencheattables.com/viewtopic.php?t=1788) (register required) generates AOB patterns + CE AA scripts. Its CE DLL plugin lets UE5CEDumper one-click browse memory / code in CE, and emit dynamic GWorld-AOB AA scripts, CE memory records for UE types & fields, and Structure Dissect data. Entirely optional — the core features work without it.
 
 ## Requirements
 
@@ -184,6 +178,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
 | [cheat-engine/cheat-engine](https://github.com/cheat-engine/cheat-engine) | CE Lua scripting API reference |
 | **AOBMaker (private)** | AOB pattern generation tooling, AA script generation and fast CE-Goto (not a must) |
 | UE4 Dumper.CT | Cake-san's cheat table — additional UE4 AOB patterns (CT-series in Signatures.h) |
+
+**Testing** — thanks to **Marc@OCT** and **SeryogaSK@OCT** ([OCT](https://opencheattables.com/)) for helping test this tool.
 
 ---
 

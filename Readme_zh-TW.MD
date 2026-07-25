@@ -30,32 +30,34 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
 ## 重點亮點 (Highlights)
 
-快速了解你實際能用它做什麼（完整的 Table 製作功能列表請見 **[Features_zh-TW.md](Features_zh-TW.md)**）：
+快速了解你實際能用它做什麼 — 完整的 Table 製作功能列表請見 **[docs/Features_zh-TW.md](docs/Features_zh-TW.md)**：
 
-- **即時記憶體檢查** — 瀏覽遊戲物件、找出某類別的每個實例，並以即時數值深入 struct / class 佈局。
-- **Value Search（數值搜尋）** — Cheat-Engine 風格的 First Scan / Next Scan，掃描每個 UE 屬性（數字、字串、向量、array / map / set），讓你不需知道 offset 就能找到要修改的目標。**Group 模式**可找出「同時持有多個數值」的物件（例如同一個 stats 區塊裡的 `Str + Def + Dex + Int`）— 比單值選擇性高得多；另有可選的 **Deep** 模式能深入巢狀容器找值。
-- **Teleport（傳送）** — 將位置存入 3 個 marker 槽並隨後召回（BugItGo 風格），或在俯視 / 2.5D 遊戲中**傳送到滑鼠游標位置**。可自設全域熱鍵。也會讀取即時**相機 POV**（位置 / 旋轉 / FOV），讓你看出遊戲相機是跟著 pawn 還是獨立運作。¹
-- **角色調整（Player tuning）** — 用 10%–3000% 滑桿切換 **Super Jump（超級跳）**、**Move Speed（移動速度）** 與 **Gravity（重力）**，外加 **God Mode（無敵）** 與 **Time Dilation（時間膨脹：全域或僅玩家的慢動作 / 凍結 / 快轉）** — 全部以反射強制設定，並對抗遊戲每 tick 的覆寫，因此重生後仍維持。可綁全域熱鍵，或匯出成 Cheat Engine 的開 / 關記錄。
-- **Debug Camera（除錯相機）** — 在內建此功能的遊戲中強制開 / 關自由飛行除錯相機（即使在通常會卡住的 Shipping build 也能可靠開關）。
-- **Console（主控台）** — 發現並一鍵呼叫許多遊戲保留的 `fly` / `god` / `ghost` / 遊戲特定 cheat 指令。
-- **即時函式剖析器（Live Funcs）** — 邊錄邊做*一個*遊戲內動作（開商店、衝刺），就能看到遊戲實際呼叫了哪些 UFunction，依呼叫次數排名，並有 baseline 差異與雜訊過濾。當名稱搜尋找不到時，改用「行為」找函式。
-- **一鍵 Cheat Engine 匯出** — 指標鏈 XML、Structure Dissect (CSX)、SDK headers、AA 腳本，以及多列 `.CT` 批次。
-- **Dump Explorer（離線瀏覽）** — 離線瀏覽匯出的「Dump All」`.jsonl`，一個關鍵字同時搜尋 class + property + function，並分成 ✅ *目前遊戲裡有*（直接跳到 Live Walker）與 ⚠ *此遊戲沒有*。
-- **注入免 Cheat Engine** — 把 `version.dll` **proxy DLL** 放到遊戲旁，或從 UI（**Inject into running game…**）或 **`inject-ue.ps1`** 命令列工具對正在執行的遊戲注入（遊戲以系統管理員執行時會自動提權）。Proxy Deploy 分頁會記住哪個 proxy 對哪款遊戲有效，並**逐遊戲建議正確的 proxy**（已確認可用 > 上次部署 > 注入成功記錄）。
+- **即時記憶體檢查** — 瀏覽物件、找出某類別的每個實例、以即時數值深入 struct / class 佈局。
+- **Value Search（數值搜尋）** — Cheat-Engine 風格的 First Scan / Next Scan，掃描每個 UE 屬性（數字、字串、向量、array / map / set），不需知道 offset 就能找到目標。**Group 模式**能找出同時持有多個數值的物件（例如 `Str + Def + Dex + Int`），另有可選的 **Deep** 模式深入巢狀容器。
+- **Teleport（傳送）** — 3 個 marker 存檔 / 召回（BugItGo 風格）、俯視 / 2.5D 遊戲的**傳送到游標**、可自設全域熱鍵，以及唯讀的**相機 POV** 讀值。¹
+- **角色調整（Player tuning）** — **Super Jump / Move Speed / Gravity** 滑桿、**God Mode（無敵）**、**Time Dilation（全域或僅玩家的慢動作 / 凍結 / 快轉）** — 全部以反射強制設定並對抗每 tick 覆寫，因此重生後仍維持。可綁熱鍵或匯出成 CE 開 / 關記錄。
+- **Debug Camera（除錯相機）** — 強制開 / 關自由飛行除錯相機，即使在通常會卡住的 Shipping build 也能可靠開關。
+- **Console（主控台）** — 發現並一鍵呼叫許多遊戲保留的 `fly` / `god` / `ghost` / 遊戲特定 exec 指令。
+- **即時函式剖析器（Live Funcs）** — 錄下*一個*遊戲內動作（開商店、衝刺），就能看到實際觸發了哪些 UFunction，附 baseline 差異 + 雜訊過濾。名稱搜尋找不到時，用「行為」找。
+- **一鍵 CE 匯出** — 指標鏈 XML、Structure Dissect (CSX)、SDK headers、AA 腳本、多列 `.CT` 批次。
+- **Dump Explorer（離線瀏覽）** — 離線瀏覽匯出的「Dump All」`.jsonl`，一個關鍵字同時搜尋 class + property + function。
+- **注入免 Cheat Engine** — `version.dll` **proxy DLL**、UI 的 **Inject into running game…**，或 **`inject-ue.ps1`** 命令列（管理員遊戲會自動提權）。Proxy Deploy **逐遊戲建議正確的 proxy**。
 
-> ¹ Marker 存檔 / 召回廣泛可用（包含泰坦任務 2，已修正某些「回報成功卻不移動 actor」的引擎 setter 的 transform 重新整理問題）。少數被大量精簡的 Shipping build（例如泰坦任務 2）無法做*游標*傳送，因為它們移除了標準的游標 / viewport / line-trace API 並改用自訂虛擬游標 — 詳見 [docs/teleport-spec.md](docs/teleport-spec.md)。
+> ¹ 少數被大量精簡的 Shipping build（例如泰坦任務 2）無法做*游標*傳送 — 它們移除了標準的游標 / viewport / line-trace API 並改用自訂虛擬游標。詳見 [docs/teleport-spec.md](docs/teleport-spec.md)。
 
 ## 實測版本矩陣 (Tested Version Matrix)
 
+依 UE 版本區間分組。各遊戲的細節（佈局差異、proxy 註記、驗證情形）收錄於 **[docs/test-games.md](docs/test-games.md)**。*Satisfactory* 出現在兩列，因為它的 UE 版本隨遊戲版本而變動。
+
 | UE 版本 | GObjects | GNames | DynOff | 已驗證遊戲 |
 |---|:---:|:---:|:---:|---|
-| **4.15 – 4.17** | ✅ | ✅ | ✅ | *Extinction* |
-| **4.18 – 4.20** | ✅ | ✅ | ✅ | *Final Fantasy VII Remake Intergrade, The Occupation* |
-| **4.21 – 4.24** | ✅ | ✅ | ✅ | *《STAR WARS 絕地：組織殞落™》, 勇者鬥惡龍 XI S, 偶像大師 星耀季節, 八方旅人, 勇者鬥惡龍 I&II / III HD-2D 重製版* |
-| **4.25 – 4.27** | ✅ | ✅ | ✅ | *Final Fantasy VII Rebirth, 劍星 (Stellar Blade), Tower of Mask, 霍格華茲的傳承, 復活邪神 2 七英雄的復仇, Ghostwire: Tokyo, TimeSplitters Rewind (Early Access V0.3.3), The Artisan of Glimmith, Barn Finders, 機動戰士 GUNDAM SEED 激鬥命運 復刻版, 女神異聞錄３ Reload (Persona 3 Reload — 版本字串被移除 → 工具預設 504；UE5-Extended + TaggedFFieldVariant，ProcessEvent 為 4.27 slot；視窗非前景時遊戲執行緒會停擺)* |
-| **5.0 – 5.2** | ✅ | ✅ | ✅ | *Squirrel With A Gun, Caravan Sandwitch, Meltopia, Retro Rewind Demo* |
-| **5.3 – 5.4** | ✅ | ✅ | ✅ | *Satisfactory (v1.1.3.1 滿意工廠), Colossal, Avowed (Obsidian — packed 20-byte FUObjectItem；static-struct GObjects AOB), 艾恩葛朗特 迴盪新聲 Demo (Echoes of Aincrad, Bandai Namco — dxgi.dll proxy), 冒險家艾略特的千年奇譚 (The Adventures of Elliot：版本字串被移除 → 偵測為 4.27，執行期校正為 UE5.4), MindsEye (Build A Rocket Boy — licensee fork：`FChunkedFixedUObjectArray` 欄位重排、`FUObjectItem` 加大為 32 bytes 且 `UObject*` 位於 +0x10、`FNameEntry` 字元經 XOR 混淆，改由讀取該 fork 自己的 key table 解碼；**僅在遊戲版本 7.3.1 驗證** — 所有 RVA 皆與 build 綁定，重推導方式見 [mindseye-fork-notes.md](docs/mindseye-fork-notes.md))* |
-| **5.5 – 5.7** | ✅ | ✅* | ✅** | *泰坦任務 2, EverSpace 2, Lushfoil Photography Sim, 莊園領主 (Manor Lords), Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT: CARRIER QUALIFICATION Demo, Solarpunk (太陽龐克), Pionero Capital Demo, Satisfactory (滿意工廠 v1.2.3.1), Star Trek Voyager – Across the Unknown* |
+| **4.15 – 4.17** | ✅ | ✅ | ✅ | Extinction |
+| **4.18 – 4.20** | ✅ | ✅ | ✅ | Final Fantasy VII Remake Intergrade, The Occupation |
+| **4.21 – 4.24** | ✅ | ✅ | ✅ | 《STAR WARS 絕地：組織殞落™》, 勇者鬥惡龍 XI S, 偶像大師 星耀季節, 八方旅人, 勇者鬥惡龍 I&II / III HD-2D 重製版 |
+| **4.25 – 4.27** | ✅ | ✅ | ✅ | Final Fantasy VII Rebirth, 劍星 (Stellar Blade), Tower of Mask, 霍格華茲的傳承, 復活邪神 2 七英雄的復仇, Ghostwire: Tokyo, TimeSplitters Rewind, The Artisan of Glimmith, Barn Finders, 機動戰士 GUNDAM SEED 激鬥命運 復刻版, 女神異聞錄３ Reload (Persona 3 Reload) |
+| **5.0 – 5.2** | ✅ | ✅ | ✅ | Squirrel With A Gun, Caravan Sandwitch, Meltopia, Retro Rewind Demo |
+| **5.3 – 5.4** | ✅ | ✅ | ✅ | Satisfactory (v1.1.3.1 滿意工廠), Colossal, Avowed, 艾恩葛朗特 迴盪新聲 Demo (Echoes of Aincrad), 冒險家艾略特的千年奇譚 (The Adventures of Elliot), MindsEye |
+| **5.5 – 5.7** | ✅ | ✅* | ✅** | 泰坦任務 2, EverSpace 2, Lushfoil Photography Sim, 莊園領主 (Manor Lords), Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT: CARRIER QUALIFICATION Demo, Solarpunk (太陽龐克), Pionero Capital Demo, Satisfactory (滿意工廠 v1.2.3.1), Star Trek Voyager – Across the Unknown |
 
 *\*GNames 在 5.5+ 版本使用 .data 指標掃描回退機制。*
 *\**DynOff 支援 **CasePreservingName (FName = 16 bytes)** 佈局。
@@ -64,7 +66,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
 ## 專為 Table 製作人員設計的功能
 
-完整的 Table 製作功能列表 — 一列一功能（AOB 掃描、DynOff、Live Walker、Value Search 單值 + 群組掃描、Teleport、移動調整 + God Mode + Time Dilation、即時函式剖析器、多格式 CE 匯出，以及其餘全部）— 收錄於 **[Features_zh-TW.md](Features_zh-TW.md)**。
+一列一功能 — AOB 掃描、DynOff、Live Walker、Value Search（單值 + 群組）、Teleport、移動調整 + God Mode + Time Dilation、即時函式剖析器、多格式 CE 匯出，以及其餘全部 — 收錄於 **[docs/Features_zh-TW.md](docs/Features_zh-TW.md)**。
 
 ---
 
@@ -87,7 +89,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
 > **注意**: 請勿同時使用兩種方式。若 Proxy DLL 已放在遊戲目錄中，請勿再透過 CE 注入 `UE5Dumper.dll`。DLL 會偵測重複實例並跳過自動啟動以避免衝突。
 
-> **該用哪個 Proxy DLL？** 先試 `version.dll`（`build.ps1 -Target ProxyDLL`）。若遊戲能啟動但 UI 無法連接，通常代表該 EXE 沒有匯入 `version.dll` — 改試 **`dxgi.dll`**（`-Target ProxyDxgi`，每款 D3D11/D3D12 UE 遊戲都會匯入）。**`winmm.dll`**（`-Target ProxyWinmm`）涵蓋的遊戲與 `dxgi.dll` 完全相同 — 並非更廣的覆蓋率，而是一個**備用槽位**：當 `dxgi.dll`（或 `version.dll`）這個檔名已被 ReShade 或其他 mod loader 佔用時改用它。`dinput8.dll`（`-Target ProxyDinput8`）為最後手段 — 少有 UE EXE 會匯入它。`build.ps1`（預設 `-Target All`）會把四種都建置到 `dist\proxy\`，而 **Proxy Deploy** 分頁可讓你為每款遊戲挑選類型並自動部署（Steam 遊戲，或指定磁碟掃描任何位置 — Epic / GOG / 手動安裝）。只要某款遊戲曾成功用過，表格的 **Suggested proxy** 欄位就會直接告訴你該選哪個。
+> **該用哪個 Proxy DLL？** 先試 `version.dll`。若遊戲能啟動但 UI 無法連接，代表該 EXE 沒有匯入 `version.dll` — 改用 **`dxgi.dll`**（每款 D3D11/D3D12 UE 遊戲都會匯入），或在 `dxgi` / `version` 檔名已被 ReShade 或其他 mod loader 佔用時改用 **`winmm.dll`** 這個備用槽位（`dinput8.dll` 為最後手段）。`build.ps1` 會把四種都建置到 `dist\proxy\`；**Proxy Deploy** 分頁會為每款遊戲部署正確的 proxy，其 **Suggested proxy** 欄位會記住哪個有效。四個檔名都被佔、或都載入不了？改用方式 C（注入）。
 
 ### 方式 C：對執行中的遊戲注入（免 CE、免重開）
 
@@ -116,17 +118,9 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
 ---
 
-### 選用：與 AOBMaker CE DLL 外掛整合
+### 選用：與 AOBMaker CE 外掛整合
 
-AOBMaker 是用於產生 AOB 特徵碼及 CE Auto Assembler 腳本的工具。它有一個 CE DLL 外掛可以與 UE5CEDumper 通訊，共享偵測到的特徵碼與偏移量。如果你已安裝 AOBMaker，可在 UE5CEDumper UI 中啟用整合功能：
-- 直接由 UI 一鍵在 CE 中瀏覽記憶體區段或對應程式碼。
-- 直接產生 CE AA 腳本（含動態 GWorld AOB AA 腳本）。
-- 為 UE 型別與欄位產生 CE 記憶體紀錄。
-- 為 UE 結構產生 dissect data 供 CE Structure Dissect 使用。
-
-備註：AOBMaker 整合為選用，並非 UE5CEDumper 的必要條件。UE5CEDumper 的核心功能皆可獨立運作。
-
-AOBMaker 下載連結（需先註冊）：https://opencheattables.com/viewtopic.php?t=1788
+[AOBMaker](https://opencheattables.com/viewtopic.php?t=1788)（需先註冊）用於產生 AOB 特徵碼與 CE AA 腳本。其 CE DLL 外掛可讓 UE5CEDumper 一鍵在 CE 中瀏覽記憶體 / 程式碼，並產生動態 GWorld-AOB AA 腳本、UE 型別與欄位的 CE 記憶體紀錄，以及 Structure Dissect 資料。完全選用 — 核心功能不需它也能運作。
 
 ---
 
@@ -184,6 +178,8 @@ AOBMaker 下載連結（需先註冊）：https://opencheattables.com/viewtopic.
 | [cheat-engine/cheat-engine](https://github.com/cheat-engine/cheat-engine) | CE Lua 腳本 API 參考 |
 | **AOBMaker (內部工具)** | AOB 特徵碼產生工具，AA 腳本產生工具、快速 CE-goto 功能 (非必備) |
 | UE4 Dumper.CT | Cake-san 的 Cheat Table — 額外的 UE4 AOB 特徵碼（Signatures.h 中的 CT 系列） |
+
+**測試** — 感謝 **Marc@OCT** 與 **SeryogaSK@OCT**（[OCT](https://opencheattables.com/)）協助測試本工具。
 
 ---
 
