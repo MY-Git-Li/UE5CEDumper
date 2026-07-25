@@ -2173,7 +2173,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly HashSet<string> LiveWalkerPersist = new()
     {
         nameof(LiveWalkerViewModel.CollapseChain), nameof(LiveWalkerViewModel.DescShowOffset),
-        nameof(LiveWalkerViewModel.DescShowType), nameof(LiveWalkerViewModel.FlattenGasAttributes),
+        nameof(LiveWalkerViewModel.DescShowType),
+        // AobSymbolPreference (the INTENT), NOT UseAobSymbol (the gated live value) —
+        // a fallback-GWorld force-uncheck changes UseAobSymbol but must not trigger a save.
+        nameof(LiveWalkerViewModel.AobSymbolPreference),
+        nameof(LiveWalkerViewModel.FlattenGasAttributes),
         nameof(LiveWalkerViewModel.FlattenLeafStructs), nameof(LiveWalkerViewModel.FlattenLeafRecords),
         nameof(LiveWalkerViewModel.CollapseLeafPointers),
         nameof(LiveWalkerViewModel.FlattenColorEnabled), nameof(LiveWalkerViewModel.FlattenColorEven),
@@ -2267,6 +2271,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         LiveWalker.CollapseChain = lw.CollapseChain;
         LiveWalker.DescShowOffset = lw.DescShowOffset;
         LiveWalker.DescShowType = lw.DescShowType;
+        // Restore the AOB intent; the live checkbox is re-derived against the gate
+        // (CanUseAobSymbol) the moment an engine state / GWorld root arrives.
+        LiveWalker.AobSymbolPreference = lw.UseAobSymbol;
         LiveWalker.FlattenGasAttributes = lw.FlattenGasAttributes;
         LiveWalker.FlattenLeafStructs = lw.FlattenLeafStructs;
         LiveWalker.FlattenLeafRecords = lw.FlattenLeafRecords;
@@ -2399,6 +2406,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         o.LiveWalker.CollapseChain = LiveWalker.CollapseChain;
         o.LiveWalker.DescShowOffset = LiveWalker.DescShowOffset;
         o.LiveWalker.DescShowType = LiveWalker.DescShowType;
+        // Persist the AOB INTENT, not the live effective checkbox — a fallback-GWorld
+        // game force-unchecks UseAobSymbol but must not erase the stored preference.
+        o.LiveWalker.UseAobSymbol = LiveWalker.AobSymbolPreference;
         o.LiveWalker.FlattenGasAttributes = LiveWalker.FlattenGasAttributes;
         o.LiveWalker.FlattenLeafStructs = LiveWalker.FlattenLeafStructs;
         o.LiveWalker.FlattenLeafRecords = LiveWalker.FlattenLeafRecords;

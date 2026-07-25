@@ -73,6 +73,7 @@ public class UiOptionsStoreTests : IDisposable
         o.Main.ArrayLimitExponent = 10;
         o.Main.SelectedAddressFormatIndex = 2;
         o.LiveWalker.DescShowType = true;
+        o.LiveWalker.UseAobSymbol = true;
         o.LiveWalker.GWorldLocateDepth = 9;
         o.ValueSearch.SelectedDataType = ValueScanDataType.Float;
         o.ValueSearch.SelectedScanType = ValueScanType.Bigger;
@@ -97,6 +98,7 @@ public class UiOptionsStoreTests : IDisposable
         Assert.Equal(10, r.Main.ArrayLimitExponent);
         Assert.Equal(2, r.Main.SelectedAddressFormatIndex);
         Assert.True(r.LiveWalker.DescShowType);
+        Assert.True(r.LiveWalker.UseAobSymbol);
         Assert.Equal(9, r.LiveWalker.GWorldLocateDepth);
         Assert.Equal(ValueScanDataType.Float, r.ValueSearch.SelectedDataType);
         Assert.Equal(ValueScanType.Bigger, r.ValueSearch.SelectedScanType);

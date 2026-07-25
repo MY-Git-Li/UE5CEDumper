@@ -368,4 +368,99 @@ public class CeAaScriptGWorldWalkTests
         Assert.Equal("", CeXmlExportService.ExtractAssemblerScript("<CheatTable></CheatTable>"));
         Assert.Equal("", CeXmlExportService.ExtractAssemblerScript(""));
     }
+
+    // ── AOB export toggle: persisted preference vs. live gated checkbox ──────
+    // The "AOB" item in the Live Walker export-options dropdown must be REMEMBERED
+    // (AobSymbolPreference), and a game where GWorld came from a FALLBACK (no AOB)
+    // — which force-unchecks the live box — must NOT erase that preference.
+
+    [Fact]
+    public void Aob_user_check_on_gworld_root_records_the_preference()
+    {
+        var vm = MakeVm(out _);
+        LoadGWorldSpine(vm);                                             // root = GWorld
+        vm.SetEngineState(EngineWith("48 8B 1D ?? ?? ?? ??", "0x150000000")); // AOB available
+        Assert.True(vm.CanUseAobSymbol);                                // checkbox enabled
+
+        vm.UseAobSymbol = true;                                          // user clicks it
+        Assert.True(vm.AobSymbolPreference);                            // intent captured
+    }
+
+    [Fact]
+    public void Aob_fallback_gworld_force_unchecks_live_box_but_keeps_preference()
+    {
+        var vm = MakeVm(out _);
+        LoadGWorldSpine(vm);
+        vm.SetEngineState(EngineWith("48 8B 1D ?? ?? ?? ??", "0x150000000"));
+        vm.UseAobSymbol = true;                                          // opted in
+        Assert.True(vm.AobSymbolPreference);
+
+        // Next game: GWorld found via FALLBACK (no AOB) → symbol unavailable.
+        vm.SetEngineState(EngineWith(gworldAob: "", gworldAddr: ""));
+        Assert.False(vm.CanUseAobSymbol);                              // checkbox disabled
+        Assert.False(vm.UseAobSymbol);                                // live box force-unchecked
+        Assert.True(vm.AobSymbolPreference);                           // ← preference NOT erased
+    }
+
+    [Fact]
+    public void Aob_preference_restores_when_symbol_becomes_available_again()
+    {
+        var vm = MakeVm(out _);
+        LoadGWorldSpine(vm);
+        vm.SetEngineState(EngineWith("48 8B 1D ?? ?? ?? ??", "0x150000000"));
+        vm.UseAobSymbol = true;
+        vm.SetEngineState(EngineWith(gworldAob: "", gworldAddr: ""));   // fallback → force-uncheck
+        Assert.False(vm.UseAobSymbol);
+
+        // Back to an AOB-capable game on a GWorld root → the stored choice returns.
+        vm.SetEngineState(EngineWith("48 8B 1D ?? ?? ?? ??", "0x150000000"));
+        Assert.True(vm.CanUseAobSymbol);
+        Assert.True(vm.UseAobSymbol);
+    }
+
+    [Fact]
+    public void Aob_leaving_gworld_root_force_unchecks_but_keeps_preference()
+    {
+        var vm = MakeVm(out _);
+        LoadGWorldSpine(vm);
+        vm.SetEngineState(EngineWith("48 8B 1D ?? ?? ?? ??", "0x150000000"));
+        vm.UseAobSymbol = true;
+
+        // Start from GameEngine / open an instance → root is no longer GWorld.
+        vm.Breadcrumbs.Clear();
+        vm.Breadcrumbs.Add(Bc("0x9000", "SomeActor"));
+        Assert.False(vm.CanUseAobSymbol);
+        Assert.False(vm.UseAobSymbol);            // force-unchecked off a non-GWorld root
+        Assert.True(vm.AobSymbolPreference);      // preference survives
+
+        // Walk GWorld again → restored.
+        LoadGWorldSpine(vm);
+        Assert.True(vm.UseAobSymbol);
+    }
+
+    [Fact]
+    public void Aob_never_opted_in_stays_unchecked_on_gworld_root()
+    {
+        // A user who never touched the box must not see it auto-enable just because
+        // AOB happens to be available (default preference = off).
+        var vm = MakeVm(out _);
+        LoadGWorldSpine(vm);
+        vm.SetEngineState(EngineWith("48 8B 1D ?? ?? ?? ??", "0x150000000"));
+        Assert.True(vm.CanUseAobSymbol);
+        Assert.False(vm.AobSymbolPreference);
+        Assert.False(vm.UseAobSymbol);
+    }
+
+    [Fact]
+    public void Aob_applied_preference_reflects_into_live_box_when_gate_open()
+    {
+        // Mirrors ApplyOptions restoring a persisted preference: setting the intent
+        // while the gate is already open re-derives the live checkbox immediately.
+        var vm = MakeVm(out _);
+        LoadGWorldSpine(vm);
+        vm.SetEngineState(EngineWith("48 8B 1D ?? ?? ?? ??", "0x150000000"));
+
+        vm.AobSymbolPreference = true;            // as ApplyOptions would set it
+        Assert.True(vm.UseAobSymbol);
+    }
 }
