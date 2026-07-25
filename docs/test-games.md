@@ -51,6 +51,81 @@
 
 -----
 
+## Untested / analysis-predicted candidates
+
+> Games we have NOT run the dumper against, but for which we can predict coverage
+> from static AOB analysis. **No live confirmation** — treat as leads, not results.
+
+### Halo Campaign Evolved (UE 5.5) — GObjects predicted via `GOBJ_V11`, NOT yet tested
+
+RE-UE4SS added a per-game config for this title (upstream commit `4b96f82b`,
+2026-07-25). It is **stock UE 5.5, standard layout** (no packed/reordered item, no
+licensee fork) — the only reason RE-UE4SS ships a custom config is a game-specific
+GUObjectArray AOB, not a non-standard structure. Their signature (from
+`assets/CustomGameConfigs/Halo Campaign Evolved/UE4SS_Signatures/GUObjectArray.lua`):
+
+```
+45 84 C0                test r8b, r8b
+48 C7 41 10 00000000    mov  [rcx+0x10], 0
+48 8D 05 ?? ?? ?? ??    lea  rax, [rip+GObjects]   ← anchor (match offset 0x0B)
+4C 8B C9                mov  r9, rcx
+48 89 01                mov  [rcx], rax
+B8 FF FF FF FF          mov  eax, -1
+89 41 08                mov  [rcx+8], eax
+```
+
+**Prediction: our existing `GOBJ_V11` already matches this** (byte-for-byte over the
+tail). `GOBJ_V11` = `48 8D ?? ?? ?? ?? ?? 4C 8B C9 48 89 01 B8 FF FF FF FF` (Himmel.h,
+priority 14, "Little Nightmares 3"): its 2-byte `48 8D` + 5 wildcards absorb Halo's
+`48 8D 05` + disp32, then `4C 8B C9 48 89 01 B8 FF FF FF FF` matches literally →
+resolves the same `lea rax,[rip+GObjects]`. `GOBJ_RE3` (LN3 Demo, priority 13) is the
+same idiom extended with `89 41 08 0F 45 …` and would also match if Halo's tail
+continues with the `cmovne`. **Halo uses the identical `FUObjectArray`-init idiom as
+Little Nightmares 3** — so we most likely resolve its GObjects with zero new patterns.
+Not added to the tested table (analysis only; no game copy to confirm).
+
+#### ⚠ Multiple-match risk — pre-diagnosed so a future fix is fast
+
+`GOBJ_V11` is **short and generic**: `lea reg,[rip]; mov r9,rcx; mov [rcx],rax;
+mov eax,-1` is a common shape, so on some binaries it can match **more than one
+site**. RE-UE4SS ships the *longer* Halo pattern (with the `test r8b,r8b; mov
+[rcx+0x10],0` prefix) precisely to be unambiguous. So there is a real, if small,
+chance that on Halo `GOBJ_V11`/`GOBJ_RE3` resolve to a **wrong** `lea` and we pick a
+bad GObjects.
+
+**What already protects us** (why this usually self-corrects, no action needed):
+- **Priority ordering** — `GOBJ_V11` is priority 14, tried early; the first
+  *validating* match wins.
+- **`ValidateGObjects`** — the resolved target must look like a chunked/flat
+  `FUObjectArray` (plausible `Num`/`Max`/chunk-table); a wrong `lea` target fails
+  validation and the scan moves on. This is the same guard that rejects the many
+  `ValidateGObjects: Failed` candidates seen in every scan log.
+
+**Symptoms that it went wrong on Halo** (what to look for in the logs): GObjects at a
+non-`.data`/non-module address, an implausible object count, `named ≈ bad` at every
+stride, sanity < 10/10, or `Start from GWorld` empty despite a live world.
+
+**Paste-ready fix if it does** — add the longer, unique RE-UE4SS anchor to
+`dll/src/Himmel.h` at a **higher** priority than `GOBJ_V11` (lower number = higher
+precedence). It is safe to rank high because the `45 84 C0 48 C7 41 10 00000000`
+prefix is specific enough that it will not steal LN3 or other `GOBJ_V11` games:
+
+```cpp
+// In the AOB definitions:
+constexpr const char* AOB_GOBJECTS_HALO_1 =
+    "45 84 C0 48 C7 41 10 00 00 00 00 48 8D 05 ?? ?? ?? ?? 4C 8B C9 48 89 01 B8 FF FF FF FF 89 41 08";
+
+// In GOBJECTS_PATTERNS[] (priority ~11, above GOBJ_RE3=13 / GOBJ_V11=14):
+//   instrOffset=0x0B (the lea sits 11 bytes into the match — RE-UE4SS's OnMatchFound
+//   uses MatchAddress+0xB), ripOffsetInInstr=3, instrLen=7, adjustment=0.
+SIG_RIP("GOBJ_HALO_1", AOB_GOBJECTS_HALO_1, AobTarget::GObjects, 0x0B, 3, 7, 0, 11,
+        "HALO", "Halo Campaign Evolved UE5.5 FUObjectArray init (unique prefix)"),
+```
+
+Source: RE-UE4SS `assets/CustomGameConfigs/Halo Campaign Evolved/UE4SS_Signatures/GUObjectArray.lua` — its `OnMatchFound` resolves `MatchAddress + 0xB` as the `lea`, confirming the `0x0B` instruction offset.
+
+-----
+
 ## GWorld Status Summary
 
 **Working (33/33):** TQ2, EverSpace 2, Hogwarts Legacy, IDOLM@STER, Romancing SaGa 2, Tower of Mask, Ghostwire: Tokyo, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT Demo, OctoPath Traveler, FF7R, FF7Re, DQ I&II, DQ III, DQ XI S, Lushfoil Photography Sim, Manor Lords, The Artisan of Glimmith, Barn Finders, Colossal, Extinction, MS Gundam SEED Battle Destiny Remastered, The Adventures of Elliot: The Millennium Tales, Avowed (instance_scan_recovery), Echoes of Aincrad Demo, Star Wars Jedi: Fallen Order (CE manual inject), Satisfactory (modular CoreUObject DLL — v1.1.3.1/UE5.3 + v1.2.3.1/UE5.6), Solarpunk (instance-scan recovery), Stellar Blade, Persona 3 Reload (GWLD_GH_1 direct), Pionero Capital Demo (GWLD_TQ_1 direct, stock UE5.7 Object@+0x08, dxgi proxy), MindsEye (UE5.4.4 licensee fork, **game v7.3.1 only** — see [mindseye-fork-notes.md](mindseye-fork-notes.md))
