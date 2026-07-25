@@ -1085,10 +1085,29 @@ static uintptr_t ScanForTarget(
             pr.id = sig->id;
             pr.hitCount = static_cast<int>(batchResults[j].matches.size());
 
-            // Try to validate each match
+            // Try to validate each match.
+            //
+            // Bounded (build 2404). Validation is not free — every candidate costs several
+            // SEH-guarded reads — and an over-generic pattern can produce five-figure match
+            // counts: the removed GNAM_D7_1 ("48 8D 0D ?? ?? ?? ?? E8", i.e. `lea rcx,[rip];
+            // call`, three literal bytes) took 27,001 matches on a UE4.20 title and 104,897
+            // on a UE4.27 one, ALL of which were validated before the scan could reach the
+            // patterns that actually work (pri 800/840 there). The cap keeps that failure
+            // mode bounded for any future pattern: if the correct site is not within the
+            // first kMaxValidatePerPattern matches, the pattern was not selective enough to
+            // be trusted anyway. Logged loudly so it is visible rather than silent.
+            constexpr size_t kMaxValidatePerPattern = 4096;
             uintptr_t bestResult = 0;
             uintptr_t bestMatchAddr = 0;
+            size_t tried = 0;
             for (uintptr_t matchAddr : batchResults[j].matches) {
+                if (++tried > kMaxValidatePerPattern) {
+                    LOG_WARN("[%s] %s: %zu matches — validation capped at %zu. This pattern is "
+                             "too generic; consider tightening or removing it.",
+                             report.targetName, sig->id,
+                             batchResults[j].matches.size(), kMaxValidatePerPattern);
+                    break;
+                }
                 uintptr_t resolved = TryResolveMatch(matchAddr, *sig, validate);
                 if (resolved) {
                     bestResult = resolved;
@@ -2132,7 +2151,53 @@ static bool ValidateSparseDelegates(uintptr_t addr) {
     // is a power of 2; default 0x80, grows by doubling.
     if (arrayMax < 0 || arrayMax > 0x100000) return false;
     if (allocMaxBits < 0 || allocMaxBits > 0x100000) return false;
-    return true;
+
+    // ── Content check (added build 2404) ────────────────────────────────
+    // Everything above is shape-only: it accepts ANY .data TMap-looking blob, which
+    // is why offline sweeps kept finding sparse patterns whose decoys resolve to
+    // unrelated 0x60-stride TSets. When the map is NON-EMPTY we can do far better,
+    // because we know exactly what a live key is: SparseDelegates is
+    //   TMap<UObjectBase const*, TMap<FName, TSharedPtr<FMulticastScriptDelegate>>>
+    // so the first 8 bytes of an occupied element are a real UObject pointer, and
+    // *that* pointer's first qword is a vtable inside a loaded module. A TMap keyed
+    // by FName/int/FString cannot satisfy both.
+    //
+    // Deliberately NOT applied when the map is empty: FindAll can legitimately run
+    // before anything binds a sparse delegate, and rejecting there would lose the
+    // address entirely. Empty stays accepted on shape alone, exactly as before.
+    uintptr_t elemData = 0;
+    int32_t   elemNum  = 0;
+    if (!Macht::ReadSafe(addr + 0x00, elemData)) return false;
+    if (!Macht::ReadSafe(addr + 0x08, elemNum))  return false;
+    if (elemNum <= 0 || !elemData) return true;          // empty / not yet allocated
+    if (elemNum > 0x100000) return false;
+
+    constexpr int32_t kOuterStride = 0x60;               // TSetElement<TTuple<ptr, TMap>>
+    constexpr int32_t kProbeSlots  = 32;                 // enough to skip freed slots
+    int32_t probe = (elemNum < kProbeSlots) ? elemNum : kProbeSlots;
+    for (int32_t i = 0; i < probe; ++i) {
+        uintptr_t key = 0;
+        if (!Macht::ReadSafe(elemData + static_cast<uintptr_t>(i) * kOuterStride, key))
+            continue;
+        if (!Grimoire::IsUserspacePointer(key)) continue;   // freed slot / not a pointer
+        uintptr_t vt = 0;
+        if (!Macht::ReadSafe(key, vt)) continue;
+        if (!Grimoire::IsUserspacePointer(vt)) continue;
+        // A UObject's vtable lives in the module image; a heap/garbage value does not.
+        uintptr_t modBase = Macht::GetModuleBase(nullptr);
+        uintptr_t modSize = Macht::GetModuleSize(nullptr);
+        if (modBase && modSize && vt >= modBase && vt < modBase + modSize) {
+            Sein::Info("SCAN:Sparse",
+                       "ValidateSparseDelegates: 0x%llX num=%d — slot %d key=0x%llX has a "
+                       "module vtable, accepted", (unsigned long long)addr, elemNum, i,
+                       (unsigned long long)key);
+            return true;
+        }
+    }
+    Sein::Debug("SCAN:Sparse",
+                "ValidateSparseDelegates: 0x%llX rejected — %d live element(s) but none has a "
+                "UObject-shaped key", (unsigned long long)addr, elemNum);
+    return false;
 }
 
 static std::atomic<uintptr_t> s_sparseDelegatesCache{0};

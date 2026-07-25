@@ -310,11 +310,17 @@ constexpr const char* AOB_GNAMES_PS2 = "48 83 EC 20 C1 EA 03 48 8D 2D ?? ?? ?? ?
 
 // --- Dumper-7 pattern ---
 
-// D7_1: lea rcx,[rip+X]; call  — FNamePool ctor singleton (basic form)
-//   Dumper-7 iterates all occurrences, verifies called function
-//   has InitializeSRWLock + "ByteProperty" reference.
-//   For us: same as V2 but shorter context; already covered by V2/V5.
-constexpr const char* AOB_GNAMES_D7_1 = "48 8D 0D ?? ?? ?? ?? E8";
+// D7_1 — REMOVED in build 2404. It was "48 8D 0D ?? ?? ?? ?? E8" = `lea rcx,[rip+X]; call`,
+// THREE literal bytes, i.e. a match on essentially every this-call in the image: 27,001 hits on
+// a UE4.20 title, 104,897 on UE4.27, 40,000 on UE5.5 — every one of them validated (several
+// SEH-guarded reads each) before the scan could reach the patterns that actually resolve there
+// (GNAM_CT3 pri 800 / GNAM_G42_1 pri 840 on 4.20). It was never the sole correct pattern on any
+// of the eight binaries in the sweep, and its own comment already recorded that V2/V5 cover the
+// same sites with real context.
+//   Dumper-7 can afford this pattern because it follows the CALL and checks the callee for
+//   InitializeSRWLock + a "ByteProperty" reference; we do not implement that second stage, so
+//   for us it was pure cost. If it is ever wanted back, it needs AobResolve::CallFollow plus
+//   that callee check — not a re-add of the bare byte string.
 
 // --- UE4 Dumper.CT patterns ---
 
@@ -965,7 +971,6 @@ constexpr AobSignature GNAMES_PATTERNS[] = {
     SIG_RIP("GNAM_V1",    AOB_GNAMES_V1,     AobTarget::GNames, 0, 3, 7, 0, 500, "V", "lea rsi; jmp"),
     SIG_RIP("GNAM_V3",    AOB_GNAMES_V3,     AobTarget::GNames, 0, 3, 7, 0, 520, "V", "lea rax; jmp"),
     SIG_RIP("GNAM_V4",    AOB_GNAMES_V4,     AobTarget::GNames, 0, 3, 7, 0, 540, "V", "lea r8; jmp"),
-    SIG_RIP("GNAM_D7_1",  AOB_GNAMES_D7_1,   AobTarget::GNames, 0, 3, 7, 0, 560, "D7", "Dumper-7 basic lea rcx; call"),
 
     // 600–690: Patternsleuth
     SIG_RIP("GNAM_PS1",   AOB_GNAMES_PS1,    AobTarget::GNames, 2, 3, 7, 0, 600, "PS", "jz+9; lea r8"),
@@ -1134,10 +1139,10 @@ constexpr AobSignature GENGINE_PATTERNS[] = {
 // Pattern count summary
 // ============================================================
 // GObjects: 27 (original) + 2 (ES2, SF) + 4 (G42) + 4 (G427) + 1 (ES53) + 1 (SAT422) + 2 (SAT425) + 2 (SAT426) + 2 (SAT52) + 2 (OT) + 4 (GH) + 3 (DI427) = 54 patterns + 1 symbol export
-// GNames:   17 (original) + 4 (ES2, SF) + 1 (G42) + 1 (ES53) + 1 (SAT422) + 3 (SAT425) + 1 (SAT52) + 2 (GH) + 2 (DI427) = 32 patterns + 3 symbol exports
+// GNames:   16 (original, D7_1 removed b2404) + 4 (ES2, SF) + 1 (G42) + 1 (ES53) + 1 (SAT422) + 3 (SAT425) + 1 (SAT52) + 2 (GH) + 2 (DI427) = 31 patterns + 3 symbol exports
 // GWorld:    7 (original) + 15 (ES2, SF, TQ) + 5 (G42) + 5 (G427) + 2 (ES53) + 2 (SAT422) + 3 (SAT425) + 2 (SAT426) + 2 (SAT52) + 4 (GH) + 4 (SP57) + 2 (DI427) = 53 patterns + 1 symbol export
 // SparseDelegates: 1 (ES2) + 2 (SP57) + 2 (DI427) = 5 — lazily resolved
 // GEngine:  2 (cross-version) + 1 (DI427) + 1 (ES55: UE5.5+5.7) + 1 (SP57) = 5 — resolved after GObjects/GNames
-// Total:    149 AOB patterns + 5 symbol exports = 154 entries (from 17 sources)
+// Total:    148 AOB patterns + 5 symbol exports = 153 entries (from 17 sources)
 
 } // namespace Sig

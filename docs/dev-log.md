@@ -20,6 +20,65 @@ builds ≤696 in
 
 -----
 
+## 2026-07-25 - Removed the 27k-decoy GNames pattern; sparse validator now checks content (build 2404)
+
+Closed the two weaknesses the six-engine harness surfaced last build.
+
+### `GNAM_D7_1` removed
+
+It was `"48 8D 0D ?? ?? ?? ?? E8"` — `lea rcx,[rip+X]; call`, **three literal bytes**, i.e. a
+match on essentially every this-call in the image. Measured hit counts: **27,001** on UE 4.20,
+**104,897** on UE 4.27, **40,000** on UE 5.5. Every one of those was resolved and validated
+(several SEH-guarded reads each) *before* the scan could reach the patterns that actually work
+on those titles — on UE 4.20 the winners are `GNAM_CT3` (pri 800) and `GNAM_G42_1` (pri 840),
+both well after D7_1 at 560.
+
+It was never the sole correct pattern on any of the eight binaries in the sweep, and its own
+comment already said "same as V2 but shorter context; already covered by V2/V5". Dumper-7 can
+afford the bare string because it follows the CALL and checks the callee for
+`InitializeSRWLock` + a `"ByteProperty"` reference — a second stage we do not implement, so for
+us it was pure cost. Re-adding it would need `AobResolve::CallFollow` plus that callee check,
+not the byte string.
+
+**Removing it improved DropIn**: GNames now selects `GNAM_DI427_2` → CORRECT (all hits),
+where it previously fell through `GNAM_V7` and D7_1's 104,897 validations first.
+
+### Validation is now bounded
+
+Independently of that pattern, `ScanForTarget`'s per-match validation loop gained a
+`kMaxValidatePerPattern = 4096` cap with a `LOG_WARN`. If the correct site is not in a
+pattern's first 4096 matches, that pattern was not selective enough to trust anyway — and the
+warning makes the next over-generic signature visible instead of silently expensive.
+
+### `ValidateSparseDelegates` now checks content, not just shape
+
+The old validator only range-checked two int32s, so it accepted any `.data` blob that looked
+vaguely like a TMap — which is why offline sweeps kept finding sparse patterns whose decoys
+resolve to unrelated 0x60-stride TSets, and why an `OK-BEHIND` sparse pattern would have been
+genuinely dangerous. When the map is **non-empty** it now also requires that one of the first
+32 slots holds a key that is a userspace pointer **whose own first qword is a vtable inside the
+module image** — which is exactly what `TMap<UObjectBase const*, …>` guarantees and what a map
+keyed by FName/int/FString cannot fake. Empty maps are still accepted on shape alone, on
+purpose: `FindAll` can legitimately run before anything binds a sparse delegate.
+
+### And the "SPARSE_SP57_1 risk" was a reporting bug, not a real one
+
+Last build flagged `SPARSE_SP57_1` on Solarpunk as "2 decoys scan first". It does not — its
+correct site is the *first* match (`0x1413D5EE5`, well below the decoys at `0x143DB6E21`). The
+harness printed the warning whenever any decoy existed, ignoring scan order. Fixed to compare
+the two indices, so the verdict now reads `CORRECT first (2 decoy(s) scan later, never
+reached)`. The strengthened validator above is still worth having — it protects the genuinely
+`AT RISK` orderings that a future game may produce.
+
+### Re-verified
+
+Full six-engine sweep re-run after the removal: no target regressed on any binary, `GENG_X1`
+still correct-first on 4.20/4.27/5.6/5.7, `SPARSE_ES2_1` still correct on 4.27/5.5/5.6.
+`tools/ghidra/GROUND-TRUTH.md` added — the per-project `GS_TRUE` strings, the verdict glossary,
+and the procedure for folding in the next PDB game, so the next sweep is copy-paste.
+
+-----
+
 ## 2026-07-25 - Six-engine regression harness; a measurement error corrected (build 2402)
 
 Two more symbolised projects arrived — **Everspace re-analysed WITH its PDB** (`ES1-420.rep`,

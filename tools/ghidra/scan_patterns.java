@@ -197,13 +197,27 @@ public class scan_patterns extends GhidraScript {
                 // the first that passes, so a newly-added lower-numbered pattern can only
                 // cause harm if it hits AND its match survives validation AND it is wrong.
                 if (haveTruth && nHits > 0 && selectedFor.add(tgt)) {
-                    w.println("  >>> SELECTED (first hitting pattern by priority): " + s.id
-                            + (nCorrect > 0
-                                ? (nDecoy == 0 ? "  => CORRECT (all hits)"
-                                               : "  => reaches truth, but " + nDecoy
-                                                 + " decoy(s) scan first — validator must reject them")
-                                : "  => *** WOULD RESOLVE WRONG unless the validator rejects all "
-                                  + nDecoy + " hits ***"));
+                    // Respect the ACTUAL scan order. .text is swept low->high, so what matters
+                    // is whether the first correct match sits before the first decoy — not
+                    // merely whether decoys exist. (This message used to say "decoys scan
+                    // first" whenever nDecoy>0, which mis-flagged SPARSE_SP57_1 on Solarpunk
+                    // as risky when its correct site is in fact the first match.)
+                    String how;
+                    if (nCorrect == 0) {
+                        how = "  => *** WOULD RESOLVE WRONG unless the validator rejects all "
+                              + nDecoy + " hits ***";
+                    } else if (nDecoy == 0) {
+                        how = "  => CORRECT (all hits)";
+                    } else if (firstCorrectIdx < firstDecoyIdx) {
+                        how = "  => CORRECT first (" + nDecoy + " decoy(s) scan later, never reached)";
+                    } else {
+                        // Every match ahead of the first correct one is a decoy, so the count
+                        // the validator must survive is firstCorrectIdx (an index, not
+                        // firstDecoyIdx — which is just where the first decoy happens to sit).
+                        how = "  => AT RISK: " + firstCorrectIdx + " decoy(s) scan BEFORE the "
+                              + "first correct match — the validator has to reject every one";
+                    }
+                    w.println("  >>> SELECTED (first hitting pattern by priority): " + s.id + how);
                 }
             }
             w.println();
