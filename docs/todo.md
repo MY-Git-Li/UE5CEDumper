@@ -1080,12 +1080,16 @@ full context + the re-derivation playbook is in [mindseye-fork-notes.md](mindsey
 
 Pick up when the active plan finishes or when blocked.
 
-- **MulticastSparseDelegateProperty UE 4.23-4.27** — Effort: **L** · Risk: **med**.
-  Closes the last delegate-flavour gap (UE5 landed in PR #194). UE4 needs a separate AOB
-  + walker branch: outer key is `FObjectKey {FWeakObjectPtr; int32 SerialNumber}` (16B)
-  not raw `UObjectBase*`, outer stride ~0x60 → ~0x68, key match reconstructs `FObjectKey`
-  from `(owner, GetSerialNumber(InternalIndex))`. Walker currently returns
-  `supported=false` for UE < 5.0.
+- ~~**MulticastSparseDelegateProperty UE 4.23-4.27**~~ — **DONE for 4.27 (build 2399)**, and
+  the plan that used to sit here was based on a false premise. It said UE4 needed a separate
+  AOB plus a walker branch for an `FObjectKey {FWeakObjectPtr; int32}` (16B) outer key with
+  stride `0x60 → 0x68`. The DropIn 4.27.2 PDB shows the outer key is a **raw `UObjectBase*`**
+  exactly as on UE5, and `FObjectKey` is **8** bytes, not 16. No new stride, no key
+  reconstruction: deleting the `UEVersion < 500` gate was the entire fix, and `SPARSE_ES2_1`
+  already resolved correctly on 4.27 (2 extra 4.27-verified patterns added anyway).
+  **Remaining**: 4.23-4.26 have no symbolised sample, so they are covered only by the
+  walker's runtime key-shape probe (fails safe). Closing that needs a 4.23-4.26 game with a
+  PDB — cheap to check with `tools/ghidra/probe.java` if one ever turns up.
 
 - **Find Refs v4 — TMap / TSet weak-like inner sides** — Effort: **M** · Risk: **low**.
   Currently Object/Class only; weak/soft pointer collections (`TMap<UObject*,

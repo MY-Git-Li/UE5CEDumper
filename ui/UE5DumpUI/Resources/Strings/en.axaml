@@ -347,6 +347,9 @@
     <sys:String x:Key="str.Pointers.SparseDelegates">FSparseDelegateStorage</sys:String>
     <sys:String x:Key="str.Pointers.SparseDelegatesOptional">Optional (UE 5.0+) &#x2014; powers MulticastSparseDelegateProperty drill-down + Find Refs sparse coverage</sys:String>
     <sys:String x:Key="str.Pointers.SparseDelegatesNotFound">AOB not found &#x2014; sparse delegate drill-down disabled. Bound flag still surfaces; full bindings unavailable.</sys:String>
+    <sys:String x:Key="str.Pointers.GEngine">&amp;GEngine (engine slot)</sys:String>
+    <sys:String x:Key="str.Pointers.GEngineOptional">Optional &#x2014; the static slot holding UEngine*. Lets engine lookups skip the object-pool walk, and lets a GameEngine-rooted CE record survive a restart.</sys:String>
+    <sys:String x:Key="str.Pointers.GEngineNotFound">AOB not found &#x2014; engine lookups fall back to scanning GObjects (slower), and GameEngine-rooted CE exports stay address-only.</sys:String>
     <sys:String x:Key="str.Pointers.SparseDelegatesUnsupported">UE &#x003C; 5.0 &#x2014; walker not supported on this version (FObjectKey outer key, separate AOB needed).</sys:String>
     <sys:String x:Key="str.Pointers.PatternIdTooltip">AOB pattern ID that matched this pointer</sys:String>
     <sys:String x:Key="str.Pointers.AobAllFailed">&#x1F534; All AOB patterns failed</sys:String>

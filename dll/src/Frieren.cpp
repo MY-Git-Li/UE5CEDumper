@@ -67,6 +67,15 @@ uintptr_t   g_cachedSparseDelegatesScanAddr = 0;
 const char* g_cachedGWorldAob    = nullptr;
 int         g_cachedGWorldAobPos = 0;
 int         g_cachedGWorldAobLen = 0;
+// &GEngine — the static slot. Same triple as GWorld so a GameEngine-rooted CE export
+// can be AOB-wrapped instead of baking in a stale UEngine* snapshot.
+uintptr_t   g_cachedGEngine          = 0;
+const char* g_cachedGEngineMethod    = "not_found";
+const char* g_cachedGEnginePatternId = nullptr;
+uintptr_t   g_cachedGEngineScanAddr  = 0;
+const char* g_cachedGEngineAob       = nullptr;
+int         g_cachedGEngineAobPos    = 0;
+int         g_cachedGEngineAobLen    = 0;
 
 static bool        s_initialized = false;
 static Fern  s_pipeServer;
@@ -147,6 +156,13 @@ bool UE5_Init() {
     g_cachedGWorldAob    = ptrs.gworldAob;
     g_cachedGWorldAobPos = ptrs.gworldAobPos;
     g_cachedGWorldAobLen = ptrs.gworldAobLen;
+    g_cachedGEngine          = ptrs.GEngine;
+    g_cachedGEngineMethod    = ptrs.gengineMethod;
+    g_cachedGEnginePatternId = ptrs.genginePatternId;
+    g_cachedGEngineScanAddr  = ptrs.gengineScanAddr;
+    g_cachedGEngineAob       = ptrs.gengineAob;
+    g_cachedGEngineAobPos    = ptrs.gengineAobPos;
+    g_cachedGEngineAobLen    = ptrs.gengineAobLen;
 
     // Initialize subsystems — only when their pointer was found
     ScanProgress::Set(5, "Initializing subsystems...");
@@ -1164,14 +1180,22 @@ namespace {
     // Sample-many-objects vtable extractor. Most slots only need one valid
     // UObject*, but a few pathological GObjects entries near the head can be
     // garbage CDOs with NULL or torn vtable pointers — walk a window of 200.
-    uintptr_t FindAnyValidVTable() {
-        for (int i = 0; i < Aura::GetCount() && i < 200; ++i) {
+    //
+    // Returns DISTINCT vtables rather than the first one, because the pattern scan is not
+    // guaranteed to work on an arbitrary class. Measured on the DropIn 4.27.2 PDB:
+    // AActor::ProcessEvent is a thin override that contains the FUNC_Native test but NOT
+    // the high-flag test, so the two-pattern scan returns -1 for any Actor vtable and we
+    // would drop to the version table. Sampling several classes makes that a non-event.
+    void CollectCandidateVTables(std::vector<uintptr_t>& out, size_t maxDistinct) {
+        for (int i = 0; i < Aura::GetCount() && i < 400; ++i) {
             uintptr_t obj = Aura::GetByIndex(i);
             if (!obj) continue;
             uintptr_t vt = 0;
-            if (Macht::ReadSafe(obj, vt) && vt) return vt;
+            if (!Macht::ReadSafe(obj, vt) || !vt) continue;
+            if (std::find(out.begin(), out.end(), vt) != out.end()) continue;
+            out.push_back(vt);
+            if (out.size() >= maxDistinct) return;
         }
-        return 0;
     }
 }  // namespace
 
@@ -1182,7 +1206,11 @@ static int DetectProcessEventVTableOffsetByPattern(uintptr_t vtable) {
     // 0x300. Step 8 = pointer stride. ~64 slots × ~0xF00 byte read is fast.
     constexpr int kMinOffset   = 0x100;
     constexpr int kMaxOffset   = 0x300;
-    constexpr size_t kBodySize = 0xF00;
+    // 0x2000, not the original 0xF00. Measured on the DropIn UE 4.27.2 PDB:
+    // UObject::ProcessEvent is 5182 bytes and pattern 2 sits at byte 3537 — only 303 bytes
+    // (7.9%) inside the old 3840-byte window. Any build that inlines a little more ahead of
+    // the high-flag test would silently push it out and drop us onto the version table.
+    constexpr size_t kBodySize = 0x2000;
 
     uint8_t body[kBodySize];
 
@@ -1217,6 +1245,15 @@ static int DetectProcessEventVTableOffsetByVersion(uintptr_t vtable) {
     int primary;
     if (g_cachedUEVersion >= 550)      primary = 0x228;
     else if (g_cachedUEVersion >= 500) primary = 0x220;
+    // 4.27 is 0x220, NOT the 0x218 this band used to return. 0x218 is slot 67 =
+    // UObject::OverridePerObjectConfigSection, one slot BEFORE ProcessEvent — hooking it is
+    // exactly the build-647 failure (invokes time out, static fast path returns 0).
+    // Ground truth: the DropIn 4.27.2 PDB, plus four live games (Geri, SBDR, P3R, Elliot).
+    // 4.25/4.26 are deliberately left on 0x218: we have no measured value for either, and
+    // widening the 4.27 number over them would be a guess. Caveat for both: these are
+    // non-editor builds — an editor build inserts the WITH_EDITOR virtual block and shifts
+    // ProcessEvent later.
+    else if (g_cachedUEVersion >= 427) primary = 0x220;
     else if (g_cachedUEVersion >= 425) primary = 0x218;
     else if (g_cachedUEVersion >= 420) primary = 0x210;
     else                               primary = 0x208;
@@ -1258,16 +1295,27 @@ static int DetectProcessEventVTableOffsetByVersion(uintptr_t vtable) {
 // Top-level resolver. Pattern-based first, version-table second. Caller is
 // expected to additionally validate by post-install hook-fire-count check.
 static int DetectProcessEventVTableOffset() {
-    uintptr_t vtable = FindAnyValidVTable();
-    if (!vtable) {
+    std::vector<uintptr_t> vtables;
+    CollectCandidateVTables(vtables, 12);
+    if (vtables.empty()) {
         LOG_ERROR("DetectProcessEvent: no valid UObject vtable available");
         return -1;
     }
 
-    int off = DetectProcessEventVTableOffsetByPattern(vtable);
-    if (off > 0) return off;
+    // Try the pattern scan across several distinct classes before giving up on it.
+    // A class that overrides ProcessEvent (any AActor) hides the high-flag test in the
+    // base implementation, so one sample is not enough to conclude "pattern scan failed".
+    for (size_t i = 0; i < vtables.size(); ++i) {
+        int off = DetectProcessEventVTableOffsetByPattern(vtables[i]);
+        if (off > 0) {
+            if (i > 0)
+                LOG_INFO("DetectProcessEvent: pattern matched on candidate vtable #%zu "
+                         "(earlier ones override ProcessEvent)", i);
+            return off;
+        }
+    }
 
-    off = DetectProcessEventVTableOffsetByVersion(vtable);
+    int off = DetectProcessEventVTableOffsetByVersion(vtables[0]);
     if (off > 0) return off;
 
     LOG_ERROR("DetectProcessEvent: both pattern scan and version fallback failed");

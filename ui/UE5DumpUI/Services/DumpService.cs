@@ -153,6 +153,14 @@ public sealed class DumpService : IDumpService
             GWorldAob = ptrs["gworld_aob"]?.GetValue<string>() ?? "",
             GWorldAobPos = ptrs["gworld_aob_pos"]?.GetValue<int>() ?? 0,
             GWorldAobLen = ptrs["gworld_aob_len"]?.GetValue<int>() ?? 0,
+            // GEngine slot + AOB metadata (build 2394+; older DLLs omit these → "" / 0)
+            GEngine = ptrs["gengine"]?.GetValue<string>() ?? "",
+            GEngineMethod = ptrs["gengine_method"]?.GetValue<string>() ?? "not_found",
+            GEnginePatternId = ptrs["gengine_pattern_id"]?.GetValue<string>() ?? "",
+            GEngineScanAddr = ptrs["gengine_scan_addr"]?.GetValue<string>() ?? "",
+            GEngineAob = ptrs["gengine_aob"]?.GetValue<string>() ?? "",
+            GEngineAobPos = ptrs["gengine_aob_pos"]?.GetValue<int>() ?? 0,
+            GEngineAobLen = ptrs["gengine_aob_len"]?.GetValue<int>() ?? 0,
             // GameThreadDispatch invoke timeout (effective value)
             InvokeTimeoutMs = ptrs["invoke_timeout_ms"]?.GetValue<int>() ?? 5000,
             // DLL build number — present in both init AND get_pointers responses

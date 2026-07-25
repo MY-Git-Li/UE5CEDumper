@@ -1,3 +1,11 @@
+// verify_aob.java — SUPERSEDED by scan_patterns.java. Kept because older docs/notes
+// point at it. Prefer scan_patterns.java for anything new: it reads a TSV instead of a
+// hand-edited array (so extract_patterns.py can feed it the WHOLE Himmel.h), understands
+// nibble wildcards (`4?`/`?5`), counts correct-vs-decoy over every hit instead of the
+// first few, and — the part that actually decides safety — reports whether a correct hit
+// sorts BEFORE its decoys. A weakly-validated target such as SparseDelegates is unsafe
+// when a decoy scans first, and this script cannot tell you that.
+//
 // verify_aob.java — Ghidra headless (Java / Ghidra 12)
 // Scan every executable block for each candidate AOB, resolve each hit the way the
 // DLL does (ripInsn=match+io; disp32 @ +opc; target=match+io+tot+disp32), and report

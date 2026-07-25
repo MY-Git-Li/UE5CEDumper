@@ -74,6 +74,15 @@ public partial class PointerPanelViewModel : ViewModelBase
     [ObservableProperty] private int _gworldAobLen;
     [ObservableProperty] private string _moduleName = "";
 
+    // --- GEngine (&GEngine slot) + its AOB metadata, same contract as GWorld's ---
+    [ObservableProperty] private string _gEngineAddress = "";
+    [ObservableProperty] private string _gEngineMethod = "not_found";
+    [ObservableProperty] private string _gEnginePatternId = "";
+    [ObservableProperty] private string _gEngineScanAddr = "";
+    [ObservableProperty] private string _gengineAob = "";
+    [ObservableProperty] private int _gengineAobPos;
+    [ObservableProperty] private int _gengineAobLen;
+
     // --- AOBMaker CE Plugin bridge ---
     [ObservableProperty] private bool _isAobMakerAvailable;
 
@@ -273,13 +282,23 @@ public partial class PointerPanelViewModel : ViewModelBase
     public bool HasSparseDelegatesPatternId => HasData && !string.IsNullOrEmpty(SparseDelegatesPatternId);
     /// <summary>True when SparseDelegates has a non-zero AOB scan address.</summary>
     public bool HasSparseDelegatesScanAddr => HasData && IsNonZeroAddr(SparseDelegatesScanAddr);
-    /// <summary>True when SparseDelegates was successfully resolved (UE 5.0+ + AOB hit).</summary>
+    /// <summary>True when SparseDelegates was successfully resolved (UE 4.23+ + AOB hit).</summary>
     public bool IsSparseDelegatesFound => HasData && IsNonZeroAddr(SparseDelegatesAddress);
-    /// <summary>True when UE &lt; 5.0 — walker doesn't support this version yet.</summary>
-    public bool IsSparseDelegatesUnsupported => HasData && UeVersion > 0 && UeVersion < 500;
-    /// <summary>True when UE 5.0+ but AOB scan didn't find the static (warning state).</summary>
-    public bool IsSparseDelegatesNotFound => HasData && UeVersion >= 500
+    /// <summary>True when UE &lt; 4.23 — sparse delegates did not exist yet.</summary>
+    public bool IsSparseDelegatesUnsupported => HasData && UeVersion > 0 && UeVersion < 423;
+    /// <summary>True when UE 4.23+ but AOB scan didn't find the static (warning state).</summary>
+    public bool IsSparseDelegatesNotFound => HasData && UeVersion >= 423
         && SparseDelegatesMethod == "not_found";
+
+    /// <summary>True when the &amp;GEngine slot was resolved.</summary>
+    public bool IsGEngineFound => HasData && IsNonZeroAddr(GEngineAddress);
+    /// <summary>True when GEngine has a pattern ID to display.</summary>
+    public bool HasGEnginePatternId => HasData && !string.IsNullOrEmpty(GEnginePatternId);
+    /// <summary>True when GEngine has a non-zero AOB scan address.</summary>
+    public bool HasGEngineScanAddr => HasData && IsNonZeroAddr(GEngineScanAddr);
+    /// <summary>True when no GEngine AOB validated — engine lookups fall back to the
+    /// GObjects walk and a GameEngine-rooted CE export cannot be made restart-proof.</summary>
+    public bool IsGEngineNotFound => HasData && GEngineMethod == "not_found";
 
     /// <summary>
     /// True when Extra Scan button should be visible:
@@ -416,6 +435,13 @@ public partial class PointerPanelViewModel : ViewModelBase
         GworldAob = state.GWorldAob;
         GworldAobPos = state.GWorldAobPos;
         GworldAobLen = state.GWorldAobLen;
+        GEngineAddress = state.GEngine;
+        GEngineMethod = state.GEngineMethod;
+        GEnginePatternId = state.GEnginePatternId;
+        GEngineScanAddr = state.GEngineScanAddr;
+        GengineAob = state.GEngineAob;
+        GengineAobPos = state.GEngineAobPos;
+        GengineAobLen = state.GEngineAobLen;
         ModuleName = state.ModuleName;
         PeHash = state.PeHash;
         DllBuildNumber = state.DllBuildNumber;
@@ -479,6 +505,10 @@ public partial class PointerPanelViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsSparseDelegatesFound));
         OnPropertyChanged(nameof(IsSparseDelegatesUnsupported));
         OnPropertyChanged(nameof(IsSparseDelegatesNotFound));
+        OnPropertyChanged(nameof(IsGEngineFound));
+        OnPropertyChanged(nameof(HasGEnginePatternId));
+        OnPropertyChanged(nameof(HasGEngineScanAddr));
+        OnPropertyChanged(nameof(IsGEngineNotFound));
         OnPropertyChanged(nameof(CanExtraScan));
         OnPropertyChanged(nameof(CanManageCache));
         OnPropertyChanged(nameof(CanClearGameCache));
@@ -1176,6 +1206,13 @@ public partial class PointerPanelViewModel : ViewModelBase
     {
         if (!string.IsNullOrEmpty(SparseDelegatesAddress))
             await _platform.CopyToClipboardAsync(StripHexPrefix(SparseDelegatesAddress));
+    }
+
+    [RelayCommand]
+    private async Task CopyGEngineAsync()
+    {
+        if (!string.IsNullOrEmpty(GEngineAddress))
+            await _platform.CopyToClipboardAsync(StripHexPrefix(GEngineAddress));
     }
 
     [RelayCommand]

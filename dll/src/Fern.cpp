@@ -827,6 +827,13 @@ static void FillPointerSnapshot(json& data) {
     extern const char* g_cachedGWorldAob;
     extern int         g_cachedGWorldAobPos;
     extern int         g_cachedGWorldAobLen;
+    extern uintptr_t   g_cachedGEngine;
+    extern const char* g_cachedGEngineMethod;
+    extern const char* g_cachedGEnginePatternId;
+    extern uintptr_t   g_cachedGEngineScanAddr;
+    extern const char* g_cachedGEngineAob;
+    extern int         g_cachedGEngineAobPos;
+    extern int         g_cachedGEngineAobLen;
 
     data["gobjects"]             = Renge::AddrToStr(g_cachedGObjects);
     data["gnames"]               = Renge::AddrToStr(g_cachedGNames);
@@ -878,6 +885,17 @@ static void FillPointerSnapshot(json& data) {
     data["gworld_aob"]     = g_cachedGWorldAob ? g_cachedGWorldAob : "";
     data["gworld_aob_pos"] = g_cachedGWorldAobPos;
     data["gworld_aob_len"] = g_cachedGWorldAobLen;
+
+    // &GEngine (the slot, not the object). Empty aob == no AOB hit, in which case the UI
+    // must treat a GameEngine-rooted export the way it treats a recovered GWorld: address
+    // only, no restart-proof CE symbol.
+    data["gengine"]            = Renge::AddrToStr(g_cachedGEngine);
+    data["gengine_method"]     = g_cachedGEngineMethod    ? g_cachedGEngineMethod    : "not_found";
+    data["gengine_pattern_id"] = g_cachedGEnginePatternId ? g_cachedGEnginePatternId : "";
+    data["gengine_scan_addr"]  = Renge::AddrToStr(g_cachedGEngineScanAddr);
+    data["gengine_aob"]        = g_cachedGEngineAob ? g_cachedGEngineAob : "";
+    data["gengine_aob_pos"]    = g_cachedGEngineAobPos;
+    data["gengine_aob_len"]    = g_cachedGEngineAobLen;
 
     data["invoke_timeout_ms"] = Stark::GetInvokeTimeoutMs();
 

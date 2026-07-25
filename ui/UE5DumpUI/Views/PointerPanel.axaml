@@ -325,6 +325,44 @@
         </Grid>
       </Border>
 
+      <!-- &GEngine (Optional) — the static slot, not the UEngine object -->
+      <Border Background="#2D2D30" CornerRadius="4" Padding="16,12">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel>
+            <TextBlock Text="{StaticResource str.Pointers.GEngine}"
+                       Foreground="#888" FontSize="12"/>
+            <TextBlock Text="{Binding GEngineAddress}" FontSize="16"
+                       Foreground="#569CD6" FontFamily="Consolas"
+                       IsVisible="{Binding IsGEngineFound}"/>
+            <TextBlock Text="{Binding GEnginePatternId}" FontSize="10"
+                       Foreground="#666" FontFamily="Consolas" Margin="0,2,0,0"
+                       IsVisible="{Binding HasGEnginePatternId}"
+                       ToolTip.Tip="{StaticResource str.Pointers.PatternIdTooltip}"/>
+            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,2,0,0"
+                        IsVisible="{Binding HasGEngineScanAddr}">
+              <TextBlock Text="{StaticResource str.Pointers.AobLabel}" Foreground="#888" FontSize="10"/>
+              <TextBlock Text="{Binding GEngineScanAddr}" FontSize="10"
+                         Foreground="#E5C07B" FontFamily="Consolas"/>
+            </StackPanel>
+            <TextBlock Text="{StaticResource str.Pointers.GEngineOptional}"
+                       Foreground="#666" FontSize="10" Margin="0,2,0,0"
+                       TextWrapping="Wrap"/>
+            <TextBlock Text="{StaticResource str.Pointers.GEngineNotFound}"
+                       Foreground="#888" FontSize="11" Margin="0,3,0,0"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding IsGEngineNotFound}"/>
+          </StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4"
+                      VerticalAlignment="Center">
+            <Button Content="{StaticResource str.Pointers.Copy}"
+                    Command="{Binding CopyGEngineCommand}"
+                    IsEnabled="{Binding IsGEngineFound}"
+                    ToolTip.Tip="{StaticResource str.Tip.Pointers.Copy}"
+                    Padding="8,4"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+
       <!-- Total Objects -->
       <Border Background="#2D2D30" CornerRadius="4" Padding="16,12">
         <StackPanel>

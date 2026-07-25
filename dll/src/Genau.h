@@ -29,7 +29,10 @@ using ScanProgressFn = std::function<void(int phase, const char* text)>;
 //     HasUEAnchorNearby / publisher-bias change, so every cached version is recomputed once
 //     under the new logic. Do NOT tie it to the build number — that would re-detect on every
 //     rebuild and defeat the cache for stripped-version games (SquareEnix).
-constexpr uint32_t kVersionDetectLogicRev = 1;
+// rev 2 (build ~2394): VERSIONINFO StringFileInfo ProductVersion/FileVersion fallback,
+// UTF-16LE pass in the Tier-1 memory scan, and Tier 1 no longer requires the needle
+// table's trailing '.' (real tags are "++UE4+Release-4.27", so it never matched before).
+constexpr uint32_t kVersionDetectLogicRev = 2;
 
 struct EnginePointers {
     uintptr_t GObjects  = 0;   // FUObjectArray*
@@ -53,11 +56,19 @@ struct EnginePointers {
     // so the UI can display it; the same value backs Genau::FindSparseDelegateStorage.
     uintptr_t SparseDelegates = 0;
 
+    // &GEngine — the STATIC SLOT holding UEngine*, not the engine object itself.
+    // Resolved by AOB after GObjects/GNames/offsets are up (the validator has to ask the
+    // reflected class for a "GameViewport" property). 0 = no AOB hit; callers then fall
+    // back to Genau::FindGameEngine's GObjects walk, which yields only the OBJECT.
+    // Having the slot is what lets a CE symbol auto-follow engine recreation.
+    uintptr_t GEngine = 0;
+
     // Scan method for each pointer: "aob", "data_scan", "string_ref", "pointer_scan", "not_found"
     const char* gobjectsMethod        = "not_found";
     const char* gnamesMethod          = "not_found";
     const char* gworldMethod          = "not_found";
     const char* sparseDelegatesMethod = "not_found";
+    const char* gengineMethod         = "not_found";
 
     // --- AOB Usage Tracking ---
     // PE hash: TimeDateStamp (8 hex) + SizeOfImage (8 hex) = unique game build ID
@@ -87,6 +98,14 @@ struct EnginePointers {
     const char* gworldAob    = nullptr;  // AOB pattern string (e.g. "48 8B 1D ?? ?? ?? ??")
     int         gworldAobPos = 0;        // instrOffset + opcodeLen: displacement offset within match
     int         gworldAobLen = 0;        // instrOffset + totalLen: instruction end for RIP calculation
+
+    // GEngine winning pattern AOB metadata — same contract as the GWorld triple above, so
+    // a GameEngine-rooted CE export can be AOB-wrapped exactly like a GWorld-rooted one.
+    const char* gengineAob    = nullptr;
+    int         gengineAobPos = 0;
+    int         gengineAobLen = 0;
+    const char* genginePatternId = nullptr;
+    uintptr_t   gengineScanAddr  = 0;
 };
 
 // Scan and cache all global pointers
@@ -109,9 +128,20 @@ uintptr_t FindGWorld(const char* hintPatternId = nullptr);
 // Lazily resolve FSparseDelegateStorage::SparseDelegates (UE 4.23+).
 // Cached for the DLL lifetime; first call scans, subsequent calls are O(1).
 // Returns 0 if no AOB pattern matched (caller should fall back to bIsBound).
-// Currently only supports UE 5.0+ (outer key is raw UObjectBase*); UE 4.23-4.27
-// uses FObjectKey and is NOT supported (caller should version-gate).
+//
+// Layout support: the outer key is a raw `UObjectBase*` on UE 5.x AND on UE 4.27
+// (PDB-verified on DropIn 4.27.2 — the long-standing "UE 4.23-4.27 uses FObjectKey"
+// note was wrong, and FObjectKey is 8 bytes there, not 16). Aura's walker probes the
+// live key shape at runtime rather than trusting a version number, so 4.23-4.26 —
+// for which we still have no symbol evidence — fail safe instead of misreading.
 uintptr_t FindSparseDelegateStorage();
+
+// Resolve &GEngine (the static slot holding UEngine*) by AOB.
+// MUST be called after GObjects/GNames/offsets are up: the validator derefs the slot
+// and asks the reflected class for a non-null "GameViewport" property, which is the
+// same version-independent test FindLiveGameEngine uses. Returns 0 if no pattern
+// validated; callers then fall back to the GObjects walk (object only, no slot).
+uintptr_t FindGEngineSlot();
 
 // Detect UE version from memory or PE resources
 uint32_t DetectVersion();

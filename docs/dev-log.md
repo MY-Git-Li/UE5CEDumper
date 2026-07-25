@@ -20,6 +20,109 @@ builds ≤696 in
 
 -----
 
+## 2026-07-25 - DropIn UE 4.27 PDB: 12 new AOBs, a new GEngine target, and three corrected premises (build 2399)
+
+**DropIn - VR Battle Royale** (Steam, `DropIn.exe`) is **UE 4.27.2** (`++UE4+Release-4.27-CL-18319896`,
+2021-11-30) and ships its full **286 MB PDB** — the project's first symbolised UE 4.27 oracle.
+It is a **Development** build (`.msvcjmc` + Live++ `.lpp_*` + `.uedbg` + engine source paths in
+`.rdata`), non-editor. Ghidra project `D:\Tools\GHIDRA_Projs\DropIn.rep`.
+
+**Method — the three-binary gauntlet.** Every candidate had to be `UNIQUE-OK` on DropIn (every
+hit resolves to the true VA, zero decoys) **and** 0-hit-or-correct on Solarpunk (UE 5.7) and
+Avowed (UE 5.3). This is stricter than the SP57 rule and it earned its keep twice: a 14-byte
+GObjects form that is decoy-free on DropIn produces 1 decoy on Solarpunk and **9** on Avowed,
+and making a sparse pattern register-agnostic with nibbles made it *worse* (picked up two
+unrelated 0x60-stride `TSet`s that scan **before** the real sites — fatal, because
+`ValidateSparseDelegates` only range-checks two ints).
+
+**What the audit of the existing database found.** Replaying all 140 signatures over the whole
+129 MB `.text`: GWorld 12 working, GNames 12, SparseDelegates 1 — and **GObjects 0 of 52**.
+Root cause, measured across all 400 xrefs to `ObjObjects.Objects`: the chunk-load destination
+register is rdi(156)/rsi(92)/r14(63)/rbx(40)/… and **never rcx**, because rcx is the *index*
+register at every one of those sites. `GOBJ_V1` hardcodes `48 8B 0C C8` (dest = rcx), so the
+entire V-series is structurally unable to fire. Compounding it, this build's `FUObjectItem` is
+**32 bytes** (`StatID` compiled in), so the within-chunk math is `shl r,5`, not the 24-byte
+`lea r,[r+r*2]; shl 4` the patterns assume.
+
+**Added — 12 signatures (source tag `DI427`)**: `GOBJ_DI427_1/2/3`, `GNAM_DI427_1/2`,
+`GWLD_DI427_1/2`, `SPARSE_DI427_1/2`, and 4 for the new GEngine target.
+`GWLD_DI427_2` is the first `mov qword[rip], imm32` (C7-form) **store** pattern in the file —
+that opcode shape was absent from all 52 GWorld entries, so this class of site was invisible in
+every game, not just this one (note `totalLen = 11`, not 7).
+
+**New — `AobTarget::GEngine`** (`Himmel.h`, `GENGINE_PATTERNS[]`). Resolves **`&GEngine`, the
+static slot**, not the object. `GENG_X1` (`UWorld::GetGameViewport`) and `GENG_X2`
+(`FEngineLoop::Tick`) are **cross-version** — verified on UE 4.27 *and* UE 5.7, and X1 also
+matches Avowed (5.3). Two payoffs: `FindLiveGameEngine` stops walking the entire object pool
+resolving a property offset per class (one deref instead), and — the user-visible one — a
+GameEngine-rooted CE record can be AOB-wrapped like a GWorld-rooted one instead of baking in an
+`allocateMemory` snapshot of a `UEngine*` that goes stale on restart. Scanned after
+GObjects/GNames in `FindAll` because the validator asks the reflected class for `GameViewport`.
+Surfaced over the pipe (`gengine`, `gengine_method`, `gengine_aob*`) and as a System-tab row.
+
+**Three premises corrected by ground truth:**
+
+1. **Sparse delegates on UE4 (feature unlocked).** `Aura.cpp`'s `UEVersion < 500` gate rested on
+   "UE 4.23-4.27 keys the outer map by `FObjectKey {FWeakObjectPtr, int32}` (16B)". The PDB says
+   the key is a raw `UObjectBase const*` — same as UE5 — and `FObjectKey` is **8** bytes
+   (`{int32 ObjectIndex; int32 ObjectSerialNumber}`); `FWeakObjectPtr` *is* those two ints, so
+   the old note double-counted. All six walker constants already matched 4.27 exactly. The gate
+   is now a **runtime key-shape probe** (first occupied outer key must look like a userspace
+   pointer), so 4.23-4.26 — for which we still have no symbols — fail safe rather than being
+   guessed at. `SPARSE_ES2_1` was verified to resolve correctly on 4.27 all along.
+2. **`Grimoire::FPROPERTY_ELEMSIZE` was 0x38 = `ArrayDim`, not `ElementSize` (0x3C).** Latent:
+   only used when dynamic offset validation fails. The `Genau` heuristic was likewise
+   `Offset_Internal - 0x14`; the correct delta is **0x10** in *both* known layouts
+   (4.25-4.27/5.0-5.1 → 0x4C-0x3C, 5.1.1+ → 0x44-0x34).
+3. **`DetectVersion` Tier 1 could essentially never match.** Its needles carry a trailing dot
+   (`"4.27."`) but real tags are `++UE4+Release-4.27` with nothing after the minor. Tier 1 now
+   drops the dot (the `++UEx+Release-` prefix is already all the context it needs) **and** runs a
+   second UTF-16LE pass — DropIn keeps the tag *only* as a wide literal (4 copies, zero ASCII).
+   `DetectVersionFromPEResource` also gained a StringFileInfo `ProductVersion`/`FileVersion`
+   fallback: DropIn's is literally `++UE4+Release-4.27-CL-18319896`, an O(1) lookup we were
+   ignoring. `kVersionDetectLogicRev` 1 → 2 so cached versions recompute once.
+   *(Correction to an earlier read: DropIn **does** have a valid `VS_FIXEDFILEINFO` (4.27.2) —
+   .NET's `FileVersionInfo` returns empty strings for it because they sit under a non-default
+   translation, which is why it first looked absent.)*
+
+**ProcessEvent detection hardened** (the primary pattern path was already correct — build 648 —
+and this PDB is its 4th independent 4.27 confirmation at **+0x220**, the first with a symbol
+proving the slot *is* `UObject::ProcessEvent`):
+* `kBodySize` `0xF00` → `0x2000`. Measured: pattern 2 sits at byte **3537** of a 5182-byte
+  `UObject::ProcessEvent` — 303 bytes (7.9%) inside the old window.
+* `FindAnyValidVTable` → `CollectCandidateVTables` (up to 12 distinct). `AActor::ProcessEvent`
+  is a thin override containing the FUNC_Native test but **not** the high-flag test, so the scan
+  returns −1 for any Actor vtable and used to fall through to the version table.
+* Version fallback: `>= 427 → 0x220`. `0x218` is slot 67 = `UObject::OverridePerObjectConfigSection`,
+  one slot before PE — exactly the build-647 failure. 4.25/4.26 deliberately left at `0x218`:
+  unmeasured, and RE-UE4SS's vendored `VTableLayout_4_2*_Template.ini` cannot settle it (computed
+  absolute slots give 4.27 = 70/`0x230`, i.e. those templates are editor-inclusive and sit 2 slots
+  above every non-editor measurement).
+
+**Tooling landed in `tools/ghidra/`** — `scan_patterns.java` (supersedes `verify_aob.java`: TSV
+input, nibble wildcards, and a decoy-**ordering** verdict), `extract_patterns.py` (whole
+`Himmel.h` → TSV), `gen_cands.py` (xrefs → mechanically enumerated candidates), plus
+`dump_xrefs2` / `dump_types` / `dump_vtables` / `pe_probe` / `dump_dataat` / `dump_func` /
+`find_syms3` / `scan_strings` / `probe`. `tools/README.md` documents the full PDB→AOB loop.
+
+**Layout facts now backed by real 4.27 symbols** (see technical-notes): `FProperty` ordering
+confirms the hard-won `feedback-fproperty-layout` note exactly (`ArrayDim@0x38`,
+`ElementSize@0x3C`, `PropertyFlags@0x40` — +4, not +8); `Offset_Internal@0x4C`,
+`FStructProperty::Struct@0x78`, `FField Next@0x20/Name@0x28`, `Outer@0x20` are byte-identical to
+what the tool already reports for SBDR; `UEnum::Names` is still the classic
+`TArray<TTuple<FName,int64>>` (the `FNameData` change really is 5.6+); legacy `UProperty` does
+not exist at 4.27; the `FNamePool` model (`FRWLock@0`, `CurrentBlock@8`, `Blocks[8192]@0x10`,
+`0x20000`-byte blocks, stride 2) that `ValidateGNamesStructural` assumes is exact.
+
+**Not done (deliberate):** re-rooting a *GWorld*-rooted CE export through GEngine when GWorld's
+AOB fails. `GEngine→GameViewport→World` does re-enter the GWorld subtree, but it needs path-prefix
+re-derivation — bigger than this change. Also unaddressed: the stride sweep still tries only
+{16, 24, 20}, so a 32-byte `FUObjectItem` like DropIn's is not in the candidate list (adding 32
+naively is unsafe — it aliases on 16-byte-item games, where it would validate and halve the
+object count).
+
+-----
+
 ## 2026-07-25 - AOB priority scheme widened 0–100 → sparse 0–1000 bands (build 2393)
 
 `Himmel.h`'s AOB priorities were cramped in 0–100 with collisions (e.g. three GObjects patterns all at

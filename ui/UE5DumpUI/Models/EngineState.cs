@@ -130,6 +130,20 @@ public sealed class EngineState
     /// <summary>Instruction end relative to AOB match (instrOffset + totalLen, for RIP calculation).</summary>
     public int GWorldAobLen { get; init; }
 
+    // --- GEngine (&GEngine — the static slot, not the UEngine object) ---
+    // Same contract as the GWorld triple above. A non-empty GEngineAob means a
+    // GameEngine-rooted CE export can be AOB-wrapped and will survive a game restart;
+    // empty means we only have the address (or the slot came from nowhere at all).
+    /// <summary>Address of the &amp;GEngine slot ("0x..." or "" / "0x0" when unresolved).</summary>
+    public string GEngine { get; init; } = "";
+    /// <summary>"aob" when an AOB validated, otherwise "not_found".</summary>
+    public string GEngineMethod { get; init; } = "not_found";
+    public string GEnginePatternId { get; init; } = "";
+    public string GEngineScanAddr { get; init; } = "";
+    public string GEngineAob { get; init; } = "";
+    public int GEngineAobPos { get; init; }
+    public int GEngineAobLen { get; init; }
+
     /// <summary>
     /// Effective GameThreadDispatch invoke timeout in ms (default 5000 = Stark::kDefaultInvokeTimeoutMs).
     /// Driven from the DLL — already-loaded per-game override is reflected here. UI shows it next

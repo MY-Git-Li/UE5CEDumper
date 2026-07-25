@@ -5610,14 +5610,19 @@ SparseDelegateResult WalkSparseDelegateBindings(uintptr_t ownerObj,
     SparseDelegateResult result{};
     if (!ownerObj || fieldName.empty()) return result;
 
-    // Version gate: walker is correct only for UE 5.0+ (raw-pointer outer key).
-    // UE 4.23-4.27 used FObjectKey { FWeakObjectPtr, int32 } which has
-    // different stride and key-comparison semantics.
-    if (::g_cachedUEVersion != 0 && ::g_cachedUEVersion < 500) {
-        result.supported = false;
-        return result;
-    }
-
+    // Layout gate. This USED to be a version check (`UEVersion < 500 -> unsupported`) on the
+    // premise that "UE 4.23-4.27 keys the outer TMap by FObjectKey, not a raw pointer".
+    // That premise is wrong for 4.27: the DropIn 4.27.2 PDB gives the global's type as
+    //   TMap<UObjectBase const*, TMap<FName, TSharedPtr<TMulticastScriptDelegate<...>,0>>>
+    // — a raw pointer key, same as UE 5.x (and vendor/UnrealEngine 5.8 declares it
+    // identically). FObjectKey is also 8 bytes there, not the 16 the old note claimed.
+    // Every other constant below was checked against that PDB and matches exactly.
+    //
+    // We still have NO symbol evidence for 4.23-4.26, so instead of widening the version
+    // range on a guess, probe the actual key shape: the first occupied outer slot must hold
+    // something that looks like a userspace pointer. An FObjectKey-keyed build stores two
+    // small int32s there, which fails the test and lands us back on the bIsBound fallback —
+    // i.e. unknown builds fail safe rather than misreading memory.
     uintptr_t storage = Genau::FindSparseDelegateStorage();
     if (!storage) return result;  // resolved=false
 
@@ -5630,6 +5635,25 @@ SparseDelegateResult WalkSparseDelegateBindings(uintptr_t ownerObj,
 
     constexpr int32_t kOuterStride = 0x60;
     constexpr int32_t kOuterValueOffset = 0x08;  // TPair value (inner TMap) starts after key
+
+    {
+        bool sawSlot = false, keyLooksLikePointer = false;
+        for (int32_t i = 0; i < outerHdr.arrayNum && i < 64; ++i) {
+            if (!TMapBitSet(outerHdr.bitArrayBase, i)) continue;
+            uintptr_t k = 0;
+            if (!Macht::ReadSafe(outerHdr.arrayData + static_cast<uintptr_t>(i) * kOuterStride, k))
+                continue;
+            sawSlot = true;
+            if (Grimoire::IsUserspacePointer(k)) { keyLooksLikePointer = true; break; }
+        }
+        if (sawSlot && !keyLooksLikePointer) {
+            LOG_WARN("WalkSparseDelegateBindings: outer key does not look like a raw pointer "
+                     "(UE=%u) — refusing to walk (possible FObjectKey-keyed build)",
+                     ::g_cachedUEVersion);
+            result.supported = false;
+            return result;
+        }
+    }
 
     // Phase 1: linear scan outer slots for matching owner key.
     uintptr_t innerMapAddr = 0;

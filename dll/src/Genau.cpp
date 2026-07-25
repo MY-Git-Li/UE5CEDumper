@@ -2328,6 +2328,37 @@ static uint32_t DetectVersionFromPEResource() {
         return 400u + fminor;
     }
 
+    // Last resort inside the resource: the StringFileInfo *strings*. Some games leave
+    // VS_FIXEDFILEINFO generic (1.0.0.0) but paste the real engine tag into
+    // ProductVersion / FileVersion. DropIn 4.27.2's ProductVersion string is literally
+    // "++UE4+Release-4.27-CL-18319896" — the exact Tier-1 needle the memory scan hunts
+    // for, available here as an O(1) resource lookup. ReadVersionInfoString already walks
+    // every (lang, codepage) pair, which matters: .NET's FileVersionInfo returns empty
+    // for this file because the strings are not under the default translation.
+    for (const wchar_t* key : { L"ProductVersion", L"FileVersion" }) {
+        std::string s = ReadVersionInfoString(buf.data(), key);
+        if (s.empty()) continue;
+        for (const char* prefix : { "++UE5+Release-", "++UE4+Release-" }) {
+            size_t p = s.find(prefix);
+            if (p == std::string::npos) continue;
+            p += strlen(prefix);
+            // expect "<major>.<minor>" right after the tag
+            unsigned maj = 0, min = 0;
+            if (sscanf_s(s.c_str() + p, "%u.%u", &maj, &min) == 2) {
+                if (maj == 5 && min <= 9) {
+                    Sein::Info("SCAN:Ver", "DetectVersion: VERSIONINFO string '%ls' = '%s' -> %u",
+                               key, s.c_str(), 500u + min);
+                    return 500u + min;
+                }
+                if (maj == 4 && min <= 27) {
+                    Sein::Info("SCAN:Ver", "DetectVersion: VERSIONINFO string '%ls' = '%s' -> %u",
+                               key, s.c_str(), 400u + min);
+                    return 400u + min;
+                }
+            }
+        }
+    }
+
     Sein::Warn("SCAN:Ver", "DetectVersion: PE VERSIONINFO Product=%u.%u File=%u.%u — unrecognised",
              major, minor, fmajor, fminor);
     return 0;
@@ -2401,19 +2432,43 @@ static VersionScanResult DetectVersionDetailed() {
     const uint8_t* scan = reinterpret_cast<const uint8_t*>(base);
 
     // === Tier 1: Exact UE build strings "++UE5+Release-5.X" / "++UE4+Release-4.XX" ===
+    // Run TWICE: once narrow, once UTF-16LE. Some builds keep the engine tag only as a wide
+    // literal — DropIn 4.27.2 has four UTF-16 copies in .rdata/.rsrc and ZERO ASCII ones, so
+    // the narrow-only scan was blind to it (and Tier 2/3 miss too: the ASCII "4.27" strings
+    // in that image are build paths like "4.27\Engine\Source\...", with no trailing dot).
     {
         const char* prefixes[] = { "++UE5+Release-", "++UE4+Release-" };
-        for (const char* prefix : prefixes) {
-            size_t prefixLen = strlen(prefix);
-            for (size_t off = 0; off + prefixLen + 4 < size; ++off) {
-                if (memcmp(scan + off, prefix, prefixLen) != 0) continue;
-                for (auto& p : patterns) {
-                    size_t needleLen = strlen(p.needle);
-                    if (off + prefixLen + needleLen <= size &&
-                        memcmp(scan + off + prefixLen, p.needle, needleLen) == 0) {
-                        Sein::Info("SCAN:Ver", "DetectVersion: Tier 1 '%s' -> %u at 0x%zX",
-                                 prefix, p.value, off);
-                        r.version = p.value; r.tier = 1; return r;
+
+        // widen: "abc" -> 'a',0,'b',0,'c',0 — a UTF-16LE literal of an ASCII string.
+        auto widen = [](const char* s) {
+            std::vector<uint8_t> w;
+            for (const char* p = s; *p; ++p) { w.push_back(static_cast<uint8_t>(*p)); w.push_back(0); }
+            return w;
+        };
+
+        for (int wide = 0; wide <= 1; ++wide) {
+            for (const char* prefix : prefixes) {
+                std::vector<uint8_t> pre = wide ? widen(prefix)
+                                                : std::vector<uint8_t>(prefix, prefix + strlen(prefix));
+                if (pre.empty() || size <= pre.size() + 8) continue;
+                for (size_t off = 0; off + pre.size() + 8 < size; ++off) {
+                    if (memcmp(scan + off, pre.data(), pre.size()) != 0) continue;
+                    for (auto& p : patterns) {
+                        // Tier 1 must NOT require the table's trailing '.': the real engine
+                        // tag is "++UE4+Release-4.27" / "++UE5+Release-5.4" with nothing
+                        // after the minor. The dot exists only to disambiguate the BARE
+                        // "5.4" needle in Tiers 2/3, and here the "++UEx+Release-" prefix
+                        // already supplies all the context we need.
+                        std::string bare = p.needle;
+                        if (!bare.empty() && bare.back() == '.') bare.pop_back();
+                        std::vector<uint8_t> nd = wide ? widen(bare.c_str())
+                                                       : std::vector<uint8_t>(bare.begin(), bare.end());
+                        if (off + pre.size() + nd.size() <= size &&
+                            memcmp(scan + off + pre.size(), nd.data(), nd.size()) == 0) {
+                            Sein::Info("SCAN:Ver", "DetectVersion: Tier 1 (%s) '%s%s' -> %u at 0x%zX",
+                                     wide ? "utf16" : "ascii", prefix, bare.c_str(), p.value, off);
+                            r.version = p.value; r.tier = 1; return r;
+                        }
                     }
                 }
             }
@@ -3365,8 +3420,10 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
     }
 
     if (propElemSizeOff < 0 && propOffsetOff > 0) {
-        // Heuristic: ElementSize is usually 0x14 bytes before Offset_Internal
-        int guess = propOffsetOff - 0x14;
+        // Heuristic: ElementSize sits 0x10 bytes before Offset_Internal.
+        // Holds in BOTH known layouts — UE4.25-4.27 / UE5.0-5.1.0 (0x3C vs 0x4C) and
+        // UE5.1.1+ (0x34 vs 0x44). The previous 0x14 landed on ArrayDim in both.
+        int guess = propOffsetOff - 0x10;
         if (guess >= probeStart) {
             int32_t val = 0;
             if (Macht::ReadSafe(childProps + guess, val) && val == expectedElemSize) {
@@ -3754,9 +3811,39 @@ uintptr_t ExtraScanGWorld() {
 // Optionally outputs the GameViewport pointer + its offset. Returns 0 if none.
 // Shared by RecoverGWorldViaEngine (GWorld recovery) and FindGameEngine
 // (Live Walker "Start from GameEngine").
+// &GEngine as resolved by FindGEngineSlot during FindAll. 0 = not resolved.
+// Declared here (rather than next to FindGEngineSlot) because BOTH engine consumers
+// below it — FindLiveGameEngine and, through it, RecoverGWorldViaEngine — take the
+// fast path off it.
+static uintptr_t s_gengineSlot = 0;
+
 static uintptr_t FindLiveGameEngine(uintptr_t* outViewport, int* outGvOff) {
     if (outViewport) *outViewport = 0;
     if (outGvOff) *outGvOff = -1;
+
+    // Fast path: &GEngine came from an AOB, so the live engine is one deref away and we
+    // can skip walking the whole object pool. The slot is restart-stable but its VALUE is
+    // not, so re-read and re-check the reflected member every call rather than caching it.
+    if (s_gengineSlot) {
+        uintptr_t engine = 0;
+        if (Macht::ReadSafe(s_gengineSlot, engine) && Grimoire::IsUserspacePointer(engine)) {
+            uintptr_t cls = 0;
+            if (Macht::ReadSafe(engine + Grimoire::OFF_UOBJECT_CLASS, cls) && cls) {
+                int off = FindPropertyOffsetByName(cls, "GameViewport");
+                if (off >= 0) {
+                    uintptr_t vp = 0;
+                    Macht::ReadSafe(engine + static_cast<uintptr_t>(off), vp);
+                    if (vp) {
+                        if (outViewport) *outViewport = vp;
+                        if (outGvOff) *outGvOff = off;
+                        return engine;
+                    }
+                }
+            }
+        }
+        // Slot present but the engine is not live yet (early boot / between maps) —
+        // fall through to the pool walk rather than reporting "no engine".
+    }
 
     int32_t count = Aura::GetCount();
     if (count <= 0) return 0;
@@ -3859,6 +3946,79 @@ uintptr_t RecoverGWorldViaEngine() {
     return 0;
 }
 
+// ============================================================
+// FindGEngineSlot — resolve &GEngine (the static slot) by AOB.
+//
+// Ordering contract: this MUST run after GObjects + GNames + offset validation,
+// because ValidateGEngineSlot derefs the candidate and asks the reflected class for a
+// "GameViewport" property. That is deliberate — it is the same version-independent test
+// FindLiveGameEngine uses, and it is what stops a decoy .data global from being accepted
+// (unlike the SparseDelegates validator, which can only range-check two ints).
+//
+// Why the SLOT and not just the object: FindLiveGameEngine walks the entire GObjects pool
+// resolving a property offset per class. With the slot that becomes one deref. More
+// importantly a slot is restart-stable, so a CE symbol registered against it auto-follows
+// engine recreation — the same property that makes the GWorld AOB worth having.
+// ============================================================
+static ScanReport  s_gengineReport;
+static const char* s_gengineMethod = "not_found";
+
+static bool ValidateGEngineSlot(uintptr_t slotAddr) {
+    if (!slotAddr) return false;
+
+    uintptr_t engine = 0;
+    if (!Macht::ReadSafe(slotAddr, engine)) return false;
+    if (!Grimoire::IsUserspacePointer(engine)) return false;
+
+    // A live UEngine is a heap UObject: its vtable must point into a loaded module.
+    uintptr_t vt = 0;
+    if (!Macht::ReadSafe(engine, vt) || !Grimoire::IsUserspacePointer(vt)) return false;
+
+    uintptr_t cls = 0;
+    if (!Macht::ReadSafe(engine + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) return false;
+    if (!Grimoire::IsUserspacePointer(cls)) return false;
+
+    // The discriminator: only UEngine and its subclasses expose a "GameViewport"
+    // object property. Class NAMES vary (UGameEngine or a game subclass), the member
+    // does not.
+    int gvOff = FindPropertyOffsetByName(cls, "GameViewport");
+    if (gvOff < 0) return false;
+
+    // A non-null viewport additionally proves this is the ACTIVE engine rather than a
+    // CDO. Do not require it: FindAll can legitimately run before the viewport exists.
+    uintptr_t viewport = 0;
+    Macht::ReadSafe(engine + static_cast<uintptr_t>(gvOff), viewport);
+
+    Sein::Info("SCAN:Eng", "ValidateGEngineSlot: slot=0x%llX -> engine=0x%llX gvOff=0x%X viewport=0x%llX",
+               static_cast<unsigned long long>(slotAddr),
+               static_cast<unsigned long long>(engine), gvOff,
+               static_cast<unsigned long long>(viewport));
+    return true;
+}
+
+uintptr_t FindGEngineSlot() {
+    s_gengineReport = ScanReport{};
+    s_gengineReport.targetName = "GEngine";
+    s_gengineMethod = "not_found";
+
+    uintptr_t result = ScanForTarget(
+        Sig::GENGINE_PATTERNS, std::size(Sig::GENGINE_PATTERNS),
+        ValidateGEngineSlot, s_gengineReport, /*tryMultiModule=*/true,
+        /*hintPatternId=*/nullptr);
+
+    LogScanReport(s_gengineReport);
+
+    if (result) {
+        s_gengineMethod = "aob";
+        Sein::Info("SCAN:Eng", "FindGEngineSlot: &GEngine = 0x%llX",
+                   static_cast<unsigned long long>(result));
+    } else {
+        Sein::Warn("SCAN:Eng", "FindGEngineSlot: no pattern validated "
+                               "(non-critical — FindGameEngine falls back to the GObjects walk)");
+    }
+    return result;
+}
+
 // Resolve the live GEngine object for the Live Walker "Start from GameEngine"
 // root + validate its standard pointer members. Detection is by reflected
 // member (GameViewport), NOT by class name, so it works across UE versions and
@@ -3868,6 +4028,7 @@ GameEngineInfo FindGameEngine() {
     GameEngineInfo info;
 
     uintptr_t viewport = 0;
+    // FindLiveGameEngine already takes the &GEngine fast path when the AOB resolved it.
     uintptr_t engine = FindLiveGameEngine(&viewport, nullptr);
     if (!engine) {
         Sein::Warn("SCAN:Eng", "FindGameEngine: no live GEngine with a non-null GameViewport found");
@@ -4057,17 +4218,29 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
         }
     }
 
+    // &GEngine — resolved BEFORE GWorld on purpose. It needs GObjects/GNames/offsets
+    // (its validator asks the reflected class for "GameViewport"), and having it lets
+    // GWorld's recovery path deref the engine instead of walking the whole object pool.
+    if (progress) progress(4, "Scanning GEngine...");
+    out.GEngine   = FindGEngineSlot();
+    s_gengineSlot = out.GEngine;
+    out.gengineMethod = s_gengineMethod;
+
     if (progress) progress(4, "Scanning GWorld...");
     out.GWorld = FindGWorld(hints.gworldPatternId.empty() ? nullptr
                             : hints.gworldPatternId.c_str());
     out.gworldMethod = s_gworldMethod;
     // GWorld is non-critical, just log
 
-    // FSparseDelegateStorage::SparseDelegates — UE 5.0+ only. Eagerly scanned
-    // here (instead of lazy-on-first-drill-down) so the Pointer panel can
+    // FSparseDelegateStorage::SparseDelegates — UE 4.23+ (sparse delegates were
+    // introduced in 4.23). Was gated at >= 500 on the mistaken belief that 4.23-4.27 keyed
+    // the outer map by FObjectKey; the DropIn 4.27.2 PDB shows a raw UObjectBase* key, and
+    // SPARSE_ES2_1 resolves correctly on that build. Aura's walker now probes the live key
+    // shape, so a genuinely FObjectKey-keyed build declines to walk instead of misreading.
+    // Eagerly scanned here (instead of lazy-on-first-drill-down) so the Pointer panel can
     // display it. Cache is the same one used by Aura::WalkSparseDelegateBindings,
     // so first drill-down is O(1).
-    if (out.UEVersion >= 500) {
+    if (out.UEVersion >= 423) {
         if (progress) progress(4, "Scanning FSparseDelegateStorage...");
         out.SparseDelegates = FindSparseDelegateStorage();
         out.sparseDelegatesMethod = s_sparseDelegatesMethod;
@@ -4093,12 +4266,22 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
         out.gworldAobPos = ws->instrOffset + ws->opcodeLen;
         out.gworldAobLen = ws->instrOffset + ws->totalLen;
     }
+    // Same triple for GEngine, so a GameEngine-rooted CE export can be AOB-wrapped
+    // exactly like a GWorld-rooted one instead of baking in a stale UEngine* snapshot.
+    out.genginePatternId = s_gengineReport.winningId;
+    out.gengineScanAddr  = s_gengineReport.scanAddr;
+    if (auto* es = s_gengineReport.winningSig) {
+        out.gengineAob    = es->pattern;
+        out.gengineAobPos = es->instrOffset + es->opcodeLen;
+        out.gengineAobLen = es->instrOffset + es->totalLen;
+    }
 
-    LOG_INFO("FindAll: Complete — GObjects=0x%llX (%s), GNames=0x%llX (%s), GWorld=0x%llX (%s), Sparse=0x%llX (%s), UE=%u, UE4Names=%s, hdrOff=%d",
+    LOG_INFO("FindAll: Complete — GObjects=0x%llX (%s), GNames=0x%llX (%s), GWorld=0x%llX (%s), Sparse=0x%llX (%s), GEngine=0x%llX (%s), UE=%u, UE4Names=%s, hdrOff=%d",
              static_cast<unsigned long long>(out.GObjects), out.gobjectsMethod,
              static_cast<unsigned long long>(out.GNames), out.gnamesMethod,
              static_cast<unsigned long long>(out.GWorld), out.gworldMethod,
              static_cast<unsigned long long>(out.SparseDelegates), out.sparseDelegatesMethod,
+             static_cast<unsigned long long>(out.GEngine), out.gengineMethod,
              out.UEVersion,
              out.bUE4NameArray ? "yes" : "no",
              out.fnameEntryHeaderOffset);

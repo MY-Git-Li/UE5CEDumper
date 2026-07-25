@@ -266,9 +266,23 @@ TMap<UObjectBase const*,
      TMap<FName, TSharedPtr<TMulticastScriptDelegate, ThreadSafe>>>
 ```
 
-(UE 4.23-4.27 used `FObjectKey { FWeakObjectPtr, int32 }` as outer key;
-walker returns `supported=false` for those — see "Drill-down gaps" in
-the dev log.)
+**CORRECTED (build 2399).** This doc used to say "UE 4.23-4.27 used
+`FObjectKey { FWeakObjectPtr, int32 }` (16B) as outer key". That was wrong on
+both counts, and it cost us the whole UE4 sparse-delegate feature:
+
+* The DropIn **UE 4.27.2** PDB gives the global's type as
+  `TMap<UObjectBase const*, TMap<FName, TSharedPtr<TMulticastScriptDelegate<FWeakObjectPtr>,0>>>`
+  — a **raw pointer** key, identical to UE 5.x. `vendor/UnrealEngine` 5.8
+  declares it the same way (`SparseDelegate.h:111`).
+* `FObjectKey` is **8 bytes** there — `{ int32 ObjectIndex; int32 ObjectSerialNumber; }`.
+  `FWeakObjectPtr` *is* those two ints, so "FWeakObjectPtr + int32 = 16" double-counted.
+
+Every walker constant was re-checked against that PDB and matches exactly
+(outer stride `0x60`, value at `+0x08`, `FName` 8B → inner stride `0x20`,
+`FScriptDelegate` 16B). The version gate is gone; `Aura::WalkSparseDelegateBindings`
+now probes the live outer key and declines to walk if it does not look like a
+userspace pointer, so 4.23-4.26 (still unverified — we have no symbols for them)
+fail safe instead of misreading memory.
 
 `Aura::WalkSparseDelegateBindings(owner, fname, max)` (build 561+) is
 the read-side path. Three phases:

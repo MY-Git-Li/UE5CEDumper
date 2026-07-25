@@ -999,8 +999,10 @@ FunctionPropRefResult WalkFunctionPropertyRefs(uintptr_t funcAddr);
 // scans the inner TSparseArray for the matching FName key, derefs the
 // TSharedPtr, and walks the InvocationList.
 //
-// Version support: UE 5.0+ only. UE 4.23-4.27 used FObjectKey as outer
-// key (different layout); walker returns supported=false on those.
+// Layout support: the outer key is a raw UObjectBase* on UE 5.x AND on UE 4.27
+// (PDB-verified). Rather than trust a version number, the walker probes the first
+// occupied outer key: if it does not look like a userspace pointer it returns
+// supported=false, so an FObjectKey-keyed build (4.23-4.26 is unverified) fails safe.
 struct SparseDelegateBinding {
     int32_t     objectIndex    = 0;   // raw FWeakObjectPtr.ObjectIndex
     int32_t     serialNumber   = 0;   // raw FWeakObjectPtr.SerialNumber
