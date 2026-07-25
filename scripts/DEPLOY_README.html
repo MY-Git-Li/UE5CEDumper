@@ -52,7 +52,7 @@ It injects a DLL into the game process, then communicates with a standalone UI v
   <tbody>
     <tr><td><code>UE5DumpUI.exe</code></td><td>Standalone UI application (connect, browse, export)</td></tr>
     <tr><td><code>UE5Dumper.dll</code></td><td>Injected DLL — used with Cheat Engine (Option A)</td></tr>
-    <tr><td><code>proxy\version.dll</code><br><code>proxy\dxgi.dll</code><br><code>proxy\dinput8.dll</code></td><td>Proxy DLLs — auto-load without CE (Option B). Use <strong>one</strong>: <code>version.dll</code> (default), <code>dxgi.dll</code> (D3D11/12 games whose EXE imports neither version nor dinput8), or <code>dinput8.dll</code>.</td></tr>
+    <tr><td><code>proxy\version.dll</code><br><code>proxy\dxgi.dll</code><br><code>proxy\dinput8.dll</code><br><code>proxy\winmm.dll</code></td><td>Proxy DLLs — auto-load without CE (Option B). Use <strong>one</strong> the game's EXE imports and whose filename isn't already taken by another tool: <code>version.dll</code> (default), <code>dxgi.dll</code> (D3D11/12 games), <code>winmm.dll</code>, or <code>dinput8.dll</code>.</td></tr>
     <tr><td><code>UE5CEDumper.CT</code></td><td>CE Cheat Table — loads and injects the DLL (Option A)</td></tr>
     <tr><td><code>inject-ue.ps1</code></td><td>Command-line injector — inject <code>UE5Dumper.dll</code> into a running UE game (Option C). No Cheat Engine needed.</td></tr>
     <tr><td><code>ue5_dissect.lua</code></td><td>CE Structure Dissect builder (optional, for advanced CE users)</td></tr>
@@ -88,7 +88,7 @@ CE Structure Dissect entries from UE class reflection. See the <em>CE Scripts</e
 
 <p>Best for: users who don't need CE, or when CE causes compatibility issues with the game.</p>
 
-<p><strong>Required files</strong>: one proxy DLL — <code>version.dll</code>, <code>dxgi.dll</code>, or <code>dinput8.dll</code> (all in <code>proxy\</code>) — plus <code>UE5DumpUI.exe</code>. The <strong>Proxy Deploy</strong> tab in the UI can pick the type and deploy it for you per game — it detects Steam games, or scans chosen drives for UE games installed anywhere (Epic / GOG / manual).</p>
+<p><strong>Required files</strong>: one proxy DLL — <code>version.dll</code>, <code>dxgi.dll</code>, or <code>dinput8.dll</code> (all in <code>proxy\</code>) — plus <code>UE5DumpUI.exe</code>. The <strong>Proxy Deploy</strong> tab in the UI can pick the type and deploy it for you per game — it detects Steam games, or scans chosen drives for UE games installed anywhere (Epic / GOG / manual). Four names ship (<code>version.dll</code> / <code>dxgi.dll</code> / <code>winmm.dll</code> / <code>dinput8.dll</code>) so you have a spare when one is already taken.</p>
 
 <ol>
   <li>Copy <strong>one</strong> proxy DLL (start with <code>version.dll</code>) into the <strong>game's root folder</strong> (next to the game <code>.exe</code>).</li>
@@ -99,13 +99,11 @@ CE Structure Dissect entries from UE class reflection. See the <em>CE Scripts</e
   <li>Browse objects, find instances, export — same workflow as Option A.</li>
 </ol>
 
-<blockquote><strong>Which proxy DLL?</strong> <code>version.dll</code> works for most games. If the game launches but the UI never connects, the EXE doesn't import <code>version.dll</code> — switch to <code>dxgi.dll</code> (every D3D11/D3D12 UE game imports it; the reliable choice for titles that import neither <code>version.dll</code> nor <code>dinput8.dll</code>) or <code>dinput8.dll</code>. Deploy only <strong>one</strong> at a time.</blockquote>
+<blockquote><strong>Which proxy DLL?</strong> <code>version.dll</code> works for most games. Game launches but the UI never connects — the EXE doesn't import <code>version.dll</code>, so switch to <code>dxgi.dll</code> (every D3D11/D3D12 UE game imports it), <code>winmm.dll</code>, or <code>dinput8.dll</code>. Filename already taken by another tool (e.g. ReShade owns <code>dxgi.dll</code>) — pick a free one. All taken or none work — use DLL injection (Option C). Deploy only <strong>one</strong> at a time.</blockquote>
 
-<blockquote><strong>Why deferred scan?</strong> The proxy DLL loads very early (before the game's main loop).
-At that point, GObjects/GNames may not be initialized yet. Waiting until you reach
-gameplay ensures the scan finds valid data.</blockquote>
+<blockquote><strong>Why deferred scan?</strong> The proxy DLL loads very early (before the game's main loop), so GObjects/GNames may not be initialized yet. Wait until you reach gameplay so the scan finds valid data.</blockquote>
 
-<blockquote><strong>Removing</strong>: To stop using the proxy DLL, simply delete the proxy DLL (<code>version.dll</code> / <code>dxgi.dll</code> / <code>dinput8.dll</code>) from the game folder.</blockquote>
+<blockquote><strong>Removing</strong>: To stop using the proxy DLL, delete it (<code>version.dll</code> / <code>dxgi.dll</code> / <code>winmm.dll</code> / <code>dinput8.dll</code>) from the game folder — or use the <strong>Proxy Deploy</strong> tab's <strong>Undeploy</strong>, which sweeps every proxy flavour it deployed.</blockquote>
 
 <h3>Option C: Inject into a Running Game (UI button or CLI)</h3>
 
@@ -184,13 +182,13 @@ dissect.enableAutoCallback()</code></pre>
 <h2>Troubleshooting</h2>
 
 <table>
-  <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+  <thead><tr><th>Issue</th><th>Root Cause</th><th>Fix</th></tr></thead>
   <tbody>
     <tr><td>UI says "Connection failed"</td><td>Pipe server not running</td><td>Make sure DLL is injected (Option A) or a proxy DLL is in the game folder (Option B)</td></tr>
-    <tr><td>Game runs but UI never connects (proxy mode)</td><td>EXE doesn't import the chosen proxy DLL, so Windows never loads it</td><td>Switch to the <code>dxgi.dll</code> proxy (every D3D11/D3D12 UE game imports it); or try <code>dinput8.dll</code></td></tr>
+    <tr><td>Game runs but UI never connects (proxy mode)</td><td>The EXE doesn't import the chosen proxy DLL (so Windows never loads it), or that filename is already taken by another tool (e.g. ReShade owns <code>dxgi.dll</code>)</td><td>Switch to another proxy the EXE imports and that is free — <code>dxgi.dll</code> (every D3D11/D3D12 UE game imports it), <code>winmm.dll</code>, or <code>dinput8.dll</code>. All taken or none work — use DLL injection (Option C), which needs no free filename.</td></tr>
     <tr><td>UI connects but shows 0 objects</td><td>Scan not run or game data not loaded</td><td>Load a save first, then inject (A) or click Start Scan (B)</td></tr>
     <tr><td>Start Scan button not visible</td><td>Already scanned, or CE inject mode</td><td>Normal — button only appears in proxy DLL mode before first scan</td></tr>
-    <tr><td>Game crashes on launch with a proxy DLL</td><td>Rare DLL conflict / anti-tamper</td><td>Try a different proxy target (<code>dxgi.dll</code> / <code>dinput8.dll</code> / <code>version.dll</code>); if all fail, use CE injection (Option A) and file a bug report</td></tr>
+    <tr><td>Game crashes on launch with a proxy DLL</td><td>Rare DLL conflict / anti-tamper</td><td>Try a different proxy (<code>dxgi.dll</code> / <code>winmm.dll</code> / <code>dinput8.dll</code> / <code>version.dll</code>); if all fail, inject the DLL instead (Option A / C) and file a bug report</td></tr>
     <tr><td>Inject fails: "OpenProcess failed (Win32 5)"</td><td>The game runs as Administrator (higher integrity)</td><td>The UI / <code>inject-ue.ps1</code> auto-relaunch elevated — just accept the UAC prompt. Or start them as Administrator up front.</td></tr>
     <tr><td>Game freezes / UI actions (POV, teleport, invokes) time out when the game is not focused</td><td>The game idles its game thread when it loses foreground (<code>t.IdleWhenNotForeground</code>)</td><td>In the <strong>Teleport</strong> tab, turn on <strong>Keep Foreground</strong> (Force ON) so the game keeps running while it's in the background.</td></tr>
     <tr><td>"UE version: Unknown"</td><td>AOB patterns didn't match</td><td>File a bug report with game name + UE version</td></tr>
