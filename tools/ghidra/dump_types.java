@@ -56,6 +56,22 @@ public class dump_types extends GhidraScript {
 
     void dumpOne(PrintWriter w, DataType dt) {
         String cat = dt.getCategoryPath() == null ? "/" : dt.getCategoryPath().getPath();
+        // Enums carry the single most reliable UE version marker: the LAST member of
+        // EUnrealEngineObjectUE5Version / ...UE4Version is bumped every release, so the
+        // highest-valued entry pins the engine version even when the build strings are
+        // stripped and there is no PE on disk to read a VERSIONINFO from.
+        if (dt instanceof ghidra.program.model.data.Enum) {
+            ghidra.program.model.data.Enum e = (ghidra.program.model.data.Enum) dt;
+            w.println("TYPE\t" + e.getName() + "\tkind=enum\tsize=" + e.getLength()
+                      + "\tcount=" + e.getCount() + "\tcat=" + cat);
+            String[] names = e.getNames();
+            java.util.List<String> rows = new ArrayList<>();
+            for (String n : names) rows.add(String.format("%20d  %s", e.getValue(n), n));
+            java.util.Collections.sort(rows);
+            for (String r : rows) w.println("  " + r);
+            w.println("ENDTYPE");
+            return;
+        }
         if (!(dt instanceof Structure)) {
             w.println("TYPE\t" + dt.getName() + "\tkind=" + dt.getClass().getSimpleName()
                       + "\tsize=" + dt.getLength() + "\tcat=" + cat);

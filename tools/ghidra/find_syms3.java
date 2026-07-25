@@ -29,7 +29,10 @@ public class find_syms3 extends GhidraScript {
             SymbolType t = s.getSymbolType();
             if (t == SymbolType.LOCAL_VAR || t == SymbolType.PARAMETER) continue;
             String nm = s.getName();
-            if (nm.startsWith("?") || nm.startsWith("__imp")) continue;   // skip raw mangled dupes
+            // Skip raw mangled duplicates, but KEEP `__imp_*` — in a modular UE build
+            // (Satisfactory) the globals live in CoreUObject.dll and the game module only
+            // ever sees the IAT slot, which is exactly what a "via _imp_" AOB resolves to.
+            if (nm.startsWith("?")) continue;
             boolean hit = false;
             for (Pattern p : pats) if (p.matcher(nm).find()) { hit = true; break; }
             if (!hit) continue;

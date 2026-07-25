@@ -47,6 +47,12 @@
 //             tools/ghidra/scan_patterns.java — it reports hits/ok/decoy AND whether a
 //             correct hit sorts before its decoys, which is what actually decides safety
 //             for a weakly-validated target.
+//   ES55    : Everspace 2, 2025-05-17 snapshot (UE 5.5, ships a full PDB — the second
+//             symbolised oracle). Note the project name "ES2-0517" is a DATE, not a
+//             version. Version pinned structurally: FFieldVariant=0x08 (>=5.1.1),
+//             UEnum::Names still TArray<TTuple> (<5.6), FUObjectItem 24B WITH RefCount,
+//             classic FChunkedFixedUObjectArray order (<5.8), and the PDB's
+//             EUnrealEngineObjectUE5Version enum ends at ASSETREGISTRY_PACKAGEBUILDDEPENDENCIES.
 // ============================================================
 
 // ============================================================
@@ -768,6 +774,16 @@ constexpr const char* AOB_GENGINE_DI427_1 =
 // SP57: UEngine::IsStereoscopic3D — UE 5.7 only, kept as an independent third anchor.
 constexpr const char* AOB_GENGINE_SP57_1 =
     "48 89 5C 24 08 57 48 83 EC 20 48 8B 3D ?? ?? ?? ?? 33 DB 48 85 D2 74";
+// ES55: UEngine::GetEngineSubsystem<T> prologue — `mov rdi,[GEngine]; call; cmp byte[flag],0`.
+// Covers UE 5.5 AND 5.7 (7 sites on ES2 5.5, 6 on Solarpunk 5.7), 0 hits on UE4.27/5.3.
+// This is the pattern that closes the 5.5 hole: X1/X2 both MISS on 5.5, because 5.5 emits
+// FEngineLoop::Tick's null check as a NEAR jz (`0F 84`) where 4.27/5.7 use a short `74` —
+// a length change no nibble can bridge. The obvious 5.5 FEngineLoop::Tick pattern was
+// REJECTED instead: it takes 6 hits on Avowed that resolve to six DIFFERENT globals
+// (a generic two-global null-check idiom). Divergent hits = generic shape; the accepted
+// patterns' extra hits all converge on one address.
+constexpr const char* AOB_GENGINE_ES55_1 =
+    "48 89 5C 24 08 57 48 83 EC 20 48 8B 3D ?? ?? ?? ?? E8 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 48 8B D8";
 
 
 // ============================================================
@@ -1081,15 +1097,25 @@ constexpr AobSignature SPARSE_PATTERNS[] = {
 // Resolved AFTER GObjects/GNames/offsets in FindAll, because the validator has to
 // deref the slot and ask the reflected class for a "GameViewport" property.
 // X1/X2 are cross-version (verified on UE 4.27 + UE 5.7; X1 also matches UE 5.3).
+// Ordering rule here is empirical, from a FIVE-binary sweep (DropIn 4.27 / ES2 5.5 /
+// Solarpunk 5.7 / Avowed 5.3 / Everspace 4.20). The first three are decoy-free on ALL
+// five; X1 and DI427_1 resolve correctly where they were mined but misfire elsewhere
+// (X1: 1 decoy on UE4.20, 2 on UE5.3 — those two converge on one .data global, which is
+// consistent with Avowed's real GEngine but is unverified, Avowed having no symbols;
+// DI427_1: 5 decoys on UE4.20). ScanForTarget validates every match and takes the first
+// that passes, and ValidateGEngineSlot demands a reflected "GameViewport" property, so a
+// decoy costs scan time rather than correctness — but the clean ones still go first.
 constexpr AobSignature GENGINE_PATTERNS[] = {
-    SIG_RIP_DIRECT("GENG_X1", AOB_GENGINE_X1, AobTarget::GEngine,
-                   7, 3, 7, 0, 100, "DI427+SP57", "UWorld::GetGameViewport (cross-version)"),
     SIG_RIP_DIRECT("GENG_X2", AOB_GENGINE_X2, AobTarget::GEngine,
-                   0, 3, 7, 0, 110, "DI427+SP57", "FEngineLoop::Tick (cross-version, 6-7 sites)"),
-    SIG_RIP_DIRECT("GENG_DI427_1", AOB_GENGINE_DI427_1, AobTarget::GEngine,
-                   13, 3, 7, 0, 120, "DI427", "UE4.27 GetRealTimeSeconds shape (6 sites)"),
+                   0, 3, 7, 0, 100, "DI427+SP57", "FEngineLoop::Tick (UE4.27+5.7, 6-7 sites, decoy-free on all 5)"),
+    SIG_RIP_DIRECT("GENG_ES55_1", AOB_GENGINE_ES55_1, AobTarget::GEngine,
+                   10, 3, 7, 0, 110, "ES55", "UE5.5+5.7 UEngine::GetEngineSubsystem<T> prologue"),
     SIG_RIP_DIRECT("GENG_SP57_1", AOB_GENGINE_SP57_1, AobTarget::GEngine,
-                   10, 3, 7, 0, 130, "SP57", "UE5.7 UEngine::IsStereoscopic3D"),
+                   10, 3, 7, 0, 120, "SP57", "UE5.5+5.7 UEngine::IsStereoscopic3D"),
+    SIG_RIP_DIRECT("GENG_X1", AOB_GENGINE_X1, AobTarget::GEngine,
+                   7, 3, 7, 0, 130, "DI427+SP57", "UWorld::GetGameViewport (UE4.27+5.7; decoys on 4.20/5.3)"),
+    SIG_RIP_DIRECT("GENG_DI427_1", AOB_GENGINE_DI427_1, AobTarget::GEngine,
+                   13, 3, 7, 0, 140, "DI427", "UE4.27 GetRealTimeSeconds shape (6 sites; 5 decoys on 4.20)"),
 };
 
 #undef SIG_RIP
@@ -1106,7 +1132,7 @@ constexpr AobSignature GENGINE_PATTERNS[] = {
 // GNames:   17 (original) + 4 (ES2, SF) + 1 (G42) + 1 (ES53) + 1 (SAT422) + 3 (SAT425) + 1 (SAT52) + 2 (GH) + 2 (DI427) = 32 patterns + 3 symbol exports
 // GWorld:    7 (original) + 15 (ES2, SF, TQ) + 5 (G42) + 5 (G427) + 2 (ES53) + 2 (SAT422) + 3 (SAT425) + 2 (SAT426) + 2 (SAT52) + 4 (GH) + 4 (SP57) + 2 (DI427) = 53 patterns + 1 symbol export
 // SparseDelegates: 1 (ES2) + 2 (SP57) + 2 (DI427) = 5 — lazily resolved
-// GEngine:  2 (cross-version) + 1 (DI427) + 1 (SP57) = 4 — resolved after GObjects/GNames
-// Total:    148 AOB patterns + 5 symbol exports = 153 entries (from 16 sources)
+// GEngine:  2 (cross-version) + 1 (DI427) + 1 (ES55: UE5.5+5.7) + 1 (SP57) = 5 — resolved after GObjects/GNames
+// Total:    149 AOB patterns + 5 symbol exports = 154 entries (from 17 sources)
 
 } // namespace Sig

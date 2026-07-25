@@ -20,6 +20,54 @@ builds ≤696 in
 
 -----
 
+## 2026-07-25 - Three more Ghidra projects swept; GEngine gains UE5.5 (build 2401)
+
+Followed the DropIn work by running the same audit over three donated Ghidra projects.
+Net result: **one new signature, two demotions, and a clear "this one can't help" verdict.**
+
+**Everspace 2 `ES2-0517` — UE 5.5, and the second symbolised oracle.** The project name's
+`0517` is a **date, not a version**. There is no `++UE5+Release-` string in the image, so the
+version was pinned **structurally**: `FFieldVariant`=0x08 (≥5.1.1), `UEnum::Names` still
+`TArray<TTuple<FName,int64>>` (<5.6), `FUObjectItem` 24B **with `RefCount`@+0x14**, classic
+`FChunkedFixedUObjectArray` order (<5.8), and — decisively — the PDB's
+`EUnrealEngineObjectUE5Version` enum ends at `ASSETREGISTRY_PACKAGEBUILDDEPENDENCIES`, whereas
+vendored UE 5.8 adds `METADATA_SERIALIZATION_OFFSET` / `VERSE_CELLS` after it. `dump_types.java`
+gained enum support for exactly this: **the last member of that enum is the most reliable UE
+version marker available when the build strings are stripped and there is no PE on disk.**
+
+Audit found GObjects/GNames/GWorld/Sparse well covered but **GEngine hitting on only 1 of 4
+patterns** — `GENG_X1`/`X2` both MISS on 5.5 because 5.5 emits `FEngineLoop::Tick`'s null check
+as a NEAR `0F 84` where 4.27/5.7 use a short `74`, a length change no nibble can bridge.
+Added **`GENG_ES55_1`** (`UEngine::GetEngineSubsystem<T>` prologue): UNIQUE-OK on **both** 5.5
+(7 sites) and 5.7 (6 sites), zero hits on 4.27/5.3/4.20.
+
+The obvious 5.5 `FEngineLoop::Tick` pattern was **rejected**: 6 hits on Avowed resolving to six
+*different* globals. Recorded as a rule — **divergent hits mean a generic shape; accepted
+patterns' extra hits all converge on one address.**
+
+**Everspace 1 `ES1` — UE 4.20, no PDB.** Usable two ways. As a **negative control** it demoted
+two GEngine patterns that had looked fine on a 3-binary sweep (`GENG_X1` 1 decoy, `GENG_DI427_1`
+5 decoys here), so `GENGINE_PATTERNS` was reordered to put the three all-clean patterns
+(`X2`, `ES55_1`, `SP57_1`) first. And via **pattern consensus** — an address independently
+agreed on by N distinct signatures — it yielded truth without symbols: GWorld `0x1432E1AC0`
+(12 patterns), GObjects `0x142E797F0` (8), GNames `0x1431DEAD8` (3). No GEngine/Sparse
+consensus, as expected: 4.20 predates sparse delegates (4.23+).
+
+**Satisfactory `Satfi426` — UE 4.26 modular: cannot help as supplied.** The .rep holds only 3
+game DLLs; `FactoryGame-CoreUObject`/`-Engine`, which DEFINE the globals, were never imported.
+The game module does carry the IAT slots (`__imp_?GUObjectArray` `0x180722950`,
+`__imp_?GWorld` `0x180727CB8`, `__imp_?GEngine` `0x180727CB0`) — the "via `_imp_`" shape
+`GOBJ_SF_1` already models, with `RipDeref` doing the second hop at runtime — but **all 490
+referencing sites are game code** (`UFG*`/`AFG*`/`FFG*`), so nothing mined there would
+generalise, and no existing pattern scores a correct hit on it. Re-importing those two DLLs
+would make the project productive. (`find_syms3.java` stopped filtering `__imp_*` so the IAT
+is visible at all.)
+
+**Re-verified: all 12 DI427 signatures are 0-hit / 0-decoy on both new binaries**, so the
+gauntlet now stands at five: DropIn 4.27, ES2 5.5, Solarpunk 5.7, Avowed 5.3, Everspace 4.20.
+
+-----
+
 ## 2026-07-25 - DropIn UE 4.27 PDB: 12 new AOBs, a new GEngine target, and three corrected premises (build 2399)
 
 **DropIn - VR Battle Royale** (Steam, `DropIn.exe`) is **UE 4.27.2** (`++UE4+Release-4.27-CL-18319896`,
