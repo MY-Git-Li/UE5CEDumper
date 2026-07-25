@@ -1097,25 +1097,30 @@ constexpr AobSignature SPARSE_PATTERNS[] = {
 // Resolved AFTER GObjects/GNames/offsets in FindAll, because the validator has to
 // deref the slot and ask the reflected class for a "GameViewport" property.
 // X1/X2 are cross-version (verified on UE 4.27 + UE 5.7; X1 also matches UE 5.3).
-// Ordering rule here is empirical, from a FIVE-binary sweep (DropIn 4.27 / ES2 5.5 /
-// Solarpunk 5.7 / Avowed 5.3 / Everspace 4.20). The first three are decoy-free on ALL
-// five; X1 and DI427_1 resolve correctly where they were mined but misfire elsewhere
-// (X1: 1 decoy on UE4.20, 2 on UE5.3 — those two converge on one .data global, which is
-// consistent with Avowed's real GEngine but is unverified, Avowed having no symbols;
-// DI427_1: 5 decoys on UE4.20). ScanForTarget validates every match and takes the first
-// that passes, and ValidateGEngineSlot demands a reflected "GameViewport" property, so a
-// decoy costs scan time rather than correctness — but the clean ones still go first.
+// Ordering is empirical, from a SIX-binary sweep with real symbols on five of them:
+// Everspace 4.20, DropIn 4.27, ES2 5.5, Satisfactory 5.6, Solarpunk 5.7 (+ Avowed 5.3,
+// symbol-less, so it can only ever say "no hits" — never "wrong hit").
+//
+// X1 is the broadest single pattern in the file: UWorld::GetGameViewport is a tiny stable
+// accessor that survives UE 4.20 -> 5.7 with only its stack size changing (hence `2?`).
+//
+// HISTORY worth keeping: X1 and DI427_1 were briefly demoted here on the strength of an
+// apparent decoy count on Everspace 4.20. That was a measurement artifact — the sweep had
+// been given a PLACEHOLDER truth value for that binary, so every hit necessarily compared
+// unequal and got labelled a decoy. With Everspace's real PDB both are UNIQUE-OK on 4.20
+// (X1 1/1, DI427_1 5/5). tools/ghidra/scan_patterns.java now emits NO-TRUTH instead of
+// DECOY-ONLY when it has no plausible truth, so the same mistake cannot be made silently.
 constexpr AobSignature GENGINE_PATTERNS[] = {
-    SIG_RIP_DIRECT("GENG_X2", AOB_GENGINE_X2, AobTarget::GEngine,
-                   0, 3, 7, 0, 100, "DI427+SP57", "FEngineLoop::Tick (UE4.27+5.7, 6-7 sites, decoy-free on all 5)"),
-    SIG_RIP_DIRECT("GENG_ES55_1", AOB_GENGINE_ES55_1, AobTarget::GEngine,
-                   10, 3, 7, 0, 110, "ES55", "UE5.5+5.7 UEngine::GetEngineSubsystem<T> prologue"),
-    SIG_RIP_DIRECT("GENG_SP57_1", AOB_GENGINE_SP57_1, AobTarget::GEngine,
-                   10, 3, 7, 0, 120, "SP57", "UE5.5+5.7 UEngine::IsStereoscopic3D"),
     SIG_RIP_DIRECT("GENG_X1", AOB_GENGINE_X1, AobTarget::GEngine,
-                   7, 3, 7, 0, 130, "DI427+SP57", "UWorld::GetGameViewport (UE4.27+5.7; decoys on 4.20/5.3)"),
+                   7, 3, 7, 0, 100, "DI427+SP57", "UWorld::GetGameViewport — UE4.20+4.27+5.7, decoy-free"),
+    SIG_RIP_DIRECT("GENG_X2", AOB_GENGINE_X2, AobTarget::GEngine,
+                   0, 3, 7, 0, 110, "DI427+SP57", "FEngineLoop::Tick (UE4.27+5.7, 6-7 sites)"),
+    SIG_RIP_DIRECT("GENG_ES55_1", AOB_GENGINE_ES55_1, AobTarget::GEngine,
+                   10, 3, 7, 0, 120, "ES55", "UE5.5+5.7 UEngine::GetEngineSubsystem<T> prologue"),
+    SIG_RIP_DIRECT("GENG_SP57_1", AOB_GENGINE_SP57_1, AobTarget::GEngine,
+                   10, 3, 7, 0, 130, "SP57", "UE5.5+5.7 UEngine::IsStereoscopic3D"),
     SIG_RIP_DIRECT("GENG_DI427_1", AOB_GENGINE_DI427_1, AobTarget::GEngine,
-                   13, 3, 7, 0, 140, "DI427", "UE4.27 GetRealTimeSeconds shape (6 sites; 5 decoys on 4.20)"),
+                   13, 3, 7, 0, 140, "DI427", "UE4.20+4.27 GetRealTimeSeconds shape (5-6 sites)"),
 };
 
 #undef SIG_RIP

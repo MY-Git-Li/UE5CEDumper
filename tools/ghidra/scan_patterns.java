@@ -74,7 +74,12 @@ public class scan_patterns extends GhidraScript {
             s.tot = Integer.parseInt(f[5]); s.adj = Integer.parseInt(f[6]);
             s.pri = Integer.parseInt(f[7]); s.src = f[8]; s.pat = f[9];
             s.note = f.length > 10 ? f[10] : "";
-            if (s.resolve.startsWith("Symbol")) { skipped++; continue; }
+            // Skip resolutions this offline model cannot reproduce. Symbol* needs
+            // GetProcAddress; CallFollow needs to follow the CALL and scan the callee body
+            // for a RIP ref — scoring either with the plain RIP model produces meaningless
+            // "decoys" (GNAM_V7 is CallFollow and looked like a 4-decoy pattern until this
+            // skip was added).
+            if (s.resolve.startsWith("Symbol") || s.resolve.equals("CallFollow")) { skipped++; continue; }
             if (!parse(s)) { skipped++; println("SKIP unparsable " + s.id); continue; }
             sigs.add(s);
         }
@@ -130,6 +135,7 @@ public class scan_patterns extends GhidraScript {
         w.println("# truth: " + truth);
         w.println("# verdict: OK = at least one hit resolves (direct/deref, +adj or raw) to the true VA");
         w.println();
+        Set<String> selectedFor = new HashSet<>();
         Map<String, List<Sig>> byTarget = new LinkedHashMap<>();
         for (Sig s : sigs) byTarget.computeIfAbsent(s.target, k -> new ArrayList<Sig>()).add(s);
         for (Map.Entry<String, List<Sig>> e : byTarget.entrySet()) {
@@ -161,15 +167,44 @@ public class scan_patterns extends GhidraScript {
                         if (decoyTargets.size() < 10) decoyTargets.add(String.format("@%X->%X", h[0], h[1]));
                     }
                 }
+                // NO-TRUTH is load-bearing, not cosmetic. If you pass a placeholder VA for a
+                // target (because the binary has no symbols for it), EVERY hit resolves to
+                // something != truth and the old code reported "DECOY-ONLY" — which reads as
+                // hard evidence that a pattern misfires. It is not: it means nothing at all.
+                // That mistake demoted two perfectly good GEngine patterns once; the tool now
+                // refuses to render a decoy verdict without a plausible truth value.
+                boolean haveTruth = exp != null;
+                if (haveTruth) {
+                    boolean plausible = false;
+                    for (Long tv : exp) if (tv != null && tv > 0x10000L) plausible = true;
+                    haveTruth = plausible;
+                }
                 String verdict = nHits == 0 ? "MISS      "
+                        : !haveTruth ? "NO-TRUTH  "
                         : nCorrect == 0 ? "DECOY-ONLY"
                         : nDecoy == 0 ? "UNIQUE-OK "
                         : (firstCorrectIdx < firstDecoyIdx ? "OK-FIRST  " : "OK-BEHIND ");
+                if (!haveTruth) { nCorrect = 0; nDecoy = 0; }
                 w.println(String.format("%-18s pri=%-4d hits=%-5d ok=%-5d decoy=%-5d %s src=%s",
                         s.id, s.pri, nHits, nCorrect, nDecoy, verdict, s.src));
                 if (!okSites.isEmpty()) w.println("        true@ " + okSites);
                 if (!decoyTargets.isEmpty()) w.println("        decoy " + decoyTargets
                         + (nDecoy > 10 ? "  ...(" + nDecoy + " total)" : ""));
+
+                // REGRESSION LINE — the question that actually matters when patterns are
+                // ADDED to the database: walking priority order, does the FIRST pattern that
+                // hits resolve correctly? Genau::ScanForTarget validates each match and takes
+                // the first that passes, so a newly-added lower-numbered pattern can only
+                // cause harm if it hits AND its match survives validation AND it is wrong.
+                if (haveTruth && nHits > 0 && selectedFor.add(tgt)) {
+                    w.println("  >>> SELECTED (first hitting pattern by priority): " + s.id
+                            + (nCorrect > 0
+                                ? (nDecoy == 0 ? "  => CORRECT (all hits)"
+                                               : "  => reaches truth, but " + nDecoy
+                                                 + " decoy(s) scan first — validator must reject them")
+                                : "  => *** WOULD RESOLVE WRONG unless the validator rejects all "
+                                  + nDecoy + " hits ***"));
+                }
             }
             w.println();
         }

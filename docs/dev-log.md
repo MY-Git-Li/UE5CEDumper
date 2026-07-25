@@ -20,6 +20,68 @@ builds ≤696 in
 
 -----
 
+## 2026-07-25 - Six-engine regression harness; a measurement error corrected (build 2402)
+
+Two more symbolised projects arrived — **Everspace re-analysed WITH its PDB** (`ES1-420.rep`,
+UE 4.20) and **Satisfactory v1.2.3.1** (UE 5.6.1, modular, CoreUObject+Core+Engine+FactoryGame
+all imported). Both were folded into the sweep, which now covers **six engine versions with
+real symbols on five of them**: 4.20, 4.27, 5.5, 5.6, 5.7 (+ Avowed 5.3, symbol-less).
+
+### The correction
+
+Last build demoted `GENG_X1` and `GENG_DI427_1` on the strength of "5 decoys on Everspace 4.20".
+**That was a measurement artifact.** Everspace had no symbols then, so the sweep had been given
+a *placeholder* truth value (`GEngine=5`); every hit necessarily compared unequal and got
+labelled a decoy. With the real PDB both are **UNIQUE-OK on 4.20** — `GENG_X1` 1/1,
+`GENG_DI427_1` 5/5. Priorities restored, and `GENG_X1` is now the lead GEngine pattern: it is
+correct-first on **4.20, 4.27, 5.6 and 5.7**, the broadest single signature in the file.
+
+Systemic fix so it cannot recur: `scan_patterns.java` now emits **`NO-TRUTH`** instead of
+`DECOY-ONLY` when a target has no plausible truth value, and refuses to render decoy counts at
+all in that case. It also skips `CallFollow`/`Symbol*` resolutions, whose model it cannot
+reproduce (`GNAM_V7` is CallFollow and had been scoring phantom decoys the same way).
+
+### The regression harness (answers "does adding AOBs break anything?")
+
+`scan_patterns.java` gained a **`>>> SELECTED`** line: walking priority order, which is the
+FIRST pattern that hits, and does it reach truth? That mirrors `Genau::ScanForTarget`, which
+validates each match and takes the first that passes — so a newly-added lower-numbered pattern
+can only do harm if it hits, survives validation, AND is wrong.
+
+Result across all eight binaries/modules: **every time a newly-added pattern is selected it is
+CORRECT on all hits** (`GENG_X1` ×4, `GENG_ES55_1`, `GWLD_DI427_1`, `SPARSE_DI427_1`). No
+existing target changed hands on any binary — Solarpunk still selects `GWLD_SP57_1` /
+`SPARSE_SP57_1`, ES2 still selects `GWLD_ES2_1` / `SPARSE_ES2_1`.
+
+The harness also surfaced two **pre-existing** (not new) weaknesses worth recording:
+* `GOBJ_ES53_1` (pri 100) and `GNAM_V5`/`GNAM_V7` are selected first on several binaries and
+  reach truth only after the validator rejects their decoys — by design, since
+  `ValidateGObjects`/`ValidateGNames*` are strong. The one to watch is `SPARSE_SP57_1` on
+  Solarpunk (2 decoys scan first) because `ValidateSparseDelegates` is deliberately weak.
+* UE 4.20 GNames is covered only in the last-resort band (`GNAM_CT3` pri 800, `GNAM_G42_1`
+  pri 840 — both UNIQUE-OK, anchored on `FName::GetNames`) while `GNAM_D7_1` fires **27,001**
+  decoys at pri 560 first. Correct, but slow.
+
+### Satisfactory 5.6.1 — no new patterns needed
+
+All five targets already resolve: GObjects `GOBJ_ES53_1`, GNames `GNAM_V5`, GWorld `GWLD_SF_1`,
+Sparse `SPARSE_ES2_1`, GEngine `GENG_X1`. Layout note: **the name pool moved from CoreUObject
+to Core by 5.6** — `NamePoolData` `0x18082E8C0`, recovered from `FNameDebugVisualizer::GetBlocks`
+(`lea rax,[pool+0x10]; ret`), the same 2-instruction oracle that worked on DropIn.
+
+`SPARSE_ES2_1` is now verified correct on **UE 4.27, 5.5, 5.6 and 5.7** — four engine versions
+from one signature.
+
+### Everspace 4.20 also validated the consensus technique
+
+Before its PDB existed, running the full database and keeping addresses that ≥3 independent
+patterns agreed on gave GWorld `0x1432E1AC0`, GObjects `0x142E797F0`, GNames `0x1431DEAD8`.
+The symbols confirmed **all three exactly** (`Names` is reached via `FName::GetNames`, which
+lazily `new`s a 0x408-byte `TNameEntryArray` — 4.20 predates FNamePool). Consensus is a sound
+fallback for any symbol-less binary.
+
+-----
+
 ## 2026-07-25 - Three more Ghidra projects swept; GEngine gains UE5.5 (build 2401)
 
 Followed the DropIn work by running the same audit over three donated Ghidra projects.
