@@ -17,6 +17,7 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | Project (`D:\Tools\GHIDRA_Projs\*.rep`) | UE | Symbols | Notes |
 |---|---|---|---|
 | `ES1-420` | 4.20 | ✅ full PDB | oldest sample; supersedes the symbol-less `ES1.rep` |
+| `ES2-UE425` | 4.25.2 | ✅ full PDB | Everspace 2 from a Steam depot; the FField/FProperty transition band |
 | `DropIn` | 4.27.2 | ✅ full PDB | Development build (32-byte `FUObjectItem`) |
 | `Avowed` | 5.3 | ❌ none | negative control only — can say "no hits", never "wrong hit" |
 | `ES2-0517` | 5.5 | ✅ full PDB | `0517` is a DATE, not a version |
@@ -33,6 +34,10 @@ base and its `ObjObjects` sub-struct (base + 0x10).
 # Everspace — UE 4.20.  No FNamePool (TNameEntryArray era) and no sparse delegates (4.23+).
 # GNames here is `Names`, a TNameEntryArray* lazily new'd inside FName::GetNames @0x1406B19D0.
 GS_TRUE="GObjects=142e797f0|142e79800,GNames=1431dead8,GWorld=1432e1ac0,GEngine=1432df470"
+
+# Everspace 2 (depot) — UE 4.25.2.  NamePoolData from FNameDebugVisualizer::GetBlocks
+# @0x140EF8410 = `lea rax,[0x144497D10]; ret`, minus 0x10.
+GS_TRUE="GObjects=1444b0520|1444b0510,GNames=144497d00,GWorld=1445f1160,SparseDelegates=1440070c0,GEngine=1445edad8"
 
 # DropIn — UE 4.27.2.  NamePoolData has no symbol; recovered from
 # FNameDebugVisualizer::GetBlocks @0x1426F59C0 = `lea rax,[0x14A363950]; ret`, minus 0x10.

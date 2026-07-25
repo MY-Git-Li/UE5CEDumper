@@ -809,6 +809,23 @@ constexpr const char* AOB_GENGINE_ES55_1 =
 //   600–690   Patternsleuth (arithmetic / offset-anchored)
 //   700–790   UE4 / legacy-specific
 //   800–990   Very short generic / last-resort
+//
+// BAND DISCIPLINE (build 2405). A pattern's band is set by how SPECIFIC it is — count its
+// LITERAL (non-wildcard) bytes — not by how old it is or who contributed it. The GNames
+// table had drifted badly in both directions and was re-sorted from measured data:
+//   * GNAM_V1/V3/V4 are 8 bytes with FOUR literal bytes, the least specific patterns in the
+//     file, yet sat at 500-540. Measured: DECOY-ONLY on UE4.20/5.5/5.7 and 539-2060 hits
+//     where they do reach truth. They belong in 800-990 and are now there.
+//   * GNAM_V5 (7 literal bytes) sat in the TIER 1 band at 110 while producing 16,686 hits on
+//     UE4.27 and OK-BEHIND on every engine it touches. Demoting it is a straight upgrade:
+//     UE5.5 and UE5.6 now select GNAM_ES53_1 and UE5.7 selects GNAM_SAT425_3, all UNIQUE-OK.
+//   * The pre-FNamePool UE4 patterns (CT3 20 literal bytes, G42_1, CT4, SAT422_1) were
+//     stranded at 800-860 in the last-resort band despite being the LONGEST and most specific
+//     entries — they were hand-derived later and deliberately lengthened. They target
+//     TStaticIndirectArrayThreadSafeRead / TNameEntryArray, a different structure entirely,
+//     and measurably MISS on all four FNamePool binaries (4.27/5.5/5.6/5.7), so moving them
+//     up to 700-730 cannot cost anything and saves ~710 wasted validations on a UE4.20 title.
+// Rule of thumb: fewer than ~8 literal bytes means 800+, no matter what it is anchored on.
 
 // Helper macro to reduce boilerplate for common RipBoth patterns
 #define SIG_RIP(id, pat, tgt, ioff, opc, tot, adj, pri, src, note) \
@@ -947,7 +964,7 @@ constexpr AobSignature GNAMES_PATTERNS[] = {
             "UE4.27 FName resolve + FNameEntry addr math (stride 2, Blocks at +0x10)"),
     SIG_RIP("GNAM_DI427_1", AOB_GNAMES_DI427_1, AobTarget::GNames, 0, 3, 7, 0, 115, "DI427",
             "UE4.27 FName resolve prologue, 10 sites (replaces the V5/V2/D7_1 decoy family)"),
-    SIG_RIP("GNAM_V5",    AOB_GNAMES_V5,     AobTarget::GNames, 0, 3, 7, 0, 110, "V", "lea rcx; call; mov byte[],1 extended"),
+    SIG_RIP("GNAM_V5",    AOB_GNAMES_V5,     AobTarget::GNames, 0, 3, 7, 0, 850, "V", "lea rcx; call; mov byte[],1 extended"),
     SIG_RIP("GNAM_ES53_1", AOB_GNAMES_ES53_1, AobTarget::GNames, 0, 3, 7, 0, 120, "ES53", "ES2 UE5.3 FNamePool init + MOV RDX,RAX"),
     SIG_RIP("GNAM_GH_1",  AOB_GNAMES_GH_1,   AobTarget::GNames, 12, 3, 7, 0, 130, "GH", "Ghidra ReserveNameBatch 27-fixed cross-game"),
     SIG_RIP("GNAM_SAT52_1", AOB_GNAMES_SAT52_1, AobTarget::GNames, 0, 3, 7, 0, 140, "SAT52", "Satisfactory UE5.2 dual-LEA NamePoolData"),
@@ -965,22 +982,22 @@ constexpr AobSignature GNAMES_PATTERNS[] = {
     SIG_RIP("GNAM_SF_2",  AOB_GNAMES_SF_2,   AobTarget::GNames, 0, 3, 7, 0, 340, "SF", "SatisfFactory SHL pattern (in Core DLL)"),
     SIG_RIP("GNAM_SF_3",  AOB_GNAMES_SF_3,   AobTarget::GNames, 0, 3, 7, 0, 360, "SF", "SatisfFactory FNameEntryId (in Core DLL)"),
     SIG_RIP("GNAM_V6",    AOB_GNAMES_V6,     AobTarget::GNames, 0, 3, 7, 0, 380, "V", "GSpots UE5+ mov rax; test; jnz"),
-    SIG_RIP("GNAM_V2",    AOB_GNAMES_V2,     AobTarget::GNames, 0, 3, 7, 0, 400, "V", "lea rcx; call; mov byte ptr"),
+    SIG_RIP("GNAM_V2",    AOB_GNAMES_V2,     AobTarget::GNames, 0, 3, 7, 0, 860, "V", "lea rcx; call; mov byte ptr"),
 
     // 500–590: Tier 3 — short patterns
-    SIG_RIP("GNAM_V1",    AOB_GNAMES_V1,     AobTarget::GNames, 0, 3, 7, 0, 500, "V", "lea rsi; jmp"),
-    SIG_RIP("GNAM_V3",    AOB_GNAMES_V3,     AobTarget::GNames, 0, 3, 7, 0, 520, "V", "lea rax; jmp"),
-    SIG_RIP("GNAM_V4",    AOB_GNAMES_V4,     AobTarget::GNames, 0, 3, 7, 0, 540, "V", "lea r8; jmp"),
+    SIG_RIP("GNAM_V1",    AOB_GNAMES_V1,     AobTarget::GNames, 0, 3, 7, 0, 870, "V", "lea rsi; jmp"),
+    SIG_RIP("GNAM_V3",    AOB_GNAMES_V3,     AobTarget::GNames, 0, 3, 7, 0, 880, "V", "lea rax; jmp"),
+    SIG_RIP("GNAM_V4",    AOB_GNAMES_V4,     AobTarget::GNames, 0, 3, 7, 0, 890, "V", "lea r8; jmp"),
 
     // 600–690: Patternsleuth
     SIG_RIP("GNAM_PS1",   AOB_GNAMES_PS1,    AobTarget::GNames, 2, 3, 7, 0, 600, "PS", "jz+9; lea r8"),
     SIG_RIP("GNAM_PS2",   AOB_GNAMES_PS2,    AobTarget::GNames, 7, 3, 7, 0, 620, "PS", "sub rsp; shr; lea rbp"),
 
     // 800–990: UE4/legacy (pre-FNamePool)
-    SIG_RIP("GNAM_CT3",   AOB_GNAMES_CT3,    AobTarget::GNames, 4, 3, 7, 0, 800, "CT", "UE4 <4.23 pre-FNamePool deref"),
-    SIG_RIP("GNAM_CT4",   AOB_GNAMES_CT4,    AobTarget::GNames, 3, 3, 7, 0, 820, "CT", "UE4 pre-FNamePool write pattern"),
-    SIG_RIP("GNAM_G42_1", AOB_GNAMES_G42_1,  AobTarget::GNames, 0, 3, 7, 0, 840, "G42", "UE4.2 pre-FNamePool TStaticIndirectArray"),
-    SIG_RIP("GNAM_SAT422_1", AOB_GNAMES_SAT422_1, AobTarget::GNames, 0, 3, 7, 0, 860, "SAT422", "Satisfactory UE4.22 pre-FNamePool JNE near + CMP byte"),
+    SIG_RIP("GNAM_CT3",   AOB_GNAMES_CT3,    AobTarget::GNames, 4, 3, 7, 0, 700, "CT", "UE4 <4.23 pre-FNamePool deref"),
+    SIG_RIP("GNAM_CT4",   AOB_GNAMES_CT4,    AobTarget::GNames, 3, 3, 7, 0, 720, "CT", "UE4 pre-FNamePool write pattern"),
+    SIG_RIP("GNAM_G42_1", AOB_GNAMES_G42_1,  AobTarget::GNames, 0, 3, 7, 0, 710, "G42", "UE4.2 pre-FNamePool TStaticIndirectArray"),
+    SIG_RIP("GNAM_SAT422_1", AOB_GNAMES_SAT422_1, AobTarget::GNames, 0, 3, 7, 0, 730, "SAT422", "Satisfactory UE4.22 pre-FNamePool JNE near + CMP byte"),
 };
 
 // ── GWorld ───────────────────────────────────────────────────────────────

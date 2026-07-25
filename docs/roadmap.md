@@ -241,7 +241,8 @@ state.
 | TArray<FScriptDelegate> | ✅ | ✅ (v3) |
 | MulticastSparseDelegate (UE 5.0+) | ✅ bindings via SPARSE_ES2_1 AOB (build 561-577) | ✅ v4 sparse pass (build 565) |
 | MulticastSparseDelegate (UE 4.27) | ✅ same raw-pointer layout as UE5 — `SPARSE_ES2_1` resolves on 4.27, + `SPARSE_DI427_1/2` (build 2399). The "FObjectKey outer key" blocker was a wrong premise, see technical-notes | ✅ |
-| MulticastSparseDelegate (UE 4.23-4.26) | ⚠ untested — no symbolised sample. Walker probes the live key shape and declines if it is not a raw pointer | ⚠ |
+| MulticastSparseDelegate (UE 4.25) | ✅ PDB-confirmed raw `UObjectBase const*` key, same as 4.27/5.x — `SPARSE_DI427_1/2` + `SPARSE_ES2_1` all UNIQUE-OK (build 2405) | ✅ |
+| MulticastSparseDelegate (UE 4.23-4.24) | ⚠ untested — no symbolised sample. Walker probes the live key shape and declines if it is not a raw pointer | ⚠ |
 | OptionalProperty\<pointer / weak\> | ✅ | ✅ |
 | OptionalProperty\<scalar Int/Float/Bool/Byte/Enum\> | ✅ trailing-bIsSet | — |
 | OptionalProperty\<String / Name / Text\> | ✅ intrusive sentinel + value (build 530) | — |

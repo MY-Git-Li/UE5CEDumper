@@ -20,6 +20,63 @@ builds ≤696 in
 
 -----
 
+## 2026-07-26 - GNames band discipline: short patterns demoted, hand-derived UE4 ones promoted; UE 4.25 folded in (build 2405)
+
+### The GNames table had drifted in *both* directions
+
+The user's read of it was right, and the sweep data was blunt about it. A pattern's band is
+supposed to track how **specific** it is — count its literal (non-wildcard) bytes — but:
+
+| pattern | old pri | bytes | literal | measured |
+|---|---|---|---|---|
+| `GNAM_V5` | **110** (Tier 1) | 19 | 7 | 16,686 hits on 4.27; OK-BEHIND on every engine it touches |
+| `GNAM_V2` | 400 | 14 | 6 | 16,692 hits on 4.27 |
+| `GNAM_V1`/`V3`/`V4` | 500/520/540 | 8 | **4** | DECOY-ONLY on 4.20/5.5/5.7; 539-2060 hits elsewhere |
+| `GNAM_CT3` | **800** | 27 | **20** | UNIQUE-OK on 4.20, MISS on every FNamePool binary |
+| `GNAM_G42_1` | 840 | 18 | 9 | UNIQUE-OK on 4.20, MISS elsewhere |
+
+The four-literal-byte patterns were running *before* the twenty-literal-byte ones. The
+pre-FNamePool UE4 entries had been hand-derived later and deliberately lengthened to cut
+collisions — but nobody moved them out of the last-resort band afterwards.
+
+Re-sorted from measurement, not vibes: `V5→850`, `V2→860`, `V1→870`, `V3→880`, `V4→890`;
+`CT3→700`, `G42_1→710`, `CT4→720`, `SAT422_1→730`. Promoting the UE4 set is provably free —
+they target `TStaticIndirectArrayThreadSafeRead`/`TNameEntryArray`, a different structure, and
+MISS on all four FNamePool binaries. A band-discipline note now sits in `Himmel.h` so the rule
+survives: **fewer than ~8 literal bytes means 800+, regardless of what it anchors on.**
+
+**Four of five engine versions improved, none regressed:**
+
+| | before | after |
+|---|---|---|
+| UE 4.20 | `GNAM_V5` DECOY-ONLY (after ~710 wasted validations) | **`GNAM_CT3` CORRECT (all hits)** |
+| UE 5.5 | `GNAM_V5` OK-BEHIND, 15 hits | **`GNAM_ES53_1` CORRECT (all hits)** |
+| UE 5.6 | `GNAM_V5` AT RISK, 5 decoys first | **`GNAM_ES53_1` CORRECT (all hits)** |
+| UE 5.7 | `GNAM_V5` OK-BEHIND, 86 hits | **`GNAM_SAT425_3` CORRECT (all hits)** |
+| UE 4.27 | `GNAM_DI427_2` CORRECT | unchanged |
+
+### UE 4.25 added — and it closes the sparse-delegate gap
+
+`ES2-UE425.rep` (Everspace 2 from a Steam depot, **UE 4.25.2**, full PDB) is the FField/FProperty
+transition band. Ground truth: `GUObjectArray` `0x1444B0510`, `NamePoolData` `0x144497D00`
+(via `FNameDebugVisualizer::GetBlocks` @ `0x140EF8410`), `GWorld` `0x1445F1160`,
+`SparseDelegates` `0x1440070C0`, `GEngine` `0x1445EDAD8`.
+
+**It needs no new patterns** — GEngine `GENG_X1`, GNames `GNAM_V8`, GWorld `GWLD_TQ_1` and
+Sparse `SPARSE_DI427_1` are all CORRECT-on-all-hits; GObjects reaches truth via
+`GOBJ_SAT425_2`. More usefully it *extends* two families: `SPARSE_DI427_1/_2` and
+`GNAM_DI427_1/_2`, both mined on 4.27, are correct here too.
+
+And it settles a documented unknown: the 4.25 PDB gives
+`TMap<UObjectBase const*, …>` for `FSparseDelegateStorage::SparseDelegates` — **a raw pointer
+key, identical to 4.27 and 5.x**. The "UE 4.23-4.26 uses FObjectKey" claim is now falsified on
+two independent UE4 builds; only 4.23/4.24 remain unverified.
+
+`GENG_X1` is now correct-first on **4.20, 4.25, 4.27, 5.6 and 5.7** — five engine versions from
+one signature. `GROUND-TRUTH.md` updated with the 4.25 row and its `GS_TRUE` line.
+
+-----
+
 ## 2026-07-25 - Removed the 27k-decoy GNames pattern; sparse validator now checks content (build 2404)
 
 Closed the two weaknesses the six-engine harness surfaced last build.
