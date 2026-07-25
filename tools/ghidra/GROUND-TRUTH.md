@@ -23,7 +23,34 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | `ES2-0517` | 5.5 | ✅ full PDB | `0517` is a DATE, not a version |
 | `Satisfactory_v1.2.3.1` | 5.6.1 | ✅ full PDB | **modular** — truth is split across 3 DLLs |
 | `Solarpunk` | 5.7 | ✅ full PDB | |
-| `Satfi426` | 4.26 | ⚠ partial | **unusable**: CoreUObject/Engine were never imported |
+| `Satfi426` | 4.26 | ⚠ partial | **unusable as imported** — see below |
+
+### `Satfi426` — why it contributes nothing, and how to fix it
+
+Recorded so nobody re-chases it. The `.rep` contains only three **game** DLLs
+(`FactoryGame-GameAnalyticsModule`, `-CoffeeCore`, `-FactoryGame`). The modules that
+**define** the globals — `FactoryGame-CoreUObject-Win64-Shipping.dll` and
+`-Engine-Win64-Shipping.dll` — were never imported, so there is no ground truth to resolve
+against and no engine code to mine.
+
+The game module *does* carry the import slots, and they are real:
+
+```
+__imp_?GUObjectArray@@3VFUObjectArray@@A   0x180722950
+__imp_?GWorld@@3VUWorldProxy@@A            0x180727CB8
+__imp_?GEngine@@3PEAVUEngine@@EA           0x180727CB0
+```
+
+That is exactly the shape `GOBJ_SF_1` models ("via `_imp_`"): the AOB resolves to the IAT slot
+and `AobResolve::RipDeref` does the second hop at runtime. But **all 490 referencing sites are
+game code** (`UFG*` / `AFG*` / `FFG*` — Coffee Stain's own prefix), so any pattern mined there
+would match Satisfactory and nothing else. No existing signature scores a correct hit on it
+either; the shipped `SAT426` family was evidently derived from CoreUObject/Engine.
+
+**Fix**: import those two DLLs into the same project (or supply a project that has them) and it
+becomes a normal UE4.26 entry. Contrast `Satisfactory_v1.2.3.1`, which has all four modules and
+works fine. Note `find_syms3.java` deliberately does **not** filter `__imp_*` — without that the
+IAT is invisible and a modular build looks empty.
 
 ## `GS_TRUE` strings (copy-paste)
 
