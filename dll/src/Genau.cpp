@@ -2060,9 +2060,23 @@ static bool ValidateGWorldBasic(uintptr_t addr) {
     if (!Macht::ReadSafe(addr, world)) return false;
     // A null world is acceptable (write-patterns at startup) — the null
     // filtering is already handled by TryResolveMatch via gworldAllowNull.
-    // Here we just accept any readable address.
     if (world == 0) return true;
-    return LooksLikeDataPtr(world);
+    if (!LooksLikeDataPtr(world)) return false;     // must be an off-module heap pointer
+
+    // Decoy guard (offset-independent). GWorld's generic short patterns can land on a
+    // .data global that merely holds a data-shaped pointer (the Solarpunk UE5.7 / Avowed
+    // GWorld decoy — 0xA8B0 below the real GWorld on Solarpunk). A real UWorld is a C++
+    // object: [world] is a vtable pointer and [[world]] is its first virtual method — a
+    // code pointer in a module image. The decoy's double-deref is not executable code, so
+    // it fails here and the scan continues to the real GWorld. This checks only the vtable
+    // at +0, so it is safe to run before DynOff validates any UObject field offset. A
+    // rejection that leaves GWorld unfound falls through to UE5_Init instance-scan recovery.
+    uintptr_t vtbl = 0;
+    if (!Macht::ReadSafe(world, vtbl) || !Grimoire::IsUserspacePointer(vtbl)) return false;
+    uintptr_t firstVirtual = 0;
+    if (!Macht::ReadSafe(vtbl, firstVirtual) || !Macht::LooksLikeCodePointer(firstVirtual))
+        return false;
+    return true;
 }
 
 uintptr_t FindGWorld(const char* hintPatternId) {

@@ -25,6 +25,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -85,13 +86,28 @@ bool IEq(const std::string& a, const char* b) {
 
 // ---- reflection: find a UFunction / param, marshal a param buffer ----
 
+// Sane upper bound on a UFunction's ParmsSize. Real signatures are tiny (a few
+// hundred bytes even for LineTraceSingle's many out-params); 16 KB is far above
+// anything legitimate. A freed/reused UFunction during game teardown can read a
+// GARBAGE-huge parmsSize, and `std::vector<uint8_t> buf(parmsSize)` would then
+// throw std::bad_alloc — which, from the worker thread with no handler, calls
+// std::terminate and fail-fasts the whole game (0xC0000409). Rejecting an insane
+// size here makes the per-tick invoke a clean no-op instead. (See-through M5.)
+constexpr int32_t kMaxSaneParmsSize = 0x4000;
+
 // Find a UFunction by name, walking class → Super (engine setters live on the
 // AActor base, above the concrete pawn/actor class). Public Ubel only.
 bool FindFuncByName(uintptr_t classAddr, const char* name, FunctionInfo& out) {
     uintptr_t cls = classAddr;
     for (int guard = 0; cls && guard < 64; ++guard) {
         for (const auto& f : Ubel::WalkFunctions(cls))
-            if (IEq(f.name, name)) { out = f; return true; }
+            if (IEq(f.name, name)) {
+                out = f;
+                // Refuse an out-of-range ParmsSize before any caller sizes a buffer
+                // by it — a garbage UFunction read during teardown must not bad_alloc.
+                if (out.parmsSize < 0 || out.parmsSize > kMaxSaneParmsSize) return false;
+                return true;
+            }
         uintptr_t super = 0;
         if (!Macht::ReadSafe(cls + static_cast<uintptr_t>(DynOff::USTRUCT_SUPER), super)
             || super == cls)
@@ -436,13 +452,26 @@ void Tick() {
 void WorkerLoop() {
     Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
     LOG_INFO("SeeThrough: worker started (%d ms tick)", Grimoire::SCHLACHT_TICK_MS);
+    bool warnedThrow = false;
     while (!s_workerStop.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(Grimoire::SCHLACHT_TICK_MS));
         if (s_workerStop.load()) break;
         bool active;
         { std::lock_guard<std::mutex> lk(s_mutex); active = s_state.active; }
         if (!active) continue;
-        Tick();
+        // Safety net: a Tick reads live game state and dispatches game-thread invokes.
+        // During the game's own shutdown that state churns/frees, so a read or an
+        // allocation can throw. An exception escaping the thread entry is std::terminate
+        // (0xC0000409) — the See-through-then-close-game crash. Swallow + skip the tick;
+        // the next one re-resolves. (Note: an uncatchable __fastfail like a GS-cookie
+        // failure would still bypass this, which is why parmsSize is bounded above.)
+        try {
+            Tick();
+        } catch (const std::exception& e) {
+            if (!warnedThrow) { warnedThrow = true; LOG_WARN("SeeThrough: tick threw (%s) — skipping (game tearing down?)", e.what()); }
+        } catch (...) {
+            if (!warnedThrow) { warnedThrow = true; LOG_WARN("SeeThrough: tick threw (unknown) — skipping (game tearing down?)"); }
+        }
     }
     LOG_INFO("SeeThrough: worker stopped");
 }

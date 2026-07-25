@@ -40,6 +40,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -157,13 +158,23 @@ bool IEq(const std::string& a, const char* b) {
     return true;
 }
 
+// Sane upper bound on a UFunction's ParmsSize — see Schlacht.cpp's note. A freed/
+// reused UFunction during game teardown can read a garbage-huge parmsSize; sizing a
+// std::vector by it then throws bad_alloc → from the worker thread, std::terminate
+// (0xC0000409). Reject it here so InvokeSetCollision is a clean no-op instead.
+constexpr int32_t kMaxSaneParmsSize = 0x4000;
+
 // Find a UFunction by name, walking class → Super (engine setters live on base
 // classes above the concrete pawn). Uses only public Ubel::WalkFunctions.
 bool FindFuncByName(uintptr_t classAddr, const char* name, FunctionInfo& out) {
     uintptr_t cls = classAddr;
     for (int guard = 0; cls && guard < 64; ++guard) {
         for (const auto& f : Ubel::WalkFunctions(cls))
-            if (IEq(f.name, name)) { out = f; return true; }
+            if (IEq(f.name, name)) {
+                out = f;
+                if (out.parmsSize < 0 || out.parmsSize > kMaxSaneParmsSize) return false;
+                return true;
+            }
         uintptr_t super = 0;
         if (!Macht::ReadSafe(cls + static_cast<uintptr_t>(DynOff::USTRUCT_SUPER), super)
             || super == cls)
@@ -458,24 +469,35 @@ void WorkerLoop() {
     Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
     LOG_INFO("Fly: worker started (%d ms tick)", Grimoire::FLY_TICK_MS);
     const double dtSec = Grimoire::FLY_TICK_MS / 1000.0;
+    bool warnedThrow = false;
     while (!s_workerStop.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(Grimoire::FLY_TICK_MS));
         if (s_workerStop.load()) break;
-        Ctx c;
-        uintptr_t collPawn = 0;
-        int collEnable = 0;
-        {
-            std::lock_guard<std::mutex> lk(s_mutex);
-            if (!s_state.active) continue;             // disabled between ticks
-            if (ResolveCtx(c, false) != FR_OK) continue;  // pawn/CMC gone (menu) — retry
-            FlyTickLocked(c, dtSec, collPawn, collEnable);
+        // Safety net (see Schlacht): a tick reads live game state + dispatches a
+        // game-thread invoke; during the game's own shutdown that churns/frees, so a
+        // read or allocation can throw. An exception escaping the thread entry is
+        // std::terminate (0xC0000409) — the feature-on-then-close-game crash.
+        try {
+            Ctx c;
+            uintptr_t collPawn = 0;
+            int collEnable = 0;
+            {
+                std::lock_guard<std::mutex> lk(s_mutex);
+                if (!s_state.active) continue;             // disabled between ticks
+                if (ResolveCtx(c, false) != FR_OK) continue;  // pawn/CMC gone (menu) — retry
+                FlyTickLocked(c, dtSec, collPawn, collEnable);
+            }
+            // The SetActorEnableCollision invoke (noclip on/off, or respawn re-apply)
+            // runs OUTSIDE s_mutex (it blocks on the game thread) and only when the game
+            // thread is live — else it would stall the worker for the full timeout on a
+            // paused game.
+            if (collPawn && Stark::IsGameThreadResponsive())
+                InvokeSetCollision(collPawn, collEnable != 0);
+        } catch (const std::exception& e) {
+            if (!warnedThrow) { warnedThrow = true; LOG_WARN("Fly: tick threw (%s) — skipping (game tearing down?)", e.what()); }
+        } catch (...) {
+            if (!warnedThrow) { warnedThrow = true; LOG_WARN("Fly: tick threw (unknown) — skipping (game tearing down?)"); }
         }
-        // The SetActorEnableCollision invoke (noclip on/off, or respawn re-apply)
-        // runs OUTSIDE s_mutex (it blocks on the game thread) and only when the game
-        // thread is live — else it would stall the worker for the full timeout on a
-        // paused game.
-        if (collPawn && Stark::IsGameThreadResponsive())
-            InvokeSetCollision(collPawn, collEnable != 0);
     }
     LOG_INFO("Fly: worker stopped");
 }

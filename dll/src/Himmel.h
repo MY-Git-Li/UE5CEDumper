@@ -35,6 +35,9 @@
 //   OT      : Octopath Traveller (UE4, Ghidra + CE analysis, codename "Kingship")
 //   GH      : Ghidra cross-game analysis (aob_export/analysis_report.md)
 //   ME      : MindsEye (Build A Rocket Boy, UE 5.4.4 licensee fork — capstone + .pdata analysis)
+//   SP57    : Solarpunk (rokaplay, UE 5.7 — ships a full PDB; symbols + xrefs mined offline
+//             via Ghidra headless, then every candidate verified unique against the .text
+//             image before inclusion — see docs/reversing-nonstandard-ue-games.md)
 // ============================================================
 
 // ============================================================
@@ -562,6 +565,33 @@ constexpr const char* AOB_GWORLD_GH_4 = "0F 57 C9 0F 2E C1 74 ?? 48 8B 1D ?? ?? 
 
 
 // ============================================================
+// New patterns: Solarpunk (UE 5.7, rokaplay — full PDB)
+// ============================================================
+// UE 5.7's MSVC codegen inserts an extra load / picks different registers around
+// the GWorld access, so ALL of the Tier-1 (100–290) UE5 GWorld patterns (ES2_1-6,
+// SF_1, GH_1/2, TQ_1/2, V1) get ZERO hits on this build. The scan then reaches the
+// generic GWLD_SF_2 (Tier 2, pri 300), which matched a single DECOY .data global and
+// passed the (intentionally loose) ValidateGWorldBasic → wrong GWorld. These four
+// patterns re-anchor GWorld at the TOP of Tier 1 (pri 100–160, before every pattern
+// that misses/mis-fires). Each was verified to hit ONLY the real GWorld slot (0
+// decoys) across the whole .text image.
+
+// SP57_1: mov rax,[GWorld]; mov rcx,[rbx+rax]; cmp [rcx+2C0],rax; jz  — UGameEngine::Tick
+//   Loosened GWLD_SF_1: tolerates the inserted `mov rcx,[rbx+rax]` before the
+//   `cmp [rcx+0x2C0],rax` world-compare. `4?` pins that byte to a REX prefix
+//   (0x40-0x4F) via nibble wildcard — tighter than `??`. 0x2C0 seen across UE5.4-5.7.
+constexpr const char* AOB_GWORLD_SP57_1 = "48 8B 05 ?? ?? ?? ?? 4? 8B ?? ?? 48 39 81 C0 02 00 00";
+// SP57_2: mov rax,[GWorld]; mov rsi,rcx; lea rcx,[rbp+10]; mov rdx,[rax+18]  — FMallocLeakReporter::WriteReports
+//   Same function as GWLD_GH_1 but UE5.7 uses `mov rsi,rcx` (48 8B F1) not `mov rbx,rcx`.
+constexpr const char* AOB_GWORLD_SP57_2 = "48 8B 05 ?? ?? ?? ?? 48 8B F1 48 8D 4D 10 48 8B 50 18";
+// SP57_3: mov rdi,[GWorld]; jmp; test rdi; jne; cmp ebx,1; jne  — UEngine::GetWorldFromContextObject
+constexpr const char* AOB_GWORLD_SP57_3 = "48 8B 3D ?? ?? ?? ?? EB ?? 48 85 FF 75 ?? 83 FB 01 75";
+// SP57_4: mov rax,[GWorld]; mov rdi,[rax+298]; test rdi; jz  — UActorComponent::On(Create|Destroy)PhysicsState
+//   0x298 is a UWorld member offset — UE5.7-specific, so ordered LAST of the four.
+constexpr const char* AOB_GWORLD_SP57_4 = "48 8B 05 ?? ?? ?? ?? 48 8B B8 98 02 00 00 48 85 FF 74";
+
+
+// ============================================================
 // FSparseDelegateStorage::SparseDelegates (UE 4.23+)
 // ============================================================
 // The static TMap<UObjectBase*, TMap<FName, TSharedPtr<TMulticastScriptDelegate>>>
@@ -589,17 +619,37 @@ constexpr const char* AOB_GWORLD_GH_4 = "0F 57 C9 0F 2E C1 74 ?? 48 8B 1D ?? ?? 
 constexpr const char* AOB_SPARSE_ES2_1 =
     "48 8D 0D ?? ?? ?? ?? FF 15 ?? ?? ?? ?? 48 8B ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 8B 05";
 
+// SP57_1: mov rdx,[SparseDelegates]; movsxd rax,r?d; lea rcx,[rax+rax*2]; shl rcx,5;
+//         cmp [rcx+r?],r?; jz  — the TSet<...>::Find/FindOrAdd/EmplaceByHash element-index
+//         math (element stride 0x60 = *3<<5). SPARSE_ES2_1 (NotifyUObjectDeleted) does NOT
+//         match this build. Verified: matches the 3 always-present hot accessors; the two
+//         same-stride decoys resolve to a different global but sit at HIGHER addresses, so
+//         the real (lower) sites validate first. RipDirect -> the TSet object base.
+constexpr const char* AOB_SPARSE_SP57_1 =
+    "48 8B 15 ?? ?? ?? ?? ?? 63 ?? 48 8D 0C 40 48 C1 E1 05 4C 39 ?? 11 74";
+// SP57_2: mov r8,[SparseDelegates]; movsxd rax,ebx; lea rdx,[rax+rax*2]; shl rdx,5;
+//         cmp [r8+rax],r11; jz  — TSet::Remove (r8 variant). Verified UNIQUE (0 decoys).
+constexpr const char* AOB_SPARSE_SP57_2 =
+    "4C 8B 05 ?? ?? ?? ?? 48 63 C3 48 8D 14 40 48 C1 E2 05 4E 39 1C 02 74";
+
 
 // ============================================================
 // Unified Pattern Arrays (sorted by priority)
 // ============================================================
-// Priority scheme:
-//   0     : Symbol exports (O(1) lookup)
-//   5     : Export function body scan
-//  10-20  : Long unique patterns (20+ fixed bytes)
-//  30-40  : Medium patterns (15-20 bytes)
-//  50-60  : Short generic patterns, patternsleuth
-//  80-100 : UE4/legacy patterns
+// Priority scheme (lower = tried first; each target's array is sorted by priority at
+// scan time). Values are SPARSE across 0–1000 BY DESIGN — the gaps let a new pattern
+// slot into the right band without renumbering its neighbours. The absolute number is
+// meaningless; only the order within a target's array matters. When adding a pattern,
+// pick an unused value in the matching band (they step by 10, so there is room between
+// any two). Bands:
+//     0– 30   Symbol exports / call-follow (exact address, O(1))
+//    40– 90   Symbol-derived (FName ctor call-site scan, etc.)
+//   100–290   Tier 1 — long, highly-specific, verified-unique (newest-engine, decoy-proof)
+//   300–490   Tier 2 — medium specificity, good surrounding context (per-game)
+//   500–590   Tier 3 — standard short patterns (common codegen)
+//   600–690   Patternsleuth (arithmetic / offset-anchored)
+//   700–790   UE4 / legacy-specific
+//   800–990   Very short generic / last-resort
 
 // Helper macro to reduce boilerplate for common RipBoth patterns
 #define SIG_RIP(id, pat, tgt, ioff, opc, tot, adj, pri, src, note) \
@@ -615,78 +665,78 @@ constexpr const char* AOB_SPARSE_ES2_1 =
 
 // ── GObjects ─────────────────────────────────────────────────────────────
 constexpr AobSignature GOBJECTS_PATTERNS[] = {
-    // Priority 0: Symbol exports
+    // 0: Symbol export (O(1))
     SIG_EXPORT("GOBJ_EXP", EXPORT_GOBJECTARRAY, AobTarget::GObjects, 0, "MSVC mangled symbol"),
 
-    // Priority 9-20: Long specific patterns
-    SIG_RIP("GOBJ_ES53_1", AOB_GOBJECTS_ES53_1, AobTarget::GObjects, 4, 3, 7, 0, 9, "ES53", "ES2 UE5.3 FUObjectArray ctor+atexit"),
+    // 100–290: Tier 1 — long, specific patterns
+    SIG_RIP("GOBJ_ES53_1", AOB_GOBJECTS_ES53_1, AobTarget::GObjects, 4, 3, 7, 0, 100, "ES53", "ES2 UE5.3 FUObjectArray ctor+atexit"),
     { "GOBJ_V10", AOB_GOBJECTS_V10, AobTarget::GObjects, AobResolve::RipBoth,
-      0, 3, 7, -0x10, 10, 0, false, "V", "Split Fiction UE5.5+ lea+call+call" },
-    SIG_RIP("GOBJ_AV1", AOB_GOBJECTS_AV1, AobTarget::GObjects, 0, 3, 7, -0x10, 10, "AV",
+      0, 3, 7, -0x10, 110, 0, false, "V", "Split Fiction UE5.5+ lea+call+call" },
+    SIG_RIP("GOBJ_AV1", AOB_GOBJECTS_AV1, AobTarget::GObjects, 0, 3, 7, -0x10, 120, "AV",
             "Avowed/Obsidian UE5.3 AllocateUObjectIndex MOV RDX,[ObjObjects.Objects]"),
-    SIG_RIP("GOBJ_AV2", AOB_GOBJECTS_AV2, AobTarget::GObjects, 0, 3, 7, -0x10, 10, "AV",
+    SIG_RIP("GOBJ_AV2", AOB_GOBJECTS_AV2, AobTarget::GObjects, 0, 3, 7, -0x10, 130, "AV",
             "Avowed/Obsidian UE5.3 FUObjectItem chunk-index (20B stride, ~10+ sites, patch-resilient)"),
-    SIG_RIP("GOBJ_G42_4", AOB_GOBJECTS_G42_4, AobTarget::GObjects, 0, 3, 7, 0, 11, "G42", "UE4.2 long lea+call+epilogue"),
-    SIG_RIP("GOBJ_SAT425_2", AOB_GOBJECTS_SAT425_2, AobTarget::GObjects, 0, 3, 7, 0, 11, "SAT425", "Satisfactory UE4.25 UObjectBaseInit 31-byte sequence"),
-    SIG_RIP("GOBJ_SAT422_1", AOB_GOBJECTS_SAT422_1, AobTarget::GObjects, 0, 3, 7, 0, 12, "SAT422", "Satisfactory UE4.22 FEngineLoop::PreInit 4-CALL chain"),
-    SIG_RIP("GOBJ_SAT425_1", AOB_GOBJECTS_SAT425_1, AobTarget::GObjects, 0, 3, 7, 0, 13, "SAT425", "Satisfactory UE4.25 FObjectIterator ctor"),
+    SIG_RIP("GOBJ_G42_4", AOB_GOBJECTS_G42_4, AobTarget::GObjects, 0, 3, 7, 0, 140, "G42", "UE4.2 long lea+call+epilogue"),
+    SIG_RIP("GOBJ_SAT425_2", AOB_GOBJECTS_SAT425_2, AobTarget::GObjects, 0, 3, 7, 0, 150, "SAT425", "Satisfactory UE4.25 UObjectBaseInit 31-byte sequence"),
+    SIG_RIP("GOBJ_SAT422_1", AOB_GOBJECTS_SAT422_1, AobTarget::GObjects, 0, 3, 7, 0, 160, "SAT422", "Satisfactory UE4.22 FEngineLoop::PreInit 4-CALL chain"),
+    SIG_RIP("GOBJ_SAT425_1", AOB_GOBJECTS_SAT425_1, AobTarget::GObjects, 0, 3, 7, 0, 170, "SAT425", "Satisfactory UE4.25 FObjectIterator ctor"),
     { "GOBJ_RE3", AOB_GOBJECTS_RE3, AobTarget::GObjects, AobResolve::RipBoth,
-      0, 3, 7, 0, 13, 0, false, "RE", "Little Nightmares 3 Demo extended" },
+      0, 3, 7, 0, 180, 0, false, "RE", "Little Nightmares 3 Demo extended" },
     { "GOBJ_V11", AOB_GOBJECTS_V11, AobTarget::GObjects, AobResolve::RipBoth,
-      0, 3, 7, 0, 14, 0, false, "V", "Little Nightmares 3" },
-    SIG_RIP("GOBJ_RE2", AOB_GOBJECTS_RE2, AobTarget::GObjects, 0, 3, 7, -0x10, 15, "RE", "FF7 Remake extended"),
-    SIG_RIP("GOBJ_V13", AOB_GOBJECTS_V13, AobTarget::GObjects, 0, 3, 7, 0, 16, "V", "Palworld extended context"),
-    SIG_RIP("GOBJ_ES2_1", AOB_GOBJECTS_ES2_1, AobTarget::GObjects, 0, 3, 7, 0, 17, "ES2", "UE5.5 AllocateUObjectIndex"),
-    SIG_RIP("GOBJ_SAT52_1", AOB_GOBJECTS_SAT52_1, AobTarget::GObjects, 0, 3, 7, 0, 18, "SAT52", "Satisfactory UE5.2 TObjectIteratorBase ctor"),
-    SIG_RIP("GOBJ_V12", AOB_GOBJECTS_V12, AobTarget::GObjects, 0, 3, 7, -0x10, 19, "V", "FF7 Remake"),
-    SIG_RIP("GOBJ_SF_1", AOB_GOBJECTS_SF_1, AobTarget::GObjects, 0, 3, 7, 0, 20, "SF", "SatisfFactory via _imp_ (in EXE)"),
+      0, 3, 7, 0, 190, 0, false, "V", "Little Nightmares 3" },
+    SIG_RIP("GOBJ_RE2", AOB_GOBJECTS_RE2, AobTarget::GObjects, 0, 3, 7, -0x10, 200, "RE", "FF7 Remake extended"),
+    SIG_RIP("GOBJ_V13", AOB_GOBJECTS_V13, AobTarget::GObjects, 0, 3, 7, 0, 210, "V", "Palworld extended context"),
+    SIG_RIP("GOBJ_ES2_1", AOB_GOBJECTS_ES2_1, AobTarget::GObjects, 0, 3, 7, 0, 220, "ES2", "UE5.5 AllocateUObjectIndex"),
+    SIG_RIP("GOBJ_SAT52_1", AOB_GOBJECTS_SAT52_1, AobTarget::GObjects, 0, 3, 7, 0, 230, "SAT52", "Satisfactory UE5.2 TObjectIteratorBase ctor"),
+    SIG_RIP("GOBJ_V12", AOB_GOBJECTS_V12, AobTarget::GObjects, 0, 3, 7, -0x10, 240, "V", "FF7 Remake"),
+    SIG_RIP("GOBJ_SF_1", AOB_GOBJECTS_SF_1, AobTarget::GObjects, 0, 3, 7, 0, 250, "SF", "SatisfFactory via _imp_ (in EXE)"),
 
-    // Priority 21-40: Medium patterns
-    SIG_RIP("GOBJ_G42_2", AOB_GOBJECTS_G42_2, AobTarget::GObjects, 0, 3, 7, 0, 20, "G42", "UE4.2 RemoveUObjectDeleteListener"),
-    SIG_RIP("GOBJ_G42_3", AOB_GOBJECTS_G42_3, AobTarget::GObjects, 0, 3, 7, 0, 21, "G42", "UE4.2 lea+mov r8d+mov edx"),
-    SIG_RIP("GOBJ_G42_1", AOB_GOBJECTS_G42_1, AobTarget::GObjects, 0, 3, 7, 0, 22, "G42", "UE4.2 lea+xor+mov constructor"),
-    SIG_RIP("GOBJ_GH_1", AOB_GOBJECTS_GH_1, AobTarget::GObjects, 12, 3, 7, 0, 23, "GH", "Ghidra UObjectBase::AddObject cross-game"),
-    SIG_RIP("GOBJ_GH_4", AOB_GOBJECTS_GH_4, AobTarget::GObjects, 12, 3, 7, 0, 24, "GH", "Ghidra FWeakObjectPtr::operator= cross-game"),
+    // 300–490: Tier 2 — medium patterns
+    SIG_RIP("GOBJ_G42_2", AOB_GOBJECTS_G42_2, AobTarget::GObjects, 0, 3, 7, 0, 260, "G42", "UE4.2 RemoveUObjectDeleteListener"),
+    SIG_RIP("GOBJ_G42_3", AOB_GOBJECTS_G42_3, AobTarget::GObjects, 0, 3, 7, 0, 300, "G42", "UE4.2 lea+mov r8d+mov edx"),
+    SIG_RIP("GOBJ_G42_1", AOB_GOBJECTS_G42_1, AobTarget::GObjects, 0, 3, 7, 0, 310, "G42", "UE4.2 lea+xor+mov constructor"),
+    SIG_RIP("GOBJ_GH_1", AOB_GOBJECTS_GH_1, AobTarget::GObjects, 12, 3, 7, 0, 320, "GH", "Ghidra UObjectBase::AddObject cross-game"),
+    SIG_RIP("GOBJ_GH_4", AOB_GOBJECTS_GH_4, AobTarget::GObjects, 12, 3, 7, 0, 330, "GH", "Ghidra FWeakObjectPtr::operator= cross-game"),
     { "GOBJ_RE1", AOB_GOBJECTS_RE1, AobTarget::GObjects, AobResolve::RipBoth,
-      0, 2, 6, 0, 25, 0, false, "RE", "FF7 Rebirth add+cmp+jge" },
-    SIG_RIP("GOBJ_GH_2", AOB_GOBJECTS_GH_2, AobTarget::GObjects, 12, 3, 7, 0, 30, "GH", "Ghidra UnMarkAllObjects cross-game"),
-    SIG_RIP("GOBJ_V4",  AOB_GOBJECTS_V4,  AobTarget::GObjects, 0, 3, 7, 0, 30, "V", "classic UE5 longer context"),
-    SIG_RIP("GOBJ_V8",  AOB_GOBJECTS_V8,  AobTarget::GObjects, 0, 3, 7, 0, 32, "V", "bit shift variant"),
-    SIG_RIP("GOBJ_V9",  AOB_GOBJECTS_V9,  AobTarget::GObjects, 0, 3, 7, 0, 33, "V", "extended index cdqe"),
-    SIG_RIP("GOBJ_V7",  AOB_GOBJECTS_V7,  AobTarget::GObjects, 0, 3, 7, 0, 34, "V", "GSpots cdq movzx"),
-    SIG_RIP("GOBJ_UD1", AOB_GOBJECTS_UD1, AobTarget::GObjects, 0, 3, 7, 0, 35, "UD", "UEDumper"),
-    SIG_RIP("GOBJ_GH_3", AOB_GOBJECTS_GH_3, AobTarget::GObjects, 12, 3, 7, 0, 36, "GH", "Ghidra IncrementalPurgeGarbage cross-game"),
-    SIG_RIP("GOBJ_G427_1", AOB_GOBJECTS_G427_1, AobTarget::GObjects, 0, 3, 7, 0, 36, "G427", "UE4.27 Objects SAR context"),
-    SIG_RIP("GOBJ_G427_3", AOB_GOBJECTS_G427_3, AobTarget::GObjects, 0, 3, 7, 0, 37, "G427", "UE4.27 FGCObject extended context"),
-    SIG_RIP("GOBJ_SAT426_1", AOB_GOBJECTS_SAT426_1, AobTarget::GObjects, 0, 3, 7, 0, 38, "SAT426", "Satisfactory UE4.26 RemoveAnnotation lea+call+test"),
-    SIG_RIP("GOBJ_SAT426_2", AOB_GOBJECTS_SAT426_2, AobTarget::GObjects, 0, 2, 6, 0, 39, "SAT426", "Satisfactory UE4.26 GatherUnreachableObjects"),
-    SIG_RIP("GOBJ_SAT52_2", AOB_GOBJECTS_SAT52_2, AobTarget::GObjects, 0, 3, 7, 0, 40, "SAT52", "Satisfactory UE5.2 ~UObjectBase IsValid"),
+      0, 2, 6, 0, 340, 0, false, "RE", "FF7 Rebirth add+cmp+jge" },
+    SIG_RIP("GOBJ_GH_2", AOB_GOBJECTS_GH_2, AobTarget::GObjects, 12, 3, 7, 0, 350, "GH", "Ghidra UnMarkAllObjects cross-game"),
+    SIG_RIP("GOBJ_V4",  AOB_GOBJECTS_V4,  AobTarget::GObjects, 0, 3, 7, 0, 360, "V", "classic UE5 longer context"),
+    SIG_RIP("GOBJ_V8",  AOB_GOBJECTS_V8,  AobTarget::GObjects, 0, 3, 7, 0, 370, "V", "bit shift variant"),
+    SIG_RIP("GOBJ_V9",  AOB_GOBJECTS_V9,  AobTarget::GObjects, 0, 3, 7, 0, 380, "V", "extended index cdqe"),
+    SIG_RIP("GOBJ_V7",  AOB_GOBJECTS_V7,  AobTarget::GObjects, 0, 3, 7, 0, 390, "V", "GSpots cdq movzx"),
+    SIG_RIP("GOBJ_UD1", AOB_GOBJECTS_UD1, AobTarget::GObjects, 0, 3, 7, 0, 400, "UD", "UEDumper"),
+    SIG_RIP("GOBJ_GH_3", AOB_GOBJECTS_GH_3, AobTarget::GObjects, 12, 3, 7, 0, 410, "GH", "Ghidra IncrementalPurgeGarbage cross-game"),
+    SIG_RIP("GOBJ_G427_1", AOB_GOBJECTS_G427_1, AobTarget::GObjects, 0, 3, 7, 0, 420, "G427", "UE4.27 Objects SAR context"),
+    SIG_RIP("GOBJ_G427_3", AOB_GOBJECTS_G427_3, AobTarget::GObjects, 0, 3, 7, 0, 430, "G427", "UE4.27 FGCObject extended context"),
+    SIG_RIP("GOBJ_SAT426_1", AOB_GOBJECTS_SAT426_1, AobTarget::GObjects, 0, 3, 7, 0, 440, "SAT426", "Satisfactory UE4.26 RemoveAnnotation lea+call+test"),
+    SIG_RIP("GOBJ_SAT426_2", AOB_GOBJECTS_SAT426_2, AobTarget::GObjects, 0, 2, 6, 0, 450, "SAT426", "Satisfactory UE4.26 GatherUnreachableObjects"),
+    SIG_RIP("GOBJ_SAT52_2", AOB_GOBJECTS_SAT52_2, AobTarget::GObjects, 0, 3, 7, 0, 460, "SAT52", "Satisfactory UE5.2 ~UObjectBase IsValid"),
 
-    // Priority 50: Standard short patterns
-    SIG_RIP("GOBJ_V2",  AOB_GOBJECTS_V2,  AobTarget::GObjects, 0, 3, 7, 0, 50, "V", "common UE5.3+"),
-    SIG_RIP("GOBJ_V1",  AOB_GOBJECTS_V1,  AobTarget::GObjects, 0, 3, 7, 0, 51, "V", "classic UE5.0-5.2"),
-    SIG_RIP("GOBJ_V6",  AOB_GOBJECTS_V6,  AobTarget::GObjects, 0, 3, 7, 0, 52, "V", "alt mov rcx"),
-    SIG_RIP("GOBJ_V3",  AOB_GOBJECTS_V3,  AobTarget::GObjects, 0, 3, 7, 0, 53, "V", "mov r8"),
-    SIG_RIP("GOBJ_V5",  AOB_GOBJECTS_V5,  AobTarget::GObjects, 0, 3, 7, 0, 54, "V", "mov r10"),
-    SIG_RIP("GOBJ_CT3", AOB_GOBJECTS_CT3, AobTarget::GObjects, 0, 3, 7, 0, 55, "CT", "mov r8; cmp"),
+    // 500–590: Tier 3 — standard short patterns
+    SIG_RIP("GOBJ_V2",  AOB_GOBJECTS_V2,  AobTarget::GObjects, 0, 3, 7, 0, 500, "V", "common UE5.3+"),
+    SIG_RIP("GOBJ_V1",  AOB_GOBJECTS_V1,  AobTarget::GObjects, 0, 3, 7, 0, 510, "V", "classic UE5.0-5.2"),
+    SIG_RIP("GOBJ_V6",  AOB_GOBJECTS_V6,  AobTarget::GObjects, 0, 3, 7, 0, 520, "V", "alt mov rcx"),
+    SIG_RIP("GOBJ_V3",  AOB_GOBJECTS_V3,  AobTarget::GObjects, 0, 3, 7, 0, 530, "V", "mov r8"),
+    SIG_RIP("GOBJ_V5",  AOB_GOBJECTS_V5,  AobTarget::GObjects, 0, 3, 7, 0, 540, "V", "mov r10"),
+    SIG_RIP("GOBJ_CT3", AOB_GOBJECTS_CT3, AobTarget::GObjects, 0, 3, 7, 0, 550, "CT", "mov r8; cmp"),
 
-    // Priority 60: Patternsleuth (instrOffset != 0)
-    SIG_RIP("GOBJ_PS1", AOB_GOBJECTS_PS1, AobTarget::GObjects, 23, 3, 7, 0, 60, "PS", "cmp/cmp/jne; lea"),
-    SIG_RIP("GOBJ_PS2", AOB_GOBJECTS_PS2, AobTarget::GObjects,  2, 3, 7, 0, 61, "PS", "jz; lea rcx"),
-    SIG_RIP("GOBJ_PS3", AOB_GOBJECTS_PS3, AobTarget::GObjects,  5, 3, 7, 0, 62, "PS", "jne; mov; lea rcx"),
-    SIG_RIP("GOBJ_PS4", AOB_GOBJECTS_PS4, AobTarget::GObjects, 16, 3, 7, 0, 63, "PS", "test; mov; lea r11"),
-    SIG_RIP("GOBJ_PS5", AOB_GOBJECTS_PS5, AobTarget::GObjects, 12, 3, 7, 0, 64, "PS", "or; and; mov; lea rcx"),
-    SIG_RIP("GOBJ_PS6", AOB_GOBJECTS_PS6, AobTarget::GObjects, 14, 2, 6, 0, 65, "PS", "arithmetic sub eax"),
-    SIG_RIP("GOBJ_PS7", AOB_GOBJECTS_PS7, AobTarget::GObjects, 17, 2, 6, 0, 66, "PS", "arithmetic add ecx"),
+    // 600–690: Patternsleuth (instrOffset != 0)
+    SIG_RIP("GOBJ_PS1", AOB_GOBJECTS_PS1, AobTarget::GObjects, 23, 3, 7, 0, 600, "PS", "cmp/cmp/jne; lea"),
+    SIG_RIP("GOBJ_PS2", AOB_GOBJECTS_PS2, AobTarget::GObjects,  2, 3, 7, 0, 610, "PS", "jz; lea rcx"),
+    SIG_RIP("GOBJ_PS3", AOB_GOBJECTS_PS3, AobTarget::GObjects,  5, 3, 7, 0, 620, "PS", "jne; mov; lea rcx"),
+    SIG_RIP("GOBJ_PS4", AOB_GOBJECTS_PS4, AobTarget::GObjects, 16, 3, 7, 0, 630, "PS", "test; mov; lea r11"),
+    SIG_RIP("GOBJ_PS5", AOB_GOBJECTS_PS5, AobTarget::GObjects, 12, 3, 7, 0, 640, "PS", "or; and; mov; lea rcx"),
+    SIG_RIP("GOBJ_PS6", AOB_GOBJECTS_PS6, AobTarget::GObjects, 14, 2, 6, 0, 650, "PS", "arithmetic sub eax"),
+    SIG_RIP("GOBJ_PS7", AOB_GOBJECTS_PS7, AobTarget::GObjects, 17, 2, 6, 0, 660, "PS", "arithmetic add ecx"),
 
-    // Priority 70: UE 4.27 patterns with offsets/adjustments
-    SIG_RIP("GOBJ_G427_2", AOB_GOBJECTS_G427_2, AobTarget::GObjects, 0, 2, 6, -0x14, 70, "G427", "UE4.27 NumElements CMP (adj -0x14)"),
-    SIG_RIP("GOBJ_G427_4", AOB_GOBJECTS_G427_4, AobTarget::GObjects, 0, 2, 6, 0x0C, 71, "G427", "UE4.27 ObjLastNonGCIndex (adj +0x0C)"),
+    // 700–790: UE 4.27 patterns with offsets/adjustments
+    SIG_RIP("GOBJ_G427_2", AOB_GOBJECTS_G427_2, AobTarget::GObjects, 0, 2, 6, -0x14, 700, "G427", "UE4.27 NumElements CMP (adj -0x14)"),
+    SIG_RIP("GOBJ_G427_4", AOB_GOBJECTS_G427_4, AobTarget::GObjects, 0, 2, 6, 0x0C, 720, "G427", "UE4.27 ObjLastNonGCIndex (adj +0x0C)"),
 
-    // Priority 80: UE4/legacy
-    SIG_RIP("GOBJ_CT1", AOB_GOBJECTS_CT1, AobTarget::GObjects, 5, 3, 7, 0, 80, "CT", "UE4 Dumper.CT v5+"),
-    SIG_RIP("GOBJ_OT_1", AOB_GOBJECTS_OT_1, AobTarget::GObjects, 2, 3, 7, 0, 85, "OT", "Octopath Traveller UE4 FUObjectArray::Init LEA RCX"),
-    SIG_RIP("GOBJ_OT_2", AOB_GOBJECTS_OT_2, AobTarget::GObjects, 2, 3, 7, 0, 86, "OT", "UE4 FUObjectArray::Init generalized (wildcarded regs)"),
+    // 800–990: UE4/legacy
+    SIG_RIP("GOBJ_CT1", AOB_GOBJECTS_CT1, AobTarget::GObjects, 5, 3, 7, 0, 800, "CT", "UE4 Dumper.CT v5+"),
+    SIG_RIP("GOBJ_OT_1", AOB_GOBJECTS_OT_1, AobTarget::GObjects, 2, 3, 7, 0, 820, "OT", "Octopath Traveller UE4 FUObjectArray::Init LEA RCX"),
+    SIG_RIP("GOBJ_OT_2", AOB_GOBJECTS_OT_2, AobTarget::GObjects, 2, 3, 7, 0, 840, "OT", "UE4 FUObjectArray::Init generalized (wildcarded regs)"),
 };
 
 // ── Obfuscated FName payloads (licensee forks) ───────────────────────────
@@ -717,139 +767,154 @@ constexpr int AOB_NAMEDECRYPT_ME1_CTX_CALL_OFF = 0x2F;
 
 // ── GNames ───────────────────────────────────────────────────────────────
 constexpr AobSignature GNAMES_PATTERNS[] = {
-    // Priority 0: Symbol exports → scan function body for FNamePool references
+    // 0–20: Symbol exports → scan function body for FNamePool references
     SIG_SYM_CALL("GNAM_EXP_TOSTR", EXPORT_FNAME_TOSTRING, AobTarget::GNames, 0, "FName::ToString export"),
-    SIG_SYM_CALL("GNAM_EXP_CTOR",  EXPORT_FNAME_CTOR,     AobTarget::GNames, 1, "FName ctor (wchar) export"),
-    SIG_SYM_CALL("GNAM_EXP_CTOR2", EXPORT_FNAME_CTOR_CHAR,AobTarget::GNames, 2, "FName ctor (char) export"),
+    SIG_SYM_CALL("GNAM_EXP_CTOR",  EXPORT_FNAME_CTOR,     AobTarget::GNames, 10, "FName ctor (wchar) export"),
+    SIG_SYM_CALL("GNAM_EXP_CTOR2", EXPORT_FNAME_CTOR_CHAR,AobTarget::GNames, 20, "FName ctor (char) export"),
 
-    // Priority 5: FName ctor call-site (follows CALL, scans body)
+    // 40: FName ctor call-site (follows CALL, scans body)
     { "GNAM_V7", AOB_GNAMES_V7_FNAME_CTOR, AobTarget::GNames, AobResolve::CallFollow,
-      0, 0, 0, 0, 5, 11, false, "V", "FF7 Rebirth FName ctor call-site" },
+      0, 0, 0, 0, 40, 11, false, "V", "FF7 Rebirth FName ctor call-site" },
 
-    // Priority 10-20: Long specific patterns
-    SIG_RIP("GNAM_V8",    AOB_GNAMES_V8,     AobTarget::GNames, 0, 3, 7, 0, 10, "V", "Palworld extended context"),
-    SIG_RIP("GNAM_V5",    AOB_GNAMES_V5,     AobTarget::GNames, 0, 3, 7, 0, 12, "V", "lea rcx; call; mov byte[],1 extended"),
-    SIG_RIP("GNAM_ES53_1", AOB_GNAMES_ES53_1, AobTarget::GNames, 0, 3, 7, 0, 13, "ES53", "ES2 UE5.3 FNamePool init + MOV RDX,RAX"),
-    SIG_RIP("GNAM_GH_1",  AOB_GNAMES_GH_1,   AobTarget::GNames, 12, 3, 7, 0, 14, "GH", "Ghidra ReserveNameBatch 27-fixed cross-game"),
-    SIG_RIP("GNAM_SAT52_1", AOB_GNAMES_SAT52_1, AobTarget::GNames, 0, 3, 7, 0, 14, "SAT52", "Satisfactory UE5.2 dual-LEA NamePoolData"),
-    SIG_RIP("GNAM_SAT425_1", AOB_GNAMES_SAT425_1, AobTarget::GNames, 18, 3, 7, 0, 15, "SAT425", "Satisfactory UE4.25 FName::AppendString LEA R8"),
-    SIG_RIP("GNAM_SAT425_2", AOB_GNAMES_SAT425_2, AobTarget::GNames, 0, 3, 7, 0, 16, "SAT425", "Satisfactory UE4.25 FName::GetNameEntryMemorySize"),
-    SIG_RIP("GNAM_GH_2",  AOB_GNAMES_GH_2,   AobTarget::GNames, 12, 3, 7, 0, 16, "GH", "Ghidra FNameEntryId::FromValidEName cross-game"),
-    SIG_RIP("GNAM_ES2_1", AOB_GNAMES_ES2_1,  AobTarget::GNames, 0, 3, 7, 0, 17, "ES2", "UE5.5 ResolveEntry"),
-    SIG_RIP("GNAM_SAT425_3", AOB_GNAMES_SAT425_3, AobTarget::GNames, 0, 3, 7, 0, 18, "SAT425", "Satisfactory UE4.25 GetNumAnsiNames (general V8)"),
-    SIG_RIP("GNAM_SF_1",  AOB_GNAMES_SF_1,   AobTarget::GNames, 0, 3, 7, 0, 19, "SF", "SatisfFactory NamePoolData init (in Core DLL)"),
-    SIG_RIP("GNAM_CT1",   AOB_GNAMES_CT1,    AobTarget::GNames, 0, 3, 7, 0, 20, "CT", "UE4 Dumper.CT v6+ lea r8; jmp 16"),
-    SIG_RIP("GNAM_CT2",   AOB_GNAMES_CT2,    AobTarget::GNames, 0, 3, 7, 0, 21, "CT", "UE4 Dumper.CT UE4.23+ main"),
-    SIG_RIP("GNAM_UD2",   AOB_GNAMES_UD2,    AobTarget::GNames, 0, 3, 7, 0, 22, "UD", "UEDumper lea rcx; call; mov r8"),
+    // 100–290: Tier 1 — long, specific patterns
+    SIG_RIP("GNAM_V8",    AOB_GNAMES_V8,     AobTarget::GNames, 0, 3, 7, 0, 100, "V", "Palworld extended context"),
+    SIG_RIP("GNAM_V5",    AOB_GNAMES_V5,     AobTarget::GNames, 0, 3, 7, 0, 110, "V", "lea rcx; call; mov byte[],1 extended"),
+    SIG_RIP("GNAM_ES53_1", AOB_GNAMES_ES53_1, AobTarget::GNames, 0, 3, 7, 0, 120, "ES53", "ES2 UE5.3 FNamePool init + MOV RDX,RAX"),
+    SIG_RIP("GNAM_GH_1",  AOB_GNAMES_GH_1,   AobTarget::GNames, 12, 3, 7, 0, 130, "GH", "Ghidra ReserveNameBatch 27-fixed cross-game"),
+    SIG_RIP("GNAM_SAT52_1", AOB_GNAMES_SAT52_1, AobTarget::GNames, 0, 3, 7, 0, 140, "SAT52", "Satisfactory UE5.2 dual-LEA NamePoolData"),
+    SIG_RIP("GNAM_SAT425_1", AOB_GNAMES_SAT425_1, AobTarget::GNames, 18, 3, 7, 0, 150, "SAT425", "Satisfactory UE4.25 FName::AppendString LEA R8"),
+    SIG_RIP("GNAM_SAT425_2", AOB_GNAMES_SAT425_2, AobTarget::GNames, 0, 3, 7, 0, 160, "SAT425", "Satisfactory UE4.25 FName::GetNameEntryMemorySize"),
+    SIG_RIP("GNAM_GH_2",  AOB_GNAMES_GH_2,   AobTarget::GNames, 12, 3, 7, 0, 170, "GH", "Ghidra FNameEntryId::FromValidEName cross-game"),
+    SIG_RIP("GNAM_ES2_1", AOB_GNAMES_ES2_1,  AobTarget::GNames, 0, 3, 7, 0, 180, "ES2", "UE5.5 ResolveEntry"),
+    SIG_RIP("GNAM_SAT425_3", AOB_GNAMES_SAT425_3, AobTarget::GNames, 0, 3, 7, 0, 190, "SAT425", "Satisfactory UE4.25 GetNumAnsiNames (general V8)"),
+    SIG_RIP("GNAM_SF_1",  AOB_GNAMES_SF_1,   AobTarget::GNames, 0, 3, 7, 0, 200, "SF", "SatisfFactory NamePoolData init (in Core DLL)"),
+    SIG_RIP("GNAM_CT1",   AOB_GNAMES_CT1,    AobTarget::GNames, 0, 3, 7, 0, 210, "CT", "UE4 Dumper.CT v6+ lea r8; jmp 16"),
+    SIG_RIP("GNAM_CT2",   AOB_GNAMES_CT2,    AobTarget::GNames, 0, 3, 7, 0, 300, "CT", "UE4 Dumper.CT UE4.23+ main"),
+    SIG_RIP("GNAM_UD2",   AOB_GNAMES_UD2,    AobTarget::GNames, 0, 3, 7, 0, 320, "UD", "UEDumper lea rcx; call; mov r8"),
 
-    // Priority 30-40: Medium patterns
-    SIG_RIP("GNAM_SF_2",  AOB_GNAMES_SF_2,   AobTarget::GNames, 0, 3, 7, 0, 30, "SF", "SatisfFactory SHL pattern (in Core DLL)"),
-    SIG_RIP("GNAM_SF_3",  AOB_GNAMES_SF_3,   AobTarget::GNames, 0, 3, 7, 0, 31, "SF", "SatisfFactory FNameEntryId (in Core DLL)"),
-    SIG_RIP("GNAM_V6",    AOB_GNAMES_V6,     AobTarget::GNames, 0, 3, 7, 0, 35, "V", "GSpots UE5+ mov rax; test; jnz"),
-    SIG_RIP("GNAM_V2",    AOB_GNAMES_V2,     AobTarget::GNames, 0, 3, 7, 0, 36, "V", "lea rcx; call; mov byte ptr"),
+    // 300–490: Tier 2 — medium patterns
+    SIG_RIP("GNAM_SF_2",  AOB_GNAMES_SF_2,   AobTarget::GNames, 0, 3, 7, 0, 340, "SF", "SatisfFactory SHL pattern (in Core DLL)"),
+    SIG_RIP("GNAM_SF_3",  AOB_GNAMES_SF_3,   AobTarget::GNames, 0, 3, 7, 0, 360, "SF", "SatisfFactory FNameEntryId (in Core DLL)"),
+    SIG_RIP("GNAM_V6",    AOB_GNAMES_V6,     AobTarget::GNames, 0, 3, 7, 0, 380, "V", "GSpots UE5+ mov rax; test; jnz"),
+    SIG_RIP("GNAM_V2",    AOB_GNAMES_V2,     AobTarget::GNames, 0, 3, 7, 0, 400, "V", "lea rcx; call; mov byte ptr"),
 
-    // Priority 50: Short patterns
-    SIG_RIP("GNAM_V1",    AOB_GNAMES_V1,     AobTarget::GNames, 0, 3, 7, 0, 50, "V", "lea rsi; jmp"),
-    SIG_RIP("GNAM_V3",    AOB_GNAMES_V3,     AobTarget::GNames, 0, 3, 7, 0, 51, "V", "lea rax; jmp"),
-    SIG_RIP("GNAM_V4",    AOB_GNAMES_V4,     AobTarget::GNames, 0, 3, 7, 0, 52, "V", "lea r8; jmp"),
-    SIG_RIP("GNAM_D7_1",  AOB_GNAMES_D7_1,   AobTarget::GNames, 0, 3, 7, 0, 55, "D7", "Dumper-7 basic lea rcx; call"),
+    // 500–590: Tier 3 — short patterns
+    SIG_RIP("GNAM_V1",    AOB_GNAMES_V1,     AobTarget::GNames, 0, 3, 7, 0, 500, "V", "lea rsi; jmp"),
+    SIG_RIP("GNAM_V3",    AOB_GNAMES_V3,     AobTarget::GNames, 0, 3, 7, 0, 520, "V", "lea rax; jmp"),
+    SIG_RIP("GNAM_V4",    AOB_GNAMES_V4,     AobTarget::GNames, 0, 3, 7, 0, 540, "V", "lea r8; jmp"),
+    SIG_RIP("GNAM_D7_1",  AOB_GNAMES_D7_1,   AobTarget::GNames, 0, 3, 7, 0, 560, "D7", "Dumper-7 basic lea rcx; call"),
 
-    // Priority 60: Patternsleuth
-    SIG_RIP("GNAM_PS1",   AOB_GNAMES_PS1,    AobTarget::GNames, 2, 3, 7, 0, 60, "PS", "jz+9; lea r8"),
-    SIG_RIP("GNAM_PS2",   AOB_GNAMES_PS2,    AobTarget::GNames, 7, 3, 7, 0, 61, "PS", "sub rsp; shr; lea rbp"),
+    // 600–690: Patternsleuth
+    SIG_RIP("GNAM_PS1",   AOB_GNAMES_PS1,    AobTarget::GNames, 2, 3, 7, 0, 600, "PS", "jz+9; lea r8"),
+    SIG_RIP("GNAM_PS2",   AOB_GNAMES_PS2,    AobTarget::GNames, 7, 3, 7, 0, 620, "PS", "sub rsp; shr; lea rbp"),
 
-    // Priority 80: UE4/legacy (pre-FNamePool)
-    SIG_RIP("GNAM_CT3",   AOB_GNAMES_CT3,    AobTarget::GNames, 4, 3, 7, 0, 80, "CT", "UE4 <4.23 pre-FNamePool deref"),
-    SIG_RIP("GNAM_CT4",   AOB_GNAMES_CT4,    AobTarget::GNames, 3, 3, 7, 0, 81, "CT", "UE4 pre-FNamePool write pattern"),
-    SIG_RIP("GNAM_G42_1", AOB_GNAMES_G42_1,  AobTarget::GNames, 0, 3, 7, 0, 82, "G42", "UE4.2 pre-FNamePool TStaticIndirectArray"),
-    SIG_RIP("GNAM_SAT422_1", AOB_GNAMES_SAT422_1, AobTarget::GNames, 0, 3, 7, 0, 83, "SAT422", "Satisfactory UE4.22 pre-FNamePool JNE near + CMP byte"),
+    // 800–990: UE4/legacy (pre-FNamePool)
+    SIG_RIP("GNAM_CT3",   AOB_GNAMES_CT3,    AobTarget::GNames, 4, 3, 7, 0, 800, "CT", "UE4 <4.23 pre-FNamePool deref"),
+    SIG_RIP("GNAM_CT4",   AOB_GNAMES_CT4,    AobTarget::GNames, 3, 3, 7, 0, 820, "CT", "UE4 pre-FNamePool write pattern"),
+    SIG_RIP("GNAM_G42_1", AOB_GNAMES_G42_1,  AobTarget::GNames, 0, 3, 7, 0, 840, "G42", "UE4.2 pre-FNamePool TStaticIndirectArray"),
+    SIG_RIP("GNAM_SAT422_1", AOB_GNAMES_SAT422_1, AobTarget::GNames, 0, 3, 7, 0, 860, "SAT422", "Satisfactory UE4.22 pre-FNamePool JNE near + CMP byte"),
 };
 
 // ── GWorld ───────────────────────────────────────────────────────────────
 constexpr AobSignature GWORLD_PATTERNS[] = {
-    // Priority 0: Symbol export
+    // 0: Symbol export (O(1))
     SIG_EXPORT("GWLD_EXP", EXPORT_GWORLD, AobTarget::GWorld, 0, "UWorldProxy symbol"),
 
-    // Priority 10-20: Long specific patterns (from ES2, SF, TQ2)
-    SIG_GWORLD_RIP("GWLD_ES2_1", AOB_GWORLD_ES2_1, 0, 3, 7, 0, 10, false, "ES2", "UE5.5 26-byte lea+mov chain"),
-    SIG_GWORLD_RIP("GWLD_ES2_2", AOB_GWORLD_ES2_2, 0, 4, 8, 0, 11, false, "ES2", "UE5.5 CMOVZ r13"),
-    SIG_GWORLD_RIP("GWLD_ES2_3", AOB_GWORLD_ES2_3, 0, 3, 7, 0, 12, false, "ES2", "UE5.5 cmp [rcx+2C0]"),
-    SIG_GWORLD_RIP("GWLD_ES2_4", AOB_GWORLD_ES2_4, 0, 3, 7, 0, 13, false, "ES2", "UE5.5 cmp+and GWorld"),
-    SIG_GWORLD_RIP("GWLD_ES2_5", AOB_GWORLD_ES2_5, 0, 3, 7, 0, 14, false, "ES2", "UE5.5 call r12 loop"),
-    SIG_GWORLD_RIP("GWLD_ES2_6", AOB_GWORLD_ES2_6, 0, 3, 7, 0, 15, false, "ES2", "UE5.5 cmovne+call rbx"),
-    SIG_GWORLD_RIP("GWLD_GH_1",  AOB_GWORLD_GH_1,  12, 3, 7, 0, 15, false, "GH", "Ghidra FMallocLeakReporter 25-fixed cross-game"),
-    SIG_GWORLD_RIP("GWLD_TQ_1",  AOB_GWORLD_TQ_1,  0, 3, 7, 0, 16, false, "TQ", "TQ2 extended V3"),
-    SIG_GWORLD_RIP("GWLD_TQ_2",  AOB_GWORLD_TQ_2,  0, 3, 7, 0, 17, false, "TQ", "TQ2 dual mov"),
-    SIG_GWORLD_RIP("GWLD_GH_2",  AOB_GWORLD_GH_2,   9, 3, 7, 0, 17, false, "GH", "Ghidra FUMGViewportClient::GetWorld cross-game"),
-    SIG_GWORLD_RIP("GWLD_V7",    AOB_GWORLD_V7,     0, 3, 7, 0, 18, false, "V", "Palworld long context"),
-    SIG_GWORLD_RIP("GWLD_V1",    AOB_GWORLD_V1,     0, 3, 7, 0, 19, false, "V", "cmp/cmovz"),
+    // 100–160: Solarpunk UE 5.7 (verified decoy-free; re-anchor GWorld before
+    // the generic GWLD_SF_2 that mis-fires on a decoy in this build)
+    SIG_GWORLD_RIP("GWLD_SP57_1", AOB_GWORLD_SP57_1, 0, 3, 7, 0, 100, false, "SP57", "UE5.7 UGameEngine::Tick cmp [rcx+2C0] (tolerates inserted mov)"),
+    SIG_GWORLD_RIP("GWLD_SP57_2", AOB_GWORLD_SP57_2, 0, 3, 7, 0, 120, false, "SP57", "UE5.7 FMallocLeakReporter::WriteReports (mov rsi,rcx variant)"),
+    SIG_GWORLD_RIP("GWLD_SP57_3", AOB_GWORLD_SP57_3, 0, 3, 7, 0, 140, false, "SP57", "UE5.7 UEngine::GetWorldFromContextObject fallback"),
+    SIG_GWORLD_RIP("GWLD_SP57_4", AOB_GWORLD_SP57_4, 0, 3, 7, 0, 160, false, "SP57", "UE5.7 UActorComponent::On*PhysicsState mov [rax+298]"),
 
-    // Priority 20-30: SatisfFactory DLL patterns + Ghidra cross-game
-    SIG_GWORLD_RIP("GWLD_GH_3",  AOB_GWORLD_GH_3,  12, 3, 7, 0, 20, false, "GH", "Ghidra GetWorldFromContextObject cross-game"),
-    SIG_GWORLD_RIP("GWLD_SF_1",  AOB_GWORLD_SF_1,   0, 3, 7, 0, 20, false, "SF", "Engine DLL UGameEngine::Tick"),
-    SIG_GWORLD_RIP("GWLD_SF_2",  AOB_GWORLD_SF_2,   0, 3, 7, 0, 21, false, "SF", "Engine DLL FAudioDeviceManager"),
-    SIG_GWORLD_RIP("GWLD_SF_3",  AOB_GWORLD_SF_3,   0, 3, 7, 0, 22, false, "SF", "Engine DLL UWorld::FinishDestroy"),
-    SIG_GWORLD_RIP("GWLD_SF_4",  AOB_GWORLD_SF_4,   0, 3, 7, 0, 23, false, "SF", "Engine DLL GetWorldFromContextObject"),
-    SIG_GWORLD_RIP("GWLD_SF_5",  AOB_GWORLD_SF_5,   0, 3, 7, 0, 24, false, "SF", "Engine DLL FMallocLeakReporter"),
-    SIG_GWORLD_RIP("GWLD_GH_4",  AOB_GWORLD_GH_4,   8, 3, 7, 0, 24, false, "GH", "Ghidra FEngineLoop::Tick XORPS cross-game"),
+    // 100–290: Tier 1 — long specific patterns (ES2, SF, TQ2, SP57)
+    SIG_GWORLD_RIP("GWLD_ES2_1", AOB_GWORLD_ES2_1, 0, 3, 7, 0, 110, false, "ES2", "UE5.5 26-byte lea+mov chain"),
+    SIG_GWORLD_RIP("GWLD_ES2_2", AOB_GWORLD_ES2_2, 0, 4, 8, 0, 130, false, "ES2", "UE5.5 CMOVZ r13"),
+    SIG_GWORLD_RIP("GWLD_ES2_3", AOB_GWORLD_ES2_3, 0, 3, 7, 0, 150, false, "ES2", "UE5.5 cmp [rcx+2C0]"),
+    SIG_GWORLD_RIP("GWLD_ES2_4", AOB_GWORLD_ES2_4, 0, 3, 7, 0, 170, false, "ES2", "UE5.5 cmp+and GWorld"),
+    SIG_GWORLD_RIP("GWLD_ES2_5", AOB_GWORLD_ES2_5, 0, 3, 7, 0, 180, false, "ES2", "UE5.5 call r12 loop"),
+    SIG_GWORLD_RIP("GWLD_ES2_6", AOB_GWORLD_ES2_6, 0, 3, 7, 0, 190, false, "ES2", "UE5.5 cmovne+call rbx"),
+    SIG_GWORLD_RIP("GWLD_GH_1",  AOB_GWORLD_GH_1,  12, 3, 7, 0, 200, false, "GH", "Ghidra FMallocLeakReporter 25-fixed cross-game"),
+    SIG_GWORLD_RIP("GWLD_TQ_1",  AOB_GWORLD_TQ_1,  0, 3, 7, 0, 210, false, "TQ", "TQ2 extended V3"),
+    SIG_GWORLD_RIP("GWLD_TQ_2",  AOB_GWORLD_TQ_2,  0, 3, 7, 0, 220, false, "TQ", "TQ2 dual mov"),
+    SIG_GWORLD_RIP("GWLD_GH_2",  AOB_GWORLD_GH_2,   9, 3, 7, 0, 230, false, "GH", "Ghidra FUMGViewportClient::GetWorld cross-game"),
+    SIG_GWORLD_RIP("GWLD_V7",    AOB_GWORLD_V7,     0, 3, 7, 0, 240, false, "V", "Palworld long context"),
+    SIG_GWORLD_RIP("GWLD_V1",    AOB_GWORLD_V1,     0, 3, 7, 0, 250, false, "V", "cmp/cmovz"),
 
-    // Priority 25-29: UE 4.2 patterns
-    SIG_GWORLD_RIP("GWLD_G42_3", AOB_GWORLD_G42_3,  9, 3, 7, 0, 25, false, "G42", "UE4.2 fallback return pattern"),
-    SIG_GWORLD_RIP("GWLD_G42_2", AOB_GWORLD_G42_2,  0, 3, 7, 0, 26, false, "G42", "UE4.2 test+jz+mov r8b"),
-    SIG_GWORLD_RIP("GWLD_G42_5", AOB_GWORLD_G42_5,  0, 3, 7, 0, 27, false, "G42", "UE4.2 mov+mov rbx+lea"),
-    SIG_GWORLD_RIP("GWLD_G42_1", AOB_GWORLD_G42_1,  0, 3, 7, 0, 28, false, "G42", "UE4.2 mov+mov rsi+call"),
-    SIG_GWORLD_RIP("GWLD_G42_4", AOB_GWORLD_G42_4,  0, 3, 7, 0, 29, false, "G42", "UE4.2 mov rdi+mov rbx"),
-    SIG_GWORLD_RIP("GWLD_SAT422_1", AOB_GWORLD_SAT422_1, 0, 3, 7, 0, 29, false, "SAT422", "Satisfactory UE4.22 FMallocLeakReporter"),
-    SIG_GWORLD_RIP("GWLD_SAT425_1", AOB_GWORLD_SAT425_1, 0, 3, 7, 0, 29, false, "SAT425", "Satisfactory UE4.25 UGameEngine::Tick CMP"),
-    SIG_GWORLD_RIP("GWLD_SAT426_1", AOB_GWORLD_SAT426_1, 0, 3, 7, 0, 29, false, "SAT426", "Satisfactory UE4.26 UGameEngine::Tick cmp+jz"),
-    SIG_GWORLD_RIP("GWLD_SAT52_1",  AOB_GWORLD_SAT52_1,  0, 3, 7, 0, 29, false, "SAT52", "Satisfactory UE5.2 FAudioDeviceManager"),
+    // 260–320: SatisfFactory DLL patterns + Ghidra cross-game
+    SIG_GWORLD_RIP("GWLD_GH_3",  AOB_GWORLD_GH_3,  12, 3, 7, 0, 260, false, "GH", "Ghidra GetWorldFromContextObject cross-game"),
+    SIG_GWORLD_RIP("GWLD_SF_1",  AOB_GWORLD_SF_1,   0, 3, 7, 0, 270, false, "SF", "Engine DLL UGameEngine::Tick"),
+    SIG_GWORLD_RIP("GWLD_SF_2",  AOB_GWORLD_SF_2,   0, 3, 7, 0, 300, false, "SF", "Engine DLL FAudioDeviceManager"),
+    SIG_GWORLD_RIP("GWLD_SF_3",  AOB_GWORLD_SF_3,   0, 3, 7, 0, 305, false, "SF", "Engine DLL UWorld::FinishDestroy"),
+    SIG_GWORLD_RIP("GWLD_SF_4",  AOB_GWORLD_SF_4,   0, 3, 7, 0, 310, false, "SF", "Engine DLL GetWorldFromContextObject"),
+    SIG_GWORLD_RIP("GWLD_SF_5",  AOB_GWORLD_SF_5,   0, 3, 7, 0, 315, false, "SF", "Engine DLL FMallocLeakReporter"),
+    SIG_GWORLD_RIP("GWLD_GH_4",  AOB_GWORLD_GH_4,   8, 3, 7, 0, 320, false, "GH", "Ghidra FEngineLoop::Tick XORPS cross-game"),
 
-    // Priority 30-39: UE 4.27 patterns and wildcard-prefixed TQ2 patterns
-    SIG_GWORLD_RIP("GWLD_G427_1", AOB_GWORLD_G427_1, 0, 3, 7, 0, 30, false, "G427", "UE4.27 FEngineLoop::Tick extended"),
-    SIG_GWORLD_RIP("GWLD_G427_2", AOB_GWORLD_G427_2, 0, 3, 7, 0, 31, false, "G427", "UE4.27 GetWorldFromContextObject"),
-    SIG_GWORLD_RIP("GWLD_G427_3", AOB_GWORLD_G427_3, 10, 3, 7, 0, 32, false, "G427", "UE4.27 UGameEngine::Tick (49 prefix)"),
-    SIG_GWORLD_RIP("GWLD_G427_4", AOB_GWORLD_G427_4, 10, 3, 7, 0, 33, false, "G427", "UE4.27 UGameEngine::Tick (48 prefix)"),
-    SIG_GWORLD_RIP("GWLD_G427_5", AOB_GWORLD_G427_5, 0, 3, 7, 0, 34, false, "G427", "UE4.27 UWorld::FinishDestroy cmp rbx"),
+    // 325–365: UE 4.2 / Satisfactory read patterns
+    SIG_GWORLD_RIP("GWLD_G42_3", AOB_GWORLD_G42_3,  9, 3, 7, 0, 325, false, "G42", "UE4.2 fallback return pattern"),
+    SIG_GWORLD_RIP("GWLD_G42_2", AOB_GWORLD_G42_2,  0, 3, 7, 0, 330, false, "G42", "UE4.2 test+jz+mov r8b"),
+    SIG_GWORLD_RIP("GWLD_G42_5", AOB_GWORLD_G42_5,  0, 3, 7, 0, 335, false, "G42", "UE4.2 mov+mov rbx+lea"),
+    SIG_GWORLD_RIP("GWLD_G42_1", AOB_GWORLD_G42_1,  0, 3, 7, 0, 340, false, "G42", "UE4.2 mov+mov rsi+call"),
+    SIG_GWORLD_RIP("GWLD_G42_4", AOB_GWORLD_G42_4,  0, 3, 7, 0, 345, false, "G42", "UE4.2 mov rdi+mov rbx"),
+    SIG_GWORLD_RIP("GWLD_SAT422_1", AOB_GWORLD_SAT422_1, 0, 3, 7, 0, 350, false, "SAT422", "Satisfactory UE4.22 FMallocLeakReporter"),
+    SIG_GWORLD_RIP("GWLD_SAT425_1", AOB_GWORLD_SAT425_1, 0, 3, 7, 0, 355, false, "SAT425", "Satisfactory UE4.25 UGameEngine::Tick CMP"),
+    SIG_GWORLD_RIP("GWLD_SAT426_1", AOB_GWORLD_SAT426_1, 0, 3, 7, 0, 360, false, "SAT426", "Satisfactory UE4.26 UGameEngine::Tick cmp+jz"),
+    SIG_GWORLD_RIP("GWLD_SAT52_1",  AOB_GWORLD_SAT52_1,  0, 3, 7, 0, 365, false, "SAT52", "Satisfactory UE5.2 FAudioDeviceManager"),
 
-    // Priority 35-36: Wildcard-prefixed TQ2 patterns
-    SIG_GWORLD_RIP("GWLD_TQ_3",  AOB_GWORLD_TQ_3,   3, 3, 7, 0, 35, false, "TQ", "TQ2 ??-prefix mov rax"),
+    // 370–390: UE 4.27 patterns
+    SIG_GWORLD_RIP("GWLD_G427_1", AOB_GWORLD_G427_1, 0, 3, 7, 0, 370, false, "G427", "UE4.27 FEngineLoop::Tick extended"),
+    SIG_GWORLD_RIP("GWLD_G427_2", AOB_GWORLD_G427_2, 0, 3, 7, 0, 375, false, "G427", "UE4.27 GetWorldFromContextObject"),
+    SIG_GWORLD_RIP("GWLD_G427_3", AOB_GWORLD_G427_3, 10, 3, 7, 0, 380, false, "G427", "UE4.27 UGameEngine::Tick (49 prefix)"),
+    SIG_GWORLD_RIP("GWLD_G427_4", AOB_GWORLD_G427_4, 10, 3, 7, 0, 385, false, "G427", "UE4.27 UGameEngine::Tick (48 prefix)"),
+    SIG_GWORLD_RIP("GWLD_G427_5", AOB_GWORLD_G427_5, 0, 3, 7, 0, 390, false, "G427", "UE4.27 UWorld::FinishDestroy cmp rbx"),
+
+    // 395–400: Wildcard-prefixed TQ2 patterns
+    SIG_GWORLD_RIP("GWLD_TQ_3",  AOB_GWORLD_TQ_3,   3, 3, 7, 0, 395, false, "TQ", "TQ2 ??-prefix mov rax"),
     { "GWLD_TQ_4", AOB_GWORLD_TQ_4, AobTarget::GWorld, AobResolve::RipBoth,
-      3, 3, 7, 0, 36, 0, true, "TQ", "TQ2 ??-prefix write pattern" },
+      3, 3, 7, 0, 400, 0, true, "TQ", "TQ2 ??-prefix write pattern" },
 
-    // Priority 37-39: Write patterns (Satisfactory UE 4.25, ES2 UE 5.3)
+    // 405–420: Write patterns (Satisfactory UE 4.25, ES2 UE 5.3)
     { "GWLD_SAT425_3", AOB_GWORLD_SAT425_3, AobTarget::GWorld, AobResolve::RipBoth,
-      0, 3, 7, 0, 37, 0, true, "SAT425", "Satisfactory UE4.25 write + R15 context" },
+      0, 3, 7, 0, 405, 0, true, "SAT425", "Satisfactory UE4.25 write + R15 context" },
     { "GWLD_SAT425_2", AOB_GWORLD_SAT425_2, AobTarget::GWorld, AobResolve::RipBoth,
-      0, 3, 7, 0, 38, 0, true, "SAT425", "Satisfactory UE4.25 write + TLS" },
+      0, 3, 7, 0, 410, 0, true, "SAT425", "Satisfactory UE4.25 write + TLS" },
     { "GWLD_ES53_1", AOB_GWORLD_ES53_1, AobTarget::GWorld, AobResolve::RipBoth,
-      0, 3, 7, 0, 39, 0, true, "ES53", "ES2 UE5.3 UGameEngine::Tick MOVAPS write" },
+      0, 3, 7, 0, 415, 0, true, "ES53", "ES2 UE5.3 UGameEngine::Tick MOVAPS write" },
     { "GWLD_ES53_2", AOB_GWORLD_ES53_2, AobTarget::GWorld, AobResolve::RipBoth,
-      0, 3, 7, 0, 40, 0, true, "ES53", "ES2 UE5.3 UGameEngine::Tick RCX write" },
+      0, 3, 7, 0, 420, 0, true, "ES53", "ES2 UE5.3 UGameEngine::Tick RCX write" },
 
-    // Priority 41-44: Satisfactory write patterns
+    // 425–435: Satisfactory write patterns
     { "GWLD_SAT422_2", AOB_GWORLD_SAT422_2, AobTarget::GWorld, AobResolve::RipBoth,
-      0, 3, 7, 0, 41, 0, true, "SAT422", "Satisfactory UE4.22 SetGlobalWorld RCX write" },
+      0, 3, 7, 0, 425, 0, true, "SAT422", "Satisfactory UE4.22 SetGlobalWorld RCX write" },
     { "GWLD_SAT426_2", AOB_GWORLD_SAT426_2, AobTarget::GWorld, AobResolve::RipBoth,
-      0, 3, 7, 0, 42, 0, true, "SAT426", "Satisfactory UE4.26 FinishDestroy RAX write" },
+      0, 3, 7, 0, 430, 0, true, "SAT426", "Satisfactory UE4.26 FinishDestroy RAX write" },
     { "GWLD_SAT52_2", AOB_GWORLD_SAT52_2, AobTarget::GWorld, AobResolve::RipBoth,
-      0, 3, 7, 0, 43, 0, true, "SAT52", "Satisfactory UE5.2 UGameEngine::Tick RCX write" },
+      0, 3, 7, 0, 435, 0, true, "SAT52", "Satisfactory UE5.2 UGameEngine::Tick RCX write" },
 
-    // Priority 50: Standard short GWorld patterns
-    SIG_GWORLD_RIP("GWLD_V3",    AOB_GWORLD_V3,     0, 3, 7, 0, 50, false, "V", "mov rbx test rbx"),
-    SIG_GWORLD_RIP("GWLD_V4",    AOB_GWORLD_V4,     0, 3, 7, 0, 51, false, "V", "mov rdi test rdi"),
-    SIG_GWORLD_RIP("GWLD_V5",    AOB_GWORLD_V5,     0, 3, 7, 0, 52, false, "V", "cmp [rip] je"),
+    // 500–590: Standard short GWorld patterns
+    SIG_GWORLD_RIP("GWLD_V3",    AOB_GWORLD_V3,     0, 3, 7, 0, 500, false, "V", "mov rbx test rbx"),
+    SIG_GWORLD_RIP("GWLD_V4",    AOB_GWORLD_V4,     0, 3, 7, 0, 520, false, "V", "mov rdi test rdi"),
+    SIG_GWORLD_RIP("GWLD_V5",    AOB_GWORLD_V5,     0, 3, 7, 0, 540, false, "V", "cmp [rip] je"),
     { "GWLD_V2", AOB_GWORLD_V2, AobTarget::GWorld, AobResolve::RipBoth,
-      0, 3, 7, 0, 55, 0, true, "V", "write: mov [rip],rax" },
+      0, 3, 7, 0, 560, 0, true, "V", "write: mov [rip],rax" },
     { "GWLD_V6", AOB_GWORLD_V6, AobTarget::GWorld, AobResolve::RipBoth,
-      0, 3, 7, 0, 56, 0, true, "V", "write: mov [rip],rbx; call" },
+      0, 3, 7, 0, 580, 0, true, "V", "write: mov [rip],rbx; call" },
 };
 
 // ── SparseDelegates (FSparseDelegateStorage::SparseDelegates) ────────────
 // Lazily resolved on first MulticastSparseDelegateProperty drill-down — NOT
 // part of the FindAll boot sequence. Resolves directly to the TMap value.
 constexpr AobSignature SPARSE_PATTERNS[] = {
+    // Solarpunk UE 5.7 — SPARSE_ES2_1 gets 0 hits on this build; these anchor on the
+    // TSet element-index math instead. RipDirect -> TSet object base. Verified.
+    SIG_RIP_DIRECT("SPARSE_SP57_1", AOB_SPARSE_SP57_1, AobTarget::SparseDelegates,
+                   0, 3, 7, 0, 100,
+                   "SP57", "UE5.7 TSet::Find/FindOrAdd/Emplace element index (mov rdx)"),
+    SIG_RIP_DIRECT("SPARSE_SP57_2", AOB_SPARSE_SP57_2, AobTarget::SparseDelegates,
+                   0, 3, 7, 0, 120,
+                   "SP57", "UE5.7 TSet::Remove element index (mov r8, unique)"),
     SIG_RIP_DIRECT("SPARSE_ES2_1", AOB_SPARSE_ES2_1, AobTarget::SparseDelegates,
-                   16, 3, 7, 0, 20,
+                   16, 3, 7, 0, 140,
                    "ES2", "ES2 UE5.4 NotifyUObjectDeleted middle (twin-ref)"),
 };
 
@@ -865,8 +930,8 @@ constexpr AobSignature SPARSE_PATTERNS[] = {
 // ============================================================
 // GObjects: 27 (original) + 2 (ES2, SF) + 4 (G42) + 4 (G427) + 1 (ES53) + 1 (SAT422) + 2 (SAT425) + 2 (SAT426) + 2 (SAT52) + 2 (OT) + 4 (GH) = 51 patterns + 1 symbol export
 // GNames:   17 (original) + 4 (ES2, SF) + 1 (G42) + 1 (ES53) + 1 (SAT422) + 3 (SAT425) + 1 (SAT52) + 2 (GH) = 30 patterns + 3 symbol exports
-// GWorld:    7 (original) + 15 (ES2, SF, TQ) + 5 (G42) + 5 (G427) + 2 (ES53) + 2 (SAT422) + 3 (SAT425) + 2 (SAT426) + 2 (SAT52) + 4 (GH) = 47 patterns + 1 symbol export
-// SparseDelegates: 1 (ES2) — lazily resolved
-// Total:    129 AOB patterns + 5 symbol exports = 134 entries (from 14 sources)
+// GWorld:    7 (original) + 15 (ES2, SF, TQ) + 5 (G42) + 5 (G427) + 2 (ES53) + 2 (SAT422) + 3 (SAT425) + 2 (SAT426) + 2 (SAT52) + 4 (GH) + 4 (SP57) = 51 patterns + 1 symbol export
+// SparseDelegates: 1 (ES2) + 2 (SP57) = 3 — lazily resolved
+// Total:    135 AOB patterns + 5 symbol exports = 140 entries (from 15 sources)
 
 } // namespace Sig

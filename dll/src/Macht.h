@@ -64,17 +64,73 @@ bool LooksLikeCodePointer(uintptr_t addr);
 
 // Parsed pattern: pre-processed bytes/mask for efficient SIMD scanning.
 struct ParsedPattern {
-    std::vector<uint8_t> bytes;
-    std::vector<uint8_t> mask;    // 1 = must match, 0 = wildcard
+    std::vector<uint8_t> bytes;   // pre-masked expected value: (mem[j] & mask[j]) == bytes[j]
+    std::vector<uint8_t> mask;    // per-byte AND-mask: 0x00 wildcard, 0x0F/0xF0 nibble, 0xFF literal
     uint8_t  firstByte    = 0;
-    bool     firstIsFixed = false; // true when bytes[0] is a literal
-    int      anchorOffset = -1;   // first non-wildcard byte index (SIMD anchor)
+    bool     firstIsFixed = false; // true when bytes[0] is a full literal (mask 0xFF)
+    int      anchorOffset = -1;   // first FULL-literal byte index (SIMD anchor; nibbles can't anchor)
     uint8_t  anchorByte   = 0;    // value at anchorOffset
 };
 
 // Parse an AOB pattern string into a ParsedPattern.
-// Pattern format: "48 8B 05 ?? ?? ?? ??" where ?? is wildcard.
-bool ParsePattern(const char* patStr, ParsedPattern& out);
+// Pattern format: "48 8B 05 ?? ?? ?? ??" where ?? is a full-byte wildcard.
+// Nibble wildcards are supported: "4?" fixes the high nibble (matches 40-4F),
+// "?5" fixes the low nibble. A token needs at least one fixed nibble to constrain.
+// Inline (pure — no Win32) so the leaf unit test can exercise the real parser.
+inline bool ParsePattern(const char* patStr, ParsedPattern& out) {
+    out.bytes.clear();
+    out.mask.clear();
+
+    auto nib = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+
+    const char* p = patStr;
+    while (*p) {
+        while (*p == ' ' || *p == '\t') ++p;
+        if (!p[0] || !p[1]) break; // Need at least 2 chars for a byte/nibble token
+
+        // Each token is 2 chars: ?? (full wildcard), ?X / X? (nibble), or XX (literal).
+        const char hiC = p[0], loC = p[1];
+        const bool hiW = (hiC == '?'), loW = (loC == '?');
+        uint8_t mask = 0, val = 0;
+        if (!hiW) {
+            int h = nib(hiC);
+            if (h < 0) return false;                 // malformed token
+            mask |= 0xF0; val |= static_cast<uint8_t>(h << 4);
+        }
+        if (!loW) {
+            int l = nib(loC);
+            if (l < 0) return false;
+            mask |= 0x0F; val |= static_cast<uint8_t>(l);
+        }
+        out.mask.push_back(mask);          // 0x00 ?? / 0x0F ?X / 0xF0 X? / 0xFF XX
+        out.bytes.push_back(val & mask);   // pre-masked so (mem & mask) == bytes compares cleanly
+        p += 2;
+    }
+
+    if (out.bytes.empty()) return false;
+    out.firstByte    = out.bytes[0];
+    out.firstIsFixed = (out.mask[0] == 0xFF);
+
+    // Find anchor: first FULL-literal byte (mask 0xFF) for AVX2 SIMD acceleration.
+    // Unlike memchr (always byte 0), the anchor can be at any position, enabling
+    // fast-skip for wildcard-prefixed patterns like "?? ?? 48 8B". Nibble-masked
+    // bytes can't be broadcast-compared so they never anchor; a pattern with no
+    // full literal (anchorOffset stays -1) falls through to the scalar path.
+    out.anchorOffset = -1;
+    for (size_t i = 0; i < out.mask.size(); ++i) {
+        if (out.mask[i] == 0xFF) {
+            out.anchorOffset = static_cast<int>(i);
+            out.anchorByte   = out.bytes[i];
+            break;
+        }
+    }
+    return true;
+}
 
 // AOB (Array of Bytes) pattern scan in module memory
 // Returns first match address, or 0 on failure

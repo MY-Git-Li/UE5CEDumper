@@ -107,46 +107,8 @@ bool LooksLikeCodePointer(uintptr_t addr) {
 // AOBScan internals
 // ============================================================
 
-// ParsedPattern struct is declared in Memory.h (public).
-
-bool ParsePattern(const char* patStr, ParsedPattern& out) {
-    out.bytes.clear();
-    out.mask.clear();
-
-    const char* p = patStr;
-    while (*p) {
-        while (*p == ' ' || *p == '\t') ++p;
-        if (!p[0] || !p[1]) break; // Need at least 2 chars for a hex byte or ??
-
-        if (p[0] == '?' && p[1] == '?') {
-            out.bytes.push_back(0);
-            out.mask.push_back(0); // wildcard
-            p += 2;
-        } else {
-            char hex[3] = { p[0], p[1], 0 };
-            out.bytes.push_back(static_cast<uint8_t>(strtoul(hex, nullptr, 16)));
-            out.mask.push_back(1); // literal
-            p += 2;
-        }
-    }
-
-    if (out.bytes.empty()) return false;
-    out.firstByte    = out.bytes[0];
-    out.firstIsFixed = (out.mask[0] != 0);
-
-    // Find anchor: first non-wildcard byte for AVX2 SIMD acceleration.
-    // Unlike memchr (always byte 0), the anchor can be at any position,
-    // enabling fast-skip for wildcard-prefixed patterns like "?? ?? 48 8B".
-    out.anchorOffset = -1;
-    for (size_t i = 0; i < out.mask.size(); ++i) {
-        if (out.mask[i]) {
-            out.anchorOffset = static_cast<int>(i);
-            out.anchorByte   = out.bytes[i];
-            break;
-        }
-    }
-    return true;
-}
+// ParsePattern moved to Macht.h as `inline` (pure — no Win32) so the leaf unit
+// test can exercise the real parser. See Macht.h for the nibble-wildcard contract.
 
 // Enumerate executable PE sections of the given module base.
 // Returns list of (base, size) pairs, covering only .text-like sections.
@@ -189,7 +151,7 @@ static const uint8_t* ScanRegionScalar(
     for (size_t i = 0; i < count; ++i) {
         bool matched = true;
         for (size_t j = 0; j < patLen; ++j) {
-            if (pat.mask[j] && scanStart[i + j] != pat.bytes[j]) {
+            if ((scanStart[i + j] & pat.mask[j]) != pat.bytes[j]) {
                 matched = false;
                 break;
             }
@@ -244,7 +206,7 @@ static const uint8_t* ScanRegion(
                 const uint8_t* p = scanStart + candidate;
                 bool matched = true;
                 for (size_t j = 0; j < patLen; ++j) {
-                    if (pat.mask[j] && p[j] != pat.bytes[j]) {
+                    if ((p[j] & pat.mask[j]) != pat.bytes[j]) {
                         matched = false;
                         break;
                     }
@@ -390,7 +352,7 @@ static void ScanRegionAll(
         for (size_t i = 0; i <= maxStart; ++i) {
             bool matched = true;
             for (size_t j = 0; j < patLen; ++j) {
-                if (pat.mask[j] && scanStart[i + j] != pat.bytes[j]) {
+                if ((scanStart[i + j] & pat.mask[j]) != pat.bytes[j]) {
                     matched = false;
                     break;
                 }
@@ -420,7 +382,7 @@ static void ScanRegionAll(
                 const uint8_t* p = scanStart + candidate;
                 bool matched = true;
                 for (size_t j = 0; j < patLen; ++j) {
-                    if (pat.mask[j] && p[j] != pat.bytes[j]) {
+                    if ((p[j] & pat.mask[j]) != pat.bytes[j]) {
                         matched = false;
                         break;
                     }
@@ -437,7 +399,7 @@ static void ScanRegionAll(
     for (; i <= maxStart; ++i) {
         bool matched = true;
         for (size_t j = 0; j < patLen; ++j) {
-            if (pat.mask[j] && scanStart[i + j] != pat.bytes[j]) {
+            if ((scanStart[i + j] & pat.mask[j]) != pat.bytes[j]) {
                 matched = false;
                 break;
             }
@@ -621,7 +583,7 @@ static void ScanRegionBatch(
                     const uint8_t* p = scanStart + candidate;
                     bool matched = true;
                     for (size_t j = 0; j < pat.bytes.size(); ++j) {
-                        if (pat.mask[j] && p[j] != pat.bytes[j]) {
+                        if ((p[j] & pat.mask[j]) != pat.bytes[j]) {
                             matched = false;
                             break;
                         }
@@ -661,7 +623,7 @@ static void ScanRegionBatch(
         for (size_t pos = scalarStart; pos <= patMaxStart; ++pos) {
             bool matched = true;
             for (size_t j = 0; j < pat.bytes.size(); ++j) {
-                if (pat.mask[j] && scanStart[pos + j] != pat.bytes[j]) {
+                if ((scanStart[pos + j] & pat.mask[j]) != pat.bytes[j]) {
                     matched = false;
                     break;
                 }
@@ -680,7 +642,7 @@ static void ScanRegionBatch(
         for (size_t pos = 0; pos <= patMaxStart; ++pos) {
             bool matched = true;
             for (size_t j = 0; j < pat.bytes.size(); ++j) {
-                if (pat.mask[j] && scanStart[pos + j] != pat.bytes[j]) {
+                if ((scanStart[pos + j] & pat.mask[j]) != pat.bytes[j]) {
                     matched = false;
                     break;
                 }

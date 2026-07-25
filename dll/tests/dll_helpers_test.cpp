@@ -3008,6 +3008,67 @@ static void Test_Holes_NormalizeGuessedType() {
     EXPECT("unknown -> drop",  Ubel::NormalizeGuessedTypeToProperty("Mystery").empty());
 }
 
+// ----- Macht::ParsePattern nibble wildcards ----------------------------------
+// Mirrors the scanner's per-byte compare so a nibble pattern can be matched
+// against a synthetic buffer without linking Macht.cpp (Win32/AVX2).
+static bool PatMatchAt(const Macht::ParsedPattern& pat,
+                       const uint8_t* mem, size_t memLen, size_t at) {
+    if (at + pat.bytes.size() > memLen) return false;
+    for (size_t j = 0; j < pat.bytes.size(); ++j)
+        if ((mem[at + j] & pat.mask[j]) != pat.bytes[j]) return false;
+    return true;
+}
+
+static void Test_Macht_ParsePattern_Nibble() {
+    std::printf("Test_Macht_ParsePattern_Nibble\n");
+    Macht::ParsedPattern p;
+
+    // Classic full-byte + full-wildcard still parses correctly.
+    EXPECT("parse classic",           Macht::ParsePattern("48 8B 05 ?? ?? ?? ??", p));
+    EXPECT("classic size 7",          p.bytes.size() == 7);
+    EXPECT("classic mask[0]=0xFF",    p.mask[0]  == 0xFF);
+    EXPECT("classic byte[0]=0x48",    p.bytes[0] == 0x48);
+    EXPECT("classic mask[3]=0x00",    p.mask[3]  == 0x00);   // wildcard
+    EXPECT("classic byte[3]=0x00",    p.bytes[3] == 0x00);
+    EXPECT("classic anchor at 0",     p.anchorOffset == 0);
+    EXPECT("classic anchorByte 0x48", p.anchorByte == 0x48);
+
+    // High-nibble fixed: "4?" matches 0x40-0x4F only (any REX.WRXB).
+    EXPECT("parse 4?",       Macht::ParsePattern("4?", p));
+    EXPECT("4? mask 0xF0",   p.mask[0]  == 0xF0);
+    EXPECT("4? byte 0x40",   p.bytes[0] == 0x40);
+    { uint8_t m40[1]={0x40}, m4f[1]={0x4F}, m50[1]={0x50}, m3f[1]={0x3F};
+      EXPECT("4? matches 0x40",  PatMatchAt(p, m40,1,0));
+      EXPECT("4? matches 0x4F",  PatMatchAt(p, m4f,1,0));
+      EXPECT("4? rejects 0x50", !PatMatchAt(p, m50,1,0));
+      EXPECT("4? rejects 0x3F", !PatMatchAt(p, m3f,1,0)); }
+    EXPECT("4? never anchors", p.anchorOffset == -1);   // nibble can't AVX2-broadcast
+
+    // Low-nibble fixed: "?5" matches low nibble 5.
+    EXPECT("parse ?5",     Macht::ParsePattern("?5", p));
+    EXPECT("?5 mask 0x0F", p.mask[0]  == 0x0F);
+    EXPECT("?5 byte 0x05", p.bytes[0] == 0x05);
+    { uint8_t a[1]={0x35}, b[1]={0xF5}, c[1]={0x34};
+      EXPECT("?5 matches 0x35",  PatMatchAt(p, a,1,0));
+      EXPECT("?5 matches 0xF5",  PatMatchAt(p, b,1,0));
+      EXPECT("?5 rejects 0x34", !PatMatchAt(p, c,1,0)); }
+
+    // Anchor selection skips nibble bytes, picks the first FULL literal.
+    EXPECT("parse ?? 4? 8B",       Macht::ParsePattern("?? 4? 8B", p));
+    EXPECT("anchor at full lit 2", p.anchorOffset == 2);
+    EXPECT("anchorByte 0x8B",      p.anchorByte == 0x8B);
+
+    // Real tightening use: "4? 8B" accepts a REX.W mov, rejects a non-REX byte.
+    EXPECT("parse 4? 8B", Macht::ParsePattern("4? 8B", p));
+    { uint8_t good[2]={0x4C,0x8B}, bad[2]={0x3C,0x8B};
+      EXPECT("4? 8B matches 4C 8B",  PatMatchAt(p, good,2,0));
+      EXPECT("4? 8B rejects 3C 8B", !PatMatchAt(p, bad,2,0)); }
+
+    // Malformed / empty tokens rejected.
+    EXPECT("rejects G5",    !Macht::ParsePattern("G5", p));
+    EXPECT("rejects empty", !Macht::ParsePattern("", p));
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + Radar)\n");
     std::printf("------------------------------------------\n");
@@ -3143,6 +3204,9 @@ int main() {
     Test_Holes_ComputeClassHoles_ArrayDim();
     Test_IsSanePropertiesSize();
     Test_Holes_NormalizeGuessedType();
+
+    // Macht — AOB pattern parser: nibble wildcards (4? / ?5) + anchor selection
+    Test_Macht_ParsePattern_Nibble();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);
