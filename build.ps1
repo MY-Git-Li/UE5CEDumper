@@ -738,6 +738,13 @@ if ($Target -in "All", "DLL") {
         if (Test-Path $staleMd) { Remove-Item $staleMd -Force -ErrorAction SilentlyContinue }
         Write-Ok "deployment README.html copied to dist\"
     }
+    # Feature-Guide.html — browsable stable-feature walkthrough (companion to
+    # README.html's Quick Start; experimental tabs intentionally omitted).
+    $guideSrc = Join-Path $ROOT_DIR "scripts\Feature-Guide.html"
+    if (Test-Path $guideSrc) {
+        Copy-Item $guideSrc -Destination (Join-Path $DIST_DIR "Feature-Guide.html") -Force
+        Write-Ok "Feature-Guide.html copied to dist\"
+    }
     # build_number.txt — build version tracking
     $buildNumSrc = Join-Path $ROOT_DIR "build_number.txt"
     if (Test-Path $buildNumSrc) {

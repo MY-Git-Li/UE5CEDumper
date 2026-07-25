@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UE5CEDumper Feature Guide</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #656d76;
+    --side-bg: #f6f8fa; --border: #d0d7de; --accent: #0b62d6;
+    --hdr: #0a53be; --hdr-bg: #ddf4ff; --target: #fff3cd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1;
+      --side-bg: #161b22; --border: #30363d; --accent: #4493f8;
+      --hdr: #79c0ff; --hdr-bg: #182a42; --target: #3b3320;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  body { font-family: -apple-system, "Segoe UI", system-ui, sans-serif; }
+  .wrap { display: flex; align-items: flex-start; }
+
+  .sidebar {
+    position: sticky; top: 0; align-self: flex-start;
+    height: 100vh; overflow-y: auto;
+    width: 18rem; flex: 0 0 18rem;
+    background: var(--side-bg); border-right: 1px solid var(--border);
+    padding: 0.75rem 0;
+  }
+  .sidebar h1 { font-size: 0.95rem; margin: 0 0 0.25rem; padding: 0 1rem; }
+  .sidebar .sub { font-size: 0.72rem; color: var(--muted); padding: 0 1rem 0.6rem; }
+  .sidebar nav { display: flex; flex-direction: column; }
+  .sidebar nav a {
+    display: flex; gap: 0.55rem; align-items: baseline;
+    padding: 0.28rem 1rem; text-decoration: none; color: var(--fg);
+    font-size: 0.82rem; border-left: 3px solid transparent;
+  }
+  .sidebar nav a:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); border-left-color: var(--accent); }
+  .sidebar nav a .n { color: var(--muted); min-width: 1.4rem; text-align: right; font-variant-numeric: tabular-nums; }
+  .sidebar nav a .t { color: var(--accent); }
+
+  .main { flex: 1 1 auto; min-width: 0; }
+  .main-inner { padding: 1rem 1.25rem 4rem; overflow-x: auto; }
+  pre {
+    margin: 0; white-space: pre;
+    font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+    font-size: 13px; line-height: 1.5; tab-size: 4;
+  }
+  pre a { color: var(--accent); text-decoration: none; }
+  pre a:hover { text-decoration: underline; }
+  .hdr {
+    display: inline-block; scroll-margin-top: 0.75rem;
+    color: var(--hdr); font-weight: 700; background: var(--hdr-bg);
+    padding: 0 0.35rem; border-radius: 3px;
+  }
+  .hdr:target { outline: 2px solid var(--accent); }
+
+  .totop {
+    position: fixed; right: 1rem; bottom: 1rem;
+    background: var(--accent); color: #fff; text-decoration: none;
+    width: 2.2rem; height: 2.2rem; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem; box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  }
+
+  @media (max-width: 820px) {
+    .wrap { flex-direction: column; }
+    .sidebar { position: static; height: auto; width: 100%; flex-basis: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+<a id="top"></a>
+<div class="wrap">
+  <aside class="sidebar">
+    <h1>UE5CEDumper Feature Guide</h1>
+    <div class="sub">Live UE4 / UE5 Inspector for Cheat Engine &middot; build 2375 &middot; 2026-07-25</div>
+    <nav>
+<a href="#sec-1"><span class="n">1</span><span class="t">Overview</span></a>
+<a href="#sec-2"><span class="n">2</span><span class="t">Install &amp; Inject</span></a>
+<a href="#sec-3"><span class="n">3</span><span class="t">First Run &mdash; Connect &amp; Scan</span></a>
+<a href="#sec-4"><span class="n">4</span><span class="t">The Tabs (map)</span></a>
+<a href="#sec-5"><span class="n">5</span><span class="t">Classes, Object Tree &amp; Class Struct</span></a>
+<a href="#sec-6"><span class="n">6</span><span class="t">Instances</span></a>
+<a href="#sec-7"><span class="n">7</span><span class="t">Live Walker</span></a>
+<a href="#sec-8"><span class="n">8</span><span class="t">Property Search</span></a>
+<a href="#sec-9"><span class="n">9</span><span class="t">Interesting Funcs &amp; Props</span></a>
+<a href="#sec-10"><span class="n">10</span><span class="t">Value Search</span></a>
+<a href="#sec-11"><span class="n">11</span><span class="t">Related Objects</span></a>
+<a href="#sec-12"><span class="n">12</span><span class="t">Console (exec commands)</span></a>
+<a href="#sec-13"><span class="n">13</span><span class="t">Live Funcs (Call Profiler)</span></a>
+<a href="#sec-14"><span class="n">14</span><span class="t">Dump Explorer</span></a>
+<a href="#sec-15"><span class="n">15</span><span class="t">Teleport</span></a>
+<a href="#sec-16"><span class="n">16</span><span class="t">CE Export</span></a>
+<a href="#sec-17"><span class="n">17</span><span class="t">Proxy Deploy</span></a>
+<a href="#sec-18"><span class="n">18</span><span class="t">System Tab</span></a>
+<a href="#sec-19"><span class="n">19</span><span class="t">Keyword Search (space = AND)</span></a>
+<a href="#sec-20"><span class="n">20</span><span class="t">Recipes</span></a>
+<a href="#sec-21"><span class="n">21</span><span class="t">Troubleshooting</span></a>
+    </nav>
+  </aside>
+  <main class="main">
+    <div class="main-inner"><pre>================================================================================
+                    UE5CEDumper - Feature Guide
+                    Live UE4 / UE5 Inspector for Cheat Engine
+================================================================================
+
+UE5CEDumper injects a small DLL into a running Unreal Engine game, walks the
+engine's own reflection data live, and drives it all from a standalone UI over a
+named pipe.  It finds the global pointers (GObjects / GNames / GWorld), rebuilds
+the object / class hierarchy, and exports Cheat Engine pointer chains, AA
+scripts, and Structure Dissect entries.
+
+Scope:  the everyday features.  The advanced / experimental analysis tabs are
+        left out on purpose, so this is a guide, not the full manual.
+Before: reading UE structs by hand in CE means hardcoded offsets that break on
+        every engine version and every game patch.  This reads them live.
+
+Supports:  UE 4.18 - 4.27 and UE 5.0 - 5.8+.  x64 games.  Single-player /
+           offline use only.
+
+For install + injection detail, see the bundled Quick Start (README.html).
+
+Sections:
+  <a href="#sec-1">1. Overview</a>
+  <a href="#sec-2">2. Install &amp; Inject</a>
+  <a href="#sec-3">3. First Run - Connect &amp; Scan</a>
+  <a href="#sec-4">4. The Tabs (map)</a>
+  <a href="#sec-5">5. Classes, Object Tree &amp; Class Struct</a>
+  <a href="#sec-6">6. Instances</a>
+  <a href="#sec-7">7. Live Walker</a>
+  <a href="#sec-8">8. Property Search</a>
+  <a href="#sec-9">9. Interesting Funcs &amp; Props</a>
+ <a href="#sec-10">10. Value Search</a>
+ <a href="#sec-11">11. Related Objects</a>
+ <a href="#sec-12">12. Console (exec commands)</a>
+ <a href="#sec-13">13. Live Funcs (Call Profiler)</a>
+ <a href="#sec-14">14. Dump Explorer</a>
+ <a href="#sec-15">15. Teleport</a>
+ <a href="#sec-16">16. CE Export</a>
+ <a href="#sec-17">17. Proxy Deploy</a>
+ <a href="#sec-18">18. System Tab</a>
+ <a href="#sec-19">19. Keyword Search (space = AND)</a>
+ <a href="#sec-20">20. Recipes</a>
+ <a href="#sec-21">21. Troubleshooting</a>
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-1">1.  OVERVIEW</span>
+--------------------------------------------------------------------------------
+
+Three pieces work together:
+
+  +----------------------------------------------------------------+
+  |  Game process                                                  |
+  |    UE5Dumper.dll  [injected]                                   |
+  |      - finds GObjects / GNames / GWorld via AOB scan           |
+  |      - walks UObject / UStruct / UProperty reflection          |
+  |      - serves a Named Pipe:  \\.\pipe\UE5DumpBfx               |
+  +----------------------------+-----------------------------------+
+                               |  JSON over pipe
+  +----------------------------v-----------------------------------+
+  |  UE5DumpUI.exe   (standalone, no install)                      |
+  |      - Connect, browse, search, edit, export                   |
+  +----------------------------------------------------------------+
+
+  Optional:  Cheat Engine, for Structure Dissect + raw memory edit.
+
+What you get:
+  - The full object / class hierarchy, read live from the running game.
+  - Find every instance of a class, drill into any UObject, read + write its
+    fields.
+  - Search by name, by value, or by "what looks like a cheat".
+  - One-click Cheat Engine export: pointer chains (XML), CE fields, Structure
+    Dissect (CSX), and self-contained AA scripts.
+
+Requirements:
+  - An x64 UE4 / UE5 game.
+  - Reach actual gameplay before scanning (UE objects are not populated at the
+    title screen).
+  - Single-player / offline only.  Injection (CreateRemoteThread) can be flagged
+    by anti-virus and is blocked by kernel anti-cheat (EAC / BattlEye).  Do not
+    use it online.
+
+Nothing is hardcoded.  Every offset (UObject / UStruct / UProperty layout,
+FName pool geometry) is verified live per game, so the same build reads UE 4.18
+and UE 5.8 without a per-game config.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-2">2.  INSTALL &amp; INJECT</span>
+--------------------------------------------------------------------------------
+
+No installer.  Extract the release, run UE5DumpUI.exe.  Single instance only
+(mutex-enforced).
+
+First you must get UE5Dumper.dll into the game process.  Four ranked routes --
+pick the first that fits.  The ranking is repeated in the UI (Proxy Deploy tab
+header + each button's tooltip).
+
+  (1) Deploy a proxy DLL          THE DEFAULT.  Proxy Deploy tab -&gt; Deploy.
+                                  Loads with the game, survives restarts, CE
+                                  never involved.  Use when you can restart the
+                                  game.
+
+  (2) Inject into a running game  Proxy Deploy tab -&gt; "Inject into running
+                                  game...".  Game already up, nothing to
+                                  install, but you repeat it every launch.
+
+  (3) From Cheat Engine           Tools -&gt; "Install CE autorun Helper" (permanent,
+                                  no plugin) or "Add Inject DLL Record" (one-off).
+                                  Use when you work inside CE anyway.
+
+  (4) Standalone UE5CEDumper.CT   Open it in CE, tick the record.  Developer
+                                  fallback.
+
+After ANY route:  launch UE5DumpUI.exe, click Connect.  If the DLL is already
+present, every route detects it and skips re-injecting.
+
+Which proxy DLL?  version.dll works for most games.  Game launches but the UI
+never connects -&gt; the EXE does not import version.dll; switch to dxgi.dll (every
+D3D11 / D3D12 UE game imports it) or dinput8.dll.  Deploy only ONE at a time.
+
+Full step-by-step for each route + the comparison table: README.html
+(Quick Start).
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-3">3.  FIRST RUN - CONNECT &amp; SCAN</span>
+--------------------------------------------------------------------------------
+
+  1. Start the game and reach actual gameplay (load a save).  This matters --
+     GObjects / GNames are not initialized at the title screen.
+  2. Inject the DLL (section 2).
+  3. Launch UE5DumpUI.exe, click Connect (top toolbar).
+  4. Proxy / inject-running mode:  click Start Scan.  (CE-inject mode scans on
+     inject, so the button does not appear.)  The DLL runs the AOB scan and
+     returns the engine pointers.
+  5. Open the System tab to confirm:  GObjects / GNames / GWorld addresses and
+     the detected UE version should be filled in, with a live object count.
+
+Once scanned, everything else in this guide is available.  Re-scan is only
+needed if you restart the game.
+
+Diagnosing a bad scan:
+  - "UE version: Unknown" or 0 objects  -&gt; the AOB patterns did not match, or
+    you scanned before reaching gameplay.  Load a save, then Start Scan again.
+  - GWorld may read as null between level loads -- that is normal; it re-fills
+    when a level is live.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-4">4.  THE TABS (map)</span>
+--------------------------------------------------------------------------------
+
+The UI is a row of tabs.  What each is for:
+
+  Live Walker        Drill into any UObject, read / write fields, export CE.
+  Instances          Find every live instance of a class (by name).
+  Properties         Search properties by name across all classes; Freeze.
+  Interesting Funcs  Scored list of "cheat-value" UFunctions.
+  Interesting Props  Scored list of "cheat-value" properties.
+  Value Search       CE-style scan by VALUE (single value or a group).
+  Console            Discover + fire UFUNCTION(exec) console commands.
+  Teleport           Position / camera / speed / time / global-pointer tools.
+  Classes            Browse + filter the class list.
+  Class Struct       Property grid for one class (works on CDO-only classes).
+  Related            An actor's owned graph (class / outer / pawn / components).
+  Dump Explorer      Offline browser over an exported "Dump All" file.
+  Live Funcs         Record which UFunctions the game actually calls.
+  Proxy Deploy       Manage DLL delivery (deploy / inject / undeploy).
+  System             Global pointers, per-game config, logs, maintenance.
+
+Three axes of "find the thing you want":
+  - by NAME     -&gt; Properties / Interesting Props / Classes
+  - by VALUE    -&gt; Value Search
+  - by ADDRESS  -&gt; Instances (search the address field)
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-5">5.  CLASSES, OBJECT TREE &amp; CLASS STRUCT</span>
+--------------------------------------------------------------------------------
+
+CLASSES tab
+~~~~~~~~~~~
+  The full list of UClasses the game registered.  Filter box up top (space =
+  AND, see section 19).  This is the "what does this game define" view.
+
+CLASS STRUCT tab
+~~~~~~~~~~~~~~~~
+  Pick a class -&gt; a property grid of its fields:  name, UE type, offset, size,
+  flags.  Works even for classes that have no live instance (it reads the
+  class's Default Object / CDO layout), so it is the reference view for "what
+  fields does this class have".
+
+  From here you can export the class layout to CE (section 16) or jump to Live
+  Walker on a live instance.
+
+Reflection metadata:
+  The dumper reads UE's own reflection, so what you see is exactly what the game
+  shipped -- BlueprintGeneratedClasses (BP_*_C) included.  Cooked Shipping
+  builds strip some editor-only metadata (display names, tooltips); field names,
+  types, and offsets always survive.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-6">6.  INSTANCES</span>
+--------------------------------------------------------------------------------
+
+The "find every live object of class X" tab.
+
+  1. Type a class name (e.g. PlayerController, or a game class like BP_Hero_C).
+  2. It lists every live, non-CDO instance with its address + class.
+  3. Double-click / "Live" a row  -&gt; opens it in Live Walker.
+
+Options:
+  - Newest first     scan the high-index end of GObjects for just-spawned
+                     instances (the enemy you just aggroed, the item you just
+                     picked up).
+  - Max cap          bound the result count.
+  - Keyword filter   narrow the returned list client-side (space = AND).
+
+Address search:
+  Paste a raw address into the search field and it resolves which object owns
+  it -- including values buried in nested containers (a struct inside a TArray
+  inside a TMap).  Use it to turn a CE-found address back into a named field.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-7">7.  LIVE WALKER</span>
+--------------------------------------------------------------------------------
+
+The core drill-down.  Give it any UObject and it shows every field with its live
+value, and lets you follow pointers deeper.
+
+Two root entry points (top of the tab):
+  - Start from GWorld       roots on the live UWorld and lists its top-level
+                            actors.  Best for "find an actor / enemy / component
+                            in the level".
+  - Start from GameEngine   roots on the live UEngine.  Best for engine-owned
+                            state:  GameInstance -&gt; subsystems / save data /
+                            local players, GameViewport, audio managers.
+                            Resolved by a reflected member, not a class name, so
+                            it works on any UE version.
+
+In the grid:
+  - Each row is one field:  name, type, value, offset, address.
+  - Pointer / struct / container rows expand -- click to follow into the target
+    object, array element, or map pair.
+  - Edit a value:  type a new one into a scalar field (int / float / bool /
+    enum).  If it snaps back, a Blueprint is re-writing it every tick -- use
+    Freeze (section 8) or invoke a setter function instead of a raw write.
+  - Functions:  a class's UFunctions are listed too.  Fire one with Pipe Invoke
+    (fill params -&gt; FIRE), or export it as an AA script.
+
+Breadcrumbs + bookmarks:
+  The path you walked is a breadcrumb spine.  A bookmark can re-anchor the same
+  walk after a game restart by re-walking the spine from a global root.
+
+CE export lives here too -- see section 16.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-8">8.  PROPERTY SEARCH</span>
+--------------------------------------------------------------------------------
+
+Search properties by NAME across every class in one pass.
+
+  1. Type a name fragment (space = AND over property + class name), e.g.
+     "health", "max stamina", "gold".
+  2. Results list:  class, property, type, offset.  Deduped.
+  3. Per-row actions:
+       Live    open the owning class in Live Walker (falls back to Class Struct
+               on CDO-only classes), property pre-highlighted.
+       Name    copy the bare property name.
+       Freeze  ship an AA script into CE that locks the property at a constant
+               across EVERY live instance of the owning class.
+
+Freeze (class-wide):
+  Different from a CE-XML pointer chain (which pins one instance).  The freeze
+  script re-enumerates instances by class + offset every 5 s, so respawns / new
+  spawns / destroys are handled automatically.  Supported types:  bool, byte,
+  int8-64, uint16-64, enum, float, double.  Not structs / strings / containers.
+  Freeze delivery is via the AOBMaker CE plugin -- the button is disabled with a
+  tooltip when the plugin is not reachable.
+
+Deep descent (opt-in):
+  Tick Deep to also search inside struct / container fields, not just top-level
+  properties.  Slower; leave off for the common case.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-9">9.  INTERESTING FUNCS &amp; PROPS</span>
+--------------------------------------------------------------------------------
+
+Two "find the cheat-relevant thing without knowing its name" finders.  They pull
+every UFunction / property and score each by keyword + host class + flags, then
+show what scores above a threshold.
+
+INTERESTING FUNCS
+~~~~~~~~~~~~~~~~~
+  Tuned for cheat-VALUE targets:  stat / resource nouns (HP / MP / Gold) and
+  movement / combat cheat verbs (Fly / God / NoClip).  Categories:  Stats /
+  Inventory / Movement / Combat / Utility.  Class bonuses for Character / Pawn /
+  PlayerController / PlayerState; penalties for anim / audio / particle noise.
+
+  Toggles:
+    Show All          bypass the score threshold and browse everything.
+    Gameplay Actions  (green checkbox) fold in a keyword pack for operation
+                      verbs -- Dash / Dodge / Interact / Open / Buy / Sell /
+                      Shop / Vendor / Trade -- and re-score in place.  These
+                      score 0 by default (they are not cheat values); turn this
+                      on to surface them.  Matching rows get a green Gameplay
+                      chip.
+    BP/Exec only      hide native getter / setter / plumbing noise.  Gameplay
+                      and control entry points are almost always
+                      BlueprintCallable or Exec.
+
+  Per-row:  Live (open in Live Walker) / AA(B) (baked AA script).
+
+INTERESTING PROPS
+~~~~~~~~~~~~~~~~~
+  Symmetric, for properties.  Categories:  Stats / Combat / Resources /
+  Movement / Utility.  Extra flag:  "Unusual Location" highlights cheat-relevant
+  fields that sit in odd containers (LocalPlayer / HUD / GameViewportClient) --
+  the ones developers hid where you would not look first.
+
+  Per-row:  Live / Name.
+
+Batch export:
+  Both tabs support Extended multi-select + a "Generate CT" button that wraps
+  the selected rows into one ready-to-share .CT (grouped by category).
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-10">10.  VALUE SEARCH</span>
+--------------------------------------------------------------------------------
+
+CE-style scan by VALUE -- the third find axis (name / address / value).  Unlike
+CE's raw memory scan, this walks reflected properties, so every hit is a NAMED
+field of a KNOWN type, and each field is compared by its own declared width (no
+byte-reinterpret false hits).
+
+SINGLE mode
+~~~~~~~~~~~
+  1. Pick a Data Type:
+       Numeric      Int8/16/32/64, UInt8/16/32/64, Float, Double, Bool.
+       NumericNoByte / NumericAll  one pass over every numeric field -- use when
+                    you know the value but not whether it is int or float.
+       String       FString / FName / FText  (Contains / StartsWith / EndsWith).
+       Vector       FVector / FRotator  (per-axis compare).
+  2. Pick a Scan Type:  Exact / Bigger / Smaller / Between, then the prev-value
+     four on Next Scan -- Changed / Unchanged / Increased / Decreased.
+  3. Enter the value, First Scan.  Refine with Next Scan.
+  4. Per-row "Open in Live Walker" jumps to the owning instance with the field
+     address pre-filled.
+
+  Classic loop:  scan HP as Exact -&gt; take a hit -&gt; Next Scan Decreased -&gt;
+  repeat.  Or start with Between [1,100] for a bounded-unknown bar.
+
+GROUP mode
+~~~~~~~~~~
+  A Single / Group toggle.  Group finds OBJECTS that hold ALL of N values (2-4)
+  at distinct offsets, in any order -- e.g. Str + Def + Dex + Int in one stats
+  object.  Multiplicatively more selective than N separate scans.  When every
+  slot converges it prints a locked offset table (Class -- Str@0x20, Def@0x24).
+
+  Options:
+    Deep              also match a group inside one nested container / struct-
+                      array element.
+    Cross-object      fold in the numeric fields of the sub-objects an actor
+                      owns (its components, a GAS attribute set), so a group
+                      spanning {actor, components, attributes} matches.
+
+Honest limit (shown as a banner):
+  Native C++ fields that are NOT UPROPERTY cannot be found here -- they have no
+  reflection entry.  Use Cheat Engine's raw memory scan for those.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-11">11.  RELATED OBJECTS</span>
+--------------------------------------------------------------------------------
+
+Given one actor, show its owned graph -- the objects it points to that you
+usually want next:
+
+  - its Class + Outer
+  - Controller &lt;-&gt; Pawn
+  - owned Components
+  - a GAS AbilitySystemComponent + its AttributeSet (where HP / stamina live in
+    GAS games)
+
+Feed it from Instance Finder / Value Search / Live Walker (each has a "Related"
+handoff), then jump onward:  a component / attribute-set row has its own Live
+Walker, Locate-in-GWorld, and finder handoffs.
+
+Detect target ( target icon ):
+  Auto-detect the player's current target -- it walks GWorld -&gt; PlayerController
+  -&gt; Pawn, scores the outgoing object-pointer fields (is-it-an-Actor gate +
+  keyword boost), and picks the most likely "the thing I am fighting".  Use it
+  to reach an enemy's actor / ASC / AttributeSet (its HP) without knowing the
+  class name.  It is a ranked-candidate picker, so verify the pick.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-12">12.  CONSOLE (exec commands)</span>
+--------------------------------------------------------------------------------
+
+Discovers UFUNCTION(exec) console commands -- the game's own cheat / debug verbs
+-- and fires them through the pipe.
+
+  1. Load exec commands.  It lists every exec UFunction it found, with the host
+     class.
+  2. Fire one directly, or export it as an AA script.
+
+Debug Camera (works UE4 + UE5):
+  When ToggleDebugCamera is found, a Debug Camera row appears.  It spawns UE's
+  free-fly ADebugCameraController (WASD + mouse), zero memory edits.  Use
+  Force On / Force Off (robust -- handles Shipping builds whose DisableDebugCamera
+  was stripped), or Copy CE Script for a self-contained CE checkbox.
+
+UCheatManager caveat:
+  UE wraps UCheatManager verbs (Fly / Ghost / God / Slomo / Teleport) in
+  #if !UE_BUILD_SHIPPING.  The reflection metadata survives the cook (you can
+  list + invoke them) but the BODY is stripped -- so Result = 0 and nothing
+  happens in a Shipping build.  The panel flags this with an orange footer when
+  the exec's class looks like a CheatManager.  Verify against a game-specific
+  target instead.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-13">13.  LIVE FUNCS (Call Profiler)</span>
+--------------------------------------------------------------------------------
+
+Behaviour-based discovery:  instead of guessing a function name, watch what the
+game actually calls.
+
+  1. Start -&gt; do ONE in-game action -&gt; Stop.
+  2. You get a ranked list of every UFunction the game dispatched during the
+     window, with call counts and the first-fired Order.
+
+Isolate the action with a baseline diff:
+  1. Start -&gt; stand still a few seconds -&gt; Stop.  Click "Set Baseline".
+  2. Start -&gt; do the action (open the shop, dash, ...) -&gt; Stop.
+  3. Functions that did NOT fire while idle are tagged NEW and ranked to the top.
+  4. "Hide UI widgets" + "Hide events/delegates" strip the reactions, leaving the
+     imperative Call functions.
+  5. "Earliest first" -- the causal entry point fires before the reactions it
+     triggers, so it sorts to the top.
+  6. Click Live on the top candidate to open + invoke it.
+
+Find a timer / cooldown callback (idle workflow -- the inverse of the diff):
+  Start -&gt; stand idle ~15-20 s -&gt; Stop -&gt; tick "Periodic only".  Functions firing
+  at a steady cadence outside the per-frame Tick band are tagged Timer with their
+  measured Period.  Good for the callback behind a cooldown / respawn / damage-
+  over-time tick.
+
+Limits:
+  - Only UFUNCTION-bound calls are visible (Blueprint /
+    SetTimerByFunctionName).  Native C++ SetTimer / direct calls bypass the hook.
+  - If Start says the hook could not install (counts stay 0), change map / scene
+    and Start again -- a level reload almost always frees the space.
+  - Leaving the tab auto-stops recording.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-14">14.  DUMP EXPLORER</span>
+--------------------------------------------------------------------------------
+
+An offline browser over a "Dump All Metadata" export -- browse a game's classes /
+properties / functions without the game running, then cross-reference back to the
+live session.
+
+  1. Export -&gt; Dump All Metadata (.jsonl) while connected (streams every class +
+     props + funcs).
+  2. Open Dump Explorer, load that file (or use the last-export quick-load).
+  3. ONE keyword search over classes + properties + functions (category filter).
+  4. Results split two ways:
+       in current game     class-name matched against a live GObjects pass
+                           (restart-safe).  Jump to Live Walker from here.
+       not in game         present in the dump, not live right now.
+
+  Client-only -- no pipe traffic, so it stays responsive on a big dump.  Use it
+  to plan (what does this game define?) then jump straight to the live object.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-15">15.  TELEPORT</span>
+--------------------------------------------------------------------------------
+
+Position / camera / speed / time tools.  They resolve the local player's pawn for
+you (no per-game class names) and act by invoking the engine's own functions, so
+they are clean across UE4 and UE5.  Single-player only -- online games rubber-band
+or may flag it.
+
+POSE READOUT
+~~~~~~~~~~~~
+  Live location / rotation, velocity, acceleration, and the resolved pawn
+  address.  The diagnostic starting point.
+
+MARKERS (BugItGo-style)
+~~~~~~~~~~~~~~~~~~~~~~~~
+  Stand somewhere, Save on Marker 1 / 2 / 3.  Recall to jump back (rotation
+  restored, fall velocity zeroed).  Markers live in the DLL, so they survive a UI
+  restart while the game runs.  Recall is refused with a hint if you changed maps;
+  Force overrides.  Copy as BugItGo puts a "BugItGo X Y Z" string on the
+  clipboard; paste one back + Run to teleport there.
+
+TELEPORT TO CURSOR
+~~~~~~~~~~~~~~~~~~
+  For top-down / 2.5D / 45-degree games:  the pawn jumps to whatever is under the
+  mouse.  No visible cursor (SE HD-2D style) -&gt; leave "Fall back to screen center"
+  ticked and it traces from the middle of the view.  Wrong surface -&gt; bump the
+  Channel number; Z offset lifts you off the ground.
+
+CAMERA POV (read-only)
+~~~~~~~~~~~~~~~~~~~~~~~
+  Get POV reads the live camera location / rotation / FOV and the camera-to-pawn
+  distance.  Read-only (UpdateCamera would overwrite a write), but it tells you
+  which camera approach a fixed-view game needs (section 20).
+
+GOD MODE
+~~~~~~~~
+  Force the player pawn's bCanBeDamaged off and hold it (a re-assert worker keeps
+  it set through respawns).  Toggle on / off.
+
+MOVE SPEED / GRAVITY / SUPER JUMP
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  Force the player's UCharacterMovementComponent knobs to a multiplier of their
+  captured base, held by a re-assert worker (re-captured on respawn):
+    Move Speed   MaxWalkSpeed        10% - 1000%
+    Gravity      GravityScale        10% - 1000%
+    Super Jump   JumpZVelocity       slider is jump HEIGHT, 10% - 3000%
+  Each has a global hotkey.  100% = off.
+
+TIME DILATION (dual row)
+~~~~~~~~~~~~~~~~~~~~~~~~~
+  Slow-mo / bullet-time / freeze / fast-forward.  Two independent levers held at
+  once, re-asserted ~every 250 ms so a game's own slow-mo or a cutscene track
+  cannot revert them:
+    Whole world   AWorldSettings.TimeDilation   0 - 3x   (everything slows)
+    Player pawn   AActor.CustomTimeDilation      0 - 10x  (only the player)
+  Effective pawn rate = world x pawn, so World 0.5x + Player 2x = the player at
+  normal speed in a half-speed world (classic bullet-time).  The Player row shows
+  a live "Combined player speed" readout.  Per-row slider / presets
+  (Freeze / quarter / half / 1x / 2x) / Apply / Reset; a shared Refresh re-reads
+  both.  Held in the DLL, so it survives a UI reconnect.
+    Note:  a literal 0 can destabilise physics on some games -- use 0.05x for a
+    near-freeze.  A few games drive speed from a bespoke non-WorldSettings
+    multiplier and will not respond.
+
+GLOBAL POINTERS (CE symbols)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  Get GWorld / Get GameEngine ask the DLL for the live pointer and publish it as a
+  registered CE symbol:  UE_GWorld (registered on the stable &amp;GWorld slot, so it
+  auto-follows) / UE_GameEngine (a captured UEngine* pointer buffer).  Pushed via the AOBMaker
+  plugin, else a paste-able CE-XML clipboard fallback.  Use them as the anchor for
+  a hand-built CE pointer chain.
+
+Export any of these to CE:  each card has Add to CE (AOBMaker) / Save .CT... that
+ship the same actions as CE records, runnable from a standalone table with just
+UE5Dumper.dll injected -- no UI open.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-16">16.  CE EXPORT</span>
+--------------------------------------------------------------------------------
+
+Turn any field / object you found into Cheat Engine records.  Buttons live on the
+Live Walker (and Class Struct) rows.
+
+  Copy CE XML     a full pointer chain (module + offsets) to the field, as CE
+                  address-list XML.  Paste into CE's address list.
+  Copy CE Field   the same chain as a single CE field entry.
+  Copy CE (CSX)   a CE Structure Dissect definition (Structure Dissect stays
+                  nested by design).
+
+Restart-stable chains (the AOB checkbox):
+  A GWorld-rooted chain can be anchored on the GWorld AOB symbol so it survives a
+  game restart.  The checkbox is only enabled from a GWorld root -- from a
+  GameEngine or arbitrary root the export uses the direct runtime address (valid
+  for the session).
+
+Flatten a struct-heavy record (Live Walker -&gt; Options):
+  A save slot / stats block / TMap of records exports as a tree of nested folders.
+  These toggles fold that tree at export time (XML / Field only; all address-
+  equivalent, off by default):
+    Flatten primitive-leaf structs   an all-numeric struct (FVector, FRotator,
+                                      FDateTime) becomes "Struct > Field" sibling
+                                      leaves.
+    Flatten leaf records             superset:  also FName + FString leaves, and
+                                      reaches into TMap / TArray element structs
+                                      (200 mission records -&gt; 200 flat rows, not
+                                      200 folders).
+    Collapse single-leaf pointers    a pointer whose target holds exactly one
+                                      value collapses to one "Ptr > Field" record.
+    Record Colors...                 tint flattened container rows by element-index
+                                      parity so adjacent records stay distinct.
+
+Other export knobs:
+  String Len   how many bytes a CE String leaf reads (16 - 4096).
+  Fabricate    pad a selected top-level TArray with template rows up to 4096 on
+               Copy CE Field, so future-grown arrays are already covered.
+
+Long exports are cancellable.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-17">17.  PROXY DEPLOY</span>
+--------------------------------------------------------------------------------
+
+Manage how the DLL gets into the game.
+
+  Deploy                    copy a proxy DLL (version / dinput8 / dxgi / winmm)
+                            into a game folder.  Detects Steam games; can also
+                            scan chosen drives for UE games installed anywhere
+                            (Epic / GOG / manual).
+  Inject into running game  CreateRemoteThread + LoadLibrary into an already-
+                            running game; auto-connects.  Auto-elevates on
+                            Access-Denied (one UAC prompt).
+  Undeploy                  remove our proxy from a game folder.  Type-agnostic --
+                            sweeps every proxy flavour we deployed, never touches
+                            another program's DLL.
+
+Suggested proxy column:
+  Per game, a suggested proxy is offered by priority:  confirmed-working (the DLL
+  self-reported how it loaded last time) &gt; last deployed &gt; injection known-good &gt;
+  version default.  Keyed by the game .exe name, so it survives a reinstall /
+  patch.
+
+  Tools menu (CE routes):  Install CE autorun Helper (permanent, no plugin) and
+  Add "Inject DLL" Record (one-off, needs the AOBMaker plugin).  See section 2.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-18">18.  SYSTEM TAB</span>
+--------------------------------------------------------------------------------
+
+Status + global settings.
+
+  Global pointers   the found GObjects / GNames / GWorld addresses, the detected
+                    UE version, and a live object count.  The health check for
+                    "did the scan work".
+
+  Per-game config   (persisted per game):
+                      UE version override   Auto (detect) or force 4.18 - 5.8.
+                      Invoke timeout        1000 - 60000 ms (default 5000).
+
+  Logs              Open Log Folder -&gt; %LOCALAPPDATA%\UE5CEDumper\Logs, split by
+                    category into per-process subfolders (init / scan / offsets /
+                    pipe / walk).  Attach these to any bug report.
+
+  Pipe Activity     a live log of pipe traffic, for diagnosing a stall.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-19">19.  KEYWORD SEARCH (space = AND)</span>
+--------------------------------------------------------------------------------
+
+Every filter / search box in the UI behaves the same way:
+
+  - Space = AND.  Whitespace-separated terms are combined with AND, each term
+    matched across the row's fields (name, class, ...).  "max health" finds rows
+    that contain BOTH "max" and "health" somewhere -- not the literal phrase.
+  - Per-keyword memory.  Terms you typed that actually produced matches are
+    remembered as autocomplete suggestions in that box.
+
+So to narrow a big result set, add more words rather than reaching for a longer
+single phrase.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-20">20.  RECIPES</span>
+--------------------------------------------------------------------------------
+
+RECIPE A -- teleport / save a spot
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  Teleport tab -&gt; Save on Marker 1 -&gt; wander -&gt; Recall.  Top-down game?  Teleport
+  to cursor.  Share a spot?  Copy as BugItGo, paste the string back later + Run.
+
+RECIPE B -- freeze a stat (HP / gold / stamina)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  Option 1 (by name):  Properties -&gt; search "health" -&gt; Freeze the row.  Locks it
+  across every live instance, respawn-safe.
+  Option 2 (by value):  Value Search -&gt; Exact scan the number -&gt; take damage ->
+  Next Scan Decreased -&gt; repeat to one hit -&gt; Open in Live Walker -&gt; edit / export.
+
+RECIPE C -- bullet time
+~~~~~~~~~~~~~~~~~~~~~~~
+  Teleport -&gt; Time Dilation.  World 0.5x + Player 2x = you at normal speed in a
+  half-speed world.  Or just World 0.25x for global slow-mo.
+
+RECIPE D -- rotate a locked / fixed-view camera
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  Diagnose first:  Teleport -&gt; Camera POV -&gt; Get POV.  If the camera barely moves
+  when you teleport the pawn, the camera is independent.
+    Easiest:  Console -&gt; Debug Camera -&gt; Force On (free-fly WASD camera).
+    Common fix:  Instances -&gt; SpringArmComponent -&gt; Live Walker -&gt; edit
+                 RelativeRotation.Yaw.  Snaps back?  Flip bUsePawnControlRotation /
+                 bInheritYaw, or invoke K2_SetRelativeRotation instead of a raw
+                 write.
+
+RECIPE E -- find an unguessable action (open shop / dash)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  Live Funcs -&gt; Start -&gt; idle -&gt; Stop -&gt; Set Baseline.  Start -&gt; do the action ->
+  Stop.  The NEW rows (Hide UI widgets + Hide events, Earliest first) are the
+  entry point.  Live the top one to invoke it.  (Interesting Funcs -&gt; Gameplay
+  Actions pack surfaces the by-name candidates.)
+
+RECIPE F -- flatten a save-data table for CE
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  Drill to the record map in Live Walker -&gt; Options -&gt; Flatten leaf records
+  (+ Record Colors) -&gt; Copy CE XML.  You get a flat, editable list instead of
+  hundreds of folders.
+
+--------------------------------------------------------------------------------
+<span class="hdr" id="sec-21">21.  TROUBLESHOOTING</span>
+--------------------------------------------------------------------------------
+
+Issue:  UI says "Connection failed" / "Connect" does nothing.
+  Root Cause:  the pipe server is not running -- the DLL is not in the game.
+  Double check:
+    - A proxy DLL is in the game folder (Option B), or the DLL was injected
+      (Option A / C).
+    - You reached gameplay, not the title screen.
+    - Only one UE5DumpUI instance is running.
+
+Issue:  Game runs but the UI never connects (proxy mode).
+  Root Cause:  the EXE does not import the proxy DLL you deployed, so Windows
+  never loads it.
+  Fix:  switch to another proxy the EXE does import -- dxgi.dll (every D3D11 /
+  D3D12 UE game imports it), winmm.dll, or dinput8.dll.  One at a time.
+
+Issue:  A proxy DLL name is already taken by another tool (proxy mode).
+  Root Cause:  a proxy only works if its filename is FREE in the game folder.
+  Some tools claim a name first -- ReShade commonly takes dxgi.dll, and some games
+  ship their own version.dll -- so dropping ours there loses to theirs or breaks
+  the other tool.
+  Fix:  deploy a DIFFERENT proxy.  Four are shipped -- version.dll, dinput8.dll,
+  dxgi.dll, winmm.dll.  dxgi.dll occupied -&gt; try winmm.dll, then version.dll /
+  dinput8.dll -- any one the EXE imports and that is not already in use.  All four
+  taken, or no proxy connects at all -&gt; fall back to DLL injection (Option C,
+  "Inject into running game") -- it maps the DLL directly, so it needs no free
+  filename and no free import slot.
+
+Issue:  Connected but 0 objects / "UE version: Unknown".
+  Root Cause:  scan ran before data loaded, or AOB patterns did not match.
+  Fix:  load a save, then Start Scan again.  Still Unknown -&gt; file a bug report
+  with the game name + UE version + the Logs folder.
+
+Issue:  Start Scan button is missing.
+  Root Cause:  already scanned, or CE-inject mode (which scans on inject).
+  Fix:  normal -- the button only shows in proxy / inject mode before the first
+  scan.
+
+Issue:  A value I edit snaps straight back.
+  Root Cause:  a Blueprint / tick re-writes it every frame.
+  Fix:  Freeze the field (Properties tab), or invoke the setter function instead
+  of a raw write.
+
+Issue:  Inject fails -- "OpenProcess failed (Win32 5)".
+  Root Cause:  the game runs as Administrator (higher integrity).
+  Fix:  accept the UAC prompt to inject elevated, or start the UI as
+  Administrator up front.
+
+Issue:  POV / teleport / invoke time out when the game is not focused.
+  Root Cause:  many UE games idle the game thread when the window loses foreground
+  (t.IdleWhenNotForeground), so game-thread calls never run.
+  Fix:  keep the game window in the foreground while using the live actions.
+
+Issue:  A UCheatManager verb (God / Fly) returns Result = 0 and does nothing.
+  Root Cause:  its body is stripped in Shipping builds (#if !UE_BUILD_SHIPPING);
+  only the reflection metadata survived the cook.
+  Fix:  it cannot be made to work through invoke.  Use a game-specific field /
+  function instead (Properties / Interesting Funcs / Value Search).
+
+Bug reports:  https://github.com/bbfox0703/UE5CEDumper -- include the game name,
+UE version, and the logs from %LOCALAPPDATA%\UE5CEDumper\Logs\.
+
+================================================================================
+  UE5CEDumper - single-player / offline use only.  Licensed under the MIT
+  License.  Not affiliated with Epic Games or Cheat Engine.
+================================================================================
+</pre></div>
+  </main>
+</div>
+<a class="totop" href="#top" title="Back to top">&uarr;</a>
+</body>
+</html>
