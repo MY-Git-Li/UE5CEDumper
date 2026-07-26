@@ -5,7 +5,7 @@
 
 // ============================================================
 // Himmel — 欣梅爾 (勇者 — The Hero, Remembered Forever)
-// Signatures: the AOB pattern database — 150 entries over FIVE targets
+// Signatures: the AOB pattern database — 152 entries over FIVE targets
 //
 // Every byte-pattern signature the scanner uses lives in this file, for all five
 // AobTarget values:
@@ -14,10 +14,10 @@
 //   GNames           FNamePool (4.23+) or TNameEntryArray      28 AOB + 1 CallFollow
 //                                                              + 3 symbol exports
 //   GWorld           UWorldProxy                               49 AOB + 1 symbol export
-//   SparseDelegates  FSparseDelegateStorage::SparseDelegates    5 AOB — lazily resolved on
+//   SparseDelegates  FSparseDelegateStorage::SparseDelegates    6 AOB — lazily resolved on
 //                    (UE 4.23+)                                  first sparse-delegate
 //                                                                drill-down, NOT in FindAll
-//   GEngine          the &GEngine SLOT, not the object          6 AOB + 1 symbol export —
+//   GEngine          the &GEngine SLOT, not the object          7 AOB + 1 symbol export —
 //                                                                resolved AFTER GObjects/GNames
 //                                                                because its validator needs
 //                                                                reflection (see that section)
@@ -67,6 +67,10 @@
 //   ME      : MindsEye (Build A Rocket Boy, UE 5.4.4 licensee fork — capstone + .pdata analysis).
 //             NOTE: AOB_NAMEDECRYPT_ME1 is deliberately NOT in any PATTERNS[] array — it does
 //             not resolve a global pointer, so Genau::ResolveNameKeyTable consumes it directly.
+//   PAL51   : Palworld (UE 5.1, NO PDB — the corpus's only 5.1 sample). Ground truth recovered
+//             by disassembly + pattern consensus rather than symbols; see the SPARSE_PAL51_1
+//             comment for how the sparse-delegate and GObjects addresses were each confirmed
+//             structurally before anything was mined from them.
 //   SP57    : Solarpunk (rokaplay, UE 5.7 — ships a full PDB; symbols + xrefs mined offline
 //             via Ghidra headless, then every candidate verified unique against the .text
 //             image before inclusion — see docs/reversing-nonstandard-ue-games.md)
@@ -792,6 +796,39 @@ constexpr const char* AOB_SPARSE_DI427_1 =
 constexpr const char* AOB_SPARSE_DI427_2 =
     "48 63 44 24 ?? 4? 33 ?? 83 F8 FF 74 ?? 48 8D ?? 40 48 C1 E? 05 48 03 ?? ?? ?? ?? ?? EB ?? 4? 8B ?? 48 85 ?? 4? 8D ?? 08 4? 0F 44 ??";
 
+// --- PAL51: UE 5.1 sparse-delegate element address (Palworld) -----------------
+// WHY it exists: Palworld was the corpus's first UE 5.1 sample, and SparseDelegates resolved
+// there through exactly ONE pattern (SPARSE_ES2_1). That is the thinnest coverage of any target
+// on any binary, and it matters more here than elsewhere because ValidateSparseDelegates is the
+// weakest validator we have — it can only range-check two ints, so it cannot rescue a miss.
+//
+// Ground truth was established without a PDB: the SPARSE_ES2_1 site disassembles to
+// FSparseDelegateStorage::NotifyUObjectDeleted — `lea rcx,[crit]; call EnterCriticalSection;
+// lea rcx,[0x148FB66B0]; call TMap::Remove; mov eax,[+0x8]; cmp eax,[+0x34]` — i.e. the address
+// is passed as `this` to a TMap method and its +0x8 / +0x34 int32s are the very fields the
+// validator checks. (The same function then does `lea rcx,[GUObjectArray]; call
+// RemoveUObjectDeleteListener`, which independently confirmed Palworld's GObjects too.)
+//
+// This pattern anchors a DIFFERENT site — the element-address computation:
+//   lea rdi,[rax+rax*2]; shl rdi,5      <- element stride 0x60
+//   add rdi,[SparseDelegates]           <- ADD, not the MOV that SP57_1/2 use
+//   lea rdi,[rdi+8]; cmovz rdi,rbp; test rdi,rdi; jz near
+//   mov eax,[rdi+8]; cmp eax,[rdi+0x34] <- the TSet Num-vs-Max compare
+// SPARSE_DI427_2 models the same semantics but with a SHORT jz and a different instruction
+// order, which is why it takes 0 hits here. 29 literal bytes.
+//
+// Measured over the full 35-program sweep it fires on exactly three binaries and is decoy-free
+// on all of them: Palworld (2 hits, both on the true address — the goal), **UE 4.26 Satisfactory
+// (2/2, UNIQUE-OK — an unplanned bonus, so this is not 5.1-only)**, and DQ I&II HD-2D (2 hits
+// converging on one address, unverifiable without symbols). Zero hits on the other 32 programs.
+//
+// The register-agnostic nibbled variant was measured and REJECTED — it produced a decoy on
+// Palworld itself, reproducing the trap already recorded for DI427_2 above. Exact-register
+// forms remain the safe ones for this target.
+constexpr const char* AOB_SPARSE_PAL51_1 =
+    "48 8D 3C 40 48 C1 E7 05 48 03 3D ?? ?? ?? ?? 48 8D 7F 08 48 0F 44 ?? 48 85 FF 0F 84 "
+    "?? ?? ?? ?? 8B 47 08 3B 47 34";
+
 // ============================================================
 // GObjects — DI427 (UE 4.27, 32-byte FUObjectItem)
 // ============================================================
@@ -908,6 +945,33 @@ constexpr const char* AOB_GENGINE_DI427_1 =
 // SP57: UEngine::IsStereoscopic3D — UE 5.7 only, kept as an independent third anchor.
 constexpr const char* AOB_GENGINE_SP57_1 =
     "48 89 5C 24 08 57 48 83 EC 20 48 8B 3D ?? ?? ?? ?? 33 DB 48 85 D2 74";
+// X4: the generic "use a member of GEngine" accessor shape —
+//   `mov rax,[GEngine]; test rax,rax; jz; mov rcx,[rax+disp32]; test rcx,rcx; jz`
+// i.e. null-check the engine, load one of its object members (GameViewport / GameInstance /
+// GameUserSettings / ...) at a 32-bit displacement, null-check that too. Mined on Palworld
+// (UE 5.1, no PDB — the corpus had no 5.1 sample) but it turned out to be the most broadly
+// portable GEngine pattern in the file. Measured over the full 35-program sweep it is correct on
+// TWELVE oracles spanning UE 4.20 -> 5.7: UNIQUE-OK (decoy-free) on 4.22, 4.24, 4.26, 4.27, 5.2,
+// 5.5 Meltopia and 5.6; correct-with-the-real-site-first on 4.20, 4.25, both 5.5 Everspace builds
+// and 5.7. On Avowed (UE 5.3, no symbols) all 53 hits converge on a SINGLE address — the
+// signature of a real global rather than a generic idiom, which is exactly what disqualified the
+// rejected `mov rcx,[G]; test; jz; call [vtable]` variant (76-93 *different* targets per binary).
+//
+// HONEST EXCEPTION — the SquareEnix forks. On FF7 Remake this is DECOY-ONLY: 106 hits across 3
+// different addresses, none of them the real GEngine; FF7 Rebirth is similarly divergent (90
+// hits, 6 targets). Those two evidently reuse this member-access shape for something else. It
+// costs nothing today because GENG_X3 (priority 105) wins on FF7 Remake before this is reached,
+// and ValidateGEngineSlot would reject the decoys anyway (it derefs the slot and demands a
+// reflected "GameViewport" property). But do not read "correct on 12 oracles" as "safe
+// everywhere" — on a UE4.18-era SquareEnix fork this pattern is noise, and if it ever became the
+// lander there the tail would need tightening.
+//
+// The `?? ?? 00 00` is load-bearing: it pins the member load to a 32-bit displacement, which is
+// what UEngine's layout forces and what keeps this off the far commoner 8-bit-displacement
+// `mov rcx,[rax+0x30]` idiom. Placed after X1/X3/X2 because it is OK-FIRST rather than
+// UNIQUE-OK on three of the seven — it is the broad safety net, not the precision instrument.
+constexpr const char* AOB_GENGINE_X4 =
+    "48 8B 05 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8B 88 ?? ?? 00 00 48 85 C9 74";
 // ES55: UEngine::GetEngineSubsystem<T> prologue — `mov rdi,[GEngine]; call; cmp byte[flag],0`.
 // Covers UE 5.5 AND 5.7 (7 sites on ES2 5.5, 6 on Solarpunk 5.7), 0 hits on UE4.27/5.3.
 // This is the pattern that closes the 5.5 hole: X1/X2 both MISS on 5.5, because 5.5 emits
@@ -1324,6 +1388,12 @@ constexpr AobSignature SPARSE_PATTERNS[] = {
     SIG_RIP_DIRECT("SPARSE_ES2_1", AOB_SPARSE_ES2_1, AobTarget::SparseDelegates,
                    16, 3, 7, 0, 140,
                    "ES2", "UE4.27 (DropIn, PDB-verified) + ES2 5.4 + TQ2 5.7 NotifyUObjectDeleted twin-ref"),
+    // 150: placed LAST deliberately. SPARSE_ES2_1 already resolves Palworld, so this is the
+    // second anchor for when that site changes — not a replacement. Ordering it after ES2_1
+    // means adding it cannot perturb any existing selection, which the re-sweep confirmed.
+    SIG_RIP_DIRECT("SPARSE_PAL51_1", AOB_SPARSE_PAL51_1, AobTarget::SparseDelegates,
+                   8, 3, 7, 0, 150,
+                   "PAL51", "UE5.1 element addr (add r,[Sparse]) + TSet Num/Max compare"),
 };
 
 // ── GEngine (UEngine* GEngine — the &GEngine SLOT) ───────────────────────
@@ -1353,6 +1423,8 @@ constexpr AobSignature GENGINE_PATTERNS[] = {
                    7, 3, 7, 0, 105, "X+FF7R", "X1 head only (no test/jz tail) — reaches FF7R UE4.18"),
     SIG_RIP_DIRECT("GENG_X2", AOB_GENGINE_X2, AobTarget::GEngine,
                    0, 3, 7, 0, 110, "DI427+SP57", "FEngineLoop::Tick (UE4.27+5.7, 6-7 sites)"),
+    SIG_RIP_DIRECT("GENG_X4", AOB_GENGINE_X4, AobTarget::GEngine,
+                   0, 3, 7, 0, 115, "PAL51+X", "GEngine member accessor — correct on 7 oracles, UE4.20-5.7"),
     SIG_RIP_DIRECT("GENG_ES55_1", AOB_GENGINE_ES55_1, AobTarget::GEngine,
                    10, 3, 7, 0, 120, "ES55", "UE5.5+5.7 UEngine::GetEngineSubsystem<T> prologue"),
     SIG_RIP_DIRECT("GENG_SP57_1", AOB_GENGINE_SP57_1, AobTarget::GEngine,
@@ -1411,9 +1483,9 @@ ASSERT_TABLE_ORDER(GENGINE_PATTERNS);
 // GObjects: 55 AOB patterns + 1 symbol export
 // GNames:   28 AOB patterns + 1 CallFollow + 3 symbol exports  (CT2 removed b2407 — see note)
 // GWorld:   49 AOB patterns + 1 symbol export  (V2/V4/V5/V6 removed b2409 — see note)
-// SparseDelegates: 5 — lazily resolved, not part of the FindAll boot sequence
-// GEngine:   6 AOB patterns + 1 symbol export — resolved after GObjects/GNames
-// Total:   143 AOB patterns + 1 CallFollow + 6 symbol exports = 150 entries (from 18 sources)
+// SparseDelegates: 6 — lazily resolved, not part of the FindAll boot sequence
+// GEngine:   7 AOB patterns + 1 symbol export — resolved after GObjects/GNames
+// Total:   145 AOB patterns + 1 CallFollow + 6 symbol exports = 152 entries (from 19 sources)
 //
 // EVERY ARRAY IS SORTED BY PRIORITY, and a checker enforces it — keep it that way. The file had
 // drifted out of order (GNAM_V5 at 850 sat inside the Tier-1 block, GOBJ_PS7 at 970 under a

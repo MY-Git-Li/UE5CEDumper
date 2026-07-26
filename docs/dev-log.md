@@ -20,6 +20,82 @@ builds ≤696 in
 
 -----
 
+## 2026-07-26 - Two AOBs mined from Palworld (UE 5.1): a second sparse anchor + the broadest GEngine pattern yet (build 2426)
+
+Palworld ships no PDB, so this is a worked example of mining from a symbol-less binary. Ground
+truth first, patterns second — the reverse order silently produces patterns for a wrong address.
+
+### Establishing Palworld's truth without symbols
+
+The consensus table gave GNames `14944DB80` and GWorld `14965BBE0` at **12 agreeing patterns**
+each — not in doubt. GObjects showed a `1494ED280` / `1494ED290` pair (6 patterns each, exactly
+`base` and `base+0x10` = ObjObjects). SparseDelegates had **one** pattern and nothing to
+corroborate it, so it was confirmed structurally instead: disassembling the `SPARSE_ES2_1` site
+gives `FSparseDelegateStorage::NotifyUObjectDeleted` —
+
+```
+LEA  RCX,[0x148FB66B0]   ; passed as `this`
+CALL <TMap::Remove>
+MOV  EAX,[0x148FB66B8]   ; +0x8   \ the two int32s ValidateSparseDelegates range-checks
+CMP  EAX,[0x148FB66E4]   ; +0x34  /
+...
+LEA  RCX,[0x1494ED280]   ; then RemoveUObjectDeleteListener  => confirms GObjects too
+```
+
+### What was actually weak, and what was not
+
+| target | Palworld anchors | action |
+|---|---|---|
+| GNames / GWorld | 12 patterns each | nothing needed |
+| GObjects | 12 patterns | nothing needed (the ~40 wasted validations are cost, not risk) |
+| GEngine | 3 patterns, but X1/X3 overlap by construction ⇒ **2 independent shapes** | added one |
+| **SparseDelegates** | **1** — and its validator is the weakest we have, so it cannot rescue a miss | added one |
+
+### `SPARSE_PAL51_1` — a second sparse anchor
+
+Anchors the element-address block rather than `NotifyUObjectDeleted`:
+`lea r,[rax+rax*2]; shl r,5` (stride 0x60) → **`add r,[SparseDelegates]`** → `lea r,[r+8];
+cmovz; test; jz near` → `mov eax,[r+8]; cmp eax,[r+0x34]` (the TSet Num-vs-Max compare).
+`SPARSE_DI427_2` models the same semantics but with a *short* jz and a different instruction
+order, which is why it takes 0 hits here. 29 literal bytes; fires on exactly three binaries,
+decoy-free on all: Palworld 2/2, **UE 4.26 Satisfactory 2/2 UNIQUE-OK** (an unplanned bonus — it
+is not 5.1-only), and DQ I&II HD-2D (2 hits converging on one address). Zero hits on the other
+32 programs. Placed at priority **150, deliberately last**, so it cannot perturb any existing
+selection — it is the backup for when `SPARSE_ES2_1`'s site changes, not a replacement.
+
+The register-agnostic nibbled variant was measured and **rejected**: it produced a decoy on
+Palworld itself, reproducing the trap already recorded for `SPARSE_DI427_2`. Exact-register forms
+remain the safe ones for this target — that is now two independent confirmations.
+
+### `GENG_X4` — mined on 5.1, useful nearly everywhere
+
+`mov rax,[GEngine]; test rax,rax; jz; mov rcx,[rax+disp32]; test rcx,rcx; jz` — null-check the
+engine, load one of its object members at a **32-bit** displacement, null-check that. The
+`?? ?? 00 00` is load-bearing: it pins the member load to a disp32, which UEngine's layout forces
+and which keeps the pattern off the far commoner 8-bit-displacement `mov rcx,[rax+0x30]` idiom.
+
+Correct on **twelve** oracles spanning UE 4.20 → 5.7 — UNIQUE-OK on 4.22 / 4.24 / 4.26 / 4.27 /
+5.2 / 5.5 Meltopia / 5.6, and correct-site-first on 4.20 / 4.25 / both 5.5 Everspace builds / 5.7.
+On Avowed all 53 hits converge on one address.
+
+**Recorded honestly, because it is not clean everywhere:** on FF7 Remake it is DECOY-ONLY (106
+hits, 3 distinct targets) and FF7 Rebirth is similarly divergent (90 hits, 6 targets) — the
+SquareEnix forks reuse this shape for something else. It costs nothing today because `GENG_X3`
+(pri 105) wins on FF7 Remake first, and `ValidateGEngineSlot` derefs the slot and demands a
+reflected `GameViewport` property. Placed at 115, behind the three cleaner X-family patterns.
+
+A rejected candidate is worth recording too: `mov rcx,[G]; test; jz; call [vtable]` looked
+plausible and produced **76–93 different targets per binary**. Divergent hits mean a generic
+idiom; convergent hits mean a real global. That single test separated the two candidates.
+
+### Verification
+
+Full 35-program re-sweep after both additions: **the regression matrix is byte-for-byte
+identical** — every target on all 20 oracles still resolves correctly and no landing pattern
+moved. Palworld's SparseDelegates is now `n=2`. Build + tests green.
+
+-----
+
 ## 2026-07-26 - Corpus to 35 programs / 20 oracles: UE 4.24 + 5.1 + a same-game cross-build pair; sparse delegates settled (build 2420)
 
 Five more Ghidra projects, all produced with the current Ghidra: `DropIn_UE424` (UE 4.24.3, PDB),
