@@ -20,6 +20,107 @@ builds ≤696 in
 
 -----
 
+## 2026-07-26 - 31-program AOB sweep: GEngine symbol export + FF7R coverage, two dead patterns removed, one unmatchable pattern fixed (build 2408)
+
+The corpus grew from 8 binaries to **31 programs across 18 Ghidra projects — 17 of them with PDB
+truth**, spanning UE 4.18 / 4.20 / 4.22 / 4.25 / 4.26 / 4.27 / 5.2 / 5.3 / 5.5 / 5.6 / 5.7. The
+sweep is now a script (`tools/ghidra/sweep.sh` + `aggregate_sweep.py`) rather than a hand-run
+command per project, because the next round has to be repeatable.
+
+**Headline: every target on every one of the 17 oracles resolves to the correct address.** No
+pattern added in this or the previous two builds changed what any engine version lands on.
+
+### What the bigger corpus exposed
+
+| finding | detail |
+|---|---|
+| **GEngine was never given a symbol export** | `?GEngine@@3PEAVUEngine@@EA` is exported by the Engine module in every modular build we have binaries for — verified in the export table of Satisfactory's `FactoryGame-Engine-Win64-Shipping.dll` on **both** UE 4.26 (ordinal 13690) and UE 5.2 (19170), sitting directly beside `?GWorld@@3VUWorldProxy@@A`. GObjects and GWorld had `SIG_EXPORT` entries; GEngine simply never got one, so modular titles paid for a full AOB sweep to find something `GetProcAddress` returns in O(1). Added at priority 0. |
+| **`AOB_GNAMES_SAT422_1` could never match anything** | It omitted the `48 85 C0` (`test rax,rax`) between the load and the jump — and MSVC cannot emit `mov`+`jnz` with no flag-setting instruction between them, so the string was unmatchable *by construction*. Zero hits across all 31 programs, including the very Satisfactory UE 4.22 build it is named after. Re-derived from that build's PDB (`FName::GetNames` @ `0x140BCEBF0`, load at +4) and moved 730 → 715, so UE 4.22 now lands on its purpose-built anchor instead of falling through to `GNAM_CT4`, a `ret; mov [rip],rbx` **write** pattern that only got there after rejecting a decoy. |
+| **`AOB_GNAMES_UD1` was dead code** | Declared since the DB was written, never referenced by `GNAMES_PATTERNS[]` — it has never been scanned for in any build. The suspicion about it was well founded: `cmp dword [rbp-0x18], 0` pins an exact frame-pointer-relative stack slot, a property of one compilation of one function in one game. Deleted rather than wired up. |
+| **`GNAM_CT2` is byte-for-byte redundant with `GNAM_UD2`** | CT2 is UD2 minus its final `05`. Measured over all 31 programs the two produced **identical** hit counts on every single one (0/0, 10/10, 11/11, 15/15, 36/36, 932/932 on FF7R…). The `C6` CT2 stops on is `mov byte ptr`, and the only encoding that ever follows here is the `C6 05` UD2 pins. CT2 removed; UD2 takes priority 300. |
+
+### FF7 Remake: the one binary where GEngine found nothing
+
+Of 31 programs, FF7R was the only one where **every** GEngine pattern missed. Its
+`GetWorldFromContextObject` wrapper spills the result (`mov rbx,rax`) *before* the null check, so
+`GENG_X1`'s trailing `48 85 C0` no longer follows the call — a length change no nibble can
+bridge. New **`GENG_X3`** is X1's head only (`sub rsp,0x2X; mov rdx,rcx; mov rcx,[GEngine];
+call`, REX nibble-masked, tail dropped). Dropping the tail was measured, not assumed: X3 is
+UNIQUE-OK with **zero decoys** on both calibration oracles and finds strictly *more* correct
+sites than X1 (DropIn 3 vs 2, Solarpunk 2 vs 1). It also closes UE 5.5, where X1 misses.
+
+Disassembling X3's single FF7R hit confirmed the address and handed over two more constants for
+free — the caller runs the returned UWorld's `InternalIndex` through
+`cmp [0x1453BD48C]` / `mov rax,[0x1453BD480]` / `lea rcx,[rax+idx*24]`, i.e. textbook
+`GUObjectArray.IndexToObject`. So FF7R is now a **partial oracle**: `GEngine = 0x145879EE8`,
+`GObjects = 0x1453BD470`, both corroborated by independent patterns. GNames/GWorld are
+deliberately left unset — a guessed truth is worse than none, because it mislabels every hit as
+a decoy (the mistake that once got two good GEngine patterns demoted).
+
+GEngine coverage is now complete over the corpus: `GENG_X1` lands on 8 engine versions,
+`GENG_X3` on the 2 it misses.
+
+### Band discipline extended to GObjects and GWorld
+
+Build 2405 fixed the GNames table; the same audit had never been applied to the other two.
+`GWLD_V3` alone takes **22,017 matches** — 95.7 per MB of `.text` on a monolithic game EXE, 2,658
+on FF7 Remake by itself — out of six literal bytes. `GOBJ_V1` takes 10,152 (53/MB).
+
+Be precise about what moving them buys, because the two tables differ:
+
+- **GObjects** (V1/V2/V3/V5/V6/V7/CT3 + PS6/PS7, 390–660 → 890–970): a **real** ordering change.
+  They previously outranked `GOBJ_G427_2` (700), `G427_4` (720), `CT1` (800) and the Octopath
+  `OT_1`/`OT_2` pair (820/840) — all 9–13 literal bytes against these six or seven.
+- **GWorld** (V2/V3/V4/V5/V6, 500–580 → 900–980): **consistency only**. They already sat behind
+  every other GWorld pattern (highest was 435), so the validator never reached them on any
+  oracle. The point is that the band now *means* something. The one genuine ordering change here
+  is `GWLD_G42_1` (7 literal bytes) 340 → 880.
+
+**Counter-example kept in the header comment,** because literal-byte count is necessary but not
+sufficient: `GOBJ_ES53_1` has 16 literal bytes yet takes 21–475 matches on every monolithic
+title — its shape is the generic MSVC function-scope-static + `atexit` registration thunk, so it
+matches once per static with a destructor. It stays at priority 100 anyway: it is the landing
+pattern for six module-instances, and patterns are scanned in **batches of 8** with an early
+return on the first validated match, so winning from batch 1 avoids every later `.text` pass.
+Rejecting a few hundred candidates by validation is far cheaper than an extra AVX2 sweep of a
+130 MB `.text`. Do not demote a noisy pattern that is also a winner.
+
+### Harness defects fixed along the way
+
+Three of these silently corrupted results rather than failing loudly, which is the dangerous kind:
+
+- `scan_patterns.java` wrote a fixed `scan_patterns.txt`, so a `-process` run over a **modular**
+  project overwrote itself and only the last DLL survived. Outputs are now keyed by
+  `tag + program + image base` — all three are needed: `FactoryGame-FactoryGame-Win64-Shipping.dll`
+  exists in both the 4.26 and 5.2 projects, and Satisfactory v1.2.3.1 holds a good *and* a broken
+  import of Core/CoreUObject/Engine under identical names. The broken duplicate had overwritten
+  the real 5.6 Engine results.
+- Programs with zero executable bytes (failed imports, image base `0000:0000`) are now skipped.
+- Hit counts were reported as `hits.size()`, which is capped at 40,000 — hot patterns were
+  under-counted. Now counted uncapped, with only the *detail* list capped.
+- `extract_patterns.py` parsed the `#define SIG_RIP(...)` macro **definition** as a signature,
+  producing a phantom 154th row with `pattern = "<UNRESOLVED:pat>"`.
+- The regression model itself was wrong: `>>> SELECTED` names the first pattern that *hits*, but
+  `ScanForTarget` validates every match and moves on when they all fail. A `DECOY-ONLY` top
+  pattern is a **fall-through (cost)**, not a wrong answer **(correctness)**. `aggregate_sweep.py`
+  now replays the real walk. Reading the old line as "what we resolve to" overstated risk.
+
+### Corpus notes for next time
+
+- `Satisfactory_UE521.rep` is **mis-imported**: only the *game* DLL is 5.2, and its
+  Core/CoreUObject/Engine are duplicates of the 4.26 DLLs (plus four broken empty programs). The
+  real 5.2 engine DLLs + PDBs were imported into a separate `SF521_pdb` project so the original
+  stays untouched. UE 5.2 is now a full oracle.
+- `Meltopia` ships a 347 MB PDB that its import never applied — it works as a monolithic UE 5.5
+  noise probe, and re-importing with the PDB would make it a second symbolised 5.5 oracle.
+- `ES2-0517` needs a one-time Ghidra language-version upgrade that `-readOnly` cannot save.
+- `Satfi426` is superseded by `Satisfactory_UE426` and can be deleted.
+
+All of this — the truth table, the per-project quirks, and the derivation procedure — is in
+[tools/ghidra/GROUND-TRUTH.md](../tools/ghidra/GROUND-TRUTH.md).
+
+-----
+
 ## 2026-07-26 - GNames band discipline: short patterns demoted, hand-derived UE4 ones promoted; UE 4.25 folded in (build 2405)
 
 ### The GNames table had drifted in *both* directions

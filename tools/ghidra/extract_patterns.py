@@ -19,6 +19,19 @@ for ln in src.splitlines():
     lines.append(ln)
 clean = "\n".join(lines)
 
+# Drop #define directives (including backslash line-continuations). Without this the
+# `SIG_RIP(id, pat, tgt, ...)` MACRO DEFINITION itself parses as a signature row, yielding a
+# phantom entry with id="id", target="tgt" and pattern "<UNRESOLVED:pat>" — which inflated the
+# reported pattern count by one and produced a spurious "SKIP unparsable" in every sweep.
+_nodef, _skipping = [], False
+for ln in clean.splitlines():
+    if _skipping or ln.lstrip().startswith("#define"):
+        _skipping = ln.rstrip().endswith("\\")
+        _nodef.append("")
+        continue
+    _nodef.append(ln)
+clean = "\n".join(_nodef)
+
 # 1) constants: constexpr const char* AOB_X = "..." ("..." ...);
 consts = {}
 for m in re.finditer(r'constexpr\s+const\s+char\*\s+(\w+)\s*=\s*((?:"[^"]*"\s*)+);', clean):

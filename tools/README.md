@@ -13,13 +13,26 @@ Run headless via `support/analyzeHeadless.bat` (or in the Script Manager GUI).
 **Ghidra 12 dropped bundled Jython**, so the new helpers are **Java** GhidraScripts; the older
 symbol/AOB exporters are Python run through the **pyghidra venv** (see their runner headers).
 
+**Start here for anything AOB-related:** [`ghidra/GROUND-TRUTH.md`](ghidra/GROUND-TRUTH.md) holds
+the per-project ground-truth addresses, the quirks of each supplied Ghidra project, and the
+procedure for adding a new game. The sweep itself is scripted — do not hand-run `analyzeHeadless`
+per project:
+
+```sh
+bash tools/ghidra/sweep.sh                      # all 18 projects (~30 min at SWEEP_JOBS=3)
+bash tools/ghidra/sweep.sh UE4.27 UE5.7         # only tags matching these substrings
+py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
+```
+
 | Script | Lang | What it does |
 |--------|------|--------------|
+| `sweep.sh` | bash | **The whole regression sweep.** Extracts `Himmel.h` → TSV, then replays it against every project in its table with that project's `GS_TRUE`, N projects at a time (a Ghidra project takes an *exclusive* lock, so parallelism is safe across projects and never within one). The truth table lives here in executable form so it cannot drift from the docs. |
+| `aggregate_sweep.py` | py3 | Turns the per-binary TSVs into the decisions: the **regression matrix** (per oracle × target, which pattern the runtime lands on and how many validations were wasted getting there), hotspot ranking by cost, a band audit (specificity vs priority), dead weight, load-bearing patterns, and noise normalised per MB of monolithic `.text`. Writes `REPORT.md`. |
 | `find_gobjects.java` | Java | Anchors on the `"...disregard for GC pool"` string (in `AllocateUObjectIndex`), finds + decompiles the referencing functions, lists their writable-`.data` globals. First arg overrides the anchor string. |
 | `decompile_functions.java` | Java | Decompiles each function VA passed as an arg (+ lists writable-`.data` refs). Forces disassembly if Ghidra missed the function. Use it to read a struct layout out of a function (e.g. `FUObjectArray` offsets + item stride). |
 | `find_callers.java` | Java | For each function VA arg, lists call sites and the `LEA/MOV RCX` (`this`) set before each call — recovers a static global a method is invoked on (e.g. `LEA RCX,[GUObjectArray]; call`). |
 | `dump_global_xref_aob.java` | Java | **PDB-shipping games.** Resolves UE global symbols by name (`GWorld`, `GUObjectArray`, `NamePoolData`, `SparseDelegates`, `GEngine`, …) and, for every code xref, dumps the raw byte window + a disp-masked AOB candidate + read/write kind + containing function. Turns a symbol-rich binary into `Himmel.h` material in one pass. Filters out variable symbols (they lazy-load the whole datatype list → OOM). |
-| `scan_patterns.java` | Java | **The one to use for validation.** Mass-scans a **TSV** of signatures against every executable section and resolves each hit exactly like `Genau::TryResolveMatch`, reporting `hits / ok / decoy` plus a verdict: `UNIQUE-OK` (every hit correct), `OK-FIRST` (a correct hit scans before any decoy), `OK-BEHIND` (**a decoy scans first — unsafe for a weakly-validated target**), `DECOY-ONLY`, `MISS`. Understands nibble wildcards. Env: `GS_TSV`, `GS_OUT`, `GS_TRUE="GObjects=<va>[\|<va2>],GNames=<va>,…"`. |
+| `scan_patterns.java` | Java | **The engine `sweep.sh` drives.** Mass-scans a **TSV** of signatures against every executable section and resolves each hit exactly like `Genau::TryResolveMatch`, reporting `hits / ok / decoy` plus a verdict: `UNIQUE-OK`, `OK-FIRST`, `OK-BEHIND` (**a decoy scans first**), `DECOY-ONLY`, `MISS`, `NO-TRUTH`. Also emits a per-pattern hotspot TSV and a **consensus** file — which VA the most *independent* patterns agree on, the only correctness signal available on a symbol-less binary — plus a *priority walk* showing what the runtime would land on there. Understands nibble wildcards. Env: `GS_TSV`, `GS_OUT`, `GS_TAG`, `GS_TRUE` (entries may carry a `programNameSubstring:` prefix, which is **required** for modular builds — their DLLs share image base `0x180000000` so their ranges overlap). Outputs are keyed by tag + program + image base; program name alone is not unique across projects. |
 | `extract_patterns.py` | py3 | Parses **all** of `dll/src/Himmel.h` (macros + raw brace initialisers + string-concatenated constants) into the TSV `scan_patterns.java` eats. Lets you replay the entire signature database against a new binary in one pass. No deps. |
 | `gen_cands.py` | py3 | Turns a `dump_xrefs2.java` dump into hundreds of mechanically-enumerated candidate patterns (every xref × several window lengths, trailing wildcards trimmed, anchor-byte rule enforced). Feed the result to `scan_patterns.java` so selection is evidence-driven instead of eyeballed. |
 | `dump_xrefs2.java` | Java | Successor to `dump_global_xref_aob.java`: accepts `Label@hexVA` as well as symbol names, and per xref emits the disassembly context plus disp-masked **and** raw windows at four back-off depths (`AOB0/2/4/6`, each with its `io=`), so you can pick how much leading context a pattern needs. |

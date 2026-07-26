@@ -1,123 +1,244 @@
 # Ground truth for the AOB regression sweep
 
 Every address below was resolved from a real PDB symbol (or, where noted, from a
-2-instruction accessor), so a signature that resolves to one of these is *provably*
-correct rather than plausibly correct. Feed them to `scan_patterns.java` via `GS_TRUE`.
+2-instruction accessor or from disassembly), so a signature that resolves to one of these is
+*provably* correct rather than plausibly correct.
 
-**Why this file exists:** re-deriving these takes a headless run per binary, and getting one
-wrong silently corrupts every verdict in the sweep. It has already happened once — a
-placeholder truth value made two good GEngine patterns look like they produced five decoys,
-and they were demoted on that basis. `scan_patterns.java` now prints `NO-TRUTH` instead of
-`DECOY-ONLY` when it has no plausible truth, but the real fix is to keep the values written down.
+**The sweep is scripted — do not hand-run `analyzeHeadless` per project:**
+
+```bash
+bash tools/ghidra/sweep.sh                      # everything (~30 min at SWEEP_JOBS=3)
+bash tools/ghidra/sweep.sh UE4.27 UE5.7         # only tags matching these substrings
+py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
+```
+
+`sweep.sh` holds the truth table below in executable form — it is the source of truth; this file
+is the explanation. Env knobs: `GHIDRA_HOME`, `GHIDRA_PROJS`, `SWEEP_OUT`, `SWEEP_XMX`,
+`SWEEP_JOBS`.
+
+**Why this file exists:** re-deriving these costs a headless run per binary, and getting one
+wrong silently corrupts every verdict downstream. It has already happened once — a placeholder
+truth value made two good GEngine patterns look like they produced five decoys, and they were
+demoted on that basis. `scan_patterns.java` now prints `NO-TRUTH` instead of `DECOY-ONLY` when
+it has no plausible truth, but the real fix is to keep the values written down.
 
 All addresses are **image-based VAs** as Ghidra shows them (preferred base, not runtime).
 
 ## The sweep
 
-| Project (`D:\Tools\GHIDRA_Projs\*.rep`) | UE | Symbols | Notes |
-|---|---|---|---|
-| `ES1-420` | 4.20 | ✅ full PDB | oldest sample; supersedes the symbol-less `ES1.rep` |
-| `ES2-UE425` | 4.25.2 | ✅ full PDB | Everspace 2 from a Steam depot; the FField/FProperty transition band |
-| `DropIn` | 4.27.2 | ✅ full PDB | Development build (32-byte `FUObjectItem`) |
-| `Avowed` | 5.3 | ❌ none | negative control only — can say "no hits", never "wrong hit" |
-| `ES2-0517` | 5.5 | ✅ full PDB | `0517` is a DATE, not a version |
-| `Satisfactory_v1.2.3.1` | 5.6.1 | ✅ full PDB | **modular** — truth is split across 3 DLLs |
-| `Solarpunk` | 5.7 | ✅ full PDB | |
-| `Satfi426` | 4.26 | ⚠ partial | **unusable as imported** — see below |
+| Tag | Project (`D:\Tools\GHIDRA_Projs\*.rep`) | UE | Symbols | Notes |
+|---|---|---|---|---|
+| UE4.18-FF7R | `FF7R` | 4.18+ | ❌ none | GObjects+GEngine truth **derived by disassembly** — see below |
+| UE4.20-Everspace | `ES1-420` | 4.20 | ✅ full PDB | oldest sample; supersedes the symbol-less `ES1.rep` |
+| UE4.22-Satisfactory | `Satisfactory_UE422` | 4.22 | ✅ full PDB | **monolithic EXE with symbols** — the only pre-4.25 one |
+| UE4.25-Everspace2 | `ES2-UE425` | 4.25.2 | ✅ full PDB | the FField/FProperty transition band |
+| UE4.26-Satisfactory | `Satisfactory_UE426` | 4.26.2 | ✅ full PDB | modular, 4 DLLs — supersedes the unusable `Satfi426` |
+| UE4.27-DropIn | `DropIn` | 4.27.2 | ✅ full PDB | Development build (32-byte `FUObjectItem`) |
+| UE4.27-Artisan | `The_Artisan_of_Glimmith` | 4.27 | ❌ none | monolithic noise probe |
+| UE4.x-Octopath | `Octopath` | 4.x | ❌ none | monolithic noise probe (version stripped) |
+| UE5.2-Satisfactory | `SF521_pdb` | 5.2.1 | ✅ full PDB | **created by us** — see the UE5.2 note below |
+| UE5.2-SatGameDLL | `Satisfactory_UE521` | 5.2.1 | ⚠ game DLL only | noise probe; project mis-imported, see below |
+| UE5.3-Avowed | `Avowed` | 5.3 | ❌ none | negative control (packed 20-byte `FUObjectItem`) |
+| UE5.5-Everspace2 | `ES2-0517` | 5.5 | ✅ full PDB | `0517` is a DATE, not a version |
+| UE5.5-ManorLords | `Manor Lords` | 5.5 | ❌ none | monolithic noise probe |
+| UE5.5-Meltopia | `Meltopia` | 5.5 | ❌ none¹ | monolithic noise probe |
+| UE5.6-Satisfactory | `Satisfactory_v1.2.3.1` | 5.6.1 | ✅ full PDB | modular; **also holds a symbolised CrashReportClient.exe** |
+| UE5.6-TQ2 | `TQ2` | 5.6 | ❌ none | monolithic noise probe |
+| UE5.7-Solarpunk | `Solarpunk` | 5.7 | ✅ full PDB | |
+| UEx-DQ12HD2D | `DQ_I_II_HD2D` | ? | ❌ none | monolithic noise probe |
 
-### `Satfi426` — why it contributes nothing, and how to fix it
+¹ Meltopia **does** ship `Meltopia-Win64-Shipping.pdb` (347 MB) beside the EXE, but the import
+never applied it — the probe finds zero UE globals. Re-importing with the PDB would turn a noise
+probe into a second symbolised monolithic UE 5.5 oracle. Not required: `ES2-0517` already covers
+5.5 with symbols.
 
-Recorded so nobody re-chases it. The `.rep` contains only three **game** DLLs
-(`FactoryGame-GameAnalyticsModule`, `-CoffeeCore`, `-FactoryGame`). The modules that
-**define** the globals — `FactoryGame-CoreUObject-Win64-Shipping.dll` and
-`-Engine-Win64-Shipping.dll` — were never imported, so there is no ground truth to resolve
-against and no engine code to mine.
+### Oracles vs noise probes — why both
 
-The game module *does* carry the import slots, and they are real:
+A row with truth answers *"does it resolve to the right address?"*. A row without answers only
+*"did anything hit that should not have?"* — but that second question needs **monolithic** game
+EXEs. A Satisfactory engine DLL is 4–30 MB of `.text`; a shipped game EXE is 100–200 MB of
+engine + game + middleware. Per-pattern collision counts measured only on modular DLLs
+understate real-world noise several-fold, which is why the report normalises to hits/MB and
+calls out the monolithic-only figure separately.
+
+### Broken imports you will see
+
+Several supplied projects contain duplicate program entries with image base `0000:0000`, 0
+functions and 1 symbol — failed imports sitting beside a good one **under the same name**.
+`scan_patterns.java` skips any program with zero executable bytes and keys its output files on
+`tag + program + image base`; without that the broken duplicate silently overwrote the real
+results (this cost us the 5.6 Engine DLL on the first pass).
+
+### `Satisfactory_UE521` — mis-imported, and how it was fixed
+
+Only ONE program in it is genuinely UE 5.2: `FactoryGame-FactoryGame-Win64-Shipping.dll` (the
+*game* module, which holds no engine globals). Its `Core` / `CoreUObject` / `Engine` entries are
+**duplicates of the UE 4.26.2 DLLs** — their recorded `executablePath` points at
+`…\Satisfactory\UE4.26.2\Engine\Binaries\Win64\` and their function/symbol counts match the 4.26
+project exactly. Four further entries are broken empty imports.
+
+Fixed by importing the real files into a **separate** project so the original stays untouched:
+
+```bash
+for M in CoreUObject Core Engine; do
+  analyzeHeadless D:/Tools/GHIDRA_Projs SF521_pdb \
+    -import "D:/tmp/Game archive/Satisfactory/UE5.2.1/Engine/Binaries/Win64/FactoryGame-$M-Win64-Shipping.dll"
+done
+```
+
+Run these **one at a time**: a Ghidra project takes an exclusive lock, so concurrent imports into
+the same project fail with `LockException` and only the first gets in.
+
+### `ES2-0517` needs a one-time language upgrade
+
+It was created by an older Ghidra. Opening it triggers "Updating language version", which
+`-readOnly` cannot save — the run stalls and the script never executes. Run it **once without
+`-readOnly`** (`-noanalysis` is fine) to persist the upgrade, then the normal read-only sweep
+works. If a previous read-only attempt was killed mid-upgrade it leaves `<project>.lock` behind;
+delete the stale `*.lock` / `*.lock~` after confirming no `java.exe` holds that project.
+
+### `Satfi426` — superseded, do not re-chase
+
+`Satfi426.rep` contains only three *game* DLLs; the modules that **define** the globals were
+never imported, so it has no ground truth and no engine code to mine. Its game module does carry
+real IAT slots (`__imp_?GUObjectArray@@3VFUObjectArray@@A` @ `0x180722950`,
+`__imp_?GWorld@@3VUWorldProxy@@A` @ `0x180727CB8`, `__imp_?GEngine@@3PEAVUEngine@@EA` @
+`0x180727CB0`) but all 490 referencing sites are Coffee Stain's own code (`UFG*`/`AFG*`/`FFG*`),
+so any pattern mined there would match Satisfactory and nothing else.
+**`Satisfactory_UE426` replaces it entirely** — same engine version, all four modules, full PDBs.
+Note `find_syms3.java` deliberately does **not** filter `__imp_*`; without that the IAT is
+invisible and a modular build looks empty.
+
+## Deriving truth for a new game
+
+1. **`probe.java` first** — confirms the project opened and whether symbols exist at all.
+2. **If symbols:** read the globals straight off it. Three catches:
+   - `NamePoolData` often has no symbol. Disassemble `FNameDebugVisualizer::GetBlocks` — it is
+     always `lea rax,[&Pool.Entries.Blocks]; ret`, so subtract `0x10`.
+   - The name pool moved from **CoreUObject to Core** at 5.6. Check both.
+   - Pre-4.23 there is no `FNamePool` at all: GNames is a `TNameEntryArray*` lazily allocated
+     inside `FName::GetNames`. Dump that function
+     (`-postScript dump_func.java "FName::GetNames"`) and take the global it tests-and-stores.
+3. **If no symbols:** run the sweep with no `GS_TRUE` and read `consensus_*.txt`. Addresses that
+   **≥3 independent patterns** agree on are reliable — validated on Everspace, where the pre-PDB
+   consensus matched the symbols exactly once the PDB arrived. The `-- priority walk --` block in
+   the same file shows what the runtime would actually land on.
+4. **If consensus is ambiguous, disassemble.** This is how FF7 Remake was cracked (below), and it
+   is often faster than it sounds — one `dump_func.java` on a candidate site settles it.
+5. Add the row to **`sweep.sh`**, then re-run the **whole** sweep, not just the new game.
+
+### The FF7 Remake derivation (worked example)
+
+FF7R has no PDB and its GObjects consensus was empty — the generic patterns each resolved
+somewhere different. A candidate GEngine pattern produced exactly one hit; dumping that site
+(`FUN_140FD1490`) showed:
 
 ```
-__imp_?GUObjectArray@@3VFUObjectArray@@A   0x180722950
-__imp_?GWorld@@3VUWorldProxy@@A            0x180727CB8
-__imp_?GEngine@@3PEAVUEngine@@EA           0x180727CB0
+  MOV    RCX,[0x145879EE8]     ; <- loaded as `this`
+  CALL   FUN_1416C7CE0         ; ...returns a UWorld   => this is GEngine
+  MOVSXD RAX,[RBX + 0xC]       ; UObject::InternalIndex of that UWorld
+  CMP    EAX,[0x1453BD48C]     ; ObjObjects.NumElements  (Objects + 0xC)
+  LEA    RDX,[RAX + RAX*2]
+  MOV    RAX,[0x1453BD480]     ; ObjObjects.Objects      => GUObjectArray + 0x10
+  LEA    RCX,[RAX + RDX*8]     ; 24-byte FUObjectItem stride
+  MOV    EAX,[RCX + 8]         ; FUObjectItem.Flags
 ```
 
-That is exactly the shape `GOBJ_SF_1` models ("via `_imp_`"): the AOB resolves to the IAT slot
-and `AobResolve::RipDeref` does the second hop at runtime. But **all 490 referencing sites are
-game code** (`UFG*` / `AFG*` / `FFG*` — Coffee Stain's own prefix), so any pattern mined there
-would match Satisfactory and nothing else. No existing signature scores a correct hit on it
-either; the shipped `SAT426` family was evidently derived from CoreUObject/Engine.
+so `GEngine = 0x145879EE8` and `GUObjectArray = 0x1453BD470`. Both independently corroborated:
+`GOBJ_RE2` + `GOBJ_V12` agree on `0x1453BD470`, and a second candidate shape on `0x145879EE8`.
+GNames/GWorld are deliberately **left unset** — the consensus is suggestive but unproven, and a
+guessed truth is worse than none (it mislabels every hit as a decoy).
 
-**Fix**: import those two DLLs into the same project (or supply a project that has them) and it
-becomes a normal UE4.26 entry. Contrast `Satisfactory_v1.2.3.1`, which has all four modules and
-works fine. Note `find_syms3.java` deliberately does **not** filter `__imp_*` — without that the
-IAT is invisible and a modular build looks empty.
+## Reading the report
 
-## `GS_TRUE` strings (copy-paste)
+`aggregate_sweep.py` writes `out/sweep/REPORT.md`. Section 1 decides whether a change is safe.
 
-`GObjects` accepts two values because `ValidateGObjects` matches both the `FUObjectArray`
-base and its `ObjObjects` sub-struct (base + 0x10).
+**Model note — read this before trusting a verdict.** `scan_patterns.java`'s `>>> SELECTED` line
+names the first pattern that *hits*. That is NOT what the runtime settles on:
+`Genau::ScanForTarget` validates every match and moves on when they all fail, returning only on
+the first that validates. So a `DECOY-ONLY` pattern at the top of the list is a **fall-through
+(cost)**, not a wrong answer **(correctness)**. The report's regression matrix replays the real
+walk and shows the pattern actually landed on plus the validations wasted getting there. Reading
+the raw SELECTED line as "what we resolve to" overstates risk; ignoring the fall-through
+understates cost.
+
+| Verdict (per pattern) | Meaning |
+|---|---|
+| `UNIQUE-OK` | every hit resolves to the true VA |
+| `OK-FIRST` | reaches truth, and the correct site is scanned before its decoys |
+| `OK-BEHIND` | reaches truth, but decoys scan first — the validator must reject them |
+| `DECOY-ONLY` | hits, never correct → the runtime falls through to the next pattern |
+| `MISS` | no hits |
+| `NO-TRUTH` | no usable truth supplied — verdict withheld on purpose, **not** evidence of anything |
+
+One more thing the cost numbers do NOT say: patterns are scanned in **batches of 8**, and
+ScanForTarget returns on the first validated match, so a pattern that wins from batch 1 avoids
+every later `.text` pass. Rejecting a few hundred candidates by validation is much cheaper than
+an extra AVX2 sweep of a 130 MB `.text`. Do not demote a noisy pattern that is also a *winner*.
+
+## `GS_TRUE` reference
+
+`GObjects` accepts two values because `ValidateGObjects` matches both the `FUObjectArray` base
+and its `ObjObjects` sub-struct (base + `0x10`).
+
+For **modular** builds every entry must carry a `programNameSubstring:` prefix. Their DLLs all
+share image base `0x180000000`, so their address ranges OVERLAP — an unscoped union would score
+a hit inside `Core` as a correct `GObjects`, which lives in `CoreUObject`. Use substrings that
+cannot alias: `-Core-Win64` does not match `-CoreUObject-Win64`.
 
 ```sh
-# Everspace — UE 4.20.  No FNamePool (TNameEntryArray era) and no sparse delegates (4.23+).
-# GNames here is `Names`, a TNameEntryArray* lazily new'd inside FName::GetNames @0x1406B19D0.
+# UE 4.18 — FF7 Remake. DERIVED BY DISASSEMBLY, not a PDB. GNames/GWorld intentionally absent.
+GS_TRUE="GObjects=1453bd470|1453bd480,GEngine=145879ee8"
+
+# UE 4.20 — Everspace. No FNamePool (TNameEntryArray era) and no sparse delegates (4.23+).
 GS_TRUE="GObjects=142e797f0|142e79800,GNames=1431dead8,GWorld=1432e1ac0,GEngine=1432df470"
 
-# Everspace 2 (depot) — UE 4.25.2.  NamePoolData from FNameDebugVisualizer::GetBlocks
+# UE 4.22 — Satisfactory (monolithic). GNames = `Names`, the TNameEntryArray* lazily new'd in
+# FName::GetNames @0x140BCEBF0 (the load is at +4). Pre-4.23: no sparse delegates.
+GS_TRUE="GObjects=144006f80|144006f90,GNames=144002a78,GWorld=1441073b8,GEngine=144104e58"
+
+# UE 4.25 — Everspace 2 (Steam depot). NamePoolData from FNameDebugVisualizer::GetBlocks
 # @0x140EF8410 = `lea rax,[0x144497D10]; ret`, minus 0x10.
 GS_TRUE="GObjects=1444b0520|1444b0510,GNames=144497d00,GWorld=1445f1160,SparseDelegates=1440070c0,GEngine=1445edad8"
 
-# DropIn — UE 4.27.2.  NamePoolData has no symbol; recovered from
-# FNameDebugVisualizer::GetBlocks @0x1426F59C0 = `lea rax,[0x14A363950]; ret`, minus 0x10.
+# UE 4.26 — Satisfactory, MODULAR (4 DLLs in one project).
+GS_TRUE="-CoreUObject-:GObjects=1803f9210|1803f9220,-CoreUObject-:SparseDelegates=1803f37d0,-Core-Win64:GNames=180659380,-Engine-:GWorld=18182a0b8,-Engine-:GEngine=181826658"
+
+# UE 4.27 — DropIn. NamePoolData from FNameDebugVisualizer::GetBlocks
+# @0x1426F59C0 = `lea rax,[0x14A363950]; ret`, minus 0x10.
 GS_TRUE="GObjects=14a3aa670|14a3aa660,GNames=14a363940,GWorld=14a52ced8,SparseDelegates=149ec0910,GEngine=14a528890"
 
-# Everspace 2 — UE 5.5.
+# UE 5.2 — Satisfactory, MODULAR (project SF521_pdb, built by us — see above). Cross-checked
+# against the DLL export table: GEngine RVA 0x1CD1140, GWorld 0x1CD4828, GUObjectArray 0x4194D0.
+GS_TRUE="-CoreUObject-:GObjects=1804194d0|1804194e0,-CoreUObject-:SparseDelegates=1803edcb0,-Core-Win64:GNames=18073d0c0,-Engine-:GWorld=181cd4828,-Engine-:GEngine=181cd1140"
+
+# UE 5.5 — Everspace 2. Needs the one-time language upgrade described above.
 GS_TRUE="GObjects=149aa7ef0|149aa7ee0,GNames=149c009c0,GWorld=149b37d18,SparseDelegates=149aa7e90,GEngine=149da5810"
 
-# Solarpunk — UE 5.7.
+# UE 5.6 — Satisfactory, MODULAR. The name pool moved CoreUObject -> Core at 5.6.
+# CrashReportClient.exe in the same project is a bonus MONOLITHIC 5.6 oracle (it links no Engine
+# module, so it legitimately has no GWorld/GEngine).
+GS_TRUE="-CoreUObject-:GObjects=1805a3620|1805a3630,-CoreUObject-:SparseDelegates=1805661a0,-Core-Win64:GNames=18082e8c0,-Engine-:GWorld=18216db68,-Engine-:GEngine=182170748,CrashReportClient:GObjects=141a9d4b0|141a9d4c0,CrashReportClient:GNames=1419c7e80,CrashReportClient:SparseDelegates=1419307f0"
+
+# UE 5.7 — Solarpunk.
 GS_TRUE="GObjects=1476ca920|1476ca910,GNames=1478e50c0,GWorld=1478cce58,SparseDelegates=1476ca4b0,GEngine=147a2fc20"
 
-# Satisfactory v1.2.3.1 — UE 5.6.1, MODULAR: run three times, once per DLL.
-#   NOTE the name pool moved from CoreUObject to Core by 5.6.
-#   NamePoolData from FNameDebugVisualizer::GetBlocks @0x18035CE20 = `lea rax,[0x18082E8D0]; ret`.
--process "FactoryGameSteam-CoreUObject-Win64-Shipping.dll"  GS_TRUE="GObjects=1805a3630|1805a3620,SparseDelegates=1805661a0"
--process "FactoryGameSteam-Core-Win64-Shipping.dll"         GS_TRUE="GNames=18082e8c0"
--process "FactoryGameSteam-Engine-Win64-Shipping.dll"       GS_TRUE="GWorld=18216db68,GEngine=182170748"
-
-# Avowed — UE 5.3, NO symbols.  Pass NO GS_TRUE at all; every target reports NO-TRUTH and the
-# only signal you get (the one you want) is "did anything hit that should not have?".
+# Noise probes — pass NO GS_TRUE at all.
 ```
 
-## Running the sweep
+## Exported symbols (the O(1) path)
 
-```sh
-export _JAVA_OPTIONS="-Xmx24G"
-py tools/ghidra/extract_patterns.py dll/src/Himmel.h out/patterns.tsv
+Modular builds export the globals, and `Genau::TrySymbolExport` enumerates every loaded module,
+so these resolve via `GetProcAddress` before any scan runs. Verified with
+`py tools/pe/pe_imports_exports.py exports <dll>`:
 
-GS_OUT="$PWD/out/<name>" GS_TSV="$PWD/out/patterns.tsv" GS_TRUE="<from above>" \
-analyzeHeadless D:/Tools/GHIDRA_Projs <Project> -process -noanalysis -readOnly \
-    -scriptPath tools/ghidra -postScript scan_patterns.java
-```
+| Symbol | Exported by | Confirmed on |
+|---|---|---|
+| `?GUObjectArray@@3VFUObjectArray@@A` | CoreUObject | 4.26, 5.2, 5.6 |
+| `?GWorld@@3VUWorldProxy@@A` | Engine | 4.26, 5.2, 5.6 |
+| `?GEngine@@3PEAVUEngine@@EA` | Engine | 4.26, 5.2 |
+| `?GMalloc@@3PEAVFMalloc@@EA` | Core | 4.26, 5.2 |
 
-Then read the **`>>> SELECTED`** lines — one per target. They answer the only question that
-matters when signatures are added: *walking priority order, which pattern hits first, and does
-it reach truth?* That mirrors `Genau::ScanForTarget`, which validates each match and takes the
-first that passes.
-
-| Verdict | Meaning |
-|---|---|
-| `CORRECT (all hits)` | ideal — every match resolves to the true VA |
-| `CORRECT first (N decoy(s) scan later, never reached)` | fine — `.text` is swept low→high and the real site comes first |
-| `AT RISK: N decoy(s) scan BEFORE the first correct match` | the runtime validator must reject all N. Acceptable for GObjects/GNames (strong validators), **dangerous for SparseDelegates** |
-| `*** WOULD RESOLVE WRONG unless the validator rejects all N hits ***` | this pattern alone would pick wrong; a later pattern must save it |
-| `NO-TRUTH` | no usable truth supplied — verdict withheld on purpose, **not** evidence of anything |
-
-## Adding a new PDB game
-
-1. `probe.java` first — confirms the project opened and whether symbols exist at all.
-2. If symbols: read the globals off it. If `NamePoolData` has no symbol (common), disassemble
-   `FNameDebugVisualizer::GetBlocks` — it is always `lea rax,[&Pool.Entries.Blocks]; ret`, so
-   subtract `0x10`. Check **Core** as well as CoreUObject on 5.6+.
-3. If no symbols: run the sweep with no `GS_TRUE`, then take addresses that **≥3 independent
-   patterns** agree on. This was validated on Everspace — the pre-PDB consensus for
-   GWorld/GObjects/GNames matched the symbols exactly once the PDB arrived.
-4. Add the row + `GS_TRUE` line here, then re-run the whole sweep, not just the new game.
+`NamePoolData` / `GNames` are **not** exported anywhere — which is why GNames has only
+`SymbolCallFollow` entries (resolve `FName::ToString`, then scan its body for the pool
+reference).
