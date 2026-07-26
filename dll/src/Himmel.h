@@ -5,24 +5,53 @@
 
 // ============================================================
 // Himmel — 欣梅爾 (勇者 — The Hero, Remembered Forever)
-// Signatures: 128+ AOB pattern database
+// Signatures: the AOB pattern database — 150 entries over FIVE targets
 //
-// All byte-pattern signatures for GObjects, GNames, GWorld,
-// and related UE global pointer scanning live in this file.
+// Every byte-pattern signature the scanner uses lives in this file, for all five
+// AobTarget values:
+//
+//   GObjects         FUObjectArray / GUObjectArray            55 AOB + 1 symbol export
+//   GNames           FNamePool (4.23+) or TNameEntryArray      28 AOB + 1 CallFollow
+//                                                              + 3 symbol exports
+//   GWorld           UWorldProxy                               49 AOB + 1 symbol export
+//   SparseDelegates  FSparseDelegateStorage::SparseDelegates    5 AOB — lazily resolved on
+//                    (UE 4.23+)                                  first sparse-delegate
+//                                                                drill-down, NOT in FindAll
+//   GEngine          the &GEngine SLOT, not the object          6 AOB + 1 symbol export —
+//                                                                resolved AFTER GObjects/GNames
+//                                                                because its validator needs
+//                                                                reflection (see that section)
+//
+// The authoritative per-target counts are at the BOTTOM of this file; regenerate them with
+//   py tools/ghidra/extract_patterns.py dll/src/Himmel.h out.tsv
+// which prints exactly what it parses out of here.
 //
 // HOW TO ADD NEW PATTERNS:
 //   1. Add a constexpr const char* in the appropriate section
 //   2. Name it AOB_{TARGET}_{SOURCE}{N} (e.g., AOB_GOBJECTS_RE3)
 //   3. Add a comment with: opcode meaning, UE version, game
-//   4. Add an AobSignature entry to the corresponding PATTERNS[] array
+//   4. Add an AobSignature entry to the corresponding PATTERNS[] array —
+//      **in priority order**. Every table is sorted, and a static_assert at the bottom of
+//      this file enforces both sortedness and uniqueness of priorities. Pick the band from
+//      how SPECIFIC the pattern is (count its LITERAL, non-wildcard bytes), per the band
+//      table above the arrays — not from how new it is or who contributed it.
+//   5. VERIFY IT AGAINST THE CORPUS before trusting it:
+//         bash tools/ghidra/sweep.sh && py tools/ghidra/aggregate_sweep.py out/sweep
+//      31 programs, 17 with PDB ground truth, UE 4.18-5.7. The bar is: correct on the binary
+//      it was mined from, and zero hits *or* correct everywhere else. A pattern that looks
+//      clean on one binary routinely produces decoys on another engine version — that is the
+//      entire point of the multi-binary gauntlet. See tools/ghidra/GROUND-TRUTH.md.
 //
-// Sources:
-//   V1-V13  : Original UE5CEDumper patterns
-//   PS1-PS7 : patternsleuth (github.com/trumank/patternsleuth)
-//   RE1-RE5 : RE-UE4SS CustomGameConfigs (github.com/UE4SS-RE/RE-UE4SS)
-//   D7_1    : Dumper-7 (github.com/Encryqed/Dumper-7)
-//   CT1-CT5 : UE4 Dumper.CT (vendor/UE4 Dumper.CT)
-//   UD1-UD3 : UEDumper (github.com/Spuckwaffel/UEDumper)
+// Sources (the `source` field of each AobSignature; ID ranges are what ACTUALLY exists here,
+// not what was once contributed — D7_1, GNAM_CT2, GOBJ_CT2, GNAM_UD1 and GWLD_V2/V4/V5/V6 have
+// all been removed, each documented at its old site with the byte string and the reason):
+//   V       : Original UE5CEDumper patterns (V1-V13, per target)
+//   PS      : patternsleuth (PS1-PS7)          github.com/trumank/patternsleuth
+//   RE      : RE-UE4SS CustomGameConfigs (RE1-RE3)  github.com/UE4SS-RE/RE-UE4SS
+//   CT      : UE4 Dumper.CT (CT1/CT3/CT4)      vendor/UE4 Dumper.CT
+//   UD      : UEDumper (GOBJ_UD1, GNAM_UD2)    github.com/Spuckwaffel/UEDumper
+//   EXP     : MSVC mangled symbol exports (GObjects / GWorld / GEngine / FName accessors)
+//   AV      : Avowed (Obsidian, UE 5.3 — packed 20-byte FUObjectItem)
 //   ES2     : Everspace 2 (UE 5.5)
 //   SF      : SatisfFactory (UE 5.3, modular build — patterns in DLLs)
 //   TQ      : TQ2 (UE 5.x)
@@ -35,7 +64,9 @@
 //   SAT52   : Satisfactory UE 5.2 build analysis (work/SF UE 5.21 AOBs.txt)
 //   OT      : Octopath Traveller (UE4, Ghidra + CE analysis, codename "Kingship")
 //   GH      : Ghidra cross-game analysis (aob_export/analysis_report.md)
-//   ME      : MindsEye (Build A Rocket Boy, UE 5.4.4 licensee fork — capstone + .pdata analysis)
+//   ME      : MindsEye (Build A Rocket Boy, UE 5.4.4 licensee fork — capstone + .pdata analysis).
+//             NOTE: AOB_NAMEDECRYPT_ME1 is deliberately NOT in any PATTERNS[] array — it does
+//             not resolve a global pointer, so Genau::ResolveNameKeyTable consumes it directly.
 //   SP57    : Solarpunk (rokaplay, UE 5.7 — ships a full PDB; symbols + xrefs mined offline
 //             via Ghidra headless, then every candidate verified unique against the .text
 //             image before inclusion — see docs/reversing-nonstandard-ue-games.md)
@@ -54,6 +85,25 @@
 //             UEnum::Names still TArray<TTuple> (<5.6), FUObjectItem 24B WITH RefCount,
 //             classic FChunkedFixedUObjectArray order (<5.8), and the PDB's
 //             EUnrealEngineObjectUE5Version enum ends at ASSETREGISTRY_PACKAGEBUILDDEPENDENCIES.
+//   DI427+SP57 / X+FF7R
+//           : CROSS-VERSION patterns — mined on one oracle, then confirmed decoy-free on
+//             others, so the source records every binary that vouches for them rather than
+//             just the one they came from. Both are GEngine entries: GENG_X1 (UWorld::
+//             GetGameViewport, correct on 8 engine versions) and GENG_X3 (its head only,
+//             which is what reaches FF7 Remake's UE 4.18 fork and UE 5.5).
+//
+// SWEEP CORPUS as of build 2414 — 31 programs, of which 17 carry ground truth. Those 17 are
+// PROGRAMS not games: a modular Satisfactory project contributes Core + CoreUObject + Engine
+// separately, since each defines different globals. They span ten engine versions —
+// UE 4.20 Everspace, 4.22 Satisfactory (monolithic), 4.25 Everspace 2, 4.26 Satisfactory,
+// 4.27 DropIn, 5.2 Satisfactory, 5.5 Everspace 2, 5.6 Satisfactory (+ its CrashReportClient,
+// a bonus monolithic 5.6), 5.7 Solarpunk — all from PDBs, plus FF7 Remake 4.18 whose
+// GObjects/GEngine were derived by disassembly instead.
+// The remaining 14 are symbol-less MONOLITHIC titles (Avowed, TQ2, Octopath, Manor Lords,
+// Meltopia, DQ I&II HD-2D, The Artisan of Glimmith, ...) used as noise probes. They cannot say
+// "right", only "did anything hit that should not have" — and that question needs monolithic
+// EXEs, because a 4-30 MB Satisfactory engine DLL understates the collision rate of a
+// 100-200 MB shipped game by several-fold.
 // ============================================================
 
 // ============================================================
@@ -180,9 +230,13 @@ constexpr const char* AOB_GOBJECTS_RE3 = "48 8D ?? ?? ?? ?? ?? 4C 8B C9 48 89 01
 // CT1: mov r8; lea rax; mov [rsi+10h]; mov qword — UE4 Dumper.CT v5+
 //   44 8B * * * 48 8D 05 * * * * * * * * * 48 89 71 10
 constexpr const char* AOB_GOBJECTS_CT1 = "44 8B ?? ?? ?? 48 8D 05 ?? ?? ?? ?? ?? ?? ?? ?? ?? 48 89 71 10";
-// CT2: push rbx; sub rsp,20h; mov rbx,rcx; test rdx; jz; mov
-//   40 53 48 83 EC 20 48 8B D9 48 85 D2 74 * 8B — function prologue
-constexpr const char* AOB_GOBJECTS_CT2 = "40 53 48 83 EC 20 48 8B D9 48 85 D2 74 ?? 8B";
+// CT2 — REMOVED in build 2415 as dead code. It was
+//   "40 53 48 83 EC 20 48 8B D9 48 85 D2 74 ?? 8B"
+// i.e. `push rbx; sub rsp,0x20; mov rbx,rcx; test rdx,rdx; jz; mov` — a bare MSVC function
+// prologue, which matches thousands of functions in any UE binary. Like AOB_GNAMES_UD1 it was
+// declared but never referenced by GOBJECTS_PATTERNS[], so it has never been scanned for.
+// Just as well: it contains **no RIP-relative operand at all**, so there is nothing for
+// TryResolveMatch to resolve — wiring it up could never have produced an address.
 // CT3: mov r8,[rip+X]; cmp [r8+?]  — 4C 8B 05 * * * * 45 3B 88
 constexpr const char* AOB_GOBJECTS_CT3 = "4C 8B 05 ?? ?? ?? ?? 45 3B 88";
 

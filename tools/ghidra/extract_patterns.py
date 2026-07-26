@@ -76,10 +76,13 @@ def unq(x):
         return "".join(re.findall(r'"([^"]*)"', x))
     return x
 
+USED_CONSTS = set()
+
 def patof(tok):
     tok = tok.strip()
     if tok.startswith('"'):
         return unq(tok)
+    USED_CONSTS.add(tok)
     return consts.get(tok, "<UNRESOLVED:%s>" % tok)
 
 rows = []
@@ -178,4 +181,21 @@ for k, v in sorted(c.items()):
 bad = [r["id"] for r in uniq if "<UNRESOLVED" in r["pattern"]]
 if bad:
     print("UNRESOLVED:", bad)
+
+# DEAD CONSTANTS — declared but never referenced by any PATTERNS[] array, so never scanned for.
+# This has bitten twice: AOB_GNAMES_UD1 (a UEDumper example pinning `cmp [rbp-0x18],0`, a stack
+# slot) and AOB_GOBJECTS_CT2 (a bare MSVC prologue with no RIP operand at all, so it could not
+# have resolved anything even if wired up). Both sat in the file for a long time looking like
+# active signatures. Deliberate exceptions are whitelisted below.
+NOT_IN_TABLES = {
+    # Consumed directly by Genau::ResolveNameKeyTable — it de-obfuscates FNameEntry payloads
+    # rather than resolving a global pointer, so it is not an AobSignature at all.
+    "AOB_NAMEDECRYPT_ME1",
+}
+declared = {n for n in consts if n.startswith("AOB_")}
+dead = sorted(declared - USED_CONSTS - NOT_IN_TABLES)
+if dead:
+    print("DEAD (declared but in no PATTERNS[] array — remove or wire up):")
+    for d in dead:
+        print("   ", d)
 print("->", os.path.abspath(OUT))

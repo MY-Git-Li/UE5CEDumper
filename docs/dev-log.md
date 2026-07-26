@@ -84,6 +84,31 @@ Re-ran the full 31-program sweep after both changes: the regression matrix is **
 identical**, and all eight symbol-less titles still pick GWorld at priority 100–390, far above
 the removed slots.
 
+### The file header was stale, and a second dead constant fell out of checking it
+
+The top-of-file block still said *"128+ AOB pattern database"* and *"signatures for GObjects,
+GNames, GWorld"* — it never mentioned **SparseDelegates or GEngine at all**, despite both being
+first-class `AobTarget` values. Its source list also overclaimed: `RE1-RE5` when only RE1–RE3
+exist, `UD1-UD3`, `CT1-CT5`, and `D7_1` which was deleted back in 2404.
+
+Rewritten with a per-target breakdown (counts machine-verified against
+`extract_patterns.py`, not hand-copied), the priority-order + `static_assert` rule, the
+"verify against the corpus before trusting it" step with the actual command, and a description
+of what the 31-program / 17-oracle corpus contains and why half of it deliberately has no
+ground truth.
+
+Auditing "is every declared constant actually in a table?" then turned up
+**`AOB_GOBJECTS_CT2`** — dead in exactly the way `AOB_GNAMES_UD1` was, and worse on inspection:
+`push rbx; sub rsp,0x20; mov rbx,rcx; test rdx,rdx; jz; mov` is a bare MSVC prologue matching
+thousands of functions, and it contains **no RIP-relative operand at all**, so there was nothing
+for `TryResolveMatch` to resolve — wiring it up could never have produced an address. Removed.
+
+Since this class of rot has now bitten twice, `extract_patterns.py` reports it: any `AOB_*`
+constant declared but referenced by no `PATTERNS[]` array is listed as `DEAD`, with a whitelist
+for the one deliberate exception (`AOB_NAMEDECRYPT_ME1`, which `Genau::ResolveNameKeyTable`
+consumes directly because it de-obfuscates FName payloads rather than resolving a pointer).
+Verified by planting a fake constant and watching it get flagged.
+
 -----
 
 ## 2026-07-26 - 31-program AOB sweep: GEngine symbol export + FF7R coverage, two dead patterns removed, one unmatchable pattern fixed (build 2408)
