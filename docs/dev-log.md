@@ -20,6 +20,86 @@ builds ≤696 in
 
 -----
 
+## 2026-07-26 - Sparse-delegate coverage audit: a second 5.5/5.6 anchor; FF7 Rebirth answered but not fixed (build 2432)
+
+Prompted by "should FF7 Rebirth get insurance AOBs, and does it even have FSparseDelegateStorage?"
+Auditing that produced a corpus-wide finding worth more than the original question.
+
+### SparseDelegates is the systematically weakest target
+
+Counting anchors per binary showed **eight** binaries resolving sparse through exactly ONE
+pattern (`SPARSE_ES2_1`), spanning UE 5.2 / 5.5 / 5.6. Many other `n=0` rows are *correct* —
+pre-4.23 engines have no sparse delegates (FF7 Remake 4.18, Everspace 4.20, Satisfactory 4.22,
+Octopath), and the modular DLLs where it does not live. The genuine gaps were the `n=1` band plus
+**Avowed 5.3 and FF7 Rebirth**.
+
+`n=1` matters more here than for other targets: `ValidateSparseDelegates` can only range-check
+two ints, so unlike the GObjects/GNames/GWorld/GEngine validators it cannot reject a wrong hit or
+rescue a miss.
+
+### `SPARSE_MEL55_1` — mined on Meltopia, covers three of the eight
+
+Meltopia's PDB names the whole family (`Add` / `AddUnique` / `Clear` / `Remove` / `RemoveAll` /
+`Get*MulticastDelegate` / `SetMulticastDelegate` / `NotifyUObjectDeleted`), which made the shapes
+easy to compare. The one that generalises is a **twin reference**:
+
+```
+lea    rcx,[SparseDelegates]     <- passed as `this` to TSet::FindOrAddId
+call   <FindOrAddId>
+movsxd rax,[rsp+d32]             <- out-param element index (displacement WILDCARDED)
+lea    rdi,[rax+rax*2]; shl rdi,5   <- element stride 0x60
+add    rdi,[SparseDelegates]     <- the SAME global again
+```
+
+Two references to one static with the stride math between them — the same property that makes
+`SPARSE_ES2_1` reliable. Meltopia 3/3 decoy-free; also hits **Manor Lords** and **TQ2**, both
+previously `n=1`, converging on a single address on each. Zero hits on Everspace 2 5.5,
+Satisfactory 5.2/5.6, Solarpunk, DropIn, Avowed and FF7 Rebirth — codegen-specific rather than
+version-specific, i.e. genuinely additive. Priority **160, last**, so it cannot perturb anything.
+
+Sparse `n=1` binaries: **8 → 5** (the remaining five are the two Everspace 2 builds and
+Satisfactory's 5.2/5.6 CoreUObject).
+
+### Two rejected candidates, both worth recording
+
+- The **TSet hash-bucket probe** (`dec ecx; mov eax,rNd; and rcx,rax; mov eax,[rdx+rcx*4];
+  cmp eax,-1; jz; mov rdx,[Sparse]`) reads like an ideal anchor and is the opposite: it is the
+  *generic* TSet lookup every TSet in the engine uses. It resolved to **39–43 different globals
+  per binary** and was DECOY-ONLY on Solarpunk and Satisfactory 5.2.
+- The **register-nibbled** form of the accepted pattern took **0 hits**. Over-wildcarding does
+  not generalise a pattern; it just stops it matching. That is now the third independent
+  confirmation of the exact-register rule for this target.
+
+The leading `lea rdx,[rsp+d32]` was also dropped on purpose — a frame-layout detail is not a
+semantic anchor, and the pattern is equally unique without it.
+
+### FF7 Rebirth: question answered, patterns deliberately NOT added
+
+**Yes, it has `FSparseDelegateStorage`.** Proven from `.rdata`, which carries
+`SparseDelegateFunction`, `MulticastSparseDelegateProperty` and even the `SparseDelegateReport`
+console command with its help text. So the storage exists and every one of our sparse patterns
+simply misses this fork's codegen — including both new ones.
+
+Its other four targets are in reasonable shape (GNames `1490D3C00` n=5, GObjects `14871EB38`
+n=5 with `GOBJ_RE1` independently finding the `-0x10` base, GWorld `148F30420` n=3, GEngine
+`148F4B580` n=2), and the tool is recorded as working in-game on it.
+
+No pattern was added, for two reasons worth stating rather than hiding:
+
+1. **Cost/benefit.** Locating the global needs a dedicated RE pass on a 377K-function
+   symbol-less binary — the `SparseDelegateReport` console command is the obvious lead (find the
+   string xref, follow the `FAutoConsoleCommand` handler) and is recorded here for whoever picks
+   it up. Sparse is lazily resolved and non-critical: only the sparse-delegate drill-down
+   degrades, nothing in the boot path.
+2. **It probably would not transfer.** The hope was insurance for FF7 part 3. But the history
+   argues against it: FF7 Remake (4.18) and FF7 Rebirth (4.26 fork) share *no* signatures —
+   `GOBJ_RE2`/`GOBJ_V12` work on Remake, `GOBJ_RE1` on Rebirth, and `GENG_X4` is DECOY-ONLY on
+   Remake while merely divergent on Rebirth. A pattern mined from Rebirth would only help part 3
+   if it reuses the same fork *and* toolchain, which those two titles did not manage between
+   themselves. Better to re-mine when the binary exists.
+
+-----
+
 ## 2026-07-26 - Two AOBs mined from Palworld (UE 5.1): a second sparse anchor + the broadest GEngine pattern yet (build 2426)
 
 Palworld ships no PDB, so this is a worked example of mining from a symbol-less binary. Ground

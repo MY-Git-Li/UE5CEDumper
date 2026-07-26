@@ -5,7 +5,7 @@
 
 // ============================================================
 // Himmel — 欣梅爾 (勇者 — The Hero, Remembered Forever)
-// Signatures: the AOB pattern database — 152 entries over FIVE targets
+// Signatures: the AOB pattern database — 153 entries over FIVE targets
 //
 // Every byte-pattern signature the scanner uses lives in this file, for all five
 // AobTarget values:
@@ -14,7 +14,7 @@
 //   GNames           FNamePool (4.23+) or TNameEntryArray      28 AOB + 1 CallFollow
 //                                                              + 3 symbol exports
 //   GWorld           UWorldProxy                               49 AOB + 1 symbol export
-//   SparseDelegates  FSparseDelegateStorage::SparseDelegates    6 AOB — lazily resolved on
+//   SparseDelegates  FSparseDelegateStorage::SparseDelegates    7 AOB — lazily resolved on
 //                    (UE 4.23+)                                  first sparse-delegate
 //                                                                drill-down, NOT in FindAll
 //   GEngine          the &GEngine SLOT, not the object          7 AOB + 1 symbol export —
@@ -67,6 +67,7 @@
 //   ME      : MindsEye (Build A Rocket Boy, UE 5.4.4 licensee fork — capstone + .pdata analysis).
 //             NOTE: AOB_NAMEDECRYPT_ME1 is deliberately NOT in any PATTERNS[] array — it does
 //             not resolve a global pointer, so Genau::ResolveNameKeyTable consumes it directly.
+//   MEL55   : Meltopia (UE 5.5, PDB via the MSDIA loader — PDB-Universal fails on that file)
 //   PAL51   : Palworld (UE 5.1, NO PDB — the corpus's only 5.1 sample). Ground truth recovered
 //             by disassembly + pattern consensus rather than symbols; see the SPARSE_PAL51_1
 //             comment for how the sparse-delegate and GObjects addresses were each confirmed
@@ -829,6 +830,38 @@ constexpr const char* AOB_SPARSE_PAL51_1 =
     "48 8D 3C 40 48 C1 E7 05 48 03 3D ?? ?? ?? ?? 48 8D 7F 08 48 0F 44 ?? 48 85 FF 0F 84 "
     "?? ?? ?? ?? 8B 47 08 3B 47 34";
 
+// --- MEL55: FSparseDelegateStorage twin-reference + element math (Meltopia) ---------
+// A second anchor for the UE 5.2-5.6 band, where SPARSE_ES2_1 was the ONLY pattern that hit.
+// Sparse coverage was measured across the whole corpus and that band was uniformly n=1, which
+// matters more than it looks: ValidateSparseDelegates can only range-check two ints, so it
+// cannot rescue a miss the way the GObjects/GNames/GWorld/GEngine validators can.
+//
+//   lea rcx,[SparseDelegates]      <- passed as `this` to TSet::FindOrAddId
+//   call <FindOrAddId>
+//   movsxd rax,[rsp+d32]           <- the out-param element index (displacement WILDCARDED)
+//   lea rdi,[rax+rax*2]; shl rdi,5 <- element stride 0x60
+//   add rdi,[SparseDelegates]      <- the SAME global again
+// The twin reference is what carries the uniqueness — the same property that makes
+// SPARSE_ES2_1 reliable — and the 0x60 stride math confirms it is this TSet and not another.
+//
+// Mined on Meltopia (UE 5.5, PDB): 3 hits, all 3 correct, zero decoys. On TQ2 (UE 5.6, no
+// symbols) 3 hits all converging on ONE address, so that title gains a second anchor as well.
+// Zero hits on Everspace 2 5.5, Satisfactory 5.2/5.6, Solarpunk 5.7, DropIn 4.27, Avowed and
+// FF7 Rebirth — it is codegen-specific, not version-specific, which is exactly why it is
+// additive rather than a replacement.
+//
+// TWO REJECTED ALTERNATIVES, both instructive:
+//   * The TSet hash-bucket probe (`dec ecx; mov eax,rNd; and rcx,rax; mov eax,[rdx+rcx*4];
+//     cmp eax,-1; jz; mov rdx,[Sparse]`) reads like a great anchor and is NOT: it is the
+//     GENERIC TSet lookup used by every TSet in the engine, so it resolved to 39-43 DIFFERENT
+//     globals per binary and was DECOY-ONLY on Solarpunk and Satisfactory 5.2.
+//   * The register-nibbled form of this pattern took 0 hits — over-wildcarding does not
+//     generalise a pattern, it just stops it matching.
+// The leading `lea rdx,[rsp+d32]` (the out-param address) was also deliberately dropped: a
+// frame-layout detail is not a semantic anchor, and the pattern is equally unique without it.
+constexpr const char* AOB_SPARSE_MEL55_1 =
+    "48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 63 84 24 ?? ?? ?? ?? 48 8D 3C 40 48 C1 E7 05 48 03 3D";
+
 // ============================================================
 // GObjects — DI427 (UE 4.27, 32-byte FUObjectItem)
 // ============================================================
@@ -1394,6 +1427,11 @@ constexpr AobSignature SPARSE_PATTERNS[] = {
     SIG_RIP_DIRECT("SPARSE_PAL51_1", AOB_SPARSE_PAL51_1, AobTarget::SparseDelegates,
                    8, 3, 7, 0, 150,
                    "PAL51", "UE5.1 element addr (add r,[Sparse]) + TSet Num/Max compare"),
+    // 160: last, for the same reason as PAL51_1 — SPARSE_ES2_1 already resolves both binaries
+    // this hits, so ordering it behind everything guarantees it cannot perturb a selection.
+    SIG_RIP_DIRECT("SPARSE_MEL55_1", AOB_SPARSE_MEL55_1, AobTarget::SparseDelegates,
+                   0, 3, 7, 0, 160,
+                   "MEL55", "UE5.5/5.6 twin-ref lea+add of SparseDelegates around the 0x60 stride math"),
 };
 
 // ── GEngine (UEngine* GEngine — the &GEngine SLOT) ───────────────────────
@@ -1483,9 +1521,9 @@ ASSERT_TABLE_ORDER(GENGINE_PATTERNS);
 // GObjects: 55 AOB patterns + 1 symbol export
 // GNames:   28 AOB patterns + 1 CallFollow + 3 symbol exports  (CT2 removed b2407 — see note)
 // GWorld:   49 AOB patterns + 1 symbol export  (V2/V4/V5/V6 removed b2409 — see note)
-// SparseDelegates: 6 — lazily resolved, not part of the FindAll boot sequence
+// SparseDelegates: 7 — lazily resolved, not part of the FindAll boot sequence
 // GEngine:   7 AOB patterns + 1 symbol export — resolved after GObjects/GNames
-// Total:   145 AOB patterns + 1 CallFollow + 6 symbol exports = 152 entries (from 19 sources)
+// Total:   146 AOB patterns + 1 CallFollow + 6 symbol exports = 153 entries (from 20 sources)
 //
 // EVERY ARRAY IS SORTED BY PRIORITY, and a checker enforces it — keep it that way. The file had
 // drifted out of order (GNAM_V5 at 850 sat inside the Tier-1 block, GOBJ_PS7 at 970 under a
