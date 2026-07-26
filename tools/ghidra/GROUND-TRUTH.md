@@ -16,6 +16,57 @@ py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
 is the explanation. Env knobs: `GHIDRA_HOME`, `GHIDRA_PROJS`, `SWEEP_OUT`, `SWEEP_XMX`,
 `SWEEP_JOBS`.
 
+## Read this first if you are going to CHANGE a pattern
+
+This file is the **operations** manual — how to re-run the sweep and how to add a game. The
+**authoring and pruning rules** live in the header + band-discipline block of
+[`dll/src/Himmel.h`](../../dll/src/Himmel.h), because they belong next to the patterns they
+govern. Read that block too before adding, moving or deleting anything. The short version:
+
+1. **Band = specificity.** Pick the priority band from the pattern's LITERAL (non-wildcard) byte
+   count, not from how new it is or who contributed it. Under ~8 literal bytes ⇒ band 800+.
+   Counter-example kept deliberately: `GOBJ_ES53_1` has 16 literal bytes and still takes 21–475
+   matches per monolithic title, because its *shape* is the generic MSVC static-init thunk. Judge
+   by specificity **and** semantics.
+2. **Wildcard FRAME displacements, keep STRUCT displacements.** `lea rdx,[rsp+????????]` is fine;
+   `lea rdx,[rsp+00000318]` is not — a frame offset encodes one compilation's stack layout.
+   But `cmp [rcx+0x2C0],rax` (UWorld member) or `cmp eax,[rdi+0x34]` (TSet Max) pin UE's real
+   layout and are the evidence that makes a pattern trustworthy. Two measured qualifiers: only
+   wildcard if the pattern has enough other literal context (doing it to the 7-literal-byte
+   `GWLD_G42_4` produced 38 hits / 37 decoys on UE 4.27), and small shadow-space constants
+   (`sub rsp,0x28`, `[rsp+0x20]`, ≤ 0x40) are idiomatic prologue, not frame layout.
+3. **Exact registers beat nibbled ones** on the sparse-delegate target — confirmed three times
+   independently. Over-wildcarding does not generalise a pattern; it either adds decoys or stops
+   it matching entirely.
+4. **Convergent hits = a real global; divergent hits = a generic idiom.** This single test has
+   rejected more candidates than any other: a rejected GEngine shape gave 76–93 *different*
+   targets per binary, and the TSet hash-bucket probe gave 39–43. A good pattern's extra hits all
+   land on ONE address.
+5. **Never prune on "no proof" — only on counter-proof.** `GWLD_V7` sat at 0-correct across the
+   whole corpus, looked like dead weight, and went UNIQUE-OK the moment Meltopia gained symbols.
+   `GOBJ_RE1` had zero hits across 31 programs and was correct the moment FF7 Rebirth was added.
+   Contrast `GWLD_V2/V4/V5/V6`, removed only after being re-tested against three *new* oracles
+   and still scoring 0 across 12 oracle groups.
+6. **Invariants the build enforces.** Every table is sorted by priority with unique priorities
+   (`static_assert` in Himmel.h — verified to actually fire), and `extract_patterns.py` reports
+   any `AOB_*` constant declared but referenced by no `PATTERNS[]` array. Two dead constants have
+   already been found that way.
+7. **`instrOffset` is the silent killer.** If you add leading context to a pattern, move
+   `instrOffset` by the same amount. Getting it wrong keeps the hit count healthy and makes the
+   resolved address garbage — it drops to 0 correct while still looking like it works.
+
+### Still open (as of build 2440)
+
+- **UE 4.23** is the only unverified sparse-delegate version; no 4.23 binary exists in the corpus.
+  Low risk: `Aura` probes the live key shape rather than gating on a version number.
+- **FF7 Rebirth's SparseDelegates** exists (proved from `.rdata`: `SparseDelegateFunction`,
+  `MulticastSparseDelegateProperty`, the `SparseDelegateReport` console command) but no pattern
+  finds it. Lead for whoever picks it up: find the `SparseDelegateReport` string xref and follow
+  the `FAutoConsoleCommand` handler.
+- **Avowed (5.3)** sparse: zero hits.
+- **Sparse `n=1`** on five binaries (both Everspace 2 builds, Satisfactory 5.2/5.6 CoreUObject) —
+  their sparse accessors are inlined, leaving only the one site `SPARSE_ES2_1` already owns.
+
 **Why this file exists:** re-deriving these costs a headless run per binary, and getting one
 wrong silently corrupts every verdict downstream. It has already happened once — a placeholder
 truth value made two good GEngine patterns look like they produced five decoys, and they were
