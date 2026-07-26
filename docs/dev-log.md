@@ -20,6 +20,72 @@ builds ≤696 in
 
 -----
 
+## 2026-07-26 - Pattern tables sorted + compile-time-enforced; 4 never-correct GWorld patterns removed (build 2414)
+
+### The tables had drifted out of priority order, and the file was lying about it
+
+The user asked why `GNAM_V1`/`V3`/`V4` "still have not been re-prioritised". They **had** been —
+demoted to 870/880/890 in build 2405 — but the array had not been re-sorted, so all three still
+sat under a `// 500–590: Tier 3 — short patterns` header. `GNAM_V5` (850) sat inside the Tier-1
+block, `GNAM_V2` (860) inside Tier 2, `GOBJ_PS7` (970) under `// 600–690`, and `GWLD_G42_1`
+(880) inside the 325–365 run. `ScanForTarget` sorts by priority so **behaviour was always
+correct** — but anyone reading the file got a different order from the one that actually runs.
+That is a worse failure than a plain bug: it silently invalidates review.
+
+All five tables are now written in priority order, the band headers match their contents, and
+the invariant is **enforced by the compiler** rather than by discipline:
+
+```cpp
+ASSERT_TABLE_ORDER(GOBJECTS_PATTERNS);   // static_assert: sorted AND no duplicate priorities
+```
+
+Verified the guard actually fires by deliberately mis-numbering an entry:
+`error C2338: static assertion failed: 'GNAMES_PATTERNS must be listed in priority order'`.
+Duplicate priorities are rejected too — two patterns on one number have an order that depends on
+the sort's stability, which makes a regression sweep unreproducible.
+
+### GWLD_V2 / V4 / V5 / V6 removed — never once correct in 31 programs
+
+The user's read that `AOB_GWORLD_V5` / `V6` "look a bit short, priority should be low" was right,
+and the data went further than that. Across 31 programs (9 groups with GWorld ground truth):
+
+| pattern | literal bytes | matches | reaches truth on |
+|---|---|---|---|
+| `GWLD_V4` `48 8B 3D ?? ?? ?? ?? 48 85 FF` | 6 | 5,809 | **0 of 9** |
+| `GWLD_V6` `48 89 1D ?? ?? ?? ?? E8` (write) | 4 | 2,403 | **0 of 9** |
+| `GWLD_V2` `48 89 05 ?? ?? ?? ?? 48 85 C0 74` (write) | 7 | 1,301 | **0 of 9** |
+| `GWLD_V5` `48 39 05 ?? ?? ?? ?? 74` | 4 | 929 | **0 of 9** |
+| `GWLD_V3` `48 8B 1D ?? ?? ?? ?? 48 85 DB` — **kept** | 6 | 22,581 | 6 of 9 |
+
+Every shape is already covered by a longer sibling that does work: the `mov rdi,[GWorld]` read by
+`SP57_3`/`G427_2`/`SF_4`, the rax-write by `SAT426_2`/`ES53_1`/`SAT425_3`, the rbx-write by
+`SF_3`. Removing them loses no mechanism, only the degenerate context-free form.
+
+**The deciding argument is specific to GWorld: a wrong GWorld is worse than no GWorld.**
+`ValidateGWorldBasic` is deliberately loose, and when it is fooled the damage is silent — exactly
+what happened on Solarpunk, where `GWLD_SF_2` matched a decoy `.data` global, passed validation
+and produced a wrong world. With nothing resolving, Genau instead falls back to instance-scan
+recovery, which found the *right* world on that same title. A pattern that has never once been
+correct is therefore pure downside here, however low its priority.
+
+### Why the GNames short patterns were NOT removed
+
+Same question, different answer, because the evidence differs. Over the same corpus
+(10 GNames oracle groups): `GNAM_V2` 8 correct / 2 decoy-only, `V5` 8/2, `V3` 7/3, `V4` 6/4,
+`V1` 6/4. They are **redundant, not wrong** — where each is correct there are 3–14 other correct
+patterns, so deleting them changes no result today, but "correct yet redundant" is worth keeping
+as insurance for an engine build the corpus does not cover, whereas "never correct" is not. The
+second half of the argument is the validator: `ValidateGNames` reads the pool structure and is
+strong, while `ValidateGWorldBasic` is loose and has been fooled in the field. At 850–890 they
+are only reached when everything above failed; on all 10 oracles GNames resolves by 715 at the
+latest, so they are never even scanned.
+
+Re-ran the full 31-program sweep after both changes: the regression matrix is **byte-for-byte
+identical**, and all eight symbol-less titles still pick GWorld at priority 100–390, far above
+the removed slots.
+
+-----
+
 ## 2026-07-26 - 31-program AOB sweep: GEngine symbol export + FF7R coverage, two dead patterns removed, one unmatchable pattern fixed (build 2408)
 
 The corpus grew from 8 binaries to **31 programs across 18 Ghidra projects — 17 of them with PDB

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>   // size_t — used by the compile-time table-order assertions below
 
 // ============================================================
 // Himmel — 欣梅爾 (勇者 — The Hero, Remembered Forever)
@@ -429,16 +430,12 @@ constexpr const char* AOB_GNAMES_GH_2 = "EC 20 80 3D ?? ?? ?? 00 00 48 8B D9 48 
 
 // V1: mov rax,[rip+X]; cmp rcx,rax; cmovz rax,[rip+Y]
 constexpr const char* AOB_GWORLD_V1 = "48 8B 05 ?? ?? ?? ?? 48 3B C8 48 0F 44 05";
-// V2: mov [rip+X],rax; test rax,rax; jz
-constexpr const char* AOB_GWORLD_V2 = "48 89 05 ?? ?? ?? ?? 48 85 C0 74";
-// V3: mov rbx,[rip+X]; test rbx,rbx
+// V2 / V4 / V5 / V6 — REMOVED in build 2409 as dead weight (0 correct on 9 GWorld oracles
+// across 31 programs). Byte strings + the full rationale are recorded at the bottom of
+// GWORLD_PATTERNS[]; the short version is that every shape they cover has a longer sibling that
+// does work, and on GWorld specifically a wrong answer is worse than no answer.
+// V3: mov rbx,[rip+X]; test rbx,rbx  — the one of the family that IS correct (6 of 9 oracles)
 constexpr const char* AOB_GWORLD_V3 = "48 8B 1D ?? ?? ?? ?? 48 85 DB";
-// V4: mov rdi,[rip+X]; test rdi,rdi
-constexpr const char* AOB_GWORLD_V4 = "48 8B 3D ?? ?? ?? ?? 48 85 FF";
-// V5: cmp [rip+X],rax; je
-constexpr const char* AOB_GWORLD_V5 = "48 39 05 ?? ?? ?? ?? 74";
-// V6: mov [rip+X],rbx; call  (GWorld write after UWorld creation)
-constexpr const char* AOB_GWORLD_V6 = "48 89 1D ?? ?? ?? ?? E8";
 // V7: mov rbx,[rip+X]; test rbx,rbx; jz 0x33; mov r8b  — Palworld
 constexpr const char* AOB_GWORLD_V7 = "48 8B 1D ?? ?? ?? ?? 48 85 DB 74 33 41 B0";
 
@@ -938,10 +935,10 @@ constexpr AobSignature GOBJECTS_PATTERNS[] = {
     SIG_RIP("GOBJ_ES53_1", AOB_GOBJECTS_ES53_1, AobTarget::GObjects, 4, 3, 7, 0, 100, "ES53", "ES2 UE5.3 FUObjectArray ctor+atexit"),
     SIG_RIP("GOBJ_DI427_1", AOB_GOBJECTS_DI427_1, AobTarget::GObjects, 0, 3, 7, 0, 105, "DI427",
             "UE4.27 GetObjectPtr + 32-byte-item shl 5 (nibble-masked dest reg)"),
-    SIG_RIP("GOBJ_DI427_3", AOB_GOBJECTS_DI427_3, AobTarget::GObjects, 0, 2, 6, -0x14, 115, "DI427",
-            "UE4.27 IndexToObject bounds test + 64K chunk divide (-> NumElements, adj -0x14)"),
     { "GOBJ_V10", AOB_GOBJECTS_V10, AobTarget::GObjects, AobResolve::RipBoth,
       0, 3, 7, -0x10, 110, 0, false, "V", "Split Fiction UE5.5+ lea+call+call" },
+    SIG_RIP("GOBJ_DI427_3", AOB_GOBJECTS_DI427_3, AobTarget::GObjects, 0, 2, 6, -0x14, 115, "DI427",
+            "UE4.27 IndexToObject bounds test + 64K chunk divide (-> NumElements, adj -0x14)"),
     SIG_RIP("GOBJ_AV1", AOB_GOBJECTS_AV1, AobTarget::GObjects, 0, 3, 7, -0x10, 120, "AV",
             "Avowed/Obsidian UE5.3 AllocateUObjectIndex MOV RDX,[ObjObjects.Objects]"),
     SIG_RIP("GOBJ_AV2", AOB_GOBJECTS_AV2, AobTarget::GObjects, 0, 3, 7, -0x10, 130, "AV",
@@ -975,7 +972,6 @@ constexpr AobSignature GOBJECTS_PATTERNS[] = {
     SIG_RIP("GOBJ_V4",  AOB_GOBJECTS_V4,  AobTarget::GObjects, 0, 3, 7, 0, 360, "V", "classic UE5 longer context"),
     SIG_RIP("GOBJ_V8",  AOB_GOBJECTS_V8,  AobTarget::GObjects, 0, 3, 7, 0, 370, "V", "bit shift variant"),
     SIG_RIP("GOBJ_V9",  AOB_GOBJECTS_V9,  AobTarget::GObjects, 0, 3, 7, 0, 380, "V", "extended index cdqe"),
-    SIG_RIP("GOBJ_V7",  AOB_GOBJECTS_V7,  AobTarget::GObjects, 0, 3, 7, 0, 890, "V", "GSpots cdq movzx"),
     SIG_RIP("GOBJ_UD1", AOB_GOBJECTS_UD1, AobTarget::GObjects, 0, 3, 7, 0, 400, "UD", "UEDumper"),
     SIG_RIP("GOBJ_GH_3", AOB_GOBJECTS_GH_3, AobTarget::GObjects, 12, 3, 7, 0, 410, "GH", "Ghidra IncrementalPurgeGarbage cross-game"),
     SIG_RIP("GOBJ_G427_1", AOB_GOBJECTS_G427_1, AobTarget::GObjects, 0, 3, 7, 0, 420, "G427", "UE4.27 Objects SAR context"),
@@ -995,9 +991,6 @@ constexpr AobSignature GOBJECTS_PATTERNS[] = {
     SIG_RIP("GOBJ_PS3", AOB_GOBJECTS_PS3, AobTarget::GObjects,  5, 3, 7, 0, 620, "PS", "jne; mov; lea rcx"),
     SIG_RIP("GOBJ_PS4", AOB_GOBJECTS_PS4, AobTarget::GObjects, 16, 3, 7, 0, 630, "PS", "test; mov; lea r11"),
     SIG_RIP("GOBJ_PS5", AOB_GOBJECTS_PS5, AobTarget::GObjects, 12, 3, 7, 0, 640, "PS", "or; and; mov; lea rcx"),
-    SIG_RIP("GOBJ_PS6", AOB_GOBJECTS_PS6, AobTarget::GObjects, 14, 2, 6, 0, 960, "PS", "arithmetic sub eax"),
-    SIG_RIP("GOBJ_PS7", AOB_GOBJECTS_PS7, AobTarget::GObjects, 17, 2, 6, 0, 970, "PS", "arithmetic add ecx"),
-
     // 700–790: UE 4.27 patterns with offsets/adjustments
     SIG_RIP("GOBJ_G427_2", AOB_GOBJECTS_G427_2, AobTarget::GObjects, 0, 2, 6, -0x14, 700, "G427", "UE4.27 NumElements CMP (adj -0x14)"),
     SIG_RIP("GOBJ_G427_4", AOB_GOBJECTS_G427_4, AobTarget::GObjects, 0, 2, 6, 0x0C, 720, "G427", "UE4.27 ObjLastNonGCIndex (adj +0x0C)"),
@@ -1016,12 +1009,15 @@ constexpr AobSignature GOBJECTS_PATTERNS[] = {
     // all of which carry 9–13 literal bytes against these six or seven. A short generic pattern
     // outranking a long purpose-built one is exactly the ordering that lets a decoy win.
     // They stay in the table as insurance for engine builds the corpus does not cover.
+    SIG_RIP("GOBJ_V7",  AOB_GOBJECTS_V7,  AobTarget::GObjects, 0, 3, 7, 0, 890, "V", "GSpots cdq movzx"),
     SIG_RIP("GOBJ_V2",  AOB_GOBJECTS_V2,  AobTarget::GObjects, 0, 3, 7, 0, 900, "V", "common UE5.3+"),
     SIG_RIP("GOBJ_V1",  AOB_GOBJECTS_V1,  AobTarget::GObjects, 0, 3, 7, 0, 910, "V", "classic UE5.0-5.2"),
     SIG_RIP("GOBJ_V6",  AOB_GOBJECTS_V6,  AobTarget::GObjects, 0, 3, 7, 0, 920, "V", "alt mov rcx"),
     SIG_RIP("GOBJ_V3",  AOB_GOBJECTS_V3,  AobTarget::GObjects, 0, 3, 7, 0, 930, "V", "mov r8"),
     SIG_RIP("GOBJ_V5",  AOB_GOBJECTS_V5,  AobTarget::GObjects, 0, 3, 7, 0, 940, "V", "mov r10"),
     SIG_RIP("GOBJ_CT3", AOB_GOBJECTS_CT3, AobTarget::GObjects, 0, 3, 7, 0, 950, "CT", "mov r8; cmp"),
+    SIG_RIP("GOBJ_PS6", AOB_GOBJECTS_PS6, AobTarget::GObjects, 14, 2, 6, 0, 960, "PS", "arithmetic sub eax"),
+    SIG_RIP("GOBJ_PS7", AOB_GOBJECTS_PS7, AobTarget::GObjects, 17, 2, 6, 0, 970, "PS", "arithmetic add ecx"),
 };
 
 // ── Obfuscated FName payloads (licensee forks) ───────────────────────────
@@ -1067,7 +1063,6 @@ constexpr AobSignature GNAMES_PATTERNS[] = {
             "UE4.27 FName resolve + FNameEntry addr math (stride 2, Blocks at +0x10)"),
     SIG_RIP("GNAM_DI427_1", AOB_GNAMES_DI427_1, AobTarget::GNames, 0, 3, 7, 0, 115, "DI427",
             "UE4.27 FName resolve prologue, 10 sites (replaces the V5/V2/D7_1 decoy family)"),
-    SIG_RIP("GNAM_V5",    AOB_GNAMES_V5,     AobTarget::GNames, 0, 3, 7, 0, 850, "V", "lea rcx; call; mov byte[],1 extended"),
     SIG_RIP("GNAM_ES53_1", AOB_GNAMES_ES53_1, AobTarget::GNames, 0, 3, 7, 0, 120, "ES53", "ES2 UE5.3 FNamePool init + MOV RDX,RAX"),
     SIG_RIP("GNAM_GH_1",  AOB_GNAMES_GH_1,   AobTarget::GNames, 12, 3, 7, 0, 130, "GH", "Ghidra ReserveNameBatch 27-fixed cross-game"),
     SIG_RIP("GNAM_SAT52_1", AOB_GNAMES_SAT52_1, AobTarget::GNames, 0, 3, 7, 0, 140, "SAT52", "Satisfactory UE5.2 dual-LEA NamePoolData"),
@@ -1081,28 +1076,48 @@ constexpr AobSignature GNAMES_PATTERNS[] = {
     // 300: was GNAM_CT2 + GNAM_UD2. CT2 removed b2407 — identical hit set on all 26 programs.
     SIG_RIP("GNAM_UD2",   AOB_GNAMES_UD2,    AobTarget::GNames, 0, 3, 7, 0, 300, "UD", "UEDumper lea rcx; call; mov r8 (supersedes CT2)"),
 
-    // 300–490: Tier 2 — medium patterns
+    // 340–380: Tier 2 — medium patterns
     SIG_RIP("GNAM_SF_2",  AOB_GNAMES_SF_2,   AobTarget::GNames, 0, 3, 7, 0, 340, "SF", "SatisfFactory SHL pattern (in Core DLL)"),
     SIG_RIP("GNAM_SF_3",  AOB_GNAMES_SF_3,   AobTarget::GNames, 0, 3, 7, 0, 360, "SF", "SatisfFactory FNameEntryId (in Core DLL)"),
     SIG_RIP("GNAM_V6",    AOB_GNAMES_V6,     AobTarget::GNames, 0, 3, 7, 0, 380, "V", "GSpots UE5+ mov rax; test; jnz"),
-    SIG_RIP("GNAM_V2",    AOB_GNAMES_V2,     AobTarget::GNames, 0, 3, 7, 0, 860, "V", "lea rcx; call; mov byte ptr"),
 
-    // 500–590: Tier 3 — short patterns
-    SIG_RIP("GNAM_V1",    AOB_GNAMES_V1,     AobTarget::GNames, 0, 3, 7, 0, 870, "V", "lea rsi; jmp"),
-    SIG_RIP("GNAM_V3",    AOB_GNAMES_V3,     AobTarget::GNames, 0, 3, 7, 0, 880, "V", "lea rax; jmp"),
-    SIG_RIP("GNAM_V4",    AOB_GNAMES_V4,     AobTarget::GNames, 0, 3, 7, 0, 890, "V", "lea r8; jmp"),
-
-    // 600–690: Patternsleuth
+    // 600–620: Patternsleuth
     SIG_RIP("GNAM_PS1",   AOB_GNAMES_PS1,    AobTarget::GNames, 2, 3, 7, 0, 600, "PS", "jz+9; lea r8"),
     SIG_RIP("GNAM_PS2",   AOB_GNAMES_PS2,    AobTarget::GNames, 7, 3, 7, 0, 620, "PS", "sub rsp; shr; lea rbp"),
 
-    // 800–990: UE4/legacy (pre-FNamePool)
+    // 700–720: UE4 pre-FNamePool (TNameEntryArray / TStaticIndirectArrayThreadSafeRead).
+    // A different structure entirely, and measurably MISSES on every FNamePool binary, so
+    // sitting below the Tier-2 block costs nothing and saves wasted validations on a UE4 title.
     SIG_RIP("GNAM_CT3",   AOB_GNAMES_CT3,    AobTarget::GNames, 4, 3, 7, 0, 700, "CT", "UE4 <4.23 pre-FNamePool deref"),
-    SIG_RIP("GNAM_CT4",   AOB_GNAMES_CT4,    AobTarget::GNames, 3, 3, 7, 0, 720, "CT", "UE4 pre-FNamePool write pattern"),
     SIG_RIP("GNAM_G42_1", AOB_GNAMES_G42_1,  AobTarget::GNames, 0, 3, 7, 0, 710, "G42", "UE4.2 pre-FNamePool TStaticIndirectArray"),
     // 715: ahead of CT4 (720) so a UE 4.22 title lands on its purpose-built anchor rather than
     // on CT4's write-pattern, which only gets there after the validator rejects a decoy.
     SIG_RIP("GNAM_SAT422_1", AOB_GNAMES_SAT422_1, AobTarget::GNames, 0, 3, 7, 0, 715, "SAT422", "Satisfactory UE4.22 FName::GetNames + game-thread assert (PDB-corrected b2407)"),
+    SIG_RIP("GNAM_CT4",   AOB_GNAMES_CT4,    AobTarget::GNames, 3, 3, 7, 0, 720, "CT", "UE4 pre-FNamePool write pattern"),
+
+    // 850–890: last resort — the short V-series, demoted here in build 2405.
+    //
+    // WHY THESE SURVIVED while the equivalent GWorld block (V2/V4/V5/V6) was deleted in 2409:
+    // they are redundant, not WRONG. Over 31 programs / 10 GNames oracle groups:
+    //     GNAM_V2  6 literal bytes  23,125 matches  reaches truth on 8 groups, decoy-only on 2
+    //     GNAM_V5  7 literal bytes  22,839 matches  8 / 2
+    //     GNAM_V3  4 literal bytes  15,000 matches  7 / 3
+    //     GNAM_V4  4 literal bytes   5,890 matches  6 / 4
+    //     GNAM_V1  4 literal bytes   1,182 matches  6 / 4
+    // Every GWorld pattern deleted in 2409 scored **0** correct; these score 6–8 of 10. None is
+    // ever the pattern the runtime lands on, and on every oracle where one is correct there are
+    // 3–14 other correct patterns, so deleting them would not change a single result today —
+    // but "correct yet redundant" is worth keeping as insurance for an engine build the corpus
+    // does not cover, whereas "never correct" is not. The other half of the argument is the
+    // validator: ValidateGNames reads the pool structure and is strong, while
+    // ValidateGWorldBasic is deliberately loose and has been fooled in the field (Solarpunk).
+    // At 850–890 they are only ever reached when everything above has failed; on all 10 oracles
+    // GNames resolves by 715 at the latest, so they are never even scanned.
+    SIG_RIP("GNAM_V5",    AOB_GNAMES_V5,     AobTarget::GNames, 0, 3, 7, 0, 850, "V", "lea rcx; call; mov byte[],1 extended"),
+    SIG_RIP("GNAM_V2",    AOB_GNAMES_V2,     AobTarget::GNames, 0, 3, 7, 0, 860, "V", "lea rcx; call; mov byte ptr"),
+    SIG_RIP("GNAM_V1",    AOB_GNAMES_V1,     AobTarget::GNames, 0, 3, 7, 0, 870, "V", "lea rsi; jmp"),
+    SIG_RIP("GNAM_V3",    AOB_GNAMES_V3,     AobTarget::GNames, 0, 3, 7, 0, 880, "V", "lea rax; jmp"),
+    SIG_RIP("GNAM_V4",    AOB_GNAMES_V4,     AobTarget::GNames, 0, 3, 7, 0, 890, "V", "lea r8; jmp"),
 };
 
 // ── GWorld ───────────────────────────────────────────────────────────────
@@ -1110,23 +1125,25 @@ constexpr AobSignature GWORLD_PATTERNS[] = {
     // 0: Symbol export (O(1))
     SIG_EXPORT("GWLD_EXP", EXPORT_GWORLD, AobTarget::GWorld, 0, "UWorldProxy symbol"),
 
-    // 100–160: Solarpunk UE 5.7 (verified decoy-free; re-anchor GWorld before
-    // the generic GWLD_SF_2 that mis-fires on a decoy in this build)
+    // 100–250: Tier 1 — long, specific, verified-unique.
+    // ENTRIES ARE IN PRIORITY ORDER, and must stay that way. They previously were not: the SP57
+    // block (100–160) was written as one run ahead of the ES2 block (110–250), so reading the
+    // file gave a different order from the one ScanForTarget actually uses (it sorts by
+    // priority). That is how a "why was this not re-prioritised?" question gets asked about a
+    // pattern that WAS re-prioritised — the file was lying, not the code.
     SIG_GWORLD_RIP("GWLD_SP57_1", AOB_GWORLD_SP57_1, 0, 3, 7, 0, 100, false, "SP57", "UE5.7 UGameEngine::Tick cmp [rcx+2C0] (tolerates inserted mov)"),
     // 105/115: UE 4.27 (DropIn, PDB-verified). Both are WRITE sites -> allowNull.
     // NOTE DI427_2 has totalLen = 11: `mov qword[rip+d32], imm32` — the disp32 still starts
     // at byte 3 but the instruction carries a trailing imm32. Mis-encoding this as 7 is the
     // classic way a C7-form store pattern silently resolves to garbage.
     SIG_GWORLD_RIP("GWLD_DI427_1", AOB_GWORLD_DI427_1, 0, 3,  7, 0, 105, true, "DI427", "UE4.27 UEngine::LoadMap GWorld=NewWorld store"),
+    SIG_GWORLD_RIP("GWLD_ES2_1", AOB_GWORLD_ES2_1, 0, 3, 7, 0, 110, false, "ES2", "UE5.5 26-byte lea+mov chain"),
     SIG_GWORLD_RIP("GWLD_DI427_2", AOB_GWORLD_DI427_2, 0, 3, 11, 0, 115, true, "DI427", "UE4.27 FSeamlessTravelHandler::Tick GWorld=nullptr (C7-imm store form)"),
     SIG_GWORLD_RIP("GWLD_SP57_2", AOB_GWORLD_SP57_2, 0, 3, 7, 0, 120, false, "SP57", "UE5.7 FMallocLeakReporter::WriteReports (mov rsi,rcx variant)"),
-    SIG_GWORLD_RIP("GWLD_SP57_3", AOB_GWORLD_SP57_3, 0, 3, 7, 0, 140, false, "SP57", "UE5.7 UEngine::GetWorldFromContextObject fallback"),
-    SIG_GWORLD_RIP("GWLD_SP57_4", AOB_GWORLD_SP57_4, 0, 3, 7, 0, 160, false, "SP57", "UE5.7 UActorComponent::On*PhysicsState mov [rax+298]"),
-
-    // 100–290: Tier 1 — long specific patterns (ES2, SF, TQ2, SP57)
-    SIG_GWORLD_RIP("GWLD_ES2_1", AOB_GWORLD_ES2_1, 0, 3, 7, 0, 110, false, "ES2", "UE5.5 26-byte lea+mov chain"),
     SIG_GWORLD_RIP("GWLD_ES2_2", AOB_GWORLD_ES2_2, 0, 4, 8, 0, 130, false, "ES2", "UE5.5 CMOVZ r13"),
+    SIG_GWORLD_RIP("GWLD_SP57_3", AOB_GWORLD_SP57_3, 0, 3, 7, 0, 140, false, "SP57", "UE5.7 UEngine::GetWorldFromContextObject fallback"),
     SIG_GWORLD_RIP("GWLD_ES2_3", AOB_GWORLD_ES2_3, 0, 3, 7, 0, 150, false, "ES2", "UE5.5 cmp [rcx+2C0]"),
+    SIG_GWORLD_RIP("GWLD_SP57_4", AOB_GWORLD_SP57_4, 0, 3, 7, 0, 160, false, "SP57", "UE5.7 UActorComponent::On*PhysicsState mov [rax+298]"),
     SIG_GWORLD_RIP("GWLD_ES2_4", AOB_GWORLD_ES2_4, 0, 3, 7, 0, 170, false, "ES2", "UE5.5 cmp+and GWorld"),
     SIG_GWORLD_RIP("GWLD_ES2_5", AOB_GWORLD_ES2_5, 0, 3, 7, 0, 180, false, "ES2", "UE5.5 call r12 loop"),
     SIG_GWORLD_RIP("GWLD_ES2_6", AOB_GWORLD_ES2_6, 0, 3, 7, 0, 190, false, "ES2", "UE5.5 cmovne+call rbx"),
@@ -1150,7 +1167,6 @@ constexpr AobSignature GWORLD_PATTERNS[] = {
     SIG_GWORLD_RIP("GWLD_G42_3", AOB_GWORLD_G42_3,  9, 3, 7, 0, 325, false, "G42", "UE4.2 fallback return pattern"),
     SIG_GWORLD_RIP("GWLD_G42_2", AOB_GWORLD_G42_2,  0, 3, 7, 0, 330, false, "G42", "UE4.2 test+jz+mov r8b"),
     SIG_GWORLD_RIP("GWLD_G42_5", AOB_GWORLD_G42_5,  0, 3, 7, 0, 335, false, "G42", "UE4.2 mov+mov rbx+lea"),
-    SIG_GWORLD_RIP("GWLD_G42_1", AOB_GWORLD_G42_1,  0, 3, 7, 0, 880, false, "G42", "UE4.2 mov+mov rsi+call"),
     SIG_GWORLD_RIP("GWLD_G42_4", AOB_GWORLD_G42_4,  0, 3, 7, 0, 345, false, "G42", "UE4.2 mov rdi+mov rbx"),
     SIG_GWORLD_RIP("GWLD_SAT422_1", AOB_GWORLD_SAT422_1, 0, 3, 7, 0, 350, false, "SAT422", "Satisfactory UE4.22 FMallocLeakReporter"),
     SIG_GWORLD_RIP("GWLD_SAT425_1", AOB_GWORLD_SAT425_1, 0, 3, 7, 0, 355, false, "SAT425", "Satisfactory UE4.25 UGameEngine::Tick CMP"),
@@ -1187,27 +1203,37 @@ constexpr AobSignature GWORLD_PATTERNS[] = {
     { "GWLD_SAT52_2", AOB_GWORLD_SAT52_2, AobTarget::GWorld, AobResolve::RipBoth,
       0, 3, 7, 0, 435, 0, true, "SAT52", "Satisfactory UE5.2 UGameEngine::Tick RCX write" },
 
-    // 900–980: the short V-series, moved out of the Tier-3 band in build 2407 (was 500–580).
-    // These are the noisiest block in the whole file: over 31 programs GWLD_V3 alone takes
-    // 22,017 matches — 95.7 per MB of .text on a monolithic game EXE, and 2,658 on FF7 Remake by
-    // itself — out of SIX literal bytes (`mov rbx,[rip+d32]; test rbx,rbx`, an idiom every UE
-    // global gets). V2/V4/V5/V6 reach the true GWorld on ZERO oracles and V3 never wins one.
-    //
-    // Be precise about what this buys, because it is NOT a cost saving: at 500–580 they already
-    // sat behind every other GWorld pattern (the highest was GWLD_SAT52_2 at 435), so the
-    // validator never reached them on any oracle anyway. The change is about the band MEANING
-    // something — a 4-literal-byte pattern must not outrank a 25-byte one, so that the next
-    // pattern added at 500 is not silently placed behind these. The one genuine ordering change
-    // here is GWLD_G42_1 (7 literal bytes), moved 340 -> 880 so that it no longer outranks the
-    // 10-14-byte SAT422/SAT425/SAT426/G427 block it used to precede.
+    // 880–900: last resort. GWLD_G42_1 (7 literal bytes) moved 340 -> 880 in build 2407 so it no
+    // longer outranks the 10–14-byte SAT422/SAT425/SAT426/G427 block it used to precede.
+    // GWLD_V3 is 6 literal bytes (`mov rbx,[rip+d32]; test rbx,rbx`) and the single noisiest
+    // pattern in the file — 22,581 matches over 31 programs, 95.7 per MB of .text on a
+    // monolithic game EXE, 2,658 on FF7 Remake alone — but it DOES reach the true GWorld on 6 of
+    // the 9 oracle groups, so it stays as the last-resort read form.
+    SIG_GWORLD_RIP("GWLD_G42_1", AOB_GWORLD_G42_1,  0, 3, 7, 0, 880, false, "G42", "UE4.2 mov+mov rsi+call"),
     SIG_GWORLD_RIP("GWLD_V3",    AOB_GWORLD_V3,     0, 3, 7, 0, 900, false, "V", "mov rbx test rbx"),
-    SIG_GWORLD_RIP("GWLD_V4",    AOB_GWORLD_V4,     0, 3, 7, 0, 920, false, "V", "mov rdi test rdi"),
-    SIG_GWORLD_RIP("GWLD_V5",    AOB_GWORLD_V5,     0, 3, 7, 0, 940, false, "V", "cmp [rip] je"),
-    { "GWLD_V2", AOB_GWORLD_V2, AobTarget::GWorld, AobResolve::RipBoth,
-      0, 3, 7, 0, 960, 0, true, "V", "write: mov [rip],rax" },
-    { "GWLD_V6", AOB_GWORLD_V6, AobTarget::GWorld, AobResolve::RipBoth,
-      0, 3, 7, 0, 980, 0, true, "V", "write: mov [rip],rbx; call" },
 };
+
+// ── REMOVED in build 2409: GWLD_V2 / V4 / V5 / V6 ────────────────────────
+// All four were 4–7 literal bytes and, measured across 31 programs (9 groups with GWorld
+// ground truth), reached the true GWorld on **ZERO** of them while firing constantly:
+//     GWLD_V4  "48 8B 3D ?? ?? ?? ?? 48 85 FF"        5,809 matches, 0 correct
+//     GWLD_V6  "48 89 1D ?? ?? ?? ?? E8"              2,403 matches, 0 correct   (write)
+//     GWLD_V2  "48 89 05 ?? ?? ?? ?? 48 85 C0 74"     1,301 matches, 0 correct   (write)
+//     GWLD_V5  "48 39 05 ?? ?? ?? ?? 74"                929 matches, 0 correct
+// Contrast GWLD_V3, kept above: same family, same length class, but 6 of 9 correct.
+//
+// Every shape is already covered by a longer sibling that DOES work — the `mov rdi,[GWorld]`
+// read by SP57_3 / G427_2 / SF_4, the rax-write by SAT426_2 / ES53_1 / SAT425_3, the rbx-write
+// by SF_3 — so removing them loses no mechanism, only the degenerate context-free form.
+//
+// The deciding argument is specific to GWorld: **a wrong GWorld is worse than no GWorld.**
+// ValidateGWorldBasic is deliberately loose, and when it is fooled the damage is silent — that
+// is exactly what happened on Solarpunk, where GWLD_SF_2 matched a decoy .data global, passed
+// validation, and produced a wrong world. When nothing resolves, Genau instead falls back to
+// instance-scan recovery, which found the RIGHT world on that same title. A pattern that has
+// never once been correct is therefore pure downside on this target, however low its priority.
+// (For GNames the calculus differs and GNAM_V1/V3/V4 were kept — see the note on that table.)
+// To restore: re-add with the byte strings above at priorities 920/960/940/980.
 
 // ── SparseDelegates (FSparseDelegateStorage::SparseDelegates) ────────────
 // Lazily resolved on first MulticastSparseDelegateProperty drill-down — NOT
@@ -1275,14 +1301,56 @@ constexpr AobSignature GENGINE_PATTERNS[] = {
 
 
 // ============================================================
+// Compile-time table invariants
+// ============================================================
+// ScanForTarget sorts by priority at run time, so an out-of-order table is not a BUG — it is
+// worse than that in practice: it makes the file misreport itself. Entries drift under stale
+// band headers, and someone reading `// 500–590: Tier 3` above a pattern that is actually at
+// 870 reasonably concludes it was never re-prioritised. That exact confusion is what prompted
+// this guard, so the invariant is now enforced by the compiler instead of by discipline.
+//
+// Duplicate priorities are also rejected: two patterns on the same number have an order that
+// depends on the sort's stability, which makes a regression sweep unreproducible.
+template <size_t N>
+constexpr bool IsSortedByPriority(const AobSignature (&arr)[N]) {
+    for (size_t i = 1; i < N; ++i)
+        if (arr[i - 1].priority > arr[i].priority) return false;
+    return true;
+}
+template <size_t N>
+constexpr bool HasUniquePriorities(const AobSignature (&arr)[N]) {
+    for (size_t i = 1; i < N; ++i)
+        if (arr[i - 1].priority == arr[i].priority) return false;   // relies on sortedness
+    return true;
+}
+
+#define ASSERT_TABLE_ORDER(tbl)                                                      \
+    static_assert(IsSortedByPriority(tbl), #tbl " must be listed in priority order"); \
+    static_assert(HasUniquePriorities(tbl), #tbl " has two entries on the same priority")
+
+ASSERT_TABLE_ORDER(GOBJECTS_PATTERNS);
+ASSERT_TABLE_ORDER(GNAMES_PATTERNS);
+ASSERT_TABLE_ORDER(GWORLD_PATTERNS);
+ASSERT_TABLE_ORDER(SPARSE_PATTERNS);
+ASSERT_TABLE_ORDER(GENGINE_PATTERNS);
+
+#undef ASSERT_TABLE_ORDER
+
+
+// ============================================================
 // Pattern count summary
 // ============================================================
 // GObjects: 55 AOB patterns + 1 symbol export
 // GNames:   28 AOB patterns + 1 CallFollow + 3 symbol exports  (CT2 removed b2407 — see note)
-// GWorld:   53 AOB patterns + 1 symbol export
+// GWorld:   49 AOB patterns + 1 symbol export  (V2/V4/V5/V6 removed b2409 — see note)
 // SparseDelegates: 5 — lazily resolved, not part of the FindAll boot sequence
 // GEngine:   6 AOB patterns + 1 symbol export — resolved after GObjects/GNames
-// Total:   147 AOB patterns + 1 CallFollow + 6 symbol exports = 154 entries (from 18 sources)
+// Total:   143 AOB patterns + 1 CallFollow + 6 symbol exports = 150 entries (from 18 sources)
+//
+// EVERY ARRAY IS SORTED BY PRIORITY, and a checker enforces it — keep it that way. The file had
+// drifted out of order (GNAM_V5 at 850 sat inside the Tier-1 block, GOBJ_PS7 at 970 under a
+// "600–690" header, GWLD_G42_1 at 880 inside the 325–365 run), which does not change behaviour
+// because ScanForTarget sorts, but does make the file misreport itself to a reader.
 //
 // Keep these in sync by running:  py tools/ghidra/extract_patterns.py dll/src/Himmel.h out.tsv
 // which prints the per-target counts it parses out of this file.
