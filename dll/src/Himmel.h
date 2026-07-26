@@ -267,7 +267,12 @@ constexpr const char* AOB_GOBJECTS_G42_2 = "48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 
 // G42_3: lea rcx,[GUObjectArray]; mov r8d,[rsp+?]; mov edx,[rsp+?]; mov [GUObjectAllocator],rax  — UE4.2
 constexpr const char* AOB_GOBJECTS_G42_3 = "48 8D 0D ?? ?? ?? ?? 44 8B 44 24 ?? 8B 54 24 ?? 48 89";
 // G42_4: lea rcx,[GUObjectArray]; call; lea rcx,[rbp+58]; ... add rsp,40; pop r14; jmp  — UE4.2 long epilogue
-constexpr const char* AOB_GOBJECTS_G42_4 = "48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8D 4D 58 48 8B 5C 24 50 48 8B 6C 24 58 48 8B 74 24 60 48 8B 7C 24 68 48 83 C4 40 41 5E 48 FF 25 ?? ?? ?? ?? 45";
+//   Frame displacements + the frame size wildcarded in build 2437 (were 0x58/0x50/0x58/0x60/
+//   0x68 and `add rsp,0x40`). Measured neutral — still 1/1 UNIQUE-OK on Everspace 4.20, where it
+//   is the landing pattern, and still no hits elsewhere. Neutral is the right trade here: 24
+//   literal bytes remain, so nothing is lost, and the pattern stops depending on one build's
+//   frame layout for free.
+constexpr const char* AOB_GOBJECTS_G42_4 = "48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8D 4D ?? 48 8B 5C 24 ?? 48 8B 6C 24 ?? 48 8B 74 24 ?? 48 8B 7C 24 ?? 48 83 C4 ?? 41 5E 48 FF 25 ?? ?? ?? ?? 45";
 
 // --- UE 4.27 game analysis patterns (G427 series) ---
 
@@ -569,8 +574,12 @@ constexpr const char* AOB_GWORLD_SF_1 = "48 8B 05 ?? ?? ?? ?? 48 39 81 C0 02 00 
 constexpr const char* AOB_GWORLD_SF_2 = "48 8B 05 ?? ?? ?? ?? 4C 8D 44 24 ?? 48 8D 54 24 ?? 48 89 44";
 // SF_3: cmp [GWorld],rdi; jne; mov [GWorld],rbx; call  — UWorld::FinishDestroy
 constexpr const char* AOB_GWORLD_SF_3 = "48 39 3D ?? ?? ?? ?? 75 ?? 48 89 1D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48";
-// SF_4: mov rdi,[GWorld]; mov rbx,[rsp+70]; mov rax,rdi  — UEngine::GetWorldFromContextObject
-constexpr const char* AOB_GWORLD_SF_4 = "48 8B 3D ?? ?? ?? ?? 48 8B 5C 24 70 48 8B";
+// SF_4: mov rdi,[GWorld]; mov rbx,[rsp+?]; mov rax,rdi  — UEngine::GetWorldFromContextObject
+//   FRAME DISPLACEMENT WILDCARDED in build 2437 (was 0x70): coverage 2 binaries -> 6, UNIQUE-OK
+//   on five of them and correct-site-first on UE 4.27. Note this makes it a near-superset of
+//   GWLD_G42_4 (same site, different frame size) — deliberately kept as separate entries because
+//   G42_4 must NOT be wildcarded; see its comment.
+constexpr const char* AOB_GWORLD_SF_4 = "48 8B 3D ?? ?? ?? ?? 48 8B 5C 24 ?? 48 8B";
 // SF_5: mov rax,[GWorld]; mov ebx,edx; mov rdi,rcx; lea rdx,[r11-38]  — FMallocLeakReporter::WriteReports
 constexpr const char* AOB_GWORLD_SF_5 = "48 8B 05 ?? ?? ?? ?? 8B DA 48 8B F9 49 8D";
 
@@ -612,7 +621,13 @@ constexpr const char* AOB_GWORLD_G42_2 = "48 8B 1D ?? ?? ?? ?? 48 85 DB 74 ?? 41
 // G42_3: mov rax,[rax+30]; test rax; jnz; mov rax,[GWorld]; ret  — UE4.2 fallback return
 //   RIP instruction starts at offset 9 (48 8B 05)
 constexpr const char* AOB_GWORLD_G42_3 = "48 8B 40 30 48 85 C0 75 ?? 48 8B 05 ?? ?? ?? ?? C3";
-// G42_4: mov rdi,[GWorld]; mov rbx,[rsp+60]  — UE4.2 epilogue context
+// G42_4: mov rdi,[GWorld]; mov rbx,[rsp+0x60]  — UE4.2 epilogue context
+//   THE ONE PATTERN WHERE THE FRAME DISPLACEMENT MUST STAY LITERAL, and the measurement that
+//   proves the stack-displacement rule needs its "enough other context" qualifier. This has only
+//   SEVEN literal bytes, so `24 60` is a meaningful fraction of its selectivity. Wildcarding it
+//   to `24 ??` was tested: it gains UE 4.24 but turns a clean UNIQUE-OK on 4.20 / 4.22 / 4.25
+//   into OK-BEHIND, and on UE 4.27 explodes to 38 hits / 37 decoys. Contrast GWLD_SF_4, the same
+//   site with two more literal bytes, where wildcarding is a clear win. Do not "fix" this one.
 constexpr const char* AOB_GWORLD_G42_4 = "48 8B 3D ?? ?? ?? ?? 48 8B 5C 24 60";
 // G42_5: mov rax,[GWorld]; mov rbx,rcx; lea rcx,[rbp+20]; mov rdx,[rax+18]  — UE4.2 extended
 constexpr const char* AOB_GWORLD_G42_5 = "48 8B 05 ?? ?? ?? ?? 48 8B D9 48 8D 4D 20 48";
@@ -686,9 +701,14 @@ constexpr const char* AOB_GWORLD_GH_1 = "89 7C 24 ?? 55 48 8B EC 48 83 EC ?? 48 
 // GH_2: FUMGViewportClient::GetWorld — mov rax,[rax+30]; test rax; jnz; mov rax,[GWorld]; ret; mov [rsp+10],rbx; push rsi; sub rsp,20
 //   instrOffset=9, 28 bytes, 23 fixed — cross-game ES/ES2/SAT. Extends G42_3 with trailing context.
 constexpr const char* AOB_GWORLD_GH_2 = "48 8B 40 30 48 85 C0 75 ?? 48 8B 05 ?? ?? ?? ?? C3 48 89 5C 24 10 56 48 83 EC 20 48";
-// GH_3: UEngine::GetWorldFromContextObject — call; cmp byte[rsp+58],0; jnz; mov rdi,[GWorld]; mov rbx,[rsp+60]; mov rax,rdi; mov rdi,[rsp+?]
-//   instrOffset=12, 31 bytes, 22 fixed — cross-game ES/ES2/SAT. Extends SF_4/G427_2.
-constexpr const char* AOB_GWORLD_GH_3 = "E8 ?? ?? ?? ?? 80 7C 24 58 00 75 ?? 48 8B 3D ?? ?? ?? ?? 48 8B 5C 24 60 48 8B C7 48 8B 7C 24";
+// GH_3: UEngine::GetWorldFromContextObject — call; cmp byte[rsp+?],0; jnz; mov rdi,[GWorld];
+//   mov rbx,[rsp+?]; mov rax,rdi; mov rdi,[rsp+?]   instrOffset=12, cross-game ES/ES2/SAT.
+//   FRAME DISPLACEMENTS WILDCARDED in build 2437 (were 0x58 / 0x60) — see the stack-displacement
+//   rule above. Measured: coverage went from 5 binaries to SEVEN (it now also reaches UE 4.24
+//   and 4.27) and it is UNIQUE-OK, zero decoys, on every one of them. A pure gain: the frame
+//   offsets were excluding two engine versions and contributing nothing to selectivity, because
+//   the other 22 literal bytes already carry it.
+constexpr const char* AOB_GWORLD_GH_3 = "E8 ?? ?? ?? ?? 80 7C 24 ?? 00 75 ?? 48 8B 3D ?? ?? ?? ?? 48 8B 5C 24 ?? 48 8B C7 48 8B 7C 24";
 // GH_4: FEngineLoop::Tick — xorps xmm1,xmm1; ucomiss xmm0,xmm1; jz; mov rbx,[GWorld]; test rbx; jz; mov r8b,1; xor edx
 //   instrOffset=8, 27 bytes, 21 fixed — cross-game ES/ES2/SAT. Unique XORPS+UCOMISS prefix.
 constexpr const char* AOB_GWORLD_GH_4 = "0F 57 C9 0F 2E C1 74 ?? 48 8B 1D ?? ?? ?? ?? 48 85 DB 74 ?? 41 B0 01 33 D2 48 8B";
@@ -857,10 +877,13 @@ constexpr const char* AOB_SPARSE_PAL51_1 =
 //     globals per binary and was DECOY-ONLY on Solarpunk and Satisfactory 5.2.
 //   * The register-nibbled form of this pattern took 0 hits — over-wildcarding does not
 //     generalise a pattern, it just stops it matching.
-// The leading `lea rdx,[rsp+d32]` (the out-param address) was also deliberately dropped: a
-// frame-layout detail is not a semantic anchor, and the pattern is equally unique without it.
+// The leading `lea rdx,[rsp+d32]` (the out-param address) is KEPT with its displacement
+// wildcarded. It was briefly dropped on a misreading of the stack-displacement rule: the rule
+// bans a LITERAL frame offset, not the instruction. Keeping the form costs nothing, adds four
+// literal bytes of context, and measured identically (3/3 on Meltopia either way).
 constexpr const char* AOB_SPARSE_MEL55_1 =
-    "48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 63 84 24 ?? ?? ?? ?? 48 8D 3C 40 48 C1 E7 05 48 03 3D";
+    "48 8D 94 24 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 63 84 24 ?? ?? ?? ?? "
+    "48 8D 3C 40 48 C1 E7 05 48 03 3D";
 
 // ============================================================
 // GObjects — DI427 (UE 4.27, 32-byte FUObjectItem)
@@ -1051,6 +1074,30 @@ constexpr const char* AOB_GENGINE_ES55_1 =
 //     and measurably MISS on all four FNamePool binaries (4.27/5.5/5.6/5.7), so moving them
 //     up to 700-730 cannot cost anything and saves ~710 wasted validations on a UE4.20 title.
 // Rule of thumb: fewer than ~8 literal bytes means 800+, no matter what it is anchored on.
+//
+// ── STACK DISPLACEMENTS: wildcard the value, keep the instruction ────────────────────────
+// `lea rdx,[rsp+????????]` is fine in a pattern. `lea rdx,[rsp+00000318]` is not.
+//
+// A frame displacement encodes the CALLEE'S FRAME LAYOUT — local count, register spills,
+// inlining decisions, alignment. None of that is a property of Unreal Engine; it is a property
+// of one compilation, and it moves when a patch adds a single local. A STRUCT displacement is
+// the opposite and must be KEPT: `cmp [rcx+0x2C0],rax` (UWorld member) or `cmp eax,[rdi+0x34]`
+// (TSet Max) pin UE's real data layout, which is version-stable and is exactly the evidence that
+// makes a pattern trustworthy. So the rule is not "avoid stack instructions" — it is
+// "wildcard FRAME displacements, keep STRUCT displacements".
+//
+// TWO MEASURED QUALIFIERS, both from build 2437:
+//   1. ONLY IF THE PATTERN HAS ENOUGH OTHER LITERAL CONTEXT. Wildcarding GWLD_GH_3's two frame
+//      offsets took it from 5 binaries to SEVEN, UNIQUE-OK and decoy-free on every one — a pure
+//      gain, because its other 22 literal bytes carry the selectivity. Doing the same to
+//      GWLD_G42_4, which has only SEVEN literal bytes total, turned clean UNIQUE-OK results into
+//      OK-BEHIND on three engine versions and produced 38 hits / 37 decoys on UE 4.27. On a short
+//      pattern the frame offset IS the selectivity — which is itself a reason to distrust the
+//      pattern, but wildcarding makes it worse, not better.
+//   2. SMALL SHADOW-SPACE CONSTANTS ARE NOT FRAME LAYOUT. `sub rsp,0x28` / `mov [rsp+0x20],rbx`
+//      (<= 0x40) are the standard x64 prologue for a function with <= 4 register parameters and
+//      are effectively idiomatic across compilers and builds. Ten patterns here bake those in
+//      and are fine. The rule targets the large, genuinely frame-specific values (0x50+).
 //
 // BUILD 2407 — the same audit applied to GObjects and GWorld, which build 2405 left alone.
 // Measured over 26 programs (11 with PDB truth) via tools/ghidra/sweep.sh + aggregate_sweep.py:
@@ -1429,8 +1476,13 @@ constexpr AobSignature SPARSE_PATTERNS[] = {
                    "PAL51", "UE5.1 element addr (add r,[Sparse]) + TSet Num/Max compare"),
     // 160: last, for the same reason as PAL51_1 — SPARSE_ES2_1 already resolves both binaries
     // this hits, so ordering it behind everything guarantees it cannot perturb a selection.
+    // instrOffset = 8: the pattern opens with `lea rdx,[rsp+d32]` (8 bytes), so the RIP-relative
+    // `lea rcx,[SparseDelegates]` starts at byte 8, NOT byte 0. Restoring that leading
+    // instruction without moving instrOffset silently resolved off the wrong instruction and
+    // dropped the pattern to 0 correct — caught by the verification sweep, which is exactly the
+    // failure mode instrOffset mistakes always take.
     SIG_RIP_DIRECT("SPARSE_MEL55_1", AOB_SPARSE_MEL55_1, AobTarget::SparseDelegates,
-                   0, 3, 7, 0, 160,
+                   8, 3, 7, 0, 160,
                    "MEL55", "UE5.5/5.6 twin-ref lea+add of SparseDelegates around the 0x60 stride math"),
 };
 

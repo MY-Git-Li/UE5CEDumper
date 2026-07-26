@@ -20,6 +20,68 @@ builds ≤696 in
 
 -----
 
+## 2026-07-26 - Stack-displacement rule codified and applied; GWLD_SF_4 coverage 4 -> 15 binaries (build 2437)
+
+The user stated a design rule I had been applying too bluntly: **`lea rdx,[rsp+????????]` is fine
+in a pattern; `lea rdx,[rsp+00000318]` is not.** The instruction form is acceptable — the literal
+frame offset is not. I had read it as "avoid stack instructions" and dropped a leading `lea` from
+`SPARSE_MEL55_1` for no reason.
+
+### Why the rule is right — and what it is really about
+
+A frame displacement encodes the **callee's frame layout**: local count, register spills, inlining
+decisions, alignment. None of that is a property of Unreal Engine; it is a property of one
+compilation, and it moves when a patch adds a single local.
+
+A **struct** displacement is the exact opposite and must be kept: `cmp [rcx+0x2C0],rax` (a UWorld
+member) or `cmp eax,[rdi+0x34]` (TSet Max) pin UE's real data layout, which is version-stable and
+is precisely the evidence that makes a pattern trustworthy. So the rule is not "avoid stack
+instructions" — it is **wildcard FRAME displacements, keep STRUCT displacements**.
+
+Auditing the whole database for literal rsp-relative displacements found 18, splitting cleanly:
+ten are small shadow-space constants (`sub rsp,0x28`, `mov [rsp+0x20],rbx`, all ≤ 0x40) which are
+the idiomatic x64 prologue and stable across compilers; eight are genuinely frame-specific
+(0x50–0x70), in four patterns.
+
+**An honest note on evidence:** breadth statistics do *not* separate the two groups (frame-offset
+patterns average 6.5 binaries hit / 3.5 correct vs 7.5 / 3.3 overall), and the one same-game
+cross-build pair in the corpus cannot test them (all four score zero hits on both ES2 builds). The
+rule stands on the mechanism, not on a correlation this corpus can show. What the corpus *can* do
+is test each change directly, which is what was done.
+
+### Measured, one pattern at a time
+
+| pattern | literal bytes | wildcarding the frame offset | action |
+|---|---|---|---|
+| `GWLD_GH_3` | 22 | 5 → 7 binaries, **UNIQUE-OK and decoy-free on every one** | applied |
+| `GWLD_SF_4` | 9 | 2 → 6 binaries, UNIQUE-OK on five, one late decoy on 4.27 | applied |
+| `GOBJ_G42_4` | 24 | neutral — still 1/1 on Everspace 4.20 where it is the lander | applied (free build-tolerance) |
+| `GWLD_G42_4` | **7** | gains 4.24 but breaks three versions to OK-BEHIND and **38 hits / 37 decoys on UE 4.27** | **rejected** |
+
+Final coverage after the full re-sweep: `GWLD_SF_4` **4 → 15 binaries** hit and **3 → 9** correct;
+`GWLD_GH_3` 9 → 12 and 4 → 6. `GWLD_G42_4` and `GOBJ_G42_4` unchanged.
+
+That last row is the qualifier worth keeping: **wildcard the frame displacement only if the
+pattern has enough other literal context.** On a seven-literal-byte pattern the frame offset *is*
+the selectivity — which is itself a reason to distrust that pattern, but removing it makes things
+worse, not better. Both the rule and this exception are now recorded in the band-discipline block
+in `Himmel.h`.
+
+### A bug the verification caught
+
+Restoring the leading `lea rdx,[rsp+d32]` to `SPARSE_MEL55_1` shifted its RIP-relative
+instruction from byte 0 to byte 8, but `instrOffset` was left at 0 — so it resolved off the wrong
+instruction and silently dropped to **0 correct** while still reporting 3 hits. The sweep caught
+it; the regression matrix did not move only because that pattern sits last at priority 160.
+This is the characteristic failure mode of an `instrOffset` mistake: hits look healthy, the
+resolved address is garbage. Fixed to `instrOffset = 8` and re-verified (1 correct, and the three
+binaries it hits are unchanged).
+
+Full 35-program re-sweep after every change: every target on all 20 oracles still correct.
+Build + tests green.
+
+-----
+
 ## 2026-07-26 - Sparse-delegate coverage audit: a second 5.5/5.6 anchor; FF7 Rebirth answered but not fixed (build 2432)
 
 Prompted by "should FF7 Rebirth get insurance AOBs, and does it even have FSparseDelegateStorage?"
