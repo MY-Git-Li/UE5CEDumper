@@ -7,7 +7,7 @@ Every address below was resolved from a real PDB symbol (or, where noted, from a
 **The sweep is scripted — do not hand-run `analyzeHeadless` per project:**
 
 ```bash
-bash tools/ghidra/sweep.sh                      # everything (~30 min at SWEEP_JOBS=3)
+bash tools/ghidra/sweep.sh                      # everything (~40 min at SWEEP_JOBS=3)
 bash tools/ghidra/sweep.sh UE4.27 UE5.7         # only tags matching these substrings
 py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
 ```
@@ -31,26 +31,47 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | UE4.18-FF7R | `FF7R` | 4.18+ | ❌ none | GObjects+GEngine truth **derived by disassembly** — see below |
 | UE4.20-Everspace | `ES1-420` | 4.20 | ✅ full PDB | oldest sample; supersedes the symbol-less `ES1.rep` |
 | UE4.22-Satisfactory | `Satisfactory_UE422` | 4.22 | ✅ full PDB | **monolithic EXE with symbols** — the only pre-4.25 one |
+| UE4.24-DropIn | `DropIn_UE424` | 4.24.3 | ✅ full PDB | **closed the last checkable sparse-delegate gap** — see below |
 | UE4.25-Everspace2 | `ES2-UE425` | 4.25.2 | ✅ full PDB | the FField/FProperty transition band |
 | UE4.26-Satisfactory | `Satisfactory_UE426` | 4.26.2 | ✅ full PDB | modular, 4 DLLs — supersedes the unusable `Satfi426` |
 | UE4.27-DropIn | `DropIn` | 4.27.2 | ✅ full PDB | Development build (32-byte `FUObjectItem`) |
 | UE4.27-Artisan | `The_Artisan_of_Glimmith` | 4.27 | ❌ none | monolithic noise probe |
 | UE4.x-Octopath | `Octopath` | 4.x | ❌ none | monolithic noise probe (version stripped) |
+| UE4.x-FF7Rebirth | `FF7Re` | 4.26 fork | ❌ none | the only binary that exercises `GOBJ_RE1` / `GNAM_V7` |
+| UE5.1-Palworld | `Palworld` | 5.1 | ❌ none | monolithic noise probe; the corpus's only 5.1 |
 | UE5.2-Satisfactory | `SF521_pdb` | 5.2.1 | ✅ full PDB | **created by us** — see the UE5.2 note below |
 | UE5.2-SatGameDLL | `Satisfactory_UE521` | 5.2.1 | ⚠ game DLL only | noise probe; project mis-imported, see below |
 | UE5.3-Avowed | `Avowed` | 5.3 | ❌ none | negative control (packed 20-byte `FUObjectItem`) |
 | UE5.5-Everspace2 | `ES2-0517` | 5.5 | ✅ full PDB | `0517` is a DATE, not a version |
+| UE5.5-Everspace2b | `ES2_UE55` | 5.5 | ✅ full PDB | 2025-06-17 build — the same-game cross-build pair with `ES2-0517` |
+| UE5.5-Meltopia | `Meltopia_V2` | 5.5 | ✅ full PDB¹ | second symbolised MONOLITHIC 5.5; supersedes `Meltopia.rep` |
 | UE5.5-ManorLords | `Manor Lords` | 5.5 | ❌ none | monolithic noise probe |
-| UE5.5-Meltopia | `Meltopia` | 5.5 | ❌ none¹ | monolithic noise probe |
 | UE5.6-Satisfactory | `Satisfactory_v1.2.3.1` | 5.6.1 | ✅ full PDB | modular; **also holds a symbolised CrashReportClient.exe** |
 | UE5.6-TQ2 | `TQ2` | 5.6 | ❌ none | monolithic noise probe |
 | UE5.7-Solarpunk | `Solarpunk` | 5.7 | ✅ full PDB | |
 | UEx-DQ12HD2D | `DQ_I_II_HD2D` | ? | ❌ none | monolithic noise probe |
 
-¹ Meltopia **does** ship `Meltopia-Win64-Shipping.pdb` (347 MB) beside the EXE, but the import
-never applied it — the probe finds zero UE globals. Re-importing with the PDB would turn a noise
-probe into a second symbolised monolithic UE 5.5 oracle. Not required: `ES2-0517` already covers
-5.5 with symbols.
+¹ Meltopia's first import silently failed to apply its 347 MB PDB. The retry succeeded by
+selecting the **MSDIA** PDB loader — **PDB-Universal fails on this file**. If a game ships a PDB
+and the probe still reports zero UE globals, try MSDIA before concluding the PDB is unusable.
+The symbol-less `Meltopia.rep` is superseded and can be deleted.
+
+**Meltopia is also the cleanest validation of the consensus method.** While it had no symbols,
+the sweep's consensus table predicted GEngine `149F002F8`, GWorld `149F03D10`, GObjects
+`149D87430` and GNames `149CA3C80`. Once the PDB applied, the symbols gave `149f002f8`,
+`149f03d10`, `149d87420` (+0x10 = `149d87430`) and `149ca3c80` — **all four exact**.
+
+### UE 4.24 closed the sparse-delegate question
+
+`DropIn_UE424` carries a `FSparseDelegateStorage::SparseDelegates` symbol, and its mangled name
+demangles to
+
+    TMap<UObjectBase const*, TMap<FName, TSharedPtr<TMulticastScriptDelegate<FWeakObjectPtr>>>>
+
+— a **raw pointer key**, identical to 4.25 / 4.26 / 4.27 / 5.x. Sparse delegates were introduced
+in 4.23, so **only 4.23 itself is now unverified**, and no 4.23 binary exists in the corpus.
+`Aura`'s walker still probes the live key shape rather than gating on a version number; keep it
+that way — that is what makes 4.23 and any licensee fork safe without a binary to test against.
 
 ### Oracles vs noise probes — why both
 
@@ -197,6 +218,10 @@ GS_TRUE="GObjects=142e797f0|142e79800,GNames=1431dead8,GWorld=1432e1ac0,GEngine=
 # FName::GetNames @0x140BCEBF0 (the load is at +4). Pre-4.23: no sparse delegates.
 GS_TRUE="GObjects=144006f80|144006f90,GNames=144002a78,GWorld=1441073b8,GEngine=144104e58"
 
+# UE 4.24 — DropIn (a second, older build of the same unplayable VR title). NamePoolData from
+# FNameDebugVisualizer::GetBlocks @0x141323510 = `lea rax,[0x1471BCA10]; ret`, minus 0x10.
+GS_TRUE="GObjects=1471db720|1471db730,GNames=1471bca00,GWorld=1472ea620,SparseDelegates=146da38d0,GEngine=1472e74a0"
+
 # UE 4.25 — Everspace 2 (Steam depot). NamePoolData from FNameDebugVisualizer::GetBlocks
 # @0x140EF8410 = `lea rax,[0x144497D10]; ret`, minus 0x10.
 GS_TRUE="GObjects=1444b0520|1444b0510,GNames=144497d00,GWorld=1445f1160,SparseDelegates=1440070c0,GEngine=1445edad8"
@@ -214,6 +239,16 @@ GS_TRUE="-CoreUObject-:GObjects=1804194d0|1804194e0,-CoreUObject-:SparseDelegate
 
 # UE 5.5 — Everspace 2. Needs the one-time language upgrade described above.
 GS_TRUE="GObjects=149aa7ef0|149aa7ee0,GNames=149c009c0,GWorld=149b37d18,SparseDelegates=149aa7e90,GEngine=149da5810"
+
+# UE 5.5 — Everspace 2, 2025-06-17 build (two manifests newer than ES2-0517). Every global moved
+# ~-0x2000 versus that snapshot, so this is a real "does a pattern survive a game update?" test
+# and not a trivially identical binary. It passes: both builds land on the SAME patterns with
+# the SAME cost for all five targets.
+GS_TRUE="GObjects=149aa5f60|149aa5f70,GNames=149bfe940,GWorld=149b35dd8,SparseDelegates=149aa5f10,GEngine=149da37b0"
+
+# UE 5.5 — Meltopia (monolithic, PDB applied via MSDIA). NamePoolData from
+# FNameDebugVisualizer::GetBlocks @0x141270620 = `lea rax,[0x149CA3C90]; ret`, minus 0x10.
+GS_TRUE="GObjects=149d87420|149d87430,GNames=149ca3c80,GWorld=149f03d10,SparseDelegates=149a9a070,GEngine=149f002f8"
 
 # UE 5.6 — Satisfactory, MODULAR. The name pool moved CoreUObject -> Core at 5.6.
 # CrashReportClient.exe in the same project is a bonus MONOLITHIC 5.6 oracle (it links no Engine

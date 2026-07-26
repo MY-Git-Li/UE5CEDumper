@@ -37,7 +37,7 @@
 //      table above the arrays — not from how new it is or who contributed it.
 //   5. VERIFY IT AGAINST THE CORPUS before trusting it:
 //         bash tools/ghidra/sweep.sh && py tools/ghidra/aggregate_sweep.py out/sweep
-//      31 programs, 17 with PDB ground truth, UE 4.18-5.7. The bar is: correct on the binary
+//      35 programs, 20 with PDB ground truth, UE 4.18-5.7. The bar is: correct on the binary
 //      it was mined from, and zero hits *or* correct everywhere else. A pattern that looks
 //      clean on one binary routinely produces decoys on another engine version — that is the
 //      entire point of the multi-binary gauntlet. See tools/ghidra/GROUND-TRUTH.md.
@@ -92,18 +92,26 @@
 //             GetGameViewport, correct on 8 engine versions) and GENG_X3 (its head only,
 //             which is what reaches FF7 Remake's UE 4.18 fork and UE 5.5).
 //
-// SWEEP CORPUS as of build 2414 — 31 programs, of which 17 carry ground truth. Those 17 are
+// SWEEP CORPUS as of build 2419 — 35 programs, of which 20 carry ground truth. Those 20 are
 // PROGRAMS not games: a modular Satisfactory project contributes Core + CoreUObject + Engine
-// separately, since each defines different globals. They span ten engine versions —
-// UE 4.20 Everspace, 4.22 Satisfactory (monolithic), 4.25 Everspace 2, 4.26 Satisfactory,
-// 4.27 DropIn, 5.2 Satisfactory, 5.5 Everspace 2, 5.6 Satisfactory (+ its CrashReportClient,
-// a bonus monolithic 5.6), 5.7 Solarpunk — all from PDBs, plus FF7 Remake 4.18 whose
-// GObjects/GEngine were derived by disassembly instead.
-// The remaining 14 are symbol-less MONOLITHIC titles (Avowed, TQ2, Octopath, Manor Lords,
-// Meltopia, DQ I&II HD-2D, The Artisan of Glimmith, ...) used as noise probes. They cannot say
-// "right", only "did anything hit that should not have" — and that question needs monolithic
-// EXEs, because a 4-30 MB Satisfactory engine DLL understates the collision rate of a
-// 100-200 MB shipped game by several-fold.
+// separately, since each defines different globals. They span twelve engine versions —
+// UE 4.20 Everspace, 4.22 Satisfactory (monolithic), 4.24 DropIn, 4.25 Everspace 2,
+// 4.26 Satisfactory, 4.27 DropIn, 5.2 Satisfactory, 5.5 Everspace 2 (TWO builds) + Meltopia
+// (monolithic), 5.6 Satisfactory (+ its CrashReportClient, a bonus monolithic 5.6),
+// 5.7 Solarpunk — all from PDBs, plus FF7 Remake 4.18 whose GObjects/GEngine were derived by
+// disassembly instead.
+// The remaining 15 are symbol-less MONOLITHIC titles (Palworld 5.1, Avowed 5.3, TQ2, Octopath,
+// FF7 Rebirth, Manor Lords, DQ I&II HD-2D, The Artisan of Glimmith, ...) used as noise probes.
+// They cannot say "right", only "did anything hit that should not have" — and that question
+// needs monolithic EXEs, because a 4-30 MB Satisfactory engine DLL understates the collision
+// rate of a 100-200 MB shipped game by several-fold.
+//
+// TWO THINGS THE ENLARGED CORPUS SETTLED, both worth remembering before pruning a pattern:
+//   * GWLD_V7 went from "0 correct, looks like dead weight" to UNIQUE-OK the moment Meltopia
+//     gained symbols. A pattern with no proof is not the same as a pattern with counter-proof.
+//   * The four GWorld patterns removed in build 2409 (V2/V4/V5/V6) were re-tested against the
+//     three NEW oracles and are still DECOY-ONLY on every one — now 0 correct across 12 oracle
+//     groups. That is counter-proof, and it is why they went and V7 stayed.
 // ============================================================
 
 // ============================================================
@@ -717,13 +725,19 @@ constexpr const char* AOB_GWORLD_SP57_4 = "48 8B 05 ?? ?? ?? ?? 48 8B B8 98 02 0
 // list lives in this global. Resolving its address lets the walker enumerate
 // per-(owner, propertyName) FScriptDelegate bindings.
 //
-// Cross-version availability: UE 4.23 introduced sparse delegates. The outer TMap is
-// keyed by a raw `UObjectBase const*` on UE 5.x AND on UE 4.27 — PDB-verified on
-// DropIn 4.27.2, and vendor/UnrealEngine 5.8 declares it identically. The older note
-// here ("UE 4.23-4.27 used FObjectKey, 16 bytes") was wrong on both counts: FObjectKey
-// is 8 bytes ({int32 ObjectIndex; int32 ObjectSerialNumber}) and is not used as this
-// key at 4.27. 4.23-4.26 remain unverified, so Aura's walker probes the live key shape
-// instead of gating on a version number.
+// Cross-version availability: UE 4.23 introduced sparse delegates. The outer TMap is keyed by a
+// raw `UObjectBase const*` at EVERY version we can check — PDB-verified from the mangled symbol
+// on 4.24 (DropIn_UE424), 4.25 (Everspace 2 depot), 4.26 (Satisfactory), 4.27 (DropIn) and
+// across 5.x, and vendor/UnrealEngine 5.8 declares it identically. The 4.24 symbol demangles to
+//   TMap<UObjectBase const*, TMap<FName, TSharedPtr<TMulticastScriptDelegate<FWeakObjectPtr>>>>
+// i.e. the shape is unchanged from the version that introduced it. **Only 4.23 itself is now
+// unverified**, and no 4.23 binary is in the corpus.
+//
+// The older note here ("UE 4.23-4.27 used FObjectKey, 16 bytes") was wrong on both counts:
+// FObjectKey is 8 bytes ({int32 ObjectIndex; int32 ObjectSerialNumber}) and is not used as this
+// key at any verified version. Aura's walker still probes the live key shape rather than gating
+// on a version number — keep it that way. That is what makes 4.23 (and any licensee fork) safe
+// without a binary to test against, and it costs one pointer-shape check.
 
 // ES2_1: NotifyUObjectDeleted middle — lea rcx,[crit]; call [EnterCriticalSection];
 //        mov rdx,r??; lea rcx,[SparseDelegates]; call TSet::Remove; mov eax,[SparseDelegates+8]

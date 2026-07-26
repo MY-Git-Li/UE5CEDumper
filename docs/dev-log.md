@@ -20,6 +20,91 @@ builds ≤696 in
 
 -----
 
+## 2026-07-26 - Corpus to 35 programs / 20 oracles: UE 4.24 + 5.1 + a same-game cross-build pair; sparse delegates settled (build 2420)
+
+Five more Ghidra projects, all produced with the current Ghidra: `DropIn_UE424` (UE 4.24.3, PDB),
+`ES2_UE55` (UE 5.5, 2025-06-17 build, PDB), `Meltopia_V2` (UE 5.5, PDB **now applied**),
+`Palworld` (UE 5.1) and `FF7Re` (FF7 Rebirth). Corpus: **35 programs, 20 with ground truth,
+twelve engine versions.** No new pattern was needed — **every target on every one of the 20
+oracles still resolves to the correct address**, and the four pre-existing fall-throughs are
+unchanged.
+
+### UE 4.24 settles the sparse-delegate question
+
+`DropIn_UE424` carries a `FSparseDelegateStorage::SparseDelegates` symbol whose mangled name
+demangles to
+
+```
+TMap<UObjectBase const*, TMap<FName, TSharedPtr<TMulticastScriptDelegate<FWeakObjectPtr>>>>
+```
+
+— a **raw pointer key**, identical to 4.25 / 4.26 / 4.27 / 5.x. Sparse delegates arrived in 4.23,
+so **only 4.23 itself is now unverified** and no 4.23 binary exists in the corpus. `Aura` still
+probes the live key shape rather than gating on a version number, which is what keeps 4.23 and
+any licensee fork safe without a binary; the note in `Himmel.h` that once claimed
+"4.23-4.26 remain unverified" is now down to one version. All five 4.24 targets resolve with no
+new patterns (`GOBJ_ES53_1` / `GNAM_V8` / `GWLD_TQ_1` / `SPARSE_DI427_1` / `GENG_X1`).
+
+### The same-game cross-build pair — patterns survive a game update
+
+`ES2-0517` (2025-05-17) and `ES2_UE55` (2025-06-17) are the same game, same engine, two manifests
+apart. Every global moved:
+
+| | 0517 | UE55 | delta |
+|---|---|---|---|
+| GObjects | `149AA7EE0` | `149AA5F60` | -0x1f80 |
+| GNames | `149C009C0` | `149BFE940` | -0x2080 |
+| GWorld | `149B37D18` | `149B35DD8` | -0x1f40 |
+| SparseDelegates | `149AA7E90` | `149AA5F10` | -0x1f80 |
+| GEngine | `149DA5810` | `149DA37B0` | -0x2060 |
+
+so this is a real re-find, not a trivially identical binary. Both builds land on the **same
+pattern with the same cost for all five targets**. That is the first direct evidence in the
+corpus that a signature survives a shipped patch rather than merely a version bump — every other
+pair differs by engine version too.
+
+### Meltopia: PDB applied via MSDIA, and it vindicates the consensus method
+
+The first import silently failed to apply Meltopia's 347 MB PDB; the retry succeeded by selecting
+the **MSDIA** loader — **PDB-Universal fails on this file**. Worth remembering as a first
+resort when a game ships a PDB and the probe still reports zero UE globals.
+
+The payoff is a clean, blind validation. While Meltopia had no symbols, the sweep's consensus
+table predicted GEngine `149F002F8`, GWorld `149F03D10`, GObjects `149D87430`, GNames
+`149CA3C80`. The PDB then gave `149f002f8`, `149f03d10`, `149d87420` (+0x10 = `149d87430`) and
+`149ca3c80` — **all four exact**. The ≥3-independent-patterns-agree heuristic has now been
+confirmed against symbols twice (Everspace, Meltopia).
+
+### A caution about pruning, learned the same day
+
+`GWLD_V7` ("Palworld long context") sat at **0 correct across the whole corpus** and appeared in
+the dead-weight table — and then went **UNIQUE-OK the moment Meltopia gained symbols**. A pattern
+with *no proof* is not the same as a pattern with *counter-proof*.
+
+So the four GWorld patterns removed in build 2409 were re-tested against all three new oracles
+rather than assumed. `GWLD_V2` / `V4` / `V5` / `V6` are still `DECOY-ONLY` on every one — now
+**0 correct across 12 oracle groups** while firing 11–395 times each. That is counter-proof, and
+it is precisely why those went and V7 stayed. Both facts are recorded in the corpus note in
+`Himmel.h` so the next pruning pass starts from the right test.
+
+### Palworld and FF7 Rebirth close two attribution loops
+
+Both are symbol-less noise probes, but each is the binary its namesake patterns were contributed
+for, and neither had ever been in the corpus:
+
+- **`GOBJ_RE1`** ("FF7 Rebirth add+cmp+jge") had **zero hits anywhere** across 31 programs. On
+  FF7 Rebirth it hits exactly once — it was never broken, just never tested on its own game.
+- **`GWLD_V7`**, **`GOBJ_V13`** and **`GOBJ_V9`** ("Palworld …") all fire on Palworld, the UE 5.1
+  title they were named after and the corpus's only 5.1 sample.
+
+Fourteen patterns still hit nothing anywhere (`GOBJ_SAT425_1`, `GOBJ_RE3`, `GOBJ_V11`,
+`GOBJ_SF_1`, `GOBJ_PS4`, `GOBJ_PS5`, `GOBJ_CT3`, `GNAM_SAT52_1`, `GNAM_V6`, `GWLD_GH_2`,
+`GWLD_V1`, `GWLD_SF_3`, `GWLD_G427_3`, `GWLD_G427_4`). On the evidence above they are being left
+alone: zero cost at their priorities, and the corpus keeps demonstrating that "never seen to
+fire" often means "the right binary is not here yet".
+
+-----
+
 ## 2026-07-26 - Pattern tables sorted + compile-time-enforced; 4 never-correct GWorld patterns removed (build 2414)
 
 ### The tables had drifted out of priority order, and the file was lying about it
