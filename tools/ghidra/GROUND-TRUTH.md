@@ -62,7 +62,7 @@ govern. Read that block too before adding, moving or deleting anything. The shor
    `instrOffset` by the same amount. Getting it wrong keeps the hit count healthy and makes the
    resolved address garbage — it drops to 0 correct while still looking like it works.
 
-### Still open (as of build 2440)
+### Still open (as of build 2474)
 
 - ~~**UE 4.23** is the only unverified sparse-delegate version~~ — **DELIBERATELY NOT CHASED**
   (decided 2026-07-27). 4.23 shipped 2019-09 and 4.24 landed that December, so its window was
@@ -180,6 +180,8 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | Tag | Project (`D:\Tools\GHIDRA_Projs\*.rep`) | UE | Symbols | Notes |
 |---|---|---|---|---|
 | UE4.18-FF7R | `FF7R` | 4.18+ | ❌ none | GObjects+GEngine truth **derived by disassembly** — see below |
+| UE4.11-Nekopara | `NEKOPALIVE_UE411` | 4.11.0-pre7 | ❌ none | **oldest in the corpus.** FLAT array at the BASE anchor, `FUObjectItem` = **16 B** |
+| UE4.13-Fantasynth | `Fantasynth_UE413` | 4.13 | ❌ none | FLAT array at the BASE anchor, 24-B item. VR title, cannot be run |
 | UE4.18-DQXIS | `DQ_XI_S` | 4.18 | ❌ none | truth by disassembly; ASLR base recovered; **GNames absent on purpose** |
 | UE4.27-DQ7R | `DQ7R` | 4.27 | ❌ none | truth by disassembly; **GEngine ≠ the live consensus** — see below |
 | UE5.4-Elliot | `Elliot` | 5.4 | ❌ none | truth by disassembly; the corpus's **only UE 5.4** sample |
@@ -390,6 +392,20 @@ GS_TRUE="GObjects=145ea7660|145ea7670,GNames=145e6b300,GWorld=145ff8470,SparseDe
 # Sparse and GObjects in one function). Note this game reports 4.27 in its PE as a publisher
 # fallback — it is 5.4.
 GS_TRUE="GObjects=149bfc140|149bfc150,GNames=149b18600,GWorld=149d8bda0,SparseDelegates=14990e1c0,GEngine=149d8e290"
+
+# UE 4.11.0-preview7 — NEKOPALIVE (Nekopara). The OLDEST binary in the corpus and the first that
+# needed the "Flat-Base" preset: a FLAT FFixedUObjectArray presented at the FUObjectArray BASE
+# (Objects@+0x10 / Max@+0x18 / Num@+0x1C), NOT at ObjObjects. FUObjectItem is 16 BYTES here —
+# Object / ClusterAndFlags / SerialNumber, cluster index and flags sharing one int32 (read off
+# Epic's source at 4.11.0-release; 4.13 splits them and grows to 24).
+# GWorld DECOY at 0x1423C9940 — a TSharedPtr {Object, ReferenceController} singleton whose +0
+# reads like a UWorld pointer, which GWLD_SAT52_1 lands on and the live validator accepts.
+# Pre-4.23: GNames is a TNameEntryArray*, SparseDelegates correctly absent.
+GS_TRUE="GObjects=1423c1510|1423c1520,GNames=1423b8f58,GWorld=1424a4370,GEngine=1424a2de0"
+
+# UE 4.13 — Fantasynth. Same Flat-Base shape as 4.11 but the standard 24-byte item. A VR title
+# that shows a black screen without a headset, so Ghidra is the only evidence available for it.
+GS_TRUE="GObjects=142779240|142779250,GNames=14273ffd0,GWorld=1427851f0,GEngine=14277d350"
 
 # UE 4.20 — Everspace. No FNamePool (TNameEntryArray era) and no sparse delegates (4.23+).
 GS_TRUE="GObjects=142e797f0|142e79800,GNames=1431dead8,GWorld=1432e1ac0,GEngine=1432df470"
