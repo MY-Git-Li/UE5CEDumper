@@ -75,6 +75,25 @@ ROWS=(
 # GNames/GWorld are deliberately left unset — the consensus is suggestive but unproven, and a
 # guessed truth value is worse than none (it silently mislabels every hit as a decoy).
 "UE4.18-FF7R|FF7R|-|GObjects=1453bd470|1453bd480,GEngine=145879ee8"
+# ---- symbol-less, truth DERIVED BY DISASSEMBLY (2026-07-27) ----
+# All three were live-run first (our own validators accepted GObjects/GNames/GWorld/Sparse),
+# then corroborated in Ghidra. Both Auto Analyze runs were saved PARTWAY through; raw data
+# inspection is unaffected, so a missing function here never means a missing global.
+#
+# DQ7R GEngine is 145ff4b28, NOT the 145d76d78 the live consensus reported. That value is a
+# GAME-SIDE singleton reached only by GENG_X4 (50 of its 55 hits) — the live ranking was by raw
+# hit count, which let one generic pattern outvote four specific ones. Proven three ways at
+# 145ff4b28: UWorld::GetGameViewport, UWorld::GetRealTimeSeconds, and a GetWorld fallback that
+# loads GEngine and GWorld in the same function. See the GENG_X4 note in Himmel.h.
+"UE4.27-DQ7R|DQ7R|-|GObjects=145ea7660|145ea7670,GNames=145e6b300,GWorld=145ff8470,SparseDelegates=145b26520,GEngine=145ff4b28"
+# ELLIOT — the corpus's ONLY UE 5.4 sample. All five globals corroborated, no contradictions.
+"UE5.4-Elliot|Elliot|-|GObjects=149bfc140|149bfc150,GNames=149b18600,GWorld=149d8bda0,SparseDelegates=14990e1c0,GEngine=149d8e290"
+# DQ XI S — UE 4.18, second pre-4.23 sample. ASLR-relocated at runtime; the image base was
+# recovered from FFixedUObjectArray's shape (Objects/+8 Max/+0xC Num) and both supplied deltas
+# reproduce exactly. GNames deliberately ABSENT: 4.18 predates FNamePool, GNames is a lazily
+# allocated TNameEntryArray*, every GNames pattern here is FNamePool-shaped, and the consensus
+# is noise — per the rule above, leave it out rather than guess. Sparse correctly absent (4.23+).
+"UE4.18-DQXIS|DQ_XI_S|-|GObjects=145d83bf8|145d83c08,GWorld=145e70c98,GEngine=145e6eeb0"
 # ---- MONOLITHIC noise probes (no symbols; consensus only) ----
 # FF7 REBIRTH (distinct from FF7 Remake above): the only binary that can exercise GOBJ_RE1 and
 # the GNAM_V7 CallFollow, both of which were contributed FOR it and hit nothing anywhere else.
@@ -85,7 +104,11 @@ ROWS=(
 # PALWORLD — the corpus had NO UE 5.1 sample at all, and it is what GOBJ_V13 / GNAM_V8 /
 # GWLD_V7 were contributed for (GWLD_V7 has never hit anything in the corpus).
 "UE5.1-Palworld|Palworld|-|"
-"UE5.3-Avowed|Avowed|-|"
+# AVOWED — SparseDelegates truth DERIVED BY DISASSEMBLY 2026-07-27 (see Himmel.h AOB_SPARSE_AV53_1).
+# GObjects/GNames/GWorld stay unset on purpose: this build is the packed-20-byte-FUObjectItem
+# negative control with a GWorld decoy (docs/avowed-gobjects-fix.md), and a guessed truth is worse
+# than none. Sparse alone is proven, so only sparse is claimed.
+"UE5.3-Avowed|Avowed|-|SparseDelegates=14b5bd9a8"
 "UE5.5-ManorLords|Manor Lords|-|"
 "UE5.6-TQ2|TQ2|-|"
 "UEx-DQ12HD2D|DQ_I_II_HD2D|-|"

@@ -42,6 +42,13 @@ govern. Read that block too before adding, moving or deleting anything. The shor
    rejected more candidates than any other: a rejected GEngine shape gave 76–93 *different*
    targets per binary, and the TSet hash-bucket probe gave 39–43. A good pattern's extra hits all
    land on ONE address.
+   **But convergence only holds WITHIN one pattern.** `GENG_X4` is convergent and *wrong* on
+   DQ7R: 50 of its 55 hits agree on `145D76D78`, which is a game-side manager singleton, while
+   `145FF4B28` is the real `&GEngine`. Across patterns the discriminator is whether the
+   semantically-specific shapes agree — on DQ7R `GENG_X1/X2/X3/DI427_1` all said `145FF4B28`
+   and only `X4` disagreed. **Rank candidates by DISTINCT PATTERNS AGREEING, never by raw hit
+   count.** `consensus_*.txt` already does this; a by-hand tally of a runtime log does not, and
+   that is exactly how the wrong DQ7R value was believed at "41 hits" confidence.
 5. **Never prune on "no proof" — only on counter-proof.** `GWLD_V7` sat at 0-correct across the
    whole corpus, looked like dead weight, and went UNIQUE-OK the moment Meltopia gained symbols.
    `GOBJ_RE1` had zero hits across 31 programs and was correct the moment FF7 Rebirth was added.
@@ -63,7 +70,9 @@ govern. Read that block too before adding, moving or deleting anything. The shor
   `MulticastSparseDelegateProperty`, the `SparseDelegateReport` console command) but no pattern
   finds it. Lead for whoever picks it up: find the `SparseDelegateReport` string xref and follow
   the `FAutoConsoleCommand` handler.
-- **Avowed (5.3)** sparse: zero hits.
+- ~~**Avowed (5.3)** sparse: zero hits.~~ **CLOSED 2026-07-27** — `SparseDelegates = 0x14B5BD9A8`,
+  found structurally (the `SparseDelegateReport` string does not exist in this binary), structure
+  is stock UE 5.3, `SPARSE_AV53_1` added at priority 170.
 - **Sparse `n=1`** on five binaries (both Everspace 2 builds, Satisfactory 5.2/5.6 CoreUObject) —
   their sparse accessors are inlined, leaving only the one site `SPARSE_ES2_1` already owns.
 
@@ -80,6 +89,9 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | Tag | Project (`D:\Tools\GHIDRA_Projs\*.rep`) | UE | Symbols | Notes |
 |---|---|---|---|---|
 | UE4.18-FF7R | `FF7R` | 4.18+ | ❌ none | GObjects+GEngine truth **derived by disassembly** — see below |
+| UE4.18-DQXIS | `DQ_XI_S` | 4.18 | ❌ none | truth by disassembly; ASLR base recovered; **GNames absent on purpose** |
+| UE4.27-DQ7R | `DQ7R` | 4.27 | ❌ none | truth by disassembly; **GEngine ≠ the live consensus** — see below |
+| UE5.4-Elliot | `Elliot` | 5.4 | ❌ none | truth by disassembly; the corpus's **only UE 5.4** sample |
 | UE4.20-Everspace | `ES1-420` | 4.20 | ✅ full PDB | oldest sample; supersedes the symbol-less `ES1.rep` |
 | UE4.22-Satisfactory | `Satisfactory_UE422` | 4.22 | ✅ full PDB | **monolithic EXE with symbols** — the only pre-4.25 one |
 | UE4.24-DropIn | `DropIn_UE424` | 4.24.3 | ✅ full PDB | **closed the last checkable sparse-delegate gap** — see below |
@@ -261,6 +273,26 @@ cannot alias: `-Core-Win64` does not match `-CoreUObject-Win64`.
 ```sh
 # UE 4.18 — FF7 Remake. DERIVED BY DISASSEMBLY, not a PDB. GNames/GWorld intentionally absent.
 GS_TRUE="GObjects=1453bd470|1453bd480,GEngine=145879ee8"
+
+# UE 4.18 — DRAGON QUEST XI S. DERIVED BY DISASSEMBLY. The process is ASLR-relocated; the image
+# base was recovered from FFixedUObjectArray's shape at 145d83c08 (Objects / +8 Max / +0xC Num,
+# 24-byte FUObjectItem, non-chunked), so the array base is that minus 0x10. GEngine confirmed via
+# UWorld::GetGameViewport + GetRealTimeSeconds; GWorld and GEngine also appear in one function.
+# GNames INTENTIONALLY ABSENT — 4.18 predates FNamePool and every GNames pattern here is
+# FNamePool-shaped, so the consensus is noise. No sparse delegates before 4.23.
+GS_TRUE="GObjects=145d83bf8|145d83c08,GWorld=145e70c98,GEngine=145e6eeb0"
+
+# UE 4.27 — DRAGON QUEST VII Reimagined. DERIVED BY DISASSEMBLY (all globals live in `.shared`).
+# GEngine is 145ff4b28. The live runtime log's most-hit candidate, 145d76d78, is a GAME-SIDE
+# singleton: GENG_X4 alone accounts for 50 of its 55 hits, and no UWorld/FWorldContext semantics
+# appear at any of them. Do not "correct" this back to the runtime value.
+GS_TRUE="GObjects=145ea7660|145ea7670,GNames=145e6b300,GWorld=145ff8470,SparseDelegates=145b26520,GEngine=145ff4b28"
+
+# UE 5.4 — The Adventures of Elliot. DERIVED BY DISASSEMBLY; the corpus's only 5.4. All five
+# corroborated (GetGameViewport, FNamePool::Resolve, the NotifyUObjectDeleted twin-ref that pins
+# Sparse and GObjects in one function). Note this game reports 4.27 in its PE as a publisher
+# fallback — it is 5.4.
+GS_TRUE="GObjects=149bfc140|149bfc150,GNames=149b18600,GWorld=149d8bda0,SparseDelegates=14990e1c0,GEngine=149d8e290"
 
 # UE 4.20 — Everspace. No FNamePool (TNameEntryArray era) and no sparse delegates (4.23+).
 GS_TRUE="GObjects=142e797f0|142e79800,GNames=1431dead8,GWorld=1432e1ac0,GEngine=1432df470"

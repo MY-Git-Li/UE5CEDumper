@@ -886,6 +886,47 @@ constexpr const char* AOB_SPARSE_MEL55_1 =
     "48 8D 3C 40 48 C1 E7 05 48 03 3D";
 
 // ============================================================
+// SparseDelegates — AV53 (UE 5.3, Avowed / Obsidian fork)
+// ============================================================
+// Closes the "Avowed (5.3) sparse: zero hits" gap. All 7 prior patterns MISS: same functions,
+// different MSVC scheduling. ES2_1 needs `lea rcx,[crit]; call [IAT]; mov rdx,rXX;
+// lea rcx,[Sparse]` with a 3-byte gap — Avowed has ~42 bytes of inlined PointerHash there.
+// MEL55_1/PAL51_1 need `add r,[Sparse]`; Avowed emits `mov r,[Sparse]` + `lea r,[base+idx]`.
+//
+// The fork does NOT change this structure. Measured against stock UE 5.x at
+// FSparseDelegateStorage::GetSparseDelegate: outer stride 0x60, TSet::HashSize at +0x48,
+// element HashNextId at +0x58, inner TMap at element+8, inner stride 0x20 with the value at
+// +8, PointerHash = ptr>>4 into the Murmur finalizer. So Avowed's known deviations (packed
+// 20-byte FUObjectItem, static FUObjectArray) stop at the object array — ValidateSparseDelegates'
+// hardcoded kOuterStride = 0x60 was already correct for it.
+//
+// `SparseDelegateReport` does NOT exist in this binary (the !UE_BUILD_SHIPPING console command
+// is compiled out), so the string-xref route GROUND-TRUTH.md suggests for FF7 Rebirth is dead
+// here. This was found structurally instead: scan .text for TSet stride math adjacent to a
+// rip-relative .data reference, bucket by global, and take the one with a pure-0x60 profile.
+// Corroborated by SparseDelegateMapCritical sitting exactly 0x28 (sizeof CRITICAL_SECTION)
+// below it — the two statics of SparseDelegate.cpp, adjacent.
+//
+// 22 literal bytes. 3 hits on Avowed, all correct, 0 decoys; 0 hits on all 41 other programs.
+// HONEST CAVEAT, measured: the head alone (through `shl rdx,5`, 14 literal bytes) scores
+// identically, so the `lea rcx,[rax+rdx]; cmp [rax+rdx],rsi` tail is inert on this corpus —
+// the selectivity comes from the exact register allocation, not the length.
+//
+// Two sibling candidates were mined and REJECTED on measurement, not taste:
+//   * a twin-ref form in GetSparseDelegate — correct, but it bakes in `[rsp+0x20]`, which is a
+//     frame LOCAL (`mov [rsp+0x20],rdi` spills the key) and not shadow space; DI427_1/2 encode
+//     the same out-param idiom and wildcard that disp8. One added spill in a future build kills
+//     its only hit.
+//   * a `mov rdx` register variant — strictly dominated: a nibbled form covers its sites plus
+//     AV53_1's, so it buys nothing.
+//   Both also push SPARSE_PATTERNS from 8 to 9 entries = 2 batches (kBatchSize = 8), which costs
+//   a second full AVX2 pass over 430 MB of .text across the titles that find nothing in batch 1,
+//   for a pattern that can only ever hit Avowed. If more Avowed sites are wanted, WIDEN this
+//   pattern in place rather than appending a 9th entry.
+constexpr const char* AOB_SPARSE_AV53_1 =
+    "48 8B 05 ?? ?? ?? ?? 48 63 C9 48 8D 14 49 48 C1 E2 05 48 8D 0C 10 48 39 34 10";
+
+// ============================================================
 // GObjects — DI427 (UE 4.27, 32-byte FUObjectItem)
 // ============================================================
 // WHY these exist: on DropIn every one of the 52 pre-existing GObjects patterns MISSES or
@@ -1484,6 +1525,14 @@ constexpr AobSignature SPARSE_PATTERNS[] = {
     SIG_RIP_DIRECT("SPARSE_MEL55_1", AOB_SPARSE_MEL55_1, AobTarget::SparseDelegates,
                    8, 3, 7, 0, 160,
                    "MEL55", "UE5.5/5.6 twin-ref lea+add of SparseDelegates around the 0x60 stride math"),
+    // 170: last, same reasoning as PAL51_1/MEL55_1 — it hits ONLY Avowed (0 hits on the other
+    // 41 programs), so ordering it behind everything guarantees it cannot perturb a selection.
+    // This is the 8th entry, which keeps SPARSE_PATTERNS at exactly one batch (kBatchSize = 8).
+    // Do not append a 9th without measuring the extra .text pass it imposes on every title that
+    // finds nothing in batch 1.
+    SIG_RIP_DIRECT("SPARSE_AV53_1", AOB_SPARSE_AV53_1, AobTarget::SparseDelegates,
+                   0, 3, 7, 0, 170,
+                   "AV53", "UE5.3 (Avowed fork) element addr + pointer-key compare; stock 0x60 stride"),
 };
 
 // ── GEngine (UEngine* GEngine — the &GEngine SLOT) ───────────────────────
@@ -1513,8 +1562,22 @@ constexpr AobSignature GENGINE_PATTERNS[] = {
                    7, 3, 7, 0, 105, "X+FF7R", "X1 head only (no test/jz tail) — reaches FF7R UE4.18"),
     SIG_RIP_DIRECT("GENG_X2", AOB_GENGINE_X2, AobTarget::GEngine,
                    0, 3, 7, 0, 110, "DI427+SP57", "FEngineLoop::Tick (UE4.27+5.7, 6-7 sites)"),
+    // GENG_X4 is the WEAKEST pattern in this table and the note used to overstate it. Its shape
+    // is a generic singleton-null-check-member idiom, so on three games added to the corpus in
+    // 2026-07 it converged on a GAME-SIDE manager singleton rather than &GEngine: 50 decoys of
+    // 55 hits on DQ7R (4.27), 6 on DQ XI S (4.18), 3 on Elliot (5.4). It stays because it is
+    // still what reaches FF7 Remake, and ValidateGEngineSlot rejects its decoys (no reflected
+    // "GameViewport"), so it costs validations rather than correctness.
+    //
+    // It is also the counter-example to GROUND-TRUTH.md rule 4 ("convergent hits = a real
+    // global"). X4's hits DO converge — on one wrong address, and by a wide margin. The rule
+    // only holds within one pattern; across patterns the discriminator is whether the
+    // semantically-specific shapes agree with it. On DQ7R they did not: X1/X2/X3/DI427_1 all
+    // pointed at 145FF4B28 (proven by UWorld::GetGameViewport / GetRealTimeSeconds / a GetWorld
+    // fallback that loads GEngine and GWorld in one function) while X4 alone pointed elsewhere.
+    // Rank candidates by DISTINCT PATTERNS AGREEING, never by raw hit count.
     SIG_RIP_DIRECT("GENG_X4", AOB_GENGINE_X4, AobTarget::GEngine,
-                   0, 3, 7, 0, 115, "PAL51+X", "GEngine member accessor — correct on 7 oracles, UE4.20-5.7"),
+                   0, 3, 7, 0, 115, "PAL51+X", "generic singleton accessor — broad reach, noisiest; decoys are game singletons"),
     SIG_RIP_DIRECT("GENG_ES55_1", AOB_GENGINE_ES55_1, AobTarget::GEngine,
                    10, 3, 7, 0, 120, "ES55", "UE5.5+5.7 UEngine::GetEngineSubsystem<T> prologue"),
     SIG_RIP_DIRECT("GENG_SP57_1", AOB_GENGINE_SP57_1, AobTarget::GEngine,

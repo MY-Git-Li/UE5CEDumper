@@ -20,6 +20,76 @@ builds ≤696 in
 
 -----
 
+## 2026-07-27 - Avowed 5.3 sparse closed; 3 games added as oracles; GENG_X4 demoted in prose
+
+### Avowed (UE 5.3) sparse delegates — found, and the fork did NOT change the structure
+
+`FSparseDelegateStorage::SparseDelegates = 0x14B5BD9A8`. This had been an open "zero hits" line
+in GROUND-TRUTH.md since the Avowed case study.
+
+The route the docs suggested is dead here: **`SparseDelegateReport` does not exist in the binary
+at all** (the `!UE_BUILD_SHIPPING` console command is compiled out), verified against every
+initialized block in both ASCII and UTF-16. Found structurally instead — scan `.text` for TSet
+element-stride arithmetic adjacent to a rip-relative `.data` reference, bucket by global, and
+take the one with a pure 0x60-stride profile. Corroborated by `SparseDelegateMapCritical` sitting
+exactly `0x28` (`sizeof(CRITICAL_SECTION)`) below it: the two statics of `SparseDelegate.cpp`,
+adjacent, as expected.
+
+**The user's question was whether Obsidian changed the sparse structure, given they changed the
+object array. Answer: no, on every observable axis** — outer stride `0x60`, `TSet::HashSize` at
+`+0x48`, element `HashNextId` at `+0x58`, inner `TMap` at element`+8`, inner stride `0x20` with
+the value at `+8`, `PointerHash` = `ptr>>4` into the Murmur finalizer. The fork's known
+deviations (packed 20-byte `FUObjectItem`, static `FUObjectArray`) stop at the object array.
+Practical consequence: `ValidateSparseDelegates`' hardcoded `kOuterStride = 0x60` was already
+correct for Avowed.
+
+Three candidates were mined; **one was added**. An adversarial pass measured over 42 programs
+refuted the other two:
+
+- the twin-ref form baked in `[rsp+0x20]`, which the mining report called shadow space. It is
+  not — `mov [rsp+0x20],rdi` spills the key into a frame **local**, and `DI427_1/2` encode the
+  same out-param idiom with that disp8 wildcarded. One added spill in a future build takes its
+  only hit to zero.
+- the `mov rdx` variant is strictly dominated: a nibbled form covers its sites *and* `AV53_1`'s.
+- both would push `SPARSE_PATTERNS` from 8 to 9 = **two batches** (`kBatchSize = 8`), costing a
+  second AVX2 pass over ~430 MB of `.text` across the titles that find nothing in batch 1, for a
+  pattern that can only ever hit Avowed.
+
+Honest caveat recorded in the header: `AV53_1`'s head alone (14 literal bytes) measures
+identically, so its tail is inert on this corpus — the selectivity is exact register allocation,
+not length.
+
+### Three games promoted from "not in the corpus" to oracles
+
+DQ7R (4.27), The Adventures of Elliot (**5.4 — the corpus had none**) and DQ XI S (4.18, a second
+pre-4.23 sample). Live-run first, then corroborated by disassembly. 14 of 15 globals confirmed.
+
+DQ XI S's GNames is **deliberately omitted**: 4.18 predates `FNamePool`, every GNames pattern is
+FNamePool-shaped, and the consensus is noise. Per the standing rule, leave it out rather than
+guess a value that would mislabel every hit as a decoy.
+
+### The one contradiction — and the rule it produced
+
+**DQ7R's GEngine is `145FF4B28`, not the `145D76D78` the runtime log pointed at.** I had reported
+that address to the user as strongly supported: 41 hits converging on one address, against a
+7-hit runner-up. It was wrong. `145D76D78` is a game-side manager singleton, and `GENG_X4` alone
+accounts for 50 of its 55 hits; the "runner-up" was `GENG_X1`+`X3`+`X2` — the semantically
+specific patterns — agreeing on the truth. `145FF4B28` is proven three ways
+(`UWorld::GetGameViewport`, `UWorld::GetRealTimeSeconds`, and a `GetWorld` fallback that loads
+GEngine and GWorld in the same function) and sits `-0x3948` from GWorld, in family with DropIn
+4.27's `-0x4648`.
+
+So GROUND-TRUTH.md rule 4 gained a limit: **convergence only holds WITHIN one pattern. Across
+patterns, rank by DISTINCT PATTERNS AGREEING, never by raw hit count.** `consensus_*.txt` already
+does this; a hand tally of a runtime log does not.
+
+`GENG_X4` keeps its priority (it is still what reaches FF7 Remake, and `ValidateGEngineSlot`
+rejects its decoys so it costs validations, not correctness) but its note no longer claims
+"correct on 7 oracles" — it now says what it is: the broadest and noisiest pattern in the table,
+whose decoys are game singletons.
+
+-----
+
 ## 2026-07-27 - Proxy Deploy CTD: bound rows were mutated from thread-pool threads (build 2445)
 
 **Symptom:** Proxy Deploy tab → *Scan Steam* → *Update all* → the whole app disappears. No managed
