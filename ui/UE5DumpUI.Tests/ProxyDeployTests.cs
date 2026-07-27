@@ -484,6 +484,24 @@ public class ProxyDeployTests
     }
 
     [Fact]
+    public void ProxyImportInfo_Imports_CoversEveryProxyFlavour()
+    {
+        // The analyzer tracked version/dinput8/dxgi but NOT winmm, even though ProxyType has had
+        // a Winmm member — so winmm could never be recommended, and it is the ONLY proxy that
+        // works on Octopath Traveler. Same desync class the DumperModuleDetector comment warns
+        // about. Assert every enum value is answerable, so a fifth flavour cannot repeat it.
+        var all = new ProxyImportAnalyzer.ProxyImportInfo(true, true, true, true);
+        var none = new ProxyImportAnalyzer.ProxyImportInfo(false, false, false, false);
+        foreach (var t in Enum.GetValues<ProxyType>())
+        {
+            Assert.True(all.Imports(t));
+            Assert.False(none.Imports(t));
+        }
+        Assert.True(none.ImportsNone);
+        Assert.False(new ProxyImportAnalyzer.ProxyImportInfo(false, false, false, true).ImportsNone);
+    }
+
+    [Fact]
     public async Task FindUeGames_WrappedLayout_FindsGameTwoLevelsDown()
     {
         string lib = MakeTempLibrary();

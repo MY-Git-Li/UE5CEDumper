@@ -889,6 +889,33 @@ public sealed class ProxyDeployService : IProxyDeployService
             {
                 string targetDll = Path.Combine(game.BinariesDir, proxyType.GetDllName());
 
+                // A proxy can only load if something in the process actually NAMES that DLL.
+                // Drop one into a folder whose binaries never import it and the deploy "succeeds",
+                // the file sits there forever, and the DLL never runs — leaving ZERO log, which
+                // reads exactly like "nothing happened". Octopath Traveler is the worked example:
+                // its exe imports winmm.dll and dxgi.dll but NOT version.dll, and a version.dll
+                // proxy there cost a debugging round before anyone thought to check the import
+                // table.
+                //
+                // Refused rather than warned, because the failure is silent and total. `force`
+                // overrides it — the import scan can legitimately come up empty (a modular build's
+                // stub exe, an unreadable file), and ReadProxyImports already folds the sibling
+                // *-Win64-Shipping.dll modules in for exactly that case. A null result means
+                // "could not tell", never "not imported", so it must not block.
+                if (!force)
+                {
+                    var imports = ReadProxyImports(game.ExePath);
+                    if (imports is ProxyImportAnalyzer.ProxyImportInfo info
+                        && !info.ImportsNone && !info.Imports(proxyType))
+                    {
+                        string msg = $"{proxyType.GetDllName()} is not imported by this game — "
+                                   + "it would never load. Try the Suggested column.";
+                        _log.Warn("ProxyDeploy", $"Refused {proxyType.GetDllName()} for {game.Name}: not in its import table");
+                        return (false, new GameStatusUpdate(game, ProxyDeployStatus.ErrorOther,
+                            ErrorMessage: msg, SetInstalledVersion: false));
+                    }
+                }
+
                 // Refuse to overwrite another program's proxy DLL
                 if (File.Exists(targetDll) && !IsOurProxyDll(targetDll) && !force)
                 {
