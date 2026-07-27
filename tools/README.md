@@ -99,10 +99,20 @@ GS_TSV=$PWD/out/cands.tsv GS_TRUE="GWorld=<va>" analyzeHeadless ... -postScript 
 | Script | What it does |
 |--------|--------------|
 | `disasm_function.py` | Offline x64 disassembler for function VA(s) in a PE; annotates RIP-relative writable-`.data` targets and flags the zero-init **BSS** ones (where runtime-filled globals like `GUObjectArray` live). `py -m pip install capstone pefile` first. |
+| `ue_version.py` | Read a game's UE version out of its `++UE5+Release-X.Y` build tag, to decide whether it is worth a Ghidra import at all. Stdlib only. **~half of shipped games have the tag stripped**, so `UNKNOWN` means unknown, not uninteresting — it is a filter, not a gate. |
 
 ```sh
 py tools/pe/disasm_function.py "<game>.exe" 0x147A604E0 0x14814D2F0
+
+# Triage a whole Steam library before importing anything
+py tools/pe/ue_version.py "D:/SteamLibrary/steamapps/common"/*/*/Binaries/Win64/*-Shipping.exe
 ```
+
+> The authoritative version source stays the DLL's runtime detection (the
+> `UE5_Init: Complete (UEnnn, …)` line in the game's `init-0.log`), which reconciles the PE data
+> against memory — The Adventures of Elliot's PE claims 4.27 and it is really 5.4.
+> `ue_version.py` still earned its place: it recovered Octopath Traveler as **4.18**, which the
+> sweep corpus had carried as "4.x, version stripped".
 
 ## External (not vendored)
 

@@ -109,7 +109,7 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | UE4.26-Satisfactory | `Satisfactory_UE426` | 4.26.2 | ✅ full PDB | modular, 4 DLLs — supersedes the unusable `Satfi426` |
 | UE4.27-DropIn | `DropIn` | 4.27.2 | ✅ full PDB | Development build (32-byte `FUObjectItem`) |
 | UE4.27-Artisan | `The_Artisan_of_Glimmith` | 4.27 | ❌ none | monolithic noise probe |
-| UE4.x-Octopath | `Octopath` | 4.x | ❌ none | monolithic noise probe (version stripped) |
+| UE4.18-Octopath | `Octopath` | 4.18 | ❌ none | monolithic noise probe; version recovered from the `++UE4+Release-4.18` build tag + a fingerprint identical to DQ XI S |
 | UE4.x-FF7Rebirth | `FF7Re` | 4.26 fork | ❌ none | the only binary that exercises `GOBJ_RE1` / `GNAM_V7` |
 | UE5.1-Grimhook | `Grimhook` | 5.1.1 | ✅ full PDB | **the first symbolised 5.1** — see below |
 | UE5.1-Palworld | `Palworld` | 5.1 | ❌ none | monolithic noise probe; its consensus is now corroborated by Grimhook |

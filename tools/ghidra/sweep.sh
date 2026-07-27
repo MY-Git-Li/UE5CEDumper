@@ -105,7 +105,9 @@ ROWS=(
 # FF7 REBIRTH (distinct from FF7 Remake above): the only binary that can exercise GOBJ_RE1 and
 # the GNAM_V7 CallFollow, both of which were contributed FOR it and hit nothing anywhere else.
 "UE4.x-FF7Rebirth|FF7Re|-|"
-"UE4.x-Octopath|Octopath|-|"
+# OCTOPATH is 4.18, not "4.x": its .rdata carries `++UE4+Release-4.18`, and its pattern
+# fingerprint is IDENTICAL to DQ XI S (a known 4.18) -- GNames 7/28 hit, SPARSE 0/10.
+"UE4.18-Octopath|Octopath|-|"
 "UE4.27-Artisan|The_Artisan_of_Glimmith|-|"
 "UE5.2-SatGameDLL|Satisfactory_UE521|FactoryGame-FactoryGame-Win64-Shipping.dll|"
 # PALWORLD — the corpus had NO UE 5.1 sample at all, and it is what GOBJ_V13 / GNAM_V8 /
