@@ -62,6 +62,15 @@ static int         s_itemSize = 16;  // FUObjectItem stride (auto-detected: 16 o
 static int         s_itemObjOffset = 0;
 static bool        s_isFlat   = false; // true = non-chunked flat array (some UE4 builds)
 
+// What DetectLayout concluded about flatness, kept SEPARATE from s_isFlat.
+//
+// s_isFlat is working state: DetectItemSize resets it to false at the top of every
+// object-pointer-offset pass so each pass re-derives flatness independently. That reset sits
+// one line above the DetectStrideForCurrentObjOffset call, so anything the preset concluded is
+// already gone by the time the stride probes run. This variable survives it and is the honest
+// answer to "did a flat PRESET win", which is stronger evidence than any probe heuristic.
+static bool        s_presetIsFlat = false;
+
 // Preset-bound FUObjectItem hint latched by DetectLayout (see LayoutPreset::itemHint).
 // stride 0 = no hint, sweep as usual. Consumed by DetectItemSize as a first, preset-gated
 // probe that never enters the shared stride candidate list.
@@ -427,6 +436,9 @@ static bool ValidateChunkedLayout(uintptr_t addr, const ArrayLayout& layout) {
 }
 
 static bool DetectLayout(uintptr_t addr) {
+    // Re-derived from scratch on every call (Init can run again on re-attach).
+    s_presetIsFlat = false;
+
     // Diagnostic: dump first 48 bytes at the GObjects address
     {
         uint64_t dump[6] = {};
@@ -475,6 +487,7 @@ static bool DetectLayout(uintptr_t addr) {
         if (ValidateChunkedLayout(addr, preset.layout)) {
             s_layout = preset.layout;
             s_isFlat = true;
+            s_presetIsFlat = true;
             LOG_INFO("ObjectArray: Layout '%s' detected (flat, non-chunked)", preset.name);
             LogLayoutFields(addr, s_layout, preset.name);
             return true;
@@ -775,7 +788,7 @@ static void DetectStrideForCurrentObjOffset(uintptr_t chunkTable, uintptr_t chun
         // Pre-existing: this gate has always been count-based. It simply could not bite until a
         // flat array smaller than 65536 objects reached it, which is what the Flat-Base preset
         // made possible. Chunked titles are unaffected — s_isFlat is false for them.
-        if (s_isFlat) {
+        if (s_presetIsFlat) {
             mightBeFlat = true;
             LOG_INFO("ObjectArray: layout preset is flat (%d objects) — testing flat layout first",
                      numElements);
