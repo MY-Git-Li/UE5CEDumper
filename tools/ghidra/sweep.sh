@@ -47,11 +47,20 @@ py "$REPO/tools/ghidra/extract_patterns.py" "$REPO/dll/src/Himmel.h" "$SWEEP_OUT
 ROWS=(
 # ---- symbolised oracles (full PDB) ----
 "UE4.20-Everspace|ES1-420|-|GObjects=142e797f0|142e79800,GNames=1431dead8,GWorld=1432e1ac0,GEngine=1432df470"
+# HELIUM RAIN 4.20.3 — the SECOND symbolised 4.20, so the pre-4.23 GNames derivation no longer
+# rests on Everspace alone. Pre-4.23: no FNamePool (GNames is the TNameEntryArray* that
+# FName::GetNames lazily new's — taken from the load at +4 in that function) and NO sparse
+# delegates, so SparseDelegates is absent BY DESIGN here, not missing.
+"UE4.20-HeliumRain|HeliumRain|-|GObjects=14321fb58|14321fb68,GNames=143216ec8,GWorld=14331de50,GEngine=14331b7d8"
 "UE4.22-Satisfactory|Satisfactory_UE422|-|GObjects=144006f80|144006f90,GNames=144002a78,GWorld=1441073b8,GEngine=144104e58"
 "UE4.24-DropIn|DropIn_UE424|-|GObjects=1471db720|1471db730,GNames=1471bca00,GWorld=1472ea620,SparseDelegates=146da38d0,GEngine=1472e74a0"
 "UE4.25-Everspace2|ES2-UE425|-|GObjects=1444b0520|1444b0510,GNames=144497d00,GWorld=1445f1160,SparseDelegates=1440070c0,GEngine=1445edad8"
 "UE4.26-Satisfactory|Satisfactory_UE426|-|-CoreUObject-:GObjects=1803f9210|1803f9220,-CoreUObject-:SparseDelegates=1803f37d0,-Core-Win64:GNames=180659380,-Engine-:GWorld=18182a0b8,-Engine-:GEngine=181826658"
 "UE4.27-DropIn|DropIn|-|GObjects=14a3aa670|14a3aa660,GNames=14a363940,GWorld=14a52ced8,SparseDelegates=149ec0910,GEngine=14a528890"
+# Two more symbolised 4.27s. Both report `++UE4+Release-4.27-CL-0`, i.e. built from an engine
+# SOURCE tree rather than a launcher binary — which is consistent with them shipping PDBs at all.
+"UE4.27-Breeders|Breeders_of_the_Nephelym|-|GObjects=1445f32d0|1445f32e0,GNames=1445b7000,GWorld=14473a7f8,SparseDelegates=1441a88b0,GEngine=144736ee8"
+"UE4.27-Maelstrom|Maelstrom|-|GObjects=145b90c10|145b90c20,GNames=145b54940,GWorld=145cd4ee8,SparseDelegates=145839d00,GEngine=145cd15c8"
 "UE5.2-Satisfactory|SF521_pdb|-|@SF521@"
 "UE5.5-Everspace2|ES2-0517|-|GObjects=149aa7ef0|149aa7ee0,GNames=149c009c0,GWorld=149b37d18,SparseDelegates=149aa7e90,GEngine=149da5810"
 # Second UE 5.5 Everspace 2, two manifests newer (2025-06-17 vs the 05-17 snapshot). Same engine,
@@ -82,6 +91,13 @@ ROWS=(
 # Do NOT be tempted by the symbolised `GNameBlocksDebug` (0x14632A4D0) on a future PDB game —
 # it is a SEPARATE pointer variable, not NamePoolData+0x10, and it is all-zero in the file.
 "UE5.1-Grimhook|Grimhook|-|GObjects=14643d800|14643d810,GNames=14639e140,GWorld=1465aa438,SparseDelegates=1461417d0,GEngine=1465a6630"
+# FREUD GATE 4.21 and LIGHT MAZE 5.0.3 — no PDB, but both projects are fully analyzed and every
+# global was pinned by disassembly AND corroborated by independent pattern consensus. They close
+# the last two version holes: 4.21 had no sample at all, and 4.27 previously jumped straight to
+# 5.1 with nothing at 5.0. Freud Gate is pre-4.23, so its GNames is a TNameEntryArray* and it has
+# no sparse delegates — both correct, not omissions.
+"UE4.21-FreudGate|Freud_Gate_UE421|-|GObjects=142f97c90|142f97ca0,GNames=142f93958,GWorld=1430897c8,GEngine=143086f60"
+"UE5.0-LightMaze|Light_Maze|-|GObjects=144a59a60|144a59a70,GNames=144bff5c0,GWorld=144dedcc0,SparseDelegates=144a59b80,GEngine=144dea558"
 # ---- symbol-less, truth DERIVED BY DISASSEMBLY (2026-07-27) ----
 # All three were live-run first (our own validators accepted GObjects/GNames/GWorld/Sparse),
 # then corroborated in Ghidra. Both Auto Analyze runs were saved PARTWAY through; raw data

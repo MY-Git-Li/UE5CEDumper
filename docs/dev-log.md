@@ -20,6 +20,78 @@ builds ≤696 in
 
 -----
 
+## 2026-07-27 - Five new oracles close the 4.21 and 5.0 holes; GWLD_TQ_1 promoted 210 -> 101
+
+Five games added — Helium Rain (4.20.3, PDB), Freud Gate (4.21, no PDB), Breeders of the Nephelym
+(4.27, PDB), Maelstrom (4.27.2, PDB), Light Maze (5.0.3, no PDB). Derived in parallel, five agents
+on five projects (Ghidra's lock is per-project, so that is safe).
+
+**23 of 23 targets resolve correctly, zero version disagreements, and nothing justified mining a
+new pattern.** No repeat of the Elliot "PE says 4.27, actually 5.4" trap — every version was
+confirmed independently from the `++UE4+Release-X.Y` build tag and refined where the label was
+coarse (4.20.3, 4.27.2, and Light Maze's `CL-20979098` = the 5.0.3 release changelist).
+
+### `GWLD_TQ_1`: 210 -> 101
+
+Measured before moving. It wins on **6 of 16** oracles — no other GWorld pattern wins more than 2 —
+and has **zero decoys anywhere**: 10 UNIQUE-OK, 6 NO-TRUTH on probes, 23 MISS. It was sitting
+behind 13 AOBs.
+
+The saving is **a whole `.text` pass, not a few validations**. Patterns scan in **batches of 8**,
+so order *within* a batch only changes validation order — one AVX2 sweep either way — but crossing
+a batch boundary costs an entire extra sweep. At 210 it sat in batch 2, so every game it wins paid
+for batch 1 first. What it displaces out of batch 1 is `GWLD_ES2_3`, which wins on nothing, so the
+swap is free. Placed at 101 rather than 95 because the 40–90 band means "symbol-derived", and
+first-vs-second inside a batch is worth nothing.
+
+Then the five new games arrived and `GWLD_TQ_1` won **all five** — 4.20, 4.21, 4.27 ×2, 5.0. The
+promotion is now backed by 11 wins across five engine generations.
+
+Bundling the reorder with the corpus additions was safe, and worth stating why: **scanning is
+per-program independent**, so adding rows cannot change another program's result. Any GWorld
+change on an *existing* oracle is attributable to the reorder alone; the new games are new
+information regardless.
+
+### What the batch settled
+
+- **DropIn's 32-byte `FUObjectItem` is a config artifact, not a 4.27 trait** — proven by two
+  independent symbolised 4.27 binaries carrying the stock 24-byte item.
+- **`SPARSE_PAL51_1` fires and is CORRECT on Maelstrom (4.27)** — its first correct fire outside
+  Palworld, and on a non-5.1 binary. It stays "provenance ≠ version coverage", but it is no longer
+  a pattern that has only ever worked on the game it was mined from.
+- **`SPARSE_X1`/`X2` are UNIQUE-OK on Maelstrom** — second corroboration outside 5.1.
+- **`GENG_X4` is clean on four of the five** and takes 1 decoy on Breeders that is never selected.
+  DQ7R stays the only place it is convergent-and-wrong.
+- A reusable recipe for pre-4.23 GNames without symbols (`mov ecx,0x408` → the nearby rip store),
+  which is a live lead for the three 4.18 rows that leave GNames unset on purpose.
+
+### The thinnest thing in the table now
+
+**Pre-4.23 GNames rests on exactly two patterns, and they are the same shape** — `GNAM_CT3` and
+`GNAM_G42_1`, both the `FName::GetNames` lazy-init prologue, both OK-BEHIND, both batch 3,
+confirmed identical on Helium Rain *and* Freud Gate. That is the sparse-`n=1` situation again on a
+different target. If a third pre-4.23 sample ever arrives, mining a structurally different anchor
+is the highest-value thing to do with it.
+
+### UE 4.23 — closed as a deliberate non-goal
+
+It shipped 2019-09 and 4.24 landed that December, so essentially every surviving title has been
+bumped to 4.27, and building a sample needs an old Visual Studio the maintainer will not install.
+It is also the version where the feature matters least — sparse delegates were barely adopted that
+early, so an unverified 4.23 is close to unobservable. The mitigation was never going to be a
+sample anyway: **`Aura` probes the live key shape instead of gating on a version number**, which is
+what makes 4.23 *and any licensee fork* safe without a binary to test against.
+
+### Version coverage
+
+4.18, 4.20, **4.21**, 4.22, 4.24, 4.25, 4.26, 4.27, **5.0**, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7 —
+contiguous from 4.24 up, with 4.19 the only remaining UE4 gap (sandwiched between covered
+neighbours) and 4.23 deliberately skipped. 5.8 is next, and the practical route is packaging a
+Blueprint template for **Shipping** from an Epic Launcher engine install — installing the engine
+alone yields Editor binaries, which are the wrong shape entirely.
+
+-----
+
 ## 2026-07-27 - Grimhook: the first symbolised UE 5.1; sparse n=1 cluster closed
 
 Grimhook ships a **full public PDB** on a `-Win64-Shipping.exe` (2.7 M symbols, 232 K functions).

@@ -64,8 +64,15 @@ govern. Read that block too before adding, moving or deleting anything. The shor
 
 ### Still open (as of build 2440)
 
-- **UE 4.23** is the only unverified sparse-delegate version; no 4.23 binary exists in the corpus.
-  Low risk: `Aura` probes the live key shape rather than gating on a version number.
+- ~~**UE 4.23** is the only unverified sparse-delegate version~~ — **DELIBERATELY NOT CHASED**
+  (decided 2026-07-27). 4.23 shipped 2019-09 and 4.24 landed that December, so its window was
+  three months and essentially every surviving title has been bumped to 4.27; building a sample
+  would need an old Visual Studio the maintainer has no intention of installing. It is also the
+  version where the feature matters least — sparse delegates were barely adopted that early, so
+  an unverified 4.23 is close to unobservable in practice. The real mitigation is structural, not
+  a sample: **`Aura` probes the live key shape instead of gating on a version number**, which is
+  what makes 4.23 *and any licensee fork* safe without a binary to test against. Do not reopen
+  this unless a 4.23 binary falls into your lap.
 - **FF7 Rebirth's SparseDelegates** exists (proved from `.rdata`: `SparseDelegateFunction`,
   `MulticastSparseDelegateProperty`, the `SparseDelegateReport` console command) but no pattern
   finds it. Lead for whoever picks it up: find the `SparseDelegateReport` string xref and follow
@@ -81,10 +88,53 @@ govern. Read that block too before adding, moving or deleting anything. The shor
   symbolised 5.1. Per rule 5 a MISS is not counter-proof, so it stays — but do not read its
   `PAL51` provenance as version coverage. The 5.1 sparse coverage that actually works is
   `SPARSE_ES2_1` (+ now `X1`/`X2`).
-- **`GWLD_TQ_1` sits at priority 210 with 13 Tier-1 GWorld patterns missing ahead of it** on
-  Grimhook, and it is the winner on several other oracles too. Promoting it inside its band looks
-  like a free saving, but it is a REORDER: it needs its own full sweep to attribute, so it was
-  deliberately not bundled with a pattern addition. Measure before moving.
+- ~~**`GWLD_TQ_1` sits at priority 210**~~ **DONE 2026-07-27 — promoted 210 → 101.** Measured
+  first: it wins on **6 of 16** oracles (no other GWorld pattern wins more than 2) and has **zero
+  decoys anywhere** (10 UNIQUE-OK, 6 NO-TRUTH, 23 MISS). The saving is a whole `.text` pass, not
+  a few validations — patterns scan in **batches of 8**, so order *within* a batch is free but
+  crossing a batch boundary costs a full extra AVX2 sweep, and at 210 it sat in batch 2. What it
+  displaces out of batch 1 (`GWLD_ES2_3`) wins on nothing, so the swap is free.
+
+### Settled facts — do not re-chase these
+
+Each cost at least one headless run to establish. Recorded so nobody spends another.
+
+- **`out/sweep/patterns.tsv` goes stale.** Always re-run `extract_patterns.py` before scanning;
+  a cached tsv from a previous sweep put three of five analysts a commit behind on a priority.
+- **DropIn's 32-byte `FUObjectItem` is a CONFIG artifact, not a 4.27 trait.** Proven by two
+  independent symbolised 4.27 binaries (Breeders, Maelstrom) carrying the stock 24-byte item.
+- **A small `.msvcjmc` section does NOT mean a Development build.** Breeders and Maelstrom have
+  one at 8 bytes VirtualSize, LightMaze 512 — one stray `/JMC` translation unit, not engine-wide
+  instrumentation. All three still ship the stock 24-byte chunked item, and it cost zero patterns.
+- **`tdb` @ `0xFF00000000` is a Ghidra loader artifact, not a PE section.** Four analysts have now
+  investigated it independently; one dumped the on-disk section table to disprove it.
+- **The default PDB loader is fine.** MSDIA remains a *Meltopia-only* workaround, not a habit.
+- **Pre-4.23 has no `NamePoolData` symbol at any version** — do not look for one. Go straight to
+  `FName::GetNames`. It also has no sparse delegates: 10/10 `SPARSE_*` MISS on a 4.20/4.21 binary
+  is the CORRECT answer, and raw ASCII+UTF-16 data-section scans for `SparseDelegate` have already
+  been run on both and returned zero.
+- **`GNAM_V7` (CallFollow) and the three `GNAM_EXP_*` (SymbolCallFollow) are UNMEASURABLE by this
+  harness**, not worryingly unknown: `scan_patterns.java` scans byte patterns only, and the `EXP`
+  ones cannot fire on a monolithic EXE because nothing is exported.
+
+### Recipe — pre-4.23 GNames on a binary with NO symbols
+
+`TNameEntryArray` is `128*8+8 = 0x408` bytes, so scan `.text` for `mov ecx,0x408` and take the
+`mov [rip+disp],rax` within ~64 bytes. On Freud Gate's 31 MB `.text` that gave 12 candidates and
+exactly one with a rip store — `FName::GetNames`. **Live lead for the three 4.18 rows that leave
+GNames unset on purpose** (DQ XI S, Octopath, FF7 Remake), with the caveat that 4.18's chunk-table
+size may not be `0x408` — confirm it from the memset / field offsets rather than hardcoding.
+Note also that a pre-4.23 binary carries TWO different chunk sizes: Freud Gate's `FUObjectArray`
+is 65536 elems/chunk (`sar 0x10`) while its `TNameEntryArray` is 16384 (`sar 0xE`). Do not conflate.
+
+### Thinnest coverage in the table
+
+**Pre-4.23 GNames rests on exactly two patterns — `GNAM_CT3` (700) and `GNAM_G42_1` (710) — and
+they are the SAME `FName::GetNames` lazy-init prologue shape.** Both are OK-BEHIND, both in batch
+3, confirmed identical on HeliumRain *and* Freud Gate. A compiler change to that prologue takes
+GNames on every pre-4.23 title at once. This is the sparse-`n=1` situation again, on a different
+target; if a third pre-4.23 sample ever arrives, mining a structurally different anchor there is
+the highest-value thing to do with it.
 
 **Why this file exists:** re-deriving these costs a headless run per binary, and getting one
 wrong silently corrupts every verdict downstream. It has already happened once — a placeholder
@@ -103,6 +153,11 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | UE4.27-DQ7R | `DQ7R` | 4.27 | ❌ none | truth by disassembly; **GEngine ≠ the live consensus** — see below |
 | UE5.4-Elliot | `Elliot` | 5.4 | ❌ none | truth by disassembly; the corpus's **only UE 5.4** sample |
 | UE4.20-Everspace | `ES1-420` | 4.20 | ✅ full PDB | oldest sample; supersedes the symbol-less `ES1.rep` |
+| UE4.20-HeliumRain | `HeliumRain` | 4.20.3 | ✅ full PDB | **second symbolised 4.20** — pre-4.23 GNames no longer rests on Everspace alone |
+| UE4.21-FreudGate | `Freud_Gate_UE421` | 4.21 | ❌ none | truth by disassembly; **closes the 4.21 hole** |
+| UE4.27-Breeders | `Breeders_of_the_Nephelym` | 4.27 | ✅ full PDB | |
+| UE4.27-Maelstrom | `Maelstrom` | 4.27.2 | ✅ full PDB | |
+| UE5.0-LightMaze | `Light_Maze` | 5.0.3 | ❌ none | truth by disassembly; **closes the 5.0 hole** (4.27 used to jump to 5.1) |
 | UE4.22-Satisfactory | `Satisfactory_UE422` | 4.22 | ✅ full PDB | **monolithic EXE with symbols** — the only pre-4.25 one |
 | UE4.24-DropIn | `DropIn_UE424` | 4.24.3 | ✅ full PDB | **closed the last checkable sparse-delegate gap** — see below |
 | UE4.25-Everspace2 | `ES2-UE425` | 4.25.2 | ✅ full PDB | the FField/FProperty transition band |

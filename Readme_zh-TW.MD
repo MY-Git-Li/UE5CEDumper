@@ -130,12 +130,13 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
 | 工具 | 版本要求 |
 |---|---|
-| Visual Studio / MSVC | 2022 v17+ (MSVC v143) |
+| Visual Studio / MSVC | **2026 (v18, MSVC 19.50)** —實際建置與測試所用版本 |
 | CMake | 3.25+ |
 | Ninja | 任何近期版本 |
 | .NET SDK | 10.0 |
 
-> `build.cmd` / `build.ps1` 會透過 `vswhere` 自動定位 MSVC，無需手動設定路徑。
+> `build.cmd` / `build.ps1` 會透過 `vswhere` 自動定位 MSVC，無需手動設定路徑，因此任何已安裝的
+> toolset 都找得到。較舊的 Visual Studio 版本未經測試 —— 本專案已在 2026 上建置一段時間了。
 
 ### 執行環境 (Runtime)
 

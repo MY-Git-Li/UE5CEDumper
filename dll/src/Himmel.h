@@ -1432,6 +1432,19 @@ constexpr AobSignature GWORLD_PATTERNS[] = {
     // priority). That is how a "why was this not re-prioritised?" question gets asked about a
     // pattern that WAS re-prioritised — the file was lying, not the code.
     SIG_GWORLD_RIP("GWLD_SP57_1", AOB_GWORLD_SP57_1, 0, 3, 7, 0, 100, false, "SP57", "UE5.7 UGameEngine::Tick cmp [rcx+2C0] (tolerates inserted mov)"),
+    // PROMOTED 210 -> 101. This is the most successful GWorld pattern in the table: it WINS on
+    // 6 of 16 oracles (no other GWorld pattern wins more than 2) and has **zero decoys anywhere**
+    // in the corpus — 10 UNIQUE-OK, 6 NO-TRUTH on probes, 23 MISS. It was sitting behind 13 AOBs.
+    //
+    // The saving is a whole .text pass, not a few validations. Patterns are scanned in BATCHES OF
+    // 8: order WITHIN a batch changes only validation order, but crossing a batch boundary costs
+    // an entire extra AVX2 sweep. At 210 this sat in batch 2, so the six games it wins each paid
+    // for batch 1 first. At 101 they resolve in batch 1 and never scan batch 2.
+    //
+    // What it displaces out of batch 1 is GWLD_ES2_3, which wins on nothing — so the swap is
+    // free. Deliberately 101 and not 95: the 40-90 band means "symbol-derived", and being 1st vs
+    // 2nd inside a batch is worth nothing anyway.
+    SIG_GWORLD_RIP("GWLD_TQ_1",  AOB_GWORLD_TQ_1,  0, 3, 7, 0, 101, false, "TQ", "TQ2 extended V3 — corpus's most successful GWorld shape"),
     // 105/115: UE 4.27 (DropIn, PDB-verified). Both are WRITE sites -> allowNull.
     // NOTE DI427_2 has totalLen = 11: `mov qword[rip+d32], imm32` — the disp32 still starts
     // at byte 3 but the instruction carries a trailing imm32. Mis-encoding this as 7 is the
@@ -1448,7 +1461,6 @@ constexpr AobSignature GWORLD_PATTERNS[] = {
     SIG_GWORLD_RIP("GWLD_ES2_5", AOB_GWORLD_ES2_5, 0, 3, 7, 0, 180, false, "ES2", "UE5.5 call r12 loop"),
     SIG_GWORLD_RIP("GWLD_ES2_6", AOB_GWORLD_ES2_6, 0, 3, 7, 0, 190, false, "ES2", "UE5.5 cmovne+call rbx"),
     SIG_GWORLD_RIP("GWLD_GH_1",  AOB_GWORLD_GH_1,  12, 3, 7, 0, 200, false, "GH", "Ghidra FMallocLeakReporter 25-fixed cross-game"),
-    SIG_GWORLD_RIP("GWLD_TQ_1",  AOB_GWORLD_TQ_1,  0, 3, 7, 0, 210, false, "TQ", "TQ2 extended V3"),
     SIG_GWORLD_RIP("GWLD_TQ_2",  AOB_GWORLD_TQ_2,  0, 3, 7, 0, 220, false, "TQ", "TQ2 dual mov"),
     SIG_GWORLD_RIP("GWLD_GH_2",  AOB_GWORLD_GH_2,   9, 3, 7, 0, 230, false, "GH", "Ghidra FUMGViewportClient::GetWorld cross-game"),
     SIG_GWORLD_RIP("GWLD_V7",    AOB_GWORLD_V7,     0, 3, 7, 0, 240, false, "V", "Palworld long context"),

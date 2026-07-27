@@ -130,12 +130,14 @@ Inject `UE5Dumper.dll` into an **already-running** game — the quickest path (n
 
 | Tool | Version |
 |---|---|
-| Visual Studio / MSVC | 2022 v17+ (MSVC v143) |
+| Visual Studio / MSVC | **2026 (v18, MSVC 19.50)** — what this is built and tested with |
 | CMake | 3.25+ |
 | Ninja | any recent |
 | .NET SDK | 10.0 |
 
-> `build.cmd` / `build.ps1` locate MSVC automatically via `vswhere`. No hardcoded paths.
+> `build.cmd` / `build.ps1` locate MSVC automatically via `vswhere`, so any installed toolset is
+> found without hardcoded paths. Older Visual Studio versions are not tested — the build has been
+> on 2026 for a while now.
 
 ### Runtime
 
