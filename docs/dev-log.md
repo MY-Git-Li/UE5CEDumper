@@ -196,6 +196,20 @@ game, always — the feature had never worked since it was added at build 2399.
 - The `apply_rescan` pipe path got the same second pass: a recovery rescan that revives
   GObjects/GNames is exactly the case where the offsets GEngine was waiting on have just arrived.
 
+### Follow-up (same day) — the two rows that had no AOBMaker buttons
+
+**LIVE-VERIFIED on Everspace 2**: `&GEngine (engine slot) = 0x7FF6430237B0` via `GENG_X3`.
+
+With the address finally resolving, the Pointer panel's last two rows were still Copy-only.
+`FSparseDelegateStorage` and `&GEngine` gained a **HEX** button (same contract as the three
+above them), and `&GEngine` gained a **SYM** button matching GWorld's.
+
+`SYM` registers the **slot**, not the UEngine object — which is the entire point. The slot
+address is restart-stable, so a GameEngine-rooted CE record auto-follows engine recreation
+instead of freezing a stale `UEngine*`. Symbol name `gengine_addr`, mirroring `gworld_addr`.
+`CanRegisterGEngineSymbol` requires the AOB triple, not just an address, for the same reason
+GWorld's does: without the pattern the generated AA script cannot re-scan on enable.
+
 ### Notes for next time
 
 - The 0.2–0.7 s per game the wasted scan cost was invisible because it was folded into the

@@ -318,6 +318,16 @@ public partial class PointerPanelViewModel : ViewModelBase
     public bool CanHexGNames => IsAobMakerAvailable && IsNonZeroAddr(GNamesAddress);
     /// <summary>Can send GWorld pointer to CE hex view (data address).</summary>
     public bool CanHexGWorld => IsAobMakerAvailable && IsNonZeroAddr(GWorldAddress);
+    /// <summary>Can send FSparseDelegateStorage pointer to CE hex view (data address).</summary>
+    public bool CanHexSparseDelegates => IsAobMakerAvailable && IsNonZeroAddr(SparseDelegatesAddress);
+    /// <summary>Can send the &amp;GEngine slot to CE hex view (data address).</summary>
+    public bool CanHexGEngine => IsAobMakerAvailable && IsNonZeroAddr(GEngineAddress);
+
+    /// <summary>Can register the &amp;GEngine SLOT as a CE symbol via CreateSymbolScript.
+    /// Same contract as GWorld: the AOB triple is what makes the symbol restart-proof, so a
+    /// resolved address alone is not enough.</summary>
+    public bool CanRegisterGEngineSymbol => IsAobMakerAvailable
+        && IsNonZeroAddr(GEngineAddress) && !string.IsNullOrEmpty(GengineAob);
 
     /// <summary>Can send GObjects AOB scan hit address to CE disassembler (code address).</summary>
     public bool CanAsmGObjectsScan => IsAobMakerAvailable && IsNonZeroAddr(GObjectsScanAddr);
@@ -542,10 +552,13 @@ public partial class PointerPanelViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanHexGObjects));
         OnPropertyChanged(nameof(CanHexGNames));
         OnPropertyChanged(nameof(CanHexGWorld));
+        OnPropertyChanged(nameof(CanHexSparseDelegates));
+        OnPropertyChanged(nameof(CanHexGEngine));
         OnPropertyChanged(nameof(CanAsmGObjectsScan));
         OnPropertyChanged(nameof(CanAsmGNamesScan));
         OnPropertyChanged(nameof(CanAsmGWorldScan));
         OnPropertyChanged(nameof(CanRegisterGWorldSymbol));
+        OnPropertyChanged(nameof(CanRegisterGEngineSymbol));
     }
 
     private bool _suppressOverrideSelectionEvent;
@@ -820,6 +833,20 @@ public partial class PointerPanelViewModel : ViewModelBase
         await _aobMaker.NavigateHexViewAsync(StripHexPrefix(GWorldAddress));
     }
 
+    [RelayCommand]
+    private async Task HexSparseDelegatesAsync()
+    {
+        if (_aobMaker == null || !IsNonZeroAddr(SparseDelegatesAddress)) return;
+        await _aobMaker.NavigateHexViewAsync(StripHexPrefix(SparseDelegatesAddress));
+    }
+
+    [RelayCommand]
+    private async Task HexGEngineAsync()
+    {
+        if (_aobMaker == null || !IsNonZeroAddr(GEngineAddress)) return;
+        await _aobMaker.NavigateHexViewAsync(StripHexPrefix(GEngineAddress));
+    }
+
     // --- AOBMaker CE Plugin: scan address → disassembler (code) ---
 
     [RelayCommand]
@@ -869,6 +896,38 @@ public partial class PointerPanelViewModel : ViewModelBase
         if (success)
             _log?.Info(Constants.LogCatInit,
                 $"Created CE symbol script '{symbolName}' (AOB: {GworldAob}, pos={GworldAobPos}, len={GworldAobLen})");
+        else
+            _log?.Warn(Constants.LogCatInit,
+                $"Failed to create CE symbol script '{symbolName}'");
+    }
+
+    // --- AOBMaker CE Plugin: register &GEngine as AOB-scan-based CE symbol ---
+    //
+    // The symbol points at the SLOT, not at the UEngine object, which is the whole reason this
+    // is worth having: the slot address is restart-stable, so a GameEngine-rooted CE record
+    // auto-follows engine recreation instead of freezing a stale UEngine* snapshot. Same
+    // contract as gworld_addr.
+
+    [RelayCommand]
+    private async Task RegisterGEngineSymbolAsync()
+    {
+        if (_aobMaker == null || string.IsNullOrEmpty(GengineAob)) return;
+
+        string symbolName = "gengine_addr";
+        string module = !string.IsNullOrEmpty(ModuleName) ? ModuleName : "game.exe";
+
+        bool success = await _aobMaker.CreateSymbolScriptAsync(
+            name: $"&GEngine → {symbolName}",
+            aob: GengineAob,
+            pos: GengineAobPos,
+            aoblen: GengineAobLen,
+            symbol: symbolName,
+            module: module,
+            autoActivate: true);
+
+        if (success)
+            _log?.Info(Constants.LogCatInit,
+                $"Created CE symbol script '{symbolName}' (AOB: {GengineAob}, pos={GengineAobPos}, len={GengineAobLen})");
         else
             _log?.Warn(Constants.LogCatInit,
                 $"Failed to create CE symbol script '{symbolName}'");
