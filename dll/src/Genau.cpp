@@ -4320,6 +4320,28 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
                  out.publisherThumbprint ? out.publisherThumbprint : "-");
     }
 
+    // ── Too-old gate ────────────────────────────────────────────────────────
+    // UE 4.10 and earlier predate FUObjectItem entirely: ObjObjects is a
+    // TStaticIndirectArrayThreadSafeRead of raw UObjectBase* (stride 8) with an INLINE chunk
+    // table, which ArrayLayout cannot express at all. Nothing downstream can work, and scanning
+    // anyway costs ~4 s of AVX2 passes to arrive at "55 patterns, no winner" — which is exactly
+    // what Fantasynth and NEKOPALIVE did before this gate. Verified against Epic's source:
+    // 4.10.2 has no FUObjectItem; 4.11.0 introduces it (16 bytes, ClusterAndFlags packed).
+    //
+    // Deliberately gated on a CONFIDENT detection only. A low-confidence or publisher-biased
+    // version is a guess, and a user override is the user's call — misreading a working game as
+    // "too old" and refusing to scan it is a far worse failure than wasting four seconds.
+    if (out.UEVersion < Grimoire::MIN_SUPPORTED_UE_VERSION
+        && out.bVersionDetected && !out.bLowConfidence && !out.bUserOverride) {
+        out.bVersionTooOld = true;
+        LOG_WARN("FindAll: UE %u is older than the minimum supported %u — SKIPPING the scan. "
+                 "Pre-4.11 has no FUObjectItem (raw UObjectBase* in an inline chunk table), so "
+                 "no pattern or preset can resolve GObjects. Set a UE version override if this "
+                 "detection is wrong.",
+                 out.UEVersion, Grimoire::MIN_SUPPORTED_UE_VERSION);
+        return true;   // not a failure — a clean, explained no-op
+    }
+
     if (progress) progress(2, "Scanning GObjects...");
     out.GObjects = FindGObjects(hints.gobjectsPatternId.empty() ? nullptr
                                 : hints.gobjectsPatternId.c_str());

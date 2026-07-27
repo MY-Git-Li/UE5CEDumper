@@ -173,20 +173,40 @@ public sealed class ProxyDeployService : IProxyDeployService
         // <Game>\Package\<Sub>\Binaries\Win64 entirely — that is a whole game the
         // scan never sees, and the Engine fallback misses it too because the
         // Engine folder is not a direct child either.
-        var primary = new List<string>();
-        var engineRoots = new List<string>();
+        var primary = new List<(string Dir, int Depth)>();
+        var engineRoots = new List<(string Dir, int Depth)>();
         CollectBinariesRoots(gameDir, gameDir, 0, primary, engineRoots);
 
+        // SHALLOWEST DEPTH WINS. Depth is scanned ascending and the first depth that yields any
+        // row stops the search — the same "primary first, fallback only if empty" shape as the
+        // Engine tier below, applied to nesting.
+        //
+        // Without this, the depth-3 search turns bonus content into phantom rows: P3R ships
+        // <Game>\P3R\Binaries\Win64 (depth 1, the real game) alongside
+        // <Game>\Artbook\P3R_Artbook\Binaries\Win64 and <Game>\Soundtrack\P3R_Soundtrack\... —
+        // and those two are genuinely UE apps with their own Engine folder, so no content-based
+        // filter separates them. Depth does: the real game is shallower. A wrapped layout like
+        // NEKOPALIVE has nothing at depth 1 at all, so it still reaches its depth-2 project.
         int gamesBefore = games.Count;
-        foreach (string root in primary)
-            ScanBinariesDir(gameName, gameDir, root, games, seenBinDirs);
+        foreach (var group in primary.GroupBy(r => r.Depth).OrderBy(g => g.Key))
+        {
+            foreach (var (root, _) in group)
+                ScanBinariesDir(gameName, gameDir, root, games, seenBinDirs);
+            if (games.Count != gamesBefore)
+                break;
+        }
 
         // Engine fallback: only walked when primary yielded zero rows for this
         // gameDir. Catches pure-modular layouts like Satisfactory where the
         // real launcher .exe lives in <Game>\Engine\Binaries\Win64\.
         if (games.Count == gamesBefore)
-            foreach (string root in engineRoots)
-                ScanBinariesDir(gameName, gameDir, root, games, seenBinDirs);
+            foreach (var group in engineRoots.GroupBy(r => r.Depth).OrderBy(g => g.Key))
+            {
+                foreach (var (root, _) in group)
+                    ScanBinariesDir(gameName, gameDir, root, games, seenBinDirs);
+                if (games.Count != gamesBefore)
+                    break;
+            }
     }
 
     /// <summary>Deepest wrapper level below a game root that is still searched for a
@@ -208,12 +228,14 @@ public sealed class ProxyDeployService : IProxyDeployService
     /// producing two rows.
     /// </summary>
     private static void CollectBinariesRoots(
-        string dir, string gameDir, int depth, List<string> primary, List<string> engineRoots)
+        string dir, string gameDir, int depth,
+        List<(string Dir, int Depth)> primary, List<(string Dir, int Depth)> engineRoots)
     {
         // A root is worth recording whether or not it has a Binaries child — ScanBinariesDir
-        // re-checks — but only descend while there is depth left.
+        // re-checks — but only descend while there is depth left. Depth travels with the root so
+        // the caller can prefer shallower ones.
         bool underEngine = IsUnderEngineFolder(dir, gameDir);
-        (underEngine ? engineRoots : primary).Add(dir);
+        (underEngine ? engineRoots : primary).Add((dir, depth));
 
         if (depth >= MaxBinariesSearchDepth)
             return;

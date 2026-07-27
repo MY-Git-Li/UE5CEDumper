@@ -33,6 +33,7 @@ public partial class PointerPanelViewModel : ViewModelBase
     [ObservableProperty] private bool _versionDetected = true;
     [ObservableProperty] private bool _isUserOverride;
     [ObservableProperty] private bool _isLowConfidence;
+    [ObservableProperty] private bool _isVersionTooOld;
     [ObservableProperty] private string _publisherThumbprint = "";
     [ObservableProperty] private string _selectedUeVersionOverride = "Auto";
     [ObservableProperty] private bool _isApplyingOverride;
@@ -209,6 +210,13 @@ public partial class PointerPanelViewModel : ViewModelBase
 
     /// <summary>True when version was detected with high confidence and no override is in effect.</summary>
     public bool ShowVersionDetectedBadge => HasData && VersionDetected && !IsUserOverride && !IsLowConfidence;
+
+    /// <summary>True when the engine predates UE 4.11, so the DLL skipped the scan outright.
+    /// Pre-4.11 has no FUObjectItem — the object array holds raw UObjectBase* at stride 8 in an
+    /// INLINE chunk table, which the layout presets cannot express — so every pointer being
+    /// empty is by design here, not a scan that failed. Shown instead of the usual
+    /// "not found" text, which would send the user hunting for a pattern that cannot exist.</summary>
+    public bool ShowVersionTooOldWarning => HasData && IsVersionTooOld;
 
     /// <summary>True when a SquareEnix (or future) publisher thumbprint was matched.</summary>
     public bool ShowPublisherHint => HasData && !string.IsNullOrEmpty(PublisherThumbprint);
@@ -414,6 +422,7 @@ public partial class PointerPanelViewModel : ViewModelBase
         VersionDetected = state.VersionDetected;
         IsUserOverride = state.IsUserOverride;
         IsLowConfidence = state.IsLowConfidence;
+        IsVersionTooOld = state.IsVersionTooOld;
         PublisherThumbprint = state.PublisherThumbprint;
         // Re-sync the ComboBox selection to whatever the DLL actually has (override or auto).
         // _suppressOverrideSelectionEvent gates the partial method so this assignment doesn't

@@ -43,6 +43,18 @@ struct EnginePointers {
     bool      bVersionDetected = true; // false = PE/memory scan failed, version is inferred or default
     bool      bUserOverride    = false;// true = ueVersion came from a user-set persistent override
     bool      bLowConfidence   = false;// true = detection used Tier 3 bare-pattern OR publisher-bias fallback
+
+    /// true = the engine predates anything this dumper can read, so the scan was SKIPPED.
+    ///
+    /// UE 4.10 and earlier have no `FUObjectItem` at all: `FUObjectArray::ObjObjects` is a
+    /// `TStaticIndirectArrayThreadSafeRead` of raw `UObjectBase*` (stride 8) whose chunk table is
+    /// INLINE, so `ArrayLayout` cannot even express it (`objectsOffset` means "read a pointer
+    /// here"; 4.10 needs "take the ADDRESS of here") — see docs/technical-notes.md. Scanning
+    /// anyway just burns ~4 s of AVX2 passes to reach "no winner", which is what these titles did
+    /// before this flag existed. Only ever set on a CONFIDENTLY detected version: a
+    /// low-confidence or user-overridden version is never gated, because misdetecting a working
+    /// game as "too old" is far worse than wasting a scan.
+    bool      bVersionTooOld   = false;
     const char* publisherThumbprint = nullptr; // e.g. "SQUARE_ENIX" (nullptr if no match) — string literal lifetime
     int       ue4StringOffset = 0x10;  // FNameEntry string offset for UE4 mode
     int       fnameEntryHeaderOffset = 0; // Offset to 2-byte header within FNameEntry (0=standard, 4=hash-prefixed UE4.26)

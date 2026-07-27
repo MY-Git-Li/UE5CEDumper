@@ -69,6 +69,17 @@
             <TextBlock Text="{Binding PublisherLabel}"
                        Foreground="#C586C0" FontSize="10" FontWeight="SemiBold"/>
           </StackPanel>
+          <!-- Engine older than UE 4.11: the scan was SKIPPED, not failed. Red rather than
+               amber, because unlike every other warning here there is nothing the user can
+               tune to make it work — the only actionable path is "the detection is wrong,
+               set an override". -->
+          <Border Background="#3A2226" BorderBrush="#E05252" BorderThickness="1"
+                  CornerRadius="4" Padding="10,8" Margin="0,6,0,0"
+                  IsVisible="{Binding ShowVersionTooOldWarning}">
+            <TextBlock Text="{StaticResource str.Pointers.VersionTooOld}"
+                       Foreground="#E88" FontSize="11" TextWrapping="Wrap"/>
+          </Border>
+
           <!-- Legacy "version not detected" warning, kept for backward compat -->
           <TextBlock Text="{StaticResource str.Pointers.VersionWarning}"
                      Foreground="#E6A817" FontSize="11" TextWrapping="Wrap"

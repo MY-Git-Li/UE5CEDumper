@@ -329,6 +329,7 @@
     <sys:String x:Key="str.Pointers.TotalObjects">Total Objects</sys:String>
     <sys:String x:Key="str.Pointers.Copy">Copy</sys:String>
     <sys:String x:Key="str.Pointers.NotConnected">Not connected — connect to view pointers</sys:String>
+    <sys:String x:Key="str.Pointers.VersionTooOld">Unsupported engine — UE 4.11 is the oldest this tool can read. UE 4.10 and earlier have no FUObjectItem: the object array holds raw UObjectBase* pointers in an inline chunk table, a layout the dumper cannot express, so the scan was skipped rather than run and fail. If this version was detected wrongly, set a UE version override above and reconnect.</sys:String>
     <sys:String x:Key="str.Pointers.VersionWarning">&#x26A0; Version not detected — inferred from engine analysis (custom UE build?)</sys:String>
     <sys:String x:Key="str.Pointers.VersionDetectedBadge">&#x2713; Detected</sys:String>
     <sys:String x:Key="str.Pointers.VersionUserOverrideBadge">&#x1F527; User Override</sys:String>

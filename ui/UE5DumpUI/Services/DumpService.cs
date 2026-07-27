@@ -112,6 +112,9 @@ public sealed class DumpService : IDumpService
             VersionDetected = versionDetected,
             IsUserOverride = isUserOverride ?? ptrs["is_user_override"]?.GetValue<bool>() ?? false,
             IsLowConfidence = isLowConfidence ?? ptrs["is_low_confidence"]?.GetValue<bool>() ?? false,
+            // Only the pointers payload carries this — an older DLL omits it, which reads as
+            // false, i.e. "not gated", which is the right default for a DLL that predates the gate.
+            IsVersionTooOld = ptrs["is_version_too_old"]?.GetValue<bool>() ?? false,
             PublisherThumbprint = ptrs["publisher_thumbprint"]?.GetValue<string>() ?? "",
             GObjectsAddr = ptrs["gobjects"]?.GetValue<string>() ?? "",
             GNamesAddr = ptrs["gnames"]?.GetValue<string>() ?? "",

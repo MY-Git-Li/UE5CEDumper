@@ -807,6 +807,7 @@ static void FillPointerSnapshot(json& data) {
     extern bool        g_cachedVersionDetected;
     extern bool        g_cachedIsUserOverride;
     extern bool        g_cachedIsLowConfidence;
+    extern bool        g_cachedVersionTooOld;
     extern const char* g_cachedPublisherThumbprint;
     extern const char* g_cachedGObjectsMethod;
     extern const char* g_cachedGNamesMethod;
@@ -843,6 +844,7 @@ static void FillPointerSnapshot(json& data) {
     data["version_detected"]     = g_cachedVersionDetected;
     data["is_user_override"]     = g_cachedIsUserOverride;
     data["is_low_confidence"]    = g_cachedIsLowConfidence;
+    data["is_version_too_old"]   = g_cachedVersionTooOld;
     // build_number: compile-time DLL build (e.g. 648). Also emitted on the
     // init response; surfacing it on every snapshot lets the UI's
     // get_pointers refreshes preserve the value across panel state rebuilds.

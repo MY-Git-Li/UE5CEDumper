@@ -45,6 +45,7 @@ uint32_t    g_cachedUEVersion = 0;
 bool        g_cachedVersionDetected = true;  // false if UE version detection failed (PE + memory scan)
 bool        g_cachedIsUserOverride  = false; // true = ueVersion came from a user-set persistent override
 bool        g_cachedIsLowConfidence = false; // true = Tier 3 bare-pattern OR publisher-bias fallback
+bool        g_cachedVersionTooOld   = false; // true = engine predates 4.11 — scan skipped, see Genau.h
 const char* g_cachedPublisherThumbprint = nullptr;  // e.g. "SQUARE_ENIX" (nullptr if no match)
 const char* g_cachedGObjectsMethod        = "not_found";  // "aob", "data_scan", "not_found"
 const char* g_cachedGNamesMethod          = "not_found";  // "aob", "string_ref", "pointer_scan", "not_found"
@@ -131,6 +132,7 @@ bool UE5_Init() {
     g_cachedVersionDetected = ptrs.bVersionDetected;
     g_cachedIsUserOverride  = ptrs.bUserOverride;
     g_cachedIsLowConfidence = ptrs.bLowConfidence;
+    g_cachedVersionTooOld   = ptrs.bVersionTooOld;
     g_cachedPublisherThumbprint = ptrs.publisherThumbprint;
     g_cachedGObjectsMethod        = ptrs.gobjectsMethod;
     g_cachedGNamesMethod          = ptrs.gnamesMethod;

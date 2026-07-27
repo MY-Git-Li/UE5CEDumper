@@ -204,6 +204,12 @@ inline bool IsFFieldVariantUObject(uintptr_t ptr) {
 namespace Grimoire {
 
 // --- Object Array ---
+// Oldest engine this dumper can read. UE 4.11 is where FUObjectItem appears (16 bytes:
+// Object / ClusterAndFlags / SerialNumber). 4.10 and earlier store raw UObjectBase* at stride 8
+// in a TStaticIndirectArrayThreadSafeRead whose chunk table is INLINE — a shape ArrayLayout
+// cannot express. Read off Epic's source at tags 4.10.2-release / 4.11.0-release.
+constexpr uint32_t MIN_SUPPORTED_UE_VERSION = 411;
+
 constexpr int OBJECTS_PER_CHUNK        = 64 * 1024;
 
 // --- FNamePool ---

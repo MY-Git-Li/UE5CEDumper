@@ -517,6 +517,39 @@ public class ProxyDeployTests
     }
 
     [Fact]
+    public async Task FindUeGames_ShallowestDepthWins_BonusContentSuppressed()
+    {
+        string lib = MakeTempLibrary();
+        try
+        {
+            // P3R-shape: the real game sits at depth 1, while Artbook and Soundtrack are
+            // depth-2 bonus apps that are ALSO genuine UE builds with their own Engine folder —
+            // so nothing about their contents separates them. Depth does.
+            string game = Path.Combine(lib, "steamapps", "common", "P3R");
+            string realBin = Path.Combine(game, "P3R", "Binaries", "Win64");
+            string artBin = Path.Combine(game, "Artbook", "P3R_Artbook", "Binaries", "Win64");
+            string ostBin = Path.Combine(game, "Soundtrack", "P3R_Soundtrack", "Binaries", "Win64");
+
+            MakeEmptyFile(Path.Combine(realBin, "P3R.exe"));
+            MakeEmptyFile(Path.Combine(artBin, "P3R_Artbook.exe"));
+            MakeEmptyFile(Path.Combine(ostBin, "P3R_Soundtrack.exe"));
+            MakeEmptyFile(Path.Combine(game, "Engine", "Binaries", "Win64", "CrashReportClient.exe"));
+
+            var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
+            var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
+
+            var p3r = Assert.Single(found, g => g.Name == "P3R");
+            Assert.Equal(realBin, p3r.BinariesDir);
+            Assert.DoesNotContain("Artbook", p3r.ExePath);
+            Assert.DoesNotContain("Soundtrack", p3r.ExePath);
+        }
+        finally
+        {
+            Directory.Delete(lib, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task FindUeGames_DeepSearch_DoesNotDescendIntoContent()
     {
         string lib = MakeTempLibrary();
