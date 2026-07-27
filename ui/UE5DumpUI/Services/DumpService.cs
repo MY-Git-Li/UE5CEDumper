@@ -112,6 +112,9 @@ public sealed class DumpService : IDumpService
             VersionDetected = versionDetected,
             IsUserOverride = isUserOverride ?? ptrs["is_user_override"]?.GetValue<bool>() ?? false,
             IsLowConfidence = isLowConfidence ?? ptrs["is_low_confidence"]?.GetValue<bool>() ?? false,
+            // Only the pointers payload carries this — an older DLL omits it, which reads as
+            // false, i.e. "not gated", which is the right default for a DLL that predates the gate.
+            IsVersionTooOld = ptrs["is_version_too_old"]?.GetValue<bool>() ?? false,
             PublisherThumbprint = ptrs["publisher_thumbprint"]?.GetValue<string>() ?? "",
             GObjectsAddr = ptrs["gobjects"]?.GetValue<string>() ?? "",
             GNamesAddr = ptrs["gnames"]?.GetValue<string>() ?? "",
@@ -119,6 +122,7 @@ public sealed class DumpService : IDumpService
             SparseDelegatesAddr = ptrs["sparse_delegates"]?.GetValue<string>() ?? "",
             ObjectCount = ptrs["object_count"]?.GetValue<int>() ?? 0,
             ModuleName = ptrs["module_name"]?.GetValue<string>() ?? "",
+            ProcessId  = ptrs["pid"]?.GetValue<int>() ?? 0,
             ModuleBase = ptrs["module_base"]?.GetValue<string>() ?? "",
             // How the DLL was loaded (self-reported); "" on older DLLs.
             LoadMode = ptrs["load_mode"]?.GetValue<string>() ?? "",
@@ -153,6 +157,14 @@ public sealed class DumpService : IDumpService
             GWorldAob = ptrs["gworld_aob"]?.GetValue<string>() ?? "",
             GWorldAobPos = ptrs["gworld_aob_pos"]?.GetValue<int>() ?? 0,
             GWorldAobLen = ptrs["gworld_aob_len"]?.GetValue<int>() ?? 0,
+            // GEngine slot + AOB metadata (build 2394+; older DLLs omit these → "" / 0)
+            GEngine = ptrs["gengine"]?.GetValue<string>() ?? "",
+            GEngineMethod = ptrs["gengine_method"]?.GetValue<string>() ?? "not_found",
+            GEnginePatternId = ptrs["gengine_pattern_id"]?.GetValue<string>() ?? "",
+            GEngineScanAddr = ptrs["gengine_scan_addr"]?.GetValue<string>() ?? "",
+            GEngineAob = ptrs["gengine_aob"]?.GetValue<string>() ?? "",
+            GEngineAobPos = ptrs["gengine_aob_pos"]?.GetValue<int>() ?? 0,
+            GEngineAobLen = ptrs["gengine_aob_len"]?.GetValue<int>() ?? 0,
             // GameThreadDispatch invoke timeout (effective value)
             InvokeTimeoutMs = ptrs["invoke_timeout_ms"]?.GetValue<int>() ?? 5000,
             // DLL build number — present in both init AND get_pointers responses

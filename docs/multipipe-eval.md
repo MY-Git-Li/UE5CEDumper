@@ -665,3 +665,32 @@ non-flatten count** - with an identical per-type mix (4 Bytes 12,386 / Byte 1,69
 8 Bytes 2). Only wrappers collapsed: groups 4,432 -> 2,168, entries 18,758 -> 16,494 (-2,264 each,
 i.e. every removed entry was a group). 4,792 leaves gained their parent's label as a
 `"parent (off) > leaf (off)"` prefix; 9,534 kept their description verbatim. No leaf gained or lost.
+
+## The pipe name is a single global — the wrong-game hazard (2026-07-27)
+
+Separate from head-of-line blocking, and cheaper to hit: `\.\pipe\UE5DumpBfx` is ONE
+well-known name with `maxInstances = 3`. **Every injected game serves that same name.** A
+connecting client lands on whichever instance is free, and there is no way to ask for a
+particular game.
+
+Two failure modes follow, and the user cannot tell them apart from the UI:
+
+1. **Connect fails** — the instances belong to a game you are not using. The CE `.CT` path
+   already surfaces this (*"the Pipe Server failed to start. Most likely another process
+   already owns …"*); the proxy/UI path had nothing.
+2. **Connect SUCCEEDS against the wrong game** and quietly shows its data. Strictly worse,
+   because nothing else on screen contradicts it.
+
+A UI disconnect does **not** free the name — only the game exiting does. Observed: TQ2's server
+logged `Stopped` twelve seconds after its clients disconnected, when the game was closed.
+
+**Shipped mitigation (build 2471).** `get_pointers` now carries `pid` beside `module_name`, and
+after connecting the UI enumerates processes hosting the dumper DLL (machinery that already
+existed for the inject picker). More than one ⇒ a red top banner naming the process actually
+reached and the others. Advisory only: it detects the ambiguity, it does not remove it.
+
+**The real fix, not built.** A per-process pipe name (`UE5DumpBfx_<pid>`) plus client-side
+discovery — named pipes are enumerable with `FindFirstFile` on `\.\pipe\`. That makes the
+choice explicit instead of racy. It is a protocol change and needs its own pass. The CE mailbox
+is shared memory and would be unaffected, but `scripts/UE5CEDumper.CT` and `dll/src/Methode.cpp`
+hardcode the current name in user-facing strings.

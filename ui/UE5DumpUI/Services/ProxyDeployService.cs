@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using Microsoft.Win32;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
@@ -156,38 +157,114 @@ public sealed class ProxyDeployService : IProxyDeployService
         //         <Game>\<Sub>\Binaries\Win64\  ← no .exe at all (only .modules + DLLs)
         //         <Game>\Engine\Binaries\Win64\<Game>-Win64-Shipping.exe  ← real launcher
         //
+        //   4. Wrapped (NEKOPALIVE) — an extra folder between the game root and
+        //      the project, and the exe is not named *-Win64-Shipping:
+        //         <Game>\Package\<Sub>\Binaries\Win64\Nekopara.exe   ← real
+        //         <Game>\Package\Engine\Binaries\Win64\CrashReportClient.exe
+        //
         // Walking Engine\ unconditionally produces phantom rows for layouts 1+2
         // (the user sees both rows for the same game). Skipping Engine\ kills
         // layout 3 (Satisfactory). Solution: try primary roots first; only fall
         // back to Engine\Binaries\Win64\ when primary contributed no rows for
         // this gameDir.
-        var primary = new List<string> { gameDir };
-        string? engineRoot = null;
+        //
+        // Layout 4 is why this searches to a bounded DEPTH rather than exactly one
+        // level down. A single level finds <Game>\<Sub>\Binaries\Win64 and misses
+        // <Game>\Package\<Sub>\Binaries\Win64 entirely — that is a whole game the
+        // scan never sees, and the Engine fallback misses it too because the
+        // Engine folder is not a direct child either.
+        var primary = new List<(string Dir, int Depth)>();
+        var engineRoots = new List<(string Dir, int Depth)>();
+        CollectBinariesRoots(gameDir, gameDir, 0, primary, engineRoots);
 
-        try
-        {
-            foreach (string sub in Directory.EnumerateDirectories(gameDir))
-            {
-                if (string.Equals(Path.GetFileName(sub), "Engine", StringComparison.OrdinalIgnoreCase))
-                    engineRoot = sub;
-                else
-                    primary.Add(sub);
-            }
-        }
-        catch
-        {
-            // Permission error etc. — just use the root
-        }
-
+        // SHALLOWEST DEPTH WINS. Depth is scanned ascending and the first depth that yields any
+        // row stops the search — the same "primary first, fallback only if empty" shape as the
+        // Engine tier below, applied to nesting.
+        //
+        // Without this, the depth-3 search turns bonus content into phantom rows: P3R ships
+        // <Game>\P3R\Binaries\Win64 (depth 1, the real game) alongside
+        // <Game>\Artbook\P3R_Artbook\Binaries\Win64 and <Game>\Soundtrack\P3R_Soundtrack\... —
+        // and those two are genuinely UE apps with their own Engine folder, so no content-based
+        // filter separates them. Depth does: the real game is shallower. A wrapped layout like
+        // NEKOPALIVE has nothing at depth 1 at all, so it still reaches its depth-2 project.
         int gamesBefore = games.Count;
-        foreach (string root in primary)
-            ScanBinariesDir(gameName, gameDir, root, games, seenBinDirs);
+        foreach (var group in primary.GroupBy(r => r.Depth).OrderBy(g => g.Key))
+        {
+            foreach (var (root, _) in group)
+                ScanBinariesDir(gameName, gameDir, root, games, seenBinDirs);
+            if (games.Count != gamesBefore)
+                break;
+        }
 
         // Engine fallback: only walked when primary yielded zero rows for this
         // gameDir. Catches pure-modular layouts like Satisfactory where the
         // real launcher .exe lives in <Game>\Engine\Binaries\Win64\.
-        if (games.Count == gamesBefore && engineRoot != null)
-            ScanBinariesDir(gameName, gameDir, engineRoot, games, seenBinDirs);
+        if (games.Count == gamesBefore)
+            foreach (var group in engineRoots.GroupBy(r => r.Depth).OrderBy(g => g.Key))
+            {
+                foreach (var (root, _) in group)
+                    ScanBinariesDir(gameName, gameDir, root, games, seenBinDirs);
+                if (games.Count != gamesBefore)
+                    break;
+            }
+    }
+
+    /// <summary>Deepest wrapper level below a game root that is still searched for a
+    /// <c>Binaries\Win64</c>. 2 covers the observed <c>&lt;Game&gt;\Package\&lt;Sub&gt;\</c>
+    /// wrapping with one level spare; going deeper buys nothing and costs directory walks
+    /// across every game in the library.</summary>
+    private const int MaxBinariesSearchDepth = 3;
+
+    /// <summary>Directory names never worth descending into while looking for a
+    /// <c>Binaries\Win64</c>. <c>Content</c> is the one that matters — a shipped game's
+    /// content tree can hold thousands of folders, and none of them is a binaries root.</summary>
+    private static readonly string[] BinariesSearchSkipDirs =
+        { "Binaries", "Content", "Saved", "Intermediate", "Config", "DerivedDataCache", "Plugins" };
+
+    /// <summary>
+    /// Walk down from <paramref name="dir"/> collecting every directory that owns a
+    /// <c>Binaries\Win64</c>, split into Engine-side and everything else so the caller can keep
+    /// the two-tier "primary first, Engine only as fallback" rule that stops modular games
+    /// producing two rows.
+    /// </summary>
+    private static void CollectBinariesRoots(
+        string dir, string gameDir, int depth,
+        List<(string Dir, int Depth)> primary, List<(string Dir, int Depth)> engineRoots)
+    {
+        // A root is worth recording whether or not it has a Binaries child — ScanBinariesDir
+        // re-checks — but only descend while there is depth left. Depth travels with the root so
+        // the caller can prefer shallower ones.
+        bool underEngine = IsUnderEngineFolder(dir, gameDir);
+        (underEngine ? engineRoots : primary).Add((dir, depth));
+
+        if (depth >= MaxBinariesSearchDepth)
+            return;
+
+        try
+        {
+            foreach (string sub in Directory.EnumerateDirectories(dir))
+            {
+                string name = Path.GetFileName(sub);
+                if (BinariesSearchSkipDirs.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    continue;
+                CollectBinariesRoots(sub, gameDir, depth + 1, primary, engineRoots);
+            }
+        }
+        catch
+        {
+            // Permission error / reparse point — this branch just contributes nothing.
+        }
+    }
+
+    /// <summary>True when any path component between the game root and <paramref name="dir"/>
+    /// (inclusive) is named <c>Engine</c>. Checking the whole relative path rather than the
+    /// immediate parent is what makes the Engine tier work under a wrapper folder.</summary>
+    private static bool IsUnderEngineFolder(string dir, string gameDir)
+    {
+        string rel = Path.GetRelativePath(gameDir, dir);
+        if (rel == ".") return false;
+        return rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                  .Any(part => string.Equals(part, "Engine", StringComparison.OrdinalIgnoreCase));
     }
 
     private void ScanBinariesDir(
@@ -669,23 +746,67 @@ public sealed class ProxyDeployService : IProxyDeployService
     // Deploy Status
     // ────────────────────────────────────────────────────────────────
 
-    public Task RefreshDeployStatusAsync(
+    // THREADING CONTRACT for everything below that touches a DetectedGame.
+    //
+    // DetectedGame is an ObservableObject and its Status / InstalledVersion /
+    // ErrorMessage / SuggestedProxy are bound to the Proxy Deploy DataGrid. Writing them
+    // from inside a Task.Run raises PropertyChanged on a thread-pool thread, which lets
+    // Avalonia mutate the visual tree while the render thread is composing it — that is an
+    // access violation inside libSkiaSharp, not an exception, so it takes the whole app
+    // down with no managed stack. It did: "Scan Steam" then "Update all" over 29 games
+    // reliably crashed with 0xc0000005 in libSkiaSharp.
+    //
+    // So: do the file I/O on the worker, COLLECT the results, and APPLY them after the
+    // await — which resumes on the caller's context. Every call site is a UI-thread
+    // [RelayCommand] in ProxyDeployViewModel with no ConfigureAwait(false), so that
+    // context is the UI thread. Keep it that way; do not add ConfigureAwait(false) to
+    // these awaits, and do not reintroduce writes inside the Task.Run bodies.
+    //
+    // (This service deliberately does NOT reference Avalonia.Threading — in this codebase
+    // Dispatcher.UIThread appears only in ViewModels and Views.)
+
+    /// <summary>One game's post-operation state, computed off-thread and applied on the
+    /// caller's thread. The two Set* flags exist because some paths deliberately leave a
+    /// field untouched, and <c>null</c> is itself a meaningful value for the other two.</summary>
+    private readonly record struct GameStatusUpdate(
+        DetectedGame Game,
+        ProxyDeployStatus Status,
+        string? InstalledVersion = null,
+        string? ErrorMessage = null,
+        bool SetInstalledVersion = true,
+        bool SetErrorMessage = true);
+
+    private static void ApplyStatus(in GameStatusUpdate u)
+    {
+        u.Game.Status = u.Status;
+        if (u.SetInstalledVersion) u.Game.InstalledVersion = u.InstalledVersion;
+        if (u.SetErrorMessage)     u.Game.ErrorMessage     = u.ErrorMessage;
+    }
+
+    public async Task RefreshDeployStatusAsync(
         IList<DetectedGame> games, string sourceDllPath, ProxyType proxyType,
         CancellationToken ct = default)
     {
-        return Task.Run(() =>
+        // Snapshot so the worker never enumerates a collection the UI thread can mutate.
+        var targets = games.ToList();
+
+        var updates = await Task.Run(() =>
         {
+            var results = new List<GameStatusUpdate>(targets.Count);
             string? sourceVersion = GetDllVersion(sourceDllPath);
 
             string selectedDllName = proxyType.GetDllName();
             string[] allProxyNames = AllProxyDllNames();
 
-            foreach (var game in games)
+            foreach (var game in targets)
             {
                 ct.ThrowIfCancellationRequested();
 
                 string targetDll = Path.Combine(game.BinariesDir, selectedDllName);
-                game.ErrorMessage = null;
+
+                ProxyDeployStatus status;
+                string? installedVersion = null;
+                string? errorMessage = null;
 
                 // Which of OUR proxy DLLs are actually present in this folder?
                 // Computed up front because it drives BOTH the absent-selected
@@ -706,32 +827,29 @@ public sealed class ProxyDeployService : IProxyDeployService
                     // Absent selected type: clean folder → NotDeployed; another of
                     // our types present → DeployedOtherType (don't mislead the user
                     // into redeploying on top of a working proxy of a different type).
-                    var (status, message) = ClassifyAbsentSelected(deployedProxyNames);
-                    game.Status = status;
-                    game.ErrorMessage = message;
-                    game.InstalledVersion = null;
+                    var (absentStatus, message) = ClassifyAbsentSelected(deployedProxyNames);
+                    status = absentStatus;
+                    errorMessage = message;
                 }
                 else if (!IsOurProxyDll(targetDll))
                 {
-                    game.Status = ProxyDeployStatus.OtherProxy;
-                    game.InstalledVersion = null;
+                    status = ProxyDeployStatus.OtherProxy;
                     try
                     {
                         var info = FileVersionInfo.GetVersionInfo(targetDll);
-                        game.ErrorMessage = $"Other proxy: {info.ProductName ?? info.FileDescription ?? "unknown"}";
+                        errorMessage = $"Other proxy: {info.ProductName ?? info.FileDescription ?? "unknown"}";
                     }
                     catch
                     {
-                        game.ErrorMessage = "Other proxy DLL detected";
+                        errorMessage = "Other proxy DLL detected";
                     }
                 }
                 else
                 {
-                    string? installedVersion = GetDllVersion(targetDll);
-                    game.InstalledVersion = installedVersion;
-                    game.Status = (sourceVersion != null && installedVersion == sourceVersion)
-                                  ? ProxyDeployStatus.DeployedCurrent
-                                  : ProxyDeployStatus.DeployedOutdated;
+                    installedVersion = GetDllVersion(targetDll);
+                    status = (sourceVersion != null && installedVersion == sourceVersion)
+                             ? ProxyDeployStatus.DeployedCurrent
+                             : ProxyDeployStatus.DeployedOutdated;
                 }
 
                 // Redundancy detection: warn ONLY when 2+ of OUR proxies coexist
@@ -743,33 +861,67 @@ public sealed class ProxyDeployService : IProxyDeployService
                 string? conflictMsg = BuildConflictMessage(deployedProxyNames);
                 if (conflictMsg != null)
                 {
-                    game.ErrorMessage = string.IsNullOrEmpty(game.ErrorMessage)
-                                        ? conflictMsg
-                                        : $"{game.ErrorMessage}; {conflictMsg}";
+                    errorMessage = string.IsNullOrEmpty(errorMessage)
+                                   ? conflictMsg
+                                   : $"{errorMessage}; {conflictMsg}";
                 }
+
+                results.Add(new GameStatusUpdate(game, status, installedVersion, errorMessage));
             }
+
+            return results;
         }, ct);
+
+        // Back on the caller's thread — see the threading contract above.
+        foreach (var u in updates) ApplyStatus(u);
     }
 
     // ────────────────────────────────────────────────────────────────
     // Deploy / Undeploy
     // ────────────────────────────────────────────────────────────────
 
-    public Task<bool> DeployAsync(string sourceDllPath, DetectedGame game, ProxyType proxyType,
+    public async Task<bool> DeployAsync(string sourceDllPath, DetectedGame game, ProxyType proxyType,
         bool force = false, CancellationToken ct = default)
     {
-        return Task.Run(() =>
+        var (ok, update) = await Task.Run<(bool, GameStatusUpdate)>(() =>
         {
             try
             {
                 string targetDll = Path.Combine(game.BinariesDir, proxyType.GetDllName());
 
+                // A proxy can only load if something in the process actually NAMES that DLL.
+                // Drop one into a folder whose binaries never import it and the deploy "succeeds",
+                // the file sits there forever, and the DLL never runs — leaving ZERO log, which
+                // reads exactly like "nothing happened". Octopath Traveler is the worked example:
+                // its exe imports winmm.dll and dxgi.dll but NOT version.dll, and a version.dll
+                // proxy there cost a debugging round before anyone thought to check the import
+                // table.
+                //
+                // Refused rather than warned, because the failure is silent and total. `force`
+                // overrides it — the import scan can legitimately come up empty (a modular build's
+                // stub exe, an unreadable file), and ReadProxyImports already folds the sibling
+                // *-Win64-Shipping.dll modules in for exactly that case. A null result means
+                // "could not tell", never "not imported", so it must not block.
+                if (!force)
+                {
+                    var imports = ReadProxyImports(game.ExePath);
+                    if (imports is ProxyImportAnalyzer.ProxyImportInfo info
+                        && !info.ImportsNone && !info.Imports(proxyType))
+                    {
+                        string msg = $"{proxyType.GetDllName()} is not imported by this game — "
+                                   + "it would never load. Try the Suggested column.";
+                        _log.Warn("ProxyDeploy", $"Refused {proxyType.GetDllName()} for {game.Name}: not in its import table");
+                        return (false, new GameStatusUpdate(game, ProxyDeployStatus.ErrorOther,
+                            ErrorMessage: msg, SetInstalledVersion: false));
+                    }
+                }
+
                 // Refuse to overwrite another program's proxy DLL
                 if (File.Exists(targetDll) && !IsOurProxyDll(targetDll) && !force)
                 {
-                    game.Status = ProxyDeployStatus.OtherProxy;
-                    game.ErrorMessage = "Refused: another program's proxy DLL";
-                    return false;
+                    return (false, new GameStatusUpdate(game, ProxyDeployStatus.OtherProxy,
+                        ErrorMessage: "Refused: another program's proxy DLL",
+                        SetInstalledVersion: false));
                 }
 
                 // Skip if same version (unless force)
@@ -779,34 +931,34 @@ public sealed class ProxyDeployService : IProxyDeployService
                     string? tgtVer = GetDllVersion(targetDll);
                     if (srcVer != null && srcVer == tgtVer)
                     {
-                        game.Status = ProxyDeployStatus.DeployedCurrent;
-                        return true; // Already up to date
+                        // Already up to date — status only, version/error left as they were.
+                        return (true, new GameStatusUpdate(game, ProxyDeployStatus.DeployedCurrent,
+                            SetInstalledVersion: false, SetErrorMessage: false));
                     }
                 }
 
                 File.Copy(sourceDllPath, targetDll, overwrite: true);
-                game.Status = ProxyDeployStatus.DeployedCurrent;
-                game.InstalledVersion = GetDllVersion(targetDll);
-                game.ErrorMessage = null;
                 _log.Info("ProxyDeploy", $"Deployed {proxyType.GetDisplayName()} to {game.Name}: {targetDll}");
-                return true;
+                return (true, new GameStatusUpdate(game, ProxyDeployStatus.DeployedCurrent,
+                    InstalledVersion: GetDllVersion(targetDll)));
             }
             catch (IOException ex) when (ex.HResult == unchecked((int)0x80070020) /* SHARING_VIOLATION */
                                       || ex.Message.Contains("being used", StringComparison.OrdinalIgnoreCase))
             {
-                game.Status = ProxyDeployStatus.ErrorLocked;
-                game.ErrorMessage = "File locked (game running?)";
                 _log.Warn("ProxyDeploy", $"Deploy to {game.Name} failed: file locked");
-                return false;
+                return (false, new GameStatusUpdate(game, ProxyDeployStatus.ErrorLocked,
+                    ErrorMessage: "File locked (game running?)", SetInstalledVersion: false));
             }
             catch (Exception ex)
             {
-                game.Status = ProxyDeployStatus.ErrorOther;
-                game.ErrorMessage = ex.Message;
                 _log.Error("ProxyDeploy", $"Deploy to {game.Name} failed: {ex.Message}");
-                return false;
+                return (false, new GameStatusUpdate(game, ProxyDeployStatus.ErrorOther,
+                    ErrorMessage: ex.Message, SetInstalledVersion: false));
             }
         }, ct);
+
+        ApplyStatus(update);   // caller's thread — see the threading contract above
+        return ok;
     }
 
     /// <summary>All distinct proxy DLL file names we ship. <c>Distinct</c> guards
@@ -871,9 +1023,9 @@ public sealed class ProxyDeployService : IProxyDeployService
         return (ProxyDeployStatus.NotDeployed, null, true);
     }
 
-    public Task<bool> UndeployAsync(DetectedGame game, CancellationToken ct = default)
+    public async Task<bool> UndeployAsync(DetectedGame game, CancellationToken ct = default)
     {
-        return Task.Run(() =>
+        var (ok, update) = await Task.Run<(bool, GameStatusUpdate)>(() =>
         {
             try
             {
@@ -917,26 +1069,27 @@ public sealed class ProxyDeployService : IProxyDeployService
 
                 var (status, message, success) =
                     ResolveUndeployOutcome(removed, plan.ForeignSkipped, locked);
-                game.Status = status;
-                game.ErrorMessage = message;
-                if (removed > 0) game.InstalledVersion = null;
-                return success;
+                // InstalledVersion is only cleared when something was actually removed.
+                return (success, new GameStatusUpdate(game, status,
+                    ErrorMessage: message, SetInstalledVersion: removed > 0));
             }
             catch (Exception ex)
             {
-                game.Status = ProxyDeployStatus.ErrorOther;
-                game.ErrorMessage = ex.Message;
                 _log.Error("ProxyDeploy", $"Undeploy from {game.Name} failed: {ex.Message}");
-                return false;
+                return (false, new GameStatusUpdate(game, ProxyDeployStatus.ErrorOther,
+                    ErrorMessage: ex.Message, SetInstalledVersion: false));
             }
         }, ct);
+
+        ApplyStatus(update);   // caller's thread — see the threading contract above
+        return ok;
     }
 
     // ────────────────────────────────────────────────────────────────
     // Proxy Suggestion (import-table + remembered pick)
     // ────────────────────────────────────────────────────────────────
 
-    public Task ApplyProxySuggestionsAsync(
+    public async Task ApplyProxySuggestionsAsync(
         IReadOnlyList<DetectedGame> games,
         IReadOnlyDictionary<string, ProxyType> confirmedByExe,
         IReadOnlyDictionary<string, ProxyType> rememberedByGame,
@@ -944,16 +1097,19 @@ public sealed class ProxyDeployService : IProxyDeployService
         bool enabled,
         CancellationToken ct = default)
     {
-        return Task.Run(() =>
+        var targets = games.ToList();
+
+        var suggestions = await Task.Run(() =>
         {
-            foreach (var game in games)
+            var results = new List<(DetectedGame Game, ProxyType? Type, string? Display)>(targets.Count);
+
+            foreach (var game in targets)
             {
                 ct.ThrowIfCancellationRequested();
 
                 if (!enabled)
                 {
-                    game.SuggestedProxyType = null;
-                    game.SuggestedProxy = null;
+                    results.Add((game, null, null));
                     continue;
                 }
 
@@ -967,10 +1123,21 @@ public sealed class ProxyDeployService : IProxyDeployService
                 var imports = ReadProxyImports(game.ExePath);
                 var suggestion = ProxyImportAnalyzer.Recommend(imports, confirmed, remembered, injected);
 
-                game.SuggestedProxyType = suggestion.Type;
-                game.SuggestedProxy = suggestion.Display;
+                results.Add((game, suggestion.Type, suggestion.Display));
             }
+
+            return results;
         }, ct);
+
+        // Back on the caller's thread — see the threading contract above.
+        // SuggestedProxy feeds a DataGrid column, so this pass is a visual-tree mutation
+        // exactly like the status one, and reading 29 PE import tables is slow enough that
+        // it used to land mid-render.
+        foreach (var (game, type, display) in suggestions)
+        {
+            game.SuggestedProxyType = type;
+            game.SuggestedProxy = display;
+        }
     }
 
     /// <summary>Open a game .exe and parse only its PE headers/import directory

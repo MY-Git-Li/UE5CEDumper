@@ -5107,8 +5107,8 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         // work uniformly. Falls back to the bound-flag-only string when:
         //   - bIsBound = 0 (nothing to look up)
         //   - AOB scan failed (older / unsupported builds)
-        //   - UE version < 5.0 (walker uses raw-pointer outer key; UE 4.23-4.27
-        //     uses FObjectKey, not yet supported)
+        //   - the live outer key does not look like a raw pointer (the walker's
+        //     runtime shape probe; guards a hypothetical FObjectKey-keyed build)
         if (fi.TypeName == "MulticastSparseDelegateProperty") {
             uintptr_t fieldAddr = instanceAddr + fi.Offset;
             uint8_t bIsBound = 0;

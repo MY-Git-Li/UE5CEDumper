@@ -190,6 +190,13 @@ enum QueryPtrOp : uint64_t {
                               //   [8..15] UWorld* (slot deref).
     QUERY_OP_GAME_ENGINE = 1, // Output paramsData: [0..7] UEngine* instance,
                               //   [8..15] UClass*, [16..143] class name.
+    QUERY_OP_GENGINE_SLOT = 2, // Output paramsData: [0..7] &GEngine slot,
+                              //   [8..15] UEngine* (slot deref). Same shape as
+                              //   QUERY_OP_GWORLD, and preferred over op 1 for a CE
+                              //   symbol: the SLOT is restart-stable, so the record
+                              //   auto-follows engine recreation instead of freezing
+                              //   a UEngine* snapshot. Errors when no GEngine AOB
+                              //   validated — callers fall back to op 1.
 };
 
 // CMD_TIME op codes (written into instanceAddr by CE Lua / pipe bridge).

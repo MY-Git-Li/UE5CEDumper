@@ -32,12 +32,25 @@ internal static class ProxyImportAnalyzer
     /// delay-) imports. <c>version.dll</c> is tracked for completeness but is
     /// almost never a static import (see class remarks) and is never used to
     /// downgrade the version default.</summary>
-    public readonly record struct ProxyImportInfo(bool ImportsVersion, bool ImportsDinput8, bool ImportsDxgi)
+    public readonly record struct ProxyImportInfo(bool ImportsVersion, bool ImportsDinput8, bool ImportsDxgi, bool ImportsWinmm = false)
     {
         /// <summary>True when this PE imports none of the three — which for a game's
         /// main .exe is the signature of a MODULAR UE build's bootstrap stub, not of
         /// a game no proxy can reach. See <see cref="Merge"/>.</summary>
-        public bool ImportsNone => !ImportsVersion && !ImportsDinput8 && !ImportsDxgi;
+        public bool ImportsNone => !ImportsVersion && !ImportsDinput8 && !ImportsDxgi && !ImportsWinmm;
+
+        /// <summary>Does this PE import the DLL a given proxy flavour hijacks? A proxy dropped
+        /// into a folder whose binaries never name it can NEVER load, and leaves no log at all —
+        /// indistinguishable from "nothing happened". Octopath Traveler is the worked example:
+        /// it imports winmm and dxgi but NOT version.dll.</summary>
+        public bool Imports(ProxyType type) => type switch
+        {
+            ProxyType.Version => ImportsVersion,
+            ProxyType.Dinput8 => ImportsDinput8,
+            ProxyType.Dxgi    => ImportsDxgi,
+            ProxyType.Winmm   => ImportsWinmm,
+            _                 => true,   // unknown flavour: never block on a rule we cannot apply
+        };
 
         /// <summary>OR two results together. Used to fold a modular build's
         /// <c>*-Win64-Shipping.dll</c> modules into the stub exe's (empty) result:
@@ -46,7 +59,8 @@ internal static class ProxyImportAnalyzer
         public ProxyImportInfo Merge(ProxyImportInfo other) => new(
             ImportsVersion || other.ImportsVersion,
             ImportsDinput8 || other.ImportsDinput8,
-            ImportsDxgi    || other.ImportsDxgi);
+            ImportsDxgi    || other.ImportsDxgi,
+            ImportsWinmm   || other.ImportsWinmm);
     }
 
     /// <summary>A per-game proxy suggestion: the recommended type (null when the
@@ -124,12 +138,13 @@ internal static class ProxyImportAnalyzer
                 return null;
             }
 
-            bool ver = false, di8 = false, dxgi = false;
+            bool ver = false, di8 = false, dxgi = false, winmm = false;
             void Classify(string name)
             {
                 if (name.Equals("version.dll", StringComparison.OrdinalIgnoreCase)) ver = true;
                 else if (name.Equals("dinput8.dll", StringComparison.OrdinalIgnoreCase)) di8 = true;
                 else if (name.Equals("dxgi.dll", StringComparison.OrdinalIgnoreCase)) dxgi = true;
+                else if (name.Equals("winmm.dll", StringComparison.OrdinalIgnoreCase)) winmm = true;
             }
 
             // ── Standard import directory (data directory index 1) ──
@@ -171,7 +186,7 @@ internal static class ProxyImportAnalyzer
                 }
             }
 
-            return new ProxyImportInfo(ver, di8, dxgi);
+            return new ProxyImportInfo(ver, di8, dxgi, winmm);
         }
         catch
         {

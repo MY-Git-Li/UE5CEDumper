@@ -62,6 +62,15 @@ static int         s_itemSize = 16;  // FUObjectItem stride (auto-detected: 16 o
 static int         s_itemObjOffset = 0;
 static bool        s_isFlat   = false; // true = non-chunked flat array (some UE4 builds)
 
+// What DetectLayout concluded about flatness, kept SEPARATE from s_isFlat.
+//
+// s_isFlat is working state: DetectItemSize resets it to false at the top of every
+// object-pointer-offset pass so each pass re-derives flatness independently. That reset sits
+// one line above the DetectStrideForCurrentObjOffset call, so anything the preset concluded is
+// already gone by the time the stride probes run. This variable survives it and is the honest
+// answer to "did a flat PRESET win", which is stronger evidence than any probe heuristic.
+static bool        s_presetIsFlat = false;
+
 // Preset-bound FUObjectItem hint latched by DetectLayout (see LayoutPreset::itemHint).
 // stride 0 = no hint, sweep as usual. Consumed by DetectItemSize as a first, preset-gated
 // probe that never enters the shared stride candidate list.
@@ -308,8 +317,27 @@ static constexpr int NUM_UE4_EXTENDED_PRESETS = sizeof(s_ue4ExtendedPresets) / s
 // Objects* points directly to FUObjectItem[] (no chunk pointer indirection).
 // Used by early UE4 (4.11-4.22) including Octopath Traveller.
 // Layout: { Objects*(8), MaxElements(4), NumElements(4) } — total 16 bytes before FCriticalSection.
+//
+// TWO ANCHORS, because a flat array can be handed to us at either address:
+//   "Flat"      — ObjObjects-relative. What the five adjustment=-0x10 GObjects patterns
+//                 (GOBJ_V10 / AV1 / AV2 / RE2 / V12) deliver, e.g. Octopath.
+//   "Flat-Base" — the FUObjectArray BASE, i.e. +0x10 further out, past
+//                 ObjFirstGCIndex / ObjLastNonGCIndex / MaxObjectsNotConsideredByGC /
+//                 OpenForDisregardForGC. Verified by disassembly on UE 4.11.0-preview7
+//                 (Nekopara, FUObjectItem = 16 B) and UE 4.13 (Fantasynth, 24 B): both do one
+//                 Malloc(Max * stride) with no chunk table, and EVERY pattern that hits them
+//                 resolves the base.
+//
+// Without the second row, a pre-4.21 title whose five ObjObjects-anchored patterns all miss is
+// unfixable by pattern work at ANY priority — nothing else can present the ObjObjects anchor.
+// That is the real reach argument here; the two old titles are just what exposed it.
+//
+// This tier runs BEFORE the relaxed tier on purpose: it pre-empts the Layout A/C and B
+// fallbacks, which would otherwise latch objectsOffset = 0x00 (reading the two GC index int32s
+// as a pointer) or numElementsOffset = 0x04 (the disregard-pool count).
 static const LayoutPreset s_flatPresets[] = {
-    { "Flat", { 0x00, 0x08, 0x0C, -1, -1 } },
+    { "Flat",      { 0x00, 0x08, 0x0C, -1, -1 } },
+    { "Flat-Base", { 0x10, 0x18, 0x1C, -1, -1 } },
 };
 static constexpr int NUM_FLAT_PRESETS = sizeof(s_flatPresets) / sizeof(s_flatPresets[0]);
 
@@ -408,6 +436,9 @@ static bool ValidateChunkedLayout(uintptr_t addr, const ArrayLayout& layout) {
 }
 
 static bool DetectLayout(uintptr_t addr) {
+    // Re-derived from scratch on every call (Init can run again on re-attach).
+    s_presetIsFlat = false;
+
     // Diagnostic: dump first 48 bytes at the GObjects address
     {
         uint64_t dump[6] = {};
@@ -456,6 +487,7 @@ static bool DetectLayout(uintptr_t addr) {
         if (ValidateChunkedLayout(addr, preset.layout)) {
             s_layout = preset.layout;
             s_isFlat = true;
+            s_presetIsFlat = true;
             LOG_INFO("ObjectArray: Layout '%s' detected (flat, non-chunked)", preset.name);
             LogLayoutFields(addr, s_layout, preset.name);
             return true;
@@ -740,7 +772,27 @@ static void DetectStrideForCurrentObjOffset(uintptr_t chunkTable, uintptr_t chun
         int32_t numElements = GetCount();
         bool mightBeFlat = false;
 
-        if (chunk0 && numElements > 0) {
+        // If the LAYOUT PRESET already said flat, believe it — do not re-derive flatness from
+        // the object count. The chunk[1] heuristic below can only speak when the array is big
+        // enough to need two chunks, so a flat array with fewer than OBJECTS_PER_CHUNK (65536)
+        // objects silently fell through to the CHUNKED probe, which then treats Item[0].Object
+        // as a chunk pointer and probes a UObject's own bytes as an item array.
+        //
+        // Measured on NEKOPALIVE (UE 4.11, Num=27016): "Layout 'Flat-Base' detected
+        // (flat, non-chunked)" was logged, then `P1 stride 16: good=1, named=1, null=51,
+        // bad=148` — 1 usable item in 200, and ~10% of names resolving downstream. Fantasynth
+        // (UE 4.13) has the identical layout but Num=80162, so it needed 2 chunks, the heuristic
+        // fired, and it scored `P0-flat stride 24: good=200, named=200, null=0, bad=0`. The only
+        // difference between the two was the object count.
+        //
+        // Pre-existing: this gate has always been count-based. It simply could not bite until a
+        // flat array smaller than 65536 objects reached it, which is what the Flat-Base preset
+        // made possible. Chunked titles are unaffected — s_isFlat is false for them.
+        if (s_presetIsFlat) {
+            mightBeFlat = true;
+            LOG_INFO("ObjectArray: layout preset is flat (%d objects) — testing flat layout first",
+                     numElements);
+        } else if (chunk0 && numElements > 0) {
             int chunksNeeded = (numElements + Grimoire::OBJECTS_PER_CHUNK - 1) / Grimoire::OBJECTS_PER_CHUNK;
             if (chunksNeeded >= 2) {
                 // Validate chunk[1]: in a real chunk table, chunk[1] must be a valid heap pointer.
@@ -5610,14 +5662,19 @@ SparseDelegateResult WalkSparseDelegateBindings(uintptr_t ownerObj,
     SparseDelegateResult result{};
     if (!ownerObj || fieldName.empty()) return result;
 
-    // Version gate: walker is correct only for UE 5.0+ (raw-pointer outer key).
-    // UE 4.23-4.27 used FObjectKey { FWeakObjectPtr, int32 } which has
-    // different stride and key-comparison semantics.
-    if (::g_cachedUEVersion != 0 && ::g_cachedUEVersion < 500) {
-        result.supported = false;
-        return result;
-    }
-
+    // Layout gate. This USED to be a version check (`UEVersion < 500 -> unsupported`) on the
+    // premise that "UE 4.23-4.27 keys the outer TMap by FObjectKey, not a raw pointer".
+    // That premise is wrong for 4.27: the DropIn 4.27.2 PDB gives the global's type as
+    //   TMap<UObjectBase const*, TMap<FName, TSharedPtr<TMulticastScriptDelegate<...>,0>>>
+    // — a raw pointer key, same as UE 5.x (and vendor/UnrealEngine 5.8 declares it
+    // identically). FObjectKey is also 8 bytes there, not the 16 the old note claimed.
+    // Every other constant below was checked against that PDB and matches exactly.
+    //
+    // We still have NO symbol evidence for 4.23-4.26, so instead of widening the version
+    // range on a guess, probe the actual key shape: the first occupied outer slot must hold
+    // something that looks like a userspace pointer. An FObjectKey-keyed build stores two
+    // small int32s there, which fails the test and lands us back on the bIsBound fallback —
+    // i.e. unknown builds fail safe rather than misreading memory.
     uintptr_t storage = Genau::FindSparseDelegateStorage();
     if (!storage) return result;  // resolved=false
 
@@ -5630,6 +5687,25 @@ SparseDelegateResult WalkSparseDelegateBindings(uintptr_t ownerObj,
 
     constexpr int32_t kOuterStride = 0x60;
     constexpr int32_t kOuterValueOffset = 0x08;  // TPair value (inner TMap) starts after key
+
+    {
+        bool sawSlot = false, keyLooksLikePointer = false;
+        for (int32_t i = 0; i < outerHdr.arrayNum && i < 64; ++i) {
+            if (!TMapBitSet(outerHdr.bitArrayBase, i)) continue;
+            uintptr_t k = 0;
+            if (!Macht::ReadSafe(outerHdr.arrayData + static_cast<uintptr_t>(i) * kOuterStride, k))
+                continue;
+            sawSlot = true;
+            if (Grimoire::IsUserspacePointer(k)) { keyLooksLikePointer = true; break; }
+        }
+        if (sawSlot && !keyLooksLikePointer) {
+            LOG_WARN("WalkSparseDelegateBindings: outer key does not look like a raw pointer "
+                     "(UE=%u) — refusing to walk (possible FObjectKey-keyed build)",
+                     ::g_cachedUEVersion);
+            result.supported = false;
+            return result;
+        }
+    }
 
     // Phase 1: linear scan outer slots for matching owner key.
     uintptr_t innerMapAddr = 0;

@@ -329,6 +329,7 @@
     <sys:String x:Key="str.Pointers.TotalObjects">Total Objects</sys:String>
     <sys:String x:Key="str.Pointers.Copy">Copy</sys:String>
     <sys:String x:Key="str.Pointers.NotConnected">Not connected — connect to view pointers</sys:String>
+    <sys:String x:Key="str.Pointers.VersionTooOld">Unsupported engine — UE 4.11 is the oldest this tool can read. UE 4.10 and earlier have no FUObjectItem: the object array holds raw UObjectBase* pointers in an inline chunk table, a layout the dumper cannot express, so the scan was skipped rather than run and fail. If this version was detected wrongly, set a UE version override above and reconnect.</sys:String>
     <sys:String x:Key="str.Pointers.VersionWarning">&#x26A0; Version not detected — inferred from engine analysis (custom UE build?)</sys:String>
     <sys:String x:Key="str.Pointers.VersionDetectedBadge">&#x2713; Detected</sys:String>
     <sys:String x:Key="str.Pointers.VersionUserOverrideBadge">&#x1F527; User Override</sys:String>
@@ -345,9 +346,12 @@
     <sys:String x:Key="str.Pointers.AobFailed">&#x26A0; AOB failed — found via</sys:String>
     <sys:String x:Key="str.Pointers.GWorldNotFound">GWorld not found (non-critical)</sys:String>
     <sys:String x:Key="str.Pointers.SparseDelegates">FSparseDelegateStorage</sys:String>
-    <sys:String x:Key="str.Pointers.SparseDelegatesOptional">Optional (UE 5.0+) &#x2014; powers MulticastSparseDelegateProperty drill-down + Find Refs sparse coverage</sys:String>
+    <sys:String x:Key="str.Pointers.SparseDelegatesOptional">Optional (UE 4.23+) &#x2014; powers MulticastSparseDelegateProperty drill-down + Find Refs sparse coverage</sys:String>
     <sys:String x:Key="str.Pointers.SparseDelegatesNotFound">AOB not found &#x2014; sparse delegate drill-down disabled. Bound flag still surfaces; full bindings unavailable.</sys:String>
-    <sys:String x:Key="str.Pointers.SparseDelegatesUnsupported">UE &#x003C; 5.0 &#x2014; walker not supported on this version (FObjectKey outer key, separate AOB needed).</sys:String>
+    <sys:String x:Key="str.Pointers.GEngine">&amp;GEngine (engine slot)</sys:String>
+    <sys:String x:Key="str.Pointers.GEngineOptional">Optional &#x2014; the static slot holding UEngine*. Lets engine lookups skip the object-pool walk, and lets a GameEngine-rooted CE record survive a restart.</sys:String>
+    <sys:String x:Key="str.Pointers.GEngineNotFound">AOB not found &#x2014; engine lookups fall back to scanning GObjects (slower), and GameEngine-rooted CE exports stay address-only.</sys:String>
+    <sys:String x:Key="str.Pointers.SparseDelegatesUnsupported">UE &#x003C; 4.23 &#x2014; sparse delegates do not exist in this engine version (introduced in 4.23), so there is nothing to find. Not a limitation of this tool.</sys:String>
     <sys:String x:Key="str.Pointers.PatternIdTooltip">AOB pattern ID that matched this pointer</sys:String>
     <sys:String x:Key="str.Pointers.AobAllFailed">&#x1F534; All AOB patterns failed</sys:String>
     <sys:String x:Key="str.Pointers.ExtraScan">Extra Scan</sys:String>
@@ -358,6 +362,7 @@
     <sys:String x:Key="str.Pointers.AobMakerScanAsmTip">Navigate CE disassembler to AOB scan hit instruction (via AOBMaker CE Plugin)</sys:String>
     <sys:String x:Key="str.Pointers.RegisterSymbol">SYM</sys:String>
     <sys:String x:Key="str.Pointers.RegisterSymbolTip">Create CE AA Script that registers GWorld address as 'gworld_addr' symbol (via AOBMaker CE Plugin)</sys:String>
+    <sys:String x:Key="str.Pointers.RegisterGEngineSymbolTip">Create CE AA Script that registers the &amp;GEngine SLOT as 'gengine_addr' symbol — the slot is restart-stable, so a GameEngine-rooted record auto-follows engine recreation (via AOBMaker CE Plugin)</sys:String>
     <sys:String x:Key="str.Pointers.TestExtraScan">Test Extra Scan</sys:String>
     <sys:String x:Key="str.Pointers.TestExtraScanHint">Dev test: simulate scan progress UI (does not actually rescan).</sys:String>
     <sys:String x:Key="str.Pointers.ClearGameCache">Clear This Game</sys:String>

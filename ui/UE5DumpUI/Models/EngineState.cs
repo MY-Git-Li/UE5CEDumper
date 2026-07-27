@@ -14,6 +14,13 @@ public sealed class EngineState
     /// <summary>True when ueVersion came from Tier 3 bare-pattern OR publisher-bias fallback — UI surfaces a warning.</summary>
     public bool IsLowConfidence { get; init; }
 
+    /// <summary>True when the engine predates UE 4.11 and the DLL therefore SKIPPED the scan
+    /// entirely. Pre-4.11 has no <c>FUObjectItem</c> — the object array holds raw
+    /// <c>UObjectBase*</c> at stride 8 in an inline chunk table, a shape the layout presets
+    /// cannot express — so every pointer comes back empty by design, not by failure. Only ever
+    /// set on a confidently detected version; a guess or a user override is never gated.</summary>
+    public bool IsVersionTooOld { get; init; }
+
     /// <summary>Publisher thumbprint key (e.g. "SQUARE_ENIX") detected from PE VERSIONINFO — empty if no match.</summary>
     public string PublisherThumbprint { get; init; } = "";
     public string GObjectsAddr { get; init; } = "";
@@ -26,11 +33,17 @@ public sealed class EngineState
     public bool HasGWorld =>
         !string.IsNullOrEmpty(GWorldAddr) && GWorldAddr != "0" && GWorldAddr != "0x0";
 
-    /// <summary>FSparseDelegateStorage::SparseDelegates address (UE 5.0+, optional — empty/0 when scan failed or version unsupported).</summary>
+    /// <summary>FSparseDelegateStorage::SparseDelegates address (UE 4.23+, optional — empty/0 when scan failed or version unsupported).</summary>
     public string SparseDelegatesAddr { get; init; } = "";
 
     public int ObjectCount { get; init; }
     public string ModuleName { get; init; } = "";
+
+    /// <summary>PID of the process on the other end of the pipe. 0 when the DLL predates the
+    /// field. The pipe name is a single global, so when two games have the dumper loaded they
+    /// both serve it and the client lands on whichever instance is free -- this is what lets
+    /// the UI say WHICH game it actually reached.</summary>
+    public int ProcessId { get; init; }
     public string ModuleBase { get; init; } = "";
 
     // --- FUObjectItem layout (UE5.7+ packed-mode awareness) ---
@@ -129,6 +142,20 @@ public sealed class EngineState
     public int GWorldAobPos { get; init; }
     /// <summary>Instruction end relative to AOB match (instrOffset + totalLen, for RIP calculation).</summary>
     public int GWorldAobLen { get; init; }
+
+    // --- GEngine (&GEngine — the static slot, not the UEngine object) ---
+    // Same contract as the GWorld triple above. A non-empty GEngineAob means a
+    // GameEngine-rooted CE export can be AOB-wrapped and will survive a game restart;
+    // empty means we only have the address (or the slot came from nowhere at all).
+    /// <summary>Address of the &amp;GEngine slot ("0x..." or "" / "0x0" when unresolved).</summary>
+    public string GEngine { get; init; } = "";
+    /// <summary>"aob" when an AOB validated, otherwise "not_found".</summary>
+    public string GEngineMethod { get; init; } = "not_found";
+    public string GEnginePatternId { get; init; } = "";
+    public string GEngineScanAddr { get; init; } = "";
+    public string GEngineAob { get; init; } = "";
+    public int GEngineAobPos { get; init; }
+    public int GEngineAobLen { get; init; }
 
     /// <summary>
     /// Effective GameThreadDispatch invoke timeout in ms (default 5000 = Stark::kDefaultInvokeTimeoutMs).

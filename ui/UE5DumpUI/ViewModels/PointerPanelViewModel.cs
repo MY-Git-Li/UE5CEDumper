@@ -33,6 +33,7 @@ public partial class PointerPanelViewModel : ViewModelBase
     [ObservableProperty] private bool _versionDetected = true;
     [ObservableProperty] private bool _isUserOverride;
     [ObservableProperty] private bool _isLowConfidence;
+    [ObservableProperty] private bool _isVersionTooOld;
     [ObservableProperty] private string _publisherThumbprint = "";
     [ObservableProperty] private string _selectedUeVersionOverride = "Auto";
     [ObservableProperty] private bool _isApplyingOverride;
@@ -73,6 +74,15 @@ public partial class PointerPanelViewModel : ViewModelBase
     [ObservableProperty] private int _gworldAobPos;
     [ObservableProperty] private int _gworldAobLen;
     [ObservableProperty] private string _moduleName = "";
+
+    // --- GEngine (&GEngine slot) + its AOB metadata, same contract as GWorld's ---
+    [ObservableProperty] private string _gEngineAddress = "";
+    [ObservableProperty] private string _gEngineMethod = "not_found";
+    [ObservableProperty] private string _gEnginePatternId = "";
+    [ObservableProperty] private string _gEngineScanAddr = "";
+    [ObservableProperty] private string _gengineAob = "";
+    [ObservableProperty] private int _gengineAobPos;
+    [ObservableProperty] private int _gengineAobLen;
 
     // --- AOBMaker CE Plugin bridge ---
     [ObservableProperty] private bool _isAobMakerAvailable;
@@ -201,6 +211,13 @@ public partial class PointerPanelViewModel : ViewModelBase
     /// <summary>True when version was detected with high confidence and no override is in effect.</summary>
     public bool ShowVersionDetectedBadge => HasData && VersionDetected && !IsUserOverride && !IsLowConfidence;
 
+    /// <summary>True when the engine predates UE 4.11, so the DLL skipped the scan outright.
+    /// Pre-4.11 has no FUObjectItem — the object array holds raw UObjectBase* at stride 8 in an
+    /// INLINE chunk table, which the layout presets cannot express — so every pointer being
+    /// empty is by design here, not a scan that failed. Shown instead of the usual
+    /// "not found" text, which would send the user hunting for a pattern that cannot exist.</summary>
+    public bool ShowVersionTooOldWarning => HasData && IsVersionTooOld;
+
     /// <summary>True when a SquareEnix (or future) publisher thumbprint was matched.</summary>
     public bool ShowPublisherHint => HasData && !string.IsNullOrEmpty(PublisherThumbprint);
 
@@ -273,13 +290,23 @@ public partial class PointerPanelViewModel : ViewModelBase
     public bool HasSparseDelegatesPatternId => HasData && !string.IsNullOrEmpty(SparseDelegatesPatternId);
     /// <summary>True when SparseDelegates has a non-zero AOB scan address.</summary>
     public bool HasSparseDelegatesScanAddr => HasData && IsNonZeroAddr(SparseDelegatesScanAddr);
-    /// <summary>True when SparseDelegates was successfully resolved (UE 5.0+ + AOB hit).</summary>
+    /// <summary>True when SparseDelegates was successfully resolved (UE 4.23+ + AOB hit).</summary>
     public bool IsSparseDelegatesFound => HasData && IsNonZeroAddr(SparseDelegatesAddress);
-    /// <summary>True when UE &lt; 5.0 — walker doesn't support this version yet.</summary>
-    public bool IsSparseDelegatesUnsupported => HasData && UeVersion > 0 && UeVersion < 500;
-    /// <summary>True when UE 5.0+ but AOB scan didn't find the static (warning state).</summary>
-    public bool IsSparseDelegatesNotFound => HasData && UeVersion >= 500
+    /// <summary>True when UE &lt; 4.23 — sparse delegates did not exist yet.</summary>
+    public bool IsSparseDelegatesUnsupported => HasData && UeVersion > 0 && UeVersion < 423;
+    /// <summary>True when UE 4.23+ but AOB scan didn't find the static (warning state).</summary>
+    public bool IsSparseDelegatesNotFound => HasData && UeVersion >= 423
         && SparseDelegatesMethod == "not_found";
+
+    /// <summary>True when the &amp;GEngine slot was resolved.</summary>
+    public bool IsGEngineFound => HasData && IsNonZeroAddr(GEngineAddress);
+    /// <summary>True when GEngine has a pattern ID to display.</summary>
+    public bool HasGEnginePatternId => HasData && !string.IsNullOrEmpty(GEnginePatternId);
+    /// <summary>True when GEngine has a non-zero AOB scan address.</summary>
+    public bool HasGEngineScanAddr => HasData && IsNonZeroAddr(GEngineScanAddr);
+    /// <summary>True when no GEngine AOB validated — engine lookups fall back to the
+    /// GObjects walk and a GameEngine-rooted CE export cannot be made restart-proof.</summary>
+    public bool IsGEngineNotFound => HasData && GEngineMethod == "not_found";
 
     /// <summary>
     /// True when Extra Scan button should be visible:
@@ -299,6 +326,16 @@ public partial class PointerPanelViewModel : ViewModelBase
     public bool CanHexGNames => IsAobMakerAvailable && IsNonZeroAddr(GNamesAddress);
     /// <summary>Can send GWorld pointer to CE hex view (data address).</summary>
     public bool CanHexGWorld => IsAobMakerAvailable && IsNonZeroAddr(GWorldAddress);
+    /// <summary>Can send FSparseDelegateStorage pointer to CE hex view (data address).</summary>
+    public bool CanHexSparseDelegates => IsAobMakerAvailable && IsNonZeroAddr(SparseDelegatesAddress);
+    /// <summary>Can send the &amp;GEngine slot to CE hex view (data address).</summary>
+    public bool CanHexGEngine => IsAobMakerAvailable && IsNonZeroAddr(GEngineAddress);
+
+    /// <summary>Can register the &amp;GEngine SLOT as a CE symbol via CreateSymbolScript.
+    /// Same contract as GWorld: the AOB triple is what makes the symbol restart-proof, so a
+    /// resolved address alone is not enough.</summary>
+    public bool CanRegisterGEngineSymbol => IsAobMakerAvailable
+        && IsNonZeroAddr(GEngineAddress) && !string.IsNullOrEmpty(GengineAob);
 
     /// <summary>Can send GObjects AOB scan hit address to CE disassembler (code address).</summary>
     public bool CanAsmGObjectsScan => IsAobMakerAvailable && IsNonZeroAddr(GObjectsScanAddr);
@@ -385,6 +422,7 @@ public partial class PointerPanelViewModel : ViewModelBase
         VersionDetected = state.VersionDetected;
         IsUserOverride = state.IsUserOverride;
         IsLowConfidence = state.IsLowConfidence;
+        IsVersionTooOld = state.IsVersionTooOld;
         PublisherThumbprint = state.PublisherThumbprint;
         // Re-sync the ComboBox selection to whatever the DLL actually has (override or auto).
         // _suppressOverrideSelectionEvent gates the partial method so this assignment doesn't
@@ -416,6 +454,13 @@ public partial class PointerPanelViewModel : ViewModelBase
         GworldAob = state.GWorldAob;
         GworldAobPos = state.GWorldAobPos;
         GworldAobLen = state.GWorldAobLen;
+        GEngineAddress = state.GEngine;
+        GEngineMethod = state.GEngineMethod;
+        GEnginePatternId = state.GEnginePatternId;
+        GEngineScanAddr = state.GEngineScanAddr;
+        GengineAob = state.GEngineAob;
+        GengineAobPos = state.GEngineAobPos;
+        GengineAobLen = state.GEngineAobLen;
         ModuleName = state.ModuleName;
         PeHash = state.PeHash;
         DllBuildNumber = state.DllBuildNumber;
@@ -479,6 +524,10 @@ public partial class PointerPanelViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsSparseDelegatesFound));
         OnPropertyChanged(nameof(IsSparseDelegatesUnsupported));
         OnPropertyChanged(nameof(IsSparseDelegatesNotFound));
+        OnPropertyChanged(nameof(IsGEngineFound));
+        OnPropertyChanged(nameof(HasGEnginePatternId));
+        OnPropertyChanged(nameof(HasGEngineScanAddr));
+        OnPropertyChanged(nameof(IsGEngineNotFound));
         OnPropertyChanged(nameof(CanExtraScan));
         OnPropertyChanged(nameof(CanManageCache));
         OnPropertyChanged(nameof(CanClearGameCache));
@@ -512,10 +561,13 @@ public partial class PointerPanelViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanHexGObjects));
         OnPropertyChanged(nameof(CanHexGNames));
         OnPropertyChanged(nameof(CanHexGWorld));
+        OnPropertyChanged(nameof(CanHexSparseDelegates));
+        OnPropertyChanged(nameof(CanHexGEngine));
         OnPropertyChanged(nameof(CanAsmGObjectsScan));
         OnPropertyChanged(nameof(CanAsmGNamesScan));
         OnPropertyChanged(nameof(CanAsmGWorldScan));
         OnPropertyChanged(nameof(CanRegisterGWorldSymbol));
+        OnPropertyChanged(nameof(CanRegisterGEngineSymbol));
     }
 
     private bool _suppressOverrideSelectionEvent;
@@ -790,6 +842,20 @@ public partial class PointerPanelViewModel : ViewModelBase
         await _aobMaker.NavigateHexViewAsync(StripHexPrefix(GWorldAddress));
     }
 
+    [RelayCommand]
+    private async Task HexSparseDelegatesAsync()
+    {
+        if (_aobMaker == null || !IsNonZeroAddr(SparseDelegatesAddress)) return;
+        await _aobMaker.NavigateHexViewAsync(StripHexPrefix(SparseDelegatesAddress));
+    }
+
+    [RelayCommand]
+    private async Task HexGEngineAsync()
+    {
+        if (_aobMaker == null || !IsNonZeroAddr(GEngineAddress)) return;
+        await _aobMaker.NavigateHexViewAsync(StripHexPrefix(GEngineAddress));
+    }
+
     // --- AOBMaker CE Plugin: scan address → disassembler (code) ---
 
     [RelayCommand]
@@ -839,6 +905,38 @@ public partial class PointerPanelViewModel : ViewModelBase
         if (success)
             _log?.Info(Constants.LogCatInit,
                 $"Created CE symbol script '{symbolName}' (AOB: {GworldAob}, pos={GworldAobPos}, len={GworldAobLen})");
+        else
+            _log?.Warn(Constants.LogCatInit,
+                $"Failed to create CE symbol script '{symbolName}'");
+    }
+
+    // --- AOBMaker CE Plugin: register &GEngine as AOB-scan-based CE symbol ---
+    //
+    // The symbol points at the SLOT, not at the UEngine object, which is the whole reason this
+    // is worth having: the slot address is restart-stable, so a GameEngine-rooted CE record
+    // auto-follows engine recreation instead of freezing a stale UEngine* snapshot. Same
+    // contract as gworld_addr.
+
+    [RelayCommand]
+    private async Task RegisterGEngineSymbolAsync()
+    {
+        if (_aobMaker == null || string.IsNullOrEmpty(GengineAob)) return;
+
+        string symbolName = "gengine_addr";
+        string module = !string.IsNullOrEmpty(ModuleName) ? ModuleName : "game.exe";
+
+        bool success = await _aobMaker.CreateSymbolScriptAsync(
+            name: $"&GEngine → {symbolName}",
+            aob: GengineAob,
+            pos: GengineAobPos,
+            aoblen: GengineAobLen,
+            symbol: symbolName,
+            module: module,
+            autoActivate: true);
+
+        if (success)
+            _log?.Info(Constants.LogCatInit,
+                $"Created CE symbol script '{symbolName}' (AOB: {GengineAob}, pos={GengineAobPos}, len={GengineAobLen})");
         else
             _log?.Warn(Constants.LogCatInit,
                 $"Failed to create CE symbol script '{symbolName}'");
@@ -1176,6 +1274,13 @@ public partial class PointerPanelViewModel : ViewModelBase
     {
         if (!string.IsNullOrEmpty(SparseDelegatesAddress))
             await _platform.CopyToClipboardAsync(StripHexPrefix(SparseDelegatesAddress));
+    }
+
+    [RelayCommand]
+    private async Task CopyGEngineAsync()
+    {
+        if (!string.IsNullOrEmpty(GEngineAddress))
+            await _platform.CopyToClipboardAsync(StripHexPrefix(GEngineAddress));
     }
 
     [RelayCommand]

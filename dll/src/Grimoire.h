@@ -106,9 +106,16 @@ inline int FFIELD_OWNER       = 0x10;  // FFieldVariant Owner — stable positio
 inline int FFIELD_NEXT        = 0x20;  // FField* next in chain
 inline int FFIELD_NAME        = 0x28;  // FName
 
-// === FProperty (inherits from FField) — defaults for UE5.0-5.1.0 ===
+// === FProperty (inherits from FField) — defaults for UE5.0-5.1.0 AND UE4.25-4.27 ===
+// (both have FFieldVariant = 0x10, so FField is 0x38 and FProperty's own fields follow it)
 // UE5.1.1+ shifts these: ElemSize=0x34, Flags=0x38, Offset=0x44
-inline int FPROPERTY_ELEMSIZE = 0x38;
+//
+// ElementSize is 0x3C, NOT 0x38 — 0x38 is ArrayDim. Verified against the DropIn 4.27.2 PDB:
+// ArrayDim@0x38, ElementSize@0x3C, PropertyFlags@0x40, Offset_Internal@0x4C. The old 0x38
+// here was internally inconsistent with FPROPERTY_FLAGS (0x38 + 4 != 0x40) and, when the
+// dynamic offset validation failed and these defaults were used, read ArrayDim as the
+// element size.
+inline int FPROPERTY_ELEMSIZE = 0x3C;
 inline int FPROPERTY_FLAGS    = 0x40;  // uint64 PropertyFlags
 inline int FPROPERTY_OFFSET   = 0x4C;  // int32 Offset_Internal
 
@@ -197,6 +204,12 @@ inline bool IsFFieldVariantUObject(uintptr_t ptr) {
 namespace Grimoire {
 
 // --- Object Array ---
+// Oldest engine this dumper can read. UE 4.11 is where FUObjectItem appears (16 bytes:
+// Object / ClusterAndFlags / SerialNumber). 4.10 and earlier store raw UObjectBase* at stride 8
+// in a TStaticIndirectArrayThreadSafeRead whose chunk table is INLINE — a shape ArrayLayout
+// cannot express. Read off Epic's source at tags 4.10.2-release / 4.11.0-release.
+constexpr uint32_t MIN_SUPPORTED_UE_VERSION = 411;
+
 constexpr int OBJECTS_PER_CHUNK        = 64 * 1024;
 
 // --- FNamePool ---

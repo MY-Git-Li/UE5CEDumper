@@ -20,6 +20,1279 @@ builds ≤696 in
 
 -----
 
+## 2026-07-27 - GWLD_FD_1: the GWorld fall-through list is now empty (build 2478)
+
+Landed the `UWorld::FinishDestroy` GWorld pattern mined at the end of the 4.11/4.13 support pass.
+It was held back deliberately — `GROUND-TRUTH.md`'s own rule requires a full 46-program sweep
+before any pattern change, and the priority placement was undecided.
+
+```
+48 8B 05 ?? ?? ?? ?? 48 3B C? 48 0F 44 C? 48 89 05 ?? ?? ?? ?? E8   pri 265, io 0
+```
+
+22 bytes, 12 fully-literal. The shape is a **read of a global followed by a conditional write-back
+of the same global**, which is self-evidencing — that, not the length, is why it is clean. Source
+PDB-confirmed on three independent oracles (HeliumRain 4.20, DropIn 4.24, DropIn 4.27).
+
+### Measured over the full sweep: 46 programs / 32 oracles
+
+**21 hits, 16 UNIQUE-OK, zero decoys anywhere**, never more than 1 hit on any binary. It appears
+in neither the hotspot table nor the dead-weight table, and the band audit stays clean.
+It became the lander on four binaries — three improvements, one lateral, **no regressions**:
+
+| binary | before | after |
+|---|---|---|
+| UE4.11 Nekopara | `GWLD_G42_1` (880), 5 wasted | `GWLD_FD_1`, **0 wasted** |
+| UE4.13 Fantasynth | `GWLD_G42_1` (880), 6 wasted | `GWLD_FD_1`, **0 wasted** |
+| UE4.26 Satisfactory Engine | `GWLD_SF_2` (300), 2 wasted | `GWLD_FD_1`, **0 wasted** |
+| UE5.2 Satisfactory Engine | `GWLD_SF_2` (300), 0 wasted | `GWLD_FD_1`, 0 wasted |
+
+Those were the *only* three GWorld entries in the report's fall-through list, so **that list is now
+GObjects-only**. GWorld redundancy rose by one on 13 oracles and fell nowhere. `GWLD_SF_2` is no
+longer the lander anywhere but still reaches truth on both Satisfactory DLLs, so it stays as
+redundancy (never prune on "no proof", only on counter-proof).
+
+### Why the sweep understates what this fixes
+
+The *baseline* sweep already showed 4.11 and 4.13 resolving GWorld correctly. That is the harness
+model, not the runtime: `scan_patterns.java` has the truth and walks past a decoy, whereas the live
+`ValidateGWorldBasic` is deliberately loose and accepts the first one it is handed. In-game both
+titles were landing on a **wrong** GWorld — Nekopara via `GWLD_SAT52_1` → `1423C9940` (a
+`TSharedPtr {Object, ReferenceController}` singleton whose `+0` reads like a UWorld pointer),
+Fantasynth via `GWLD_SF_2` → `14288E648` — and were rescued only by instance-scan recovery.
+
+At 265 the new pattern is scanned **ahead of both** (`SF_2` 300, `SAT52_1` 365), so the true GWorld
+is validated and returned before either decoy is ever presented. This is the shape the maintainer
+asked for when declining to tighten the validator: *add a pattern, do not touch something 30+
+oracles depend on to fix one 2016 title.*
+
+### Placement: 265 over a Tier-1 slot
+
+`GWORLD_PATTERNS` went 49 → 50 byte patterns, i.e. 6 full batches + 2 either way — **no batch
+boundary moves**. At 265 it lands in batch 3, leaving batches 1–2 byte-identical, so nothing that
+resolves off the modern Tier-1 block could be perturbed at all. Tier 1 (~102) is defensible on the
+raw numbers (16 UNIQUE-OK / 0 decoys beats `GWLD_TQ_1`'s 10) but the existing Tier-1 block has not
+been re-measured corpus-wide, so what a promotion would displace is unknown. Recorded in
+`Himmel.h`, not decided by taste.
+
+Also corrected the pattern-count summary block in `Himmel.h`, which had drifted 4 short
+(`SPARSE_AV53_1`/`X1`/`X2` were never added to it): now **150 AOB + 1 CallFollow + 6 symbol
+exports = 157 entries**, with a note to regenerate it from `extract_patterns.py` rather than
+hand-edit.
+
+-----
+
+## 2026-07-27 - Five new oracles close the 4.21 and 5.0 holes; GWLD_TQ_1 promoted 210 -> 101
+
+Five games added — Helium Rain (4.20.3, PDB), Freud Gate (4.21, no PDB), Breeders of the Nephelym
+(4.27, PDB), Maelstrom (4.27.2, PDB), Light Maze (5.0.3, no PDB). Derived in parallel, five agents
+on five projects (Ghidra's lock is per-project, so that is safe).
+
+**23 of 23 targets resolve correctly, zero version disagreements, and nothing justified mining a
+new pattern.** No repeat of the Elliot "PE says 4.27, actually 5.4" trap — every version was
+confirmed independently from the `++UE4+Release-X.Y` build tag and refined where the label was
+coarse (4.20.3, 4.27.2, and Light Maze's `CL-20979098` = the 5.0.3 release changelist).
+
+### `GWLD_TQ_1`: 210 -> 101
+
+Measured before moving. It wins on **6 of 16** oracles — no other GWorld pattern wins more than 2 —
+and has **zero decoys anywhere**: 10 UNIQUE-OK, 6 NO-TRUTH on probes, 23 MISS. It was sitting
+behind 13 AOBs.
+
+The saving is **a whole `.text` pass, not a few validations**. Patterns scan in **batches of 8**,
+so order *within* a batch only changes validation order — one AVX2 sweep either way — but crossing
+a batch boundary costs an entire extra sweep. At 210 it sat in batch 2, so every game it wins paid
+for batch 1 first. What it displaces out of batch 1 is `GWLD_ES2_3`, which wins on nothing, so the
+swap is free. Placed at 101 rather than 95 because the 40–90 band means "symbol-derived", and
+first-vs-second inside a batch is worth nothing.
+
+Then the five new games arrived and `GWLD_TQ_1` won **all five** — 4.20, 4.21, 4.27 ×2, 5.0. The
+promotion is now backed by 11 wins across five engine generations.
+
+Bundling the reorder with the corpus additions was safe, and worth stating why: **scanning is
+per-program independent**, so adding rows cannot change another program's result. Any GWorld
+change on an *existing* oracle is attributable to the reorder alone; the new games are new
+information regardless.
+
+### What the batch settled
+
+- **DropIn's 32-byte `FUObjectItem` is a config artifact, not a 4.27 trait** — proven by two
+  independent symbolised 4.27 binaries carrying the stock 24-byte item.
+- **`SPARSE_PAL51_1` fires and is CORRECT on Maelstrom (4.27)** — its first correct fire outside
+  Palworld, and on a non-5.1 binary. It stays "provenance ≠ version coverage", but it is no longer
+  a pattern that has only ever worked on the game it was mined from.
+- **`SPARSE_X1`/`X2` are UNIQUE-OK on Maelstrom** — second corroboration outside 5.1.
+- **`GENG_X4` is clean on four of the five** and takes 1 decoy on Breeders that is never selected.
+  DQ7R stays the only place it is convergent-and-wrong.
+- A reusable recipe for pre-4.23 GNames without symbols (`mov ecx,0x408` → the nearby rip store),
+  which is a live lead for the three 4.18 rows that leave GNames unset on purpose.
+
+### The thinnest thing in the table now
+
+**Pre-4.23 GNames rests on exactly two patterns, and they are the same shape** — `GNAM_CT3` and
+`GNAM_G42_1`, both the `FName::GetNames` lazy-init prologue, both OK-BEHIND, both batch 3,
+confirmed identical on Helium Rain *and* Freud Gate. That is the sparse-`n=1` situation again on a
+different target. If a third pre-4.23 sample ever arrives, mining a structurally different anchor
+is the highest-value thing to do with it.
+
+### UE 4.23 — closed as a deliberate non-goal
+
+It shipped 2019-09 and 4.24 landed that December, so essentially every surviving title has been
+bumped to 4.27, and building a sample needs an old Visual Studio the maintainer will not install.
+It is also the version where the feature matters least — sparse delegates were barely adopted that
+early, so an unverified 4.23 is close to unobservable. The mitigation was never going to be a
+sample anyway: **`Aura` probes the live key shape instead of gating on a version number**, which is
+what makes 4.23 *and any licensee fork* safe without a binary to test against.
+
+### Version coverage
+
+4.18, 4.20, **4.21**, 4.22, 4.24, 4.25, 4.26, 4.27, **5.0**, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7 —
+contiguous from 4.24 up, with 4.19 the only remaining UE4 gap (sandwiched between covered
+neighbours) and 4.23 deliberately skipped. 5.8 is next, and the practical route is packaging a
+Blueprint template for **Shipping** from an Epic Launcher engine install — installing the engine
+alone yields Editor binaries, which are the wrong shape entirely.
+
+-----
+
+## 2026-07-27 - Grimhook: the first symbolised UE 5.1; sparse n=1 cluster closed
+
+Grimhook ships a **full public PDB** on a `-Win64-Shipping.exe` (2.7 M symbols, 232 K functions).
+Until now the corpus's only 5.1 was Palworld, which has no symbols — so every 5.1 claim rested on
+consensus. All five globals read straight off the PDB, and the version was confirmed
+*structurally* rather than from the label: the PDB's `EUnrealEngineObjectUE5Version` terminates at
+`ADD_SOFTOBJECTPATH_LIST = 1008`, which is exactly 5.1 (5.0 stops at 1004, 5.2 adds 1009). Stock
+layout — 24-byte `FUObjectItem`, `UObject*` at `+0x00`, chunked.
+
+### What it settled about Palworld
+
+Different binary, so the addresses cannot match — what transfers is which *sets* of patterns
+converge. They match almost exactly, which corroborates Palworld's derived values:
+
+- GEngine: the identical 4-set `[X1,X2,X3,X4]` converges on truth here and on `149657F38` there.
+- GNames: the identical **12**-pattern set converges on truth here and on `14944DB80` there.
+- GObjects: the base gets one 6-set on both and `+0x10` a different 5-set on both — so Palworld's
+  base/`ObjObjects` split was the right way round.
+- Sparse: `SPARSE_ES2_1` is now *proven* correct on real 5.1, and it is what hit Palworld.
+
+And three patterns that had never been checked against 5.1 symbols are now proven: `GOBJ_V13`
+(136 hits, 136 ok), `GNAM_V8` (the priority-100 winner), `GWLD_V7` (its second oracle after
+Meltopia).
+
+**One falsification.** `SPARSE_PAL51_1` takes **0 hits** on Grimhook. It is not a generic UE 5.1
+shape — it is Palworld-specific inlining. A MISS is not counter-proof so it stays, but its
+`PAL51` tag must not be read as "covers 5.1".
+
+### The n=1 cluster — closed except Avowed
+
+Six binaries reached SparseDelegates through `SPARSE_ES2_1` and **nothing else**; a patch moving
+that one site would have taken sparse support with it. `SPARSE_X1` / `X2`, mined here, anchor on
+`Remove`/`RemoveAll`/`Clear` — different *functions* from `ES2_1`'s `NotifyUObjectDeleted`, so
+this is real redundancy, not a re-anchor on the same instruction stream.
+
+| binary | patterns reaching truth |
+|---|---|
+| Everspace 2 5.5 / 5.5b | 1 → **2** |
+| Satisfactory 5.2 / 5.6 CoreUObject, CrashReportClient 5.6, Grimhook 5.1 | 1 → **3** |
+| Avowed 5.3 | 1 → 1 — **now the only n=1 left** |
+
+Both are decoy-free across 39 programs including 8 monolithic EXEs up to 414 MB of `.text`.
+No binary that currently fails starts working; this is insurance, on the same footing as
+`PAL51_1` / `MEL55_1` / `AV53_1`.
+
+### The adversarial pass earned its keep — twice
+
+**X1 was refuted as submitted and shipped shorter.** Its mined form ended with one more
+`48 8D 0D` (the `GUObjectArray` ref). Measured, those 3 bytes are inert on 36 of 38 programs — and
+they *cost* both Everspace 2 5.5 builds, because 5.5 emits `lea rdx,…; call` with no second `lea`.
+Since ES2 5.5 is one of the exact `n=1` binaries the pattern exists to fix, **the longer form
+failed at its own purpose.** Longer is not safer; it is only safer where the extra bytes are
+load-bearing. This is the mirror image of the `GWLD_G42_4` finding, where wildcarding *more* was
+the mistake.
+
+**The `instrOffset` trap was demonstrated, not just asserted.** X2 needs `instrOffset = 11`. A
+deliberate wrong-value control at 26 resolves to `SparseDelegateObjectListener` — a plausible
+adjacent global 8 bytes below truth — and goes DECOY-ONLY on all 15 binaries *while the hit count
+stays healthy*. That is exactly the silent failure rule 7 warns about, now with a worked example.
+
+### Build quirks worth remembering
+
+- `.rodata` is marked **executable** here (2 KB) — every other corpus binary has it non-exec, so
+  "exec bytes" for Grimhook is `.text` + that.
+- A `.msvcjmc` section is present: MSVC `/JMC` instrumentation on ~512 functions, which adds a
+  `call __CheckForDebuggerJustMyCode` prologue. It disturbed nothing here, but it is the kind of
+  thing that would shift a prologue-anchored AOB in a game that enabled it globally.
+- `GNameBlocksDebug` **is** symbolised (`0x14632A4D0`) and is a **trap**: it is a separate pointer
+  variable, not `NamePoolData+0x10`, and it is all-zero in the file. Recorded in GROUND-TRUTH.md
+  so nobody takes the shortcut on a future PDB game.
+
+### Version coverage after this
+
+4.18, 4.20, 4.22, 4.24, 4.25, 4.26, 4.27, **5.1**, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7. The named holes
+are **4.23** (still the only unverified sparse-delegate version — mitigated because `Aura` probes
+the live key shape rather than gating on a version number) and **5.0** (bracketed by 4.27 and a
+now-symbolised 5.1, so low risk). 4.19 / 4.21 sit between covered neighbours.
+
+-----
+
+## 2026-07-27 - UE_GameEngine binds the &GEngine slot instead of a frozen pointer (build 2453)
+
+The Teleport tab's Global Pointers card exported two CE symbols with asymmetric backing:
+`UE_GWorld` bound directly to the stable `&GWorld` slot (auto-follows), but `UE_GameEngine` was an
+`allocateMemory(8)` buffer holding a `UEngine*` **snapshot**. That asymmetry existed for one
+reason — `&GEngine` could not be resolved — and that stopped being true today.
+
+- **DLL:** new `QUERY_OP_GENGINE_SLOT = 2` returns the SLOT (`g_cachedGEngine`) plus its deref,
+  same shape as `QUERY_OP_GWORLD`. Op 1 still returns the live instance.
+- **Script:** `UE_GameEngine` now asks for the slot first and registers the symbol straight to it.
+  Only when no GEngine AOB validated does it fall back to op 1 + the buffer.
+
+**The choice is made at ENABLE time, not at generation time.** A CE record gets saved into a `.CT`
+and re-enabled in later sessions, where the AOB may resolve even though it did not when the record
+was created. Baking the decision in when the script is generated would make the artifact silently
+wrong later — and a downgrade to a frozen pointer is precisely the failure a user would not notice.
+
+Two details worth keeping:
+
+- **A marker symbol, not a heuristic, decides what to free.** The snapshot path also registers
+  `UE_GameEngine_buf`; `[DISABLE]` frees only through that. Deciding from `UE_GameEngine` itself
+  would call `deAlloc` on a game address on the slot path. The GWorld script emits no `deAlloc`
+  or `allocateMemory` **at all** — a test asserts the string is absent, so a reader can see the
+  record cannot free a game address without tracing logic.
+- **The busy check had to become a bounded wait.** `SetDone`/`SetError` publish `status = DONE`
+  **before** clearing `cmd` (deliberately). A script issuing two round-trips back to back can
+  exit its status poll and still observe the previous `cmd` for an instant, so a single sample
+  would report "mailbox busy" and silently abandon the fallback. The prior scripts never hit this
+  because they only ever queried once. Now `MailboxIdleWaitMs = 100` ms, bounded.
+
+-----
+
+## 2026-07-27 - Avowed 5.3 sparse closed; 3 games added as oracles; GENG_X4 demoted in prose
+
+### Avowed (UE 5.3) sparse delegates — found, and the fork did NOT change the structure
+
+`FSparseDelegateStorage::SparseDelegates = 0x14B5BD9A8`. This had been an open "zero hits" line
+in GROUND-TRUTH.md since the Avowed case study.
+
+The route the docs suggested is dead here: **`SparseDelegateReport` does not exist in the binary
+at all** (the `!UE_BUILD_SHIPPING` console command is compiled out), verified against every
+initialized block in both ASCII and UTF-16. Found structurally instead — scan `.text` for TSet
+element-stride arithmetic adjacent to a rip-relative `.data` reference, bucket by global, and
+take the one with a pure 0x60-stride profile. Corroborated by `SparseDelegateMapCritical` sitting
+exactly `0x28` (`sizeof(CRITICAL_SECTION)`) below it: the two statics of `SparseDelegate.cpp`,
+adjacent, as expected.
+
+**The user's question was whether Obsidian changed the sparse structure, given they changed the
+object array. Answer: no, on every observable axis** — outer stride `0x60`, `TSet::HashSize` at
+`+0x48`, element `HashNextId` at `+0x58`, inner `TMap` at element`+8`, inner stride `0x20` with
+the value at `+8`, `PointerHash` = `ptr>>4` into the Murmur finalizer. The fork's known
+deviations (packed 20-byte `FUObjectItem`, static `FUObjectArray`) stop at the object array.
+Practical consequence: `ValidateSparseDelegates`' hardcoded `kOuterStride = 0x60` was already
+correct for Avowed.
+
+Three candidates were mined; **one was added**. An adversarial pass measured over 42 programs
+refuted the other two:
+
+- the twin-ref form baked in `[rsp+0x20]`, which the mining report called shadow space. It is
+  not — `mov [rsp+0x20],rdi` spills the key into a frame **local**, and `DI427_1/2` encode the
+  same out-param idiom with that disp8 wildcarded. One added spill in a future build takes its
+  only hit to zero.
+- the `mov rdx` variant is strictly dominated: a nibbled form covers its sites *and* `AV53_1`'s.
+- both would push `SPARSE_PATTERNS` from 8 to 9 = **two batches** (`kBatchSize = 8`), costing a
+  second AVX2 pass over ~430 MB of `.text` across the titles that find nothing in batch 1, for a
+  pattern that can only ever hit Avowed.
+
+Honest caveat recorded in the header: `AV53_1`'s head alone (14 literal bytes) measures
+identically, so its tail is inert on this corpus — the selectivity is exact register allocation,
+not length.
+
+### Three games promoted from "not in the corpus" to oracles
+
+DQ7R (4.27), The Adventures of Elliot (**5.4 — the corpus had none**) and DQ XI S (4.18, a second
+pre-4.23 sample). Live-run first, then corroborated by disassembly. 14 of 15 globals confirmed.
+
+DQ XI S's GNames is **deliberately omitted**: 4.18 predates `FNamePool`, every GNames pattern is
+FNamePool-shaped, and the consensus is noise. Per the standing rule, leave it out rather than
+guess a value that would mislabel every hit as a decoy.
+
+### The one contradiction — and the rule it produced
+
+**DQ7R's GEngine is `145FF4B28`, not the `145D76D78` the runtime log pointed at.** I had reported
+that address to the user as strongly supported: 41 hits converging on one address, against a
+7-hit runner-up. It was wrong. `145D76D78` is a game-side manager singleton, and `GENG_X4` alone
+accounts for 50 of its 55 hits; the "runner-up" was `GENG_X1`+`X3`+`X2` — the semantically
+specific patterns — agreeing on the truth. `145FF4B28` is proven three ways
+(`UWorld::GetGameViewport`, `UWorld::GetRealTimeSeconds`, and a `GetWorld` fallback that loads
+GEngine and GWorld in the same function) and sits `-0x3948` from GWorld, in family with DropIn
+4.27's `-0x4648`.
+
+So GROUND-TRUTH.md rule 4 gained a limit: **convergence only holds WITHIN one pattern. Across
+patterns, rank by DISTINCT PATTERNS AGREEING, never by raw hit count.** `consensus_*.txt` already
+does this; a hand tally of a runtime log does not.
+
+`GENG_X4` keeps its priority (it is still what reaches FF7 Remake, and `ValidateGEngineSlot`
+rejects its decoys so it costs validations, not correctness) but its note no longer claims
+"correct on 7 oracles" — it now says what it is: the broadest and noisiest pattern in the table,
+whose decoys are game singletons.
+
+-----
+
+## 2026-07-27 - Proxy Deploy CTD: bound rows were mutated from thread-pool threads (build 2445)
+
+**Symptom:** Proxy Deploy tab → *Scan Steam* → *Update all* → the whole app disappears. No managed
+exception, no error dialog, nothing after the last log line. Windows recorded
+`0xc0000005` (access violation) in **`libSkiaSharp.DLL`**, i.e. inside the renderer.
+
+The deploy itself had *succeeded* — `Updated: 26, up-to-date: 0, failed: 0` is the last line in
+`view-0.log`, ~2 s before the crash. So the work was fine; the painting of the result was not.
+
+### Root cause
+
+`DetectedGame` is an `ObservableObject` whose `Status` / `InstalledVersion` / `ErrorMessage` /
+`SuggestedProxy` are bound to the Proxy Deploy `DataGrid`. Four `ProxyDeployService` methods
+(`RefreshDeployStatusAsync`, `DeployAsync`, `UndeployAsync`, `ApplyProxySuggestionsAsync`) wrote
+those properties **from inside their `Task.Run` bodies**, so `PropertyChanged` fired on
+thread-pool threads for 29 bound rows at once. Avalonia then mutated the visual tree while the
+render thread was composing it. That is not an exception path — it is an AV in Skia, which takes
+the process down with no managed stack to look at.
+
+The codebase had already met this bug and mistaken it for a cosmetic one. From
+`ProxyDeployPanel.axaml`:
+
+> *"Marking the whole grid IsReadOnly=True caused row visuals to lag behind item PropertyChanged
+> events **from the background-thread Refresh**, requiring a second click to repaint."*
+
+The late repaint and the crash are the same race. Setting `IsReadOnly` per column instead of on
+the grid fixed the visible symptom and left the thread violation in place.
+
+### Fix — compute off-thread, apply on the caller's thread
+
+All four methods now do their file I/O inside `Task.Run`, collect the results into a
+`GameStatusUpdate` record, and apply them **after** the `await`, which resumes on the caller's
+context. All 11 call sites are UI-thread `[RelayCommand]`s in `ProxyDeployViewModel` with no
+`ConfigureAwait(false)`, so that context is the UI thread.
+
+`GameStatusUpdate` carries `SetInstalledVersion` / `SetErrorMessage` flags because some paths
+deliberately leave a field alone (the "already up to date" deploy sets only `Status`) and `null`
+is itself a meaningful value for the other two — a blanket three-field apply would have changed
+behaviour.
+
+The contract is now written down on `IProxyDeployService` rather than left implicit, since
+nothing enforced it the first time.
+
+### Notes
+
+- `ProxyDeployService` deliberately does **not** take a dependency on `Avalonia.Threading`. In
+  this codebase `Dispatcher.UIThread` appears only in ViewModels and Views; services stay
+  UI-framework-free, so the marshalling is done by *where the code runs*, not by a dispatcher call.
+- Swept the rest of `Services/`: `PipeClient` and `SnapshotStore` are the only other files using
+  `Task.Run`, and neither references any `ObservableObject` model. `DriveDescriptor.IsSelected` is
+  read but never written off-thread. `ProxyDeployService` was the only offender.
+- A UI crash whose faulting module is `libSkiaSharp` and whose trigger is a batch operation over
+  a bound collection should be treated as a threading bug until proven otherwise — SOS cannot
+  read the dump (Native AOT publish has no CoreCLR), so the dump is a dead end and the code is not.
+
+-----
+
+## 2026-07-27 - &GEngine was never resolvable: the validator ran before the offsets it needs (build 2441)
+
+**Symptom:** the System tab reported `&GEngine — AOB not found` on *every* game. Reported against
+DQ7R (4.27), The Adventures of Elliot (5.4), DQ XI S (4.18), Titan Quest II (5.6) and
+Everspace 2 (5.5) — the last two being cases where the offline sweep says the patterns resolve
+correctly, which is what made it obviously a code bug rather than a coverage gap.
+
+### The patterns were right the whole time
+
+The scan log records every candidate. On Everspace 2, **14 of 15 candidates across four
+independent patterns resolved to `0x7FF68ACC37B0`** — and the PDB's `&GEngine` is image VA
+`0x149DA37B0`, which at that process's load base is exactly `0x7FF68ACC37B0`. Same picture
+everywhere else: DQ7R 41 hits on one address, Elliot 27, TQ2 28, DQ XI S 12. Textbook
+convergence. Then every one of them was rejected.
+
+### Root cause — an ordering contract that was documented but not honoured
+
+`Genau.cpp`'s `FindGEngineSlot` carried a comment stating it *"MUST be called after
+GObjects/GNames/offsets are up"*, because `ValidateGEngineSlot` derefs the candidate and asks the
+reflected class for a `GameViewport` property. `FindPropertyOffsetByName` needs
+`DynOff::USTRUCT_CHILDPROPS` / `FFIELD_NAME` / `FFIELD_NEXT` / `FPROPERTY_OFFSET` **and**
+`Serie::GetString` — i.e. the dynamic offsets *and* a live FNamePool.
+
+The call site did not satisfy it. From the Everspace 2 log:
+
+| time | event |
+|---|---|
+| `12:10:01.340` | GEngine AOB scan + validation (inside `Genau::FindAll`, `Frieren.cpp:122`) |
+| `12:10:02.505` | `FNamePool: Initialized` |
+| `12:10:02.506` | `ValidateAndFixOffsets: Starting…` (`Frieren.cpp:319`) |
+| `12:10:02.508` | `ChildProperties found at struct+0x50`, `FField::Name at +0x20` |
+
+The validator ran **1.2 s before** the values it reads were discovered, so it walked the property
+chain with compile-time default offsets and a dead name pool. Every candidate failed, on every
+game, always — the feature had never worked since it was added at build 2399.
+
+### Fix — resolve &GEngine in a second pass
+
+- `FindGEngineSlot` now **enforces** its own precondition instead of documenting it: if
+  `DynOff::bOffsetsValidated` is false it returns 0 with method `deferred` **without scanning**.
+  That also stops burning the 0.2–0.7 s AVX2 pass on a scan whose result cannot be accepted.
+- New `Genau::ResolveGEngineDeferred(EnginePointers&)` re-runs the scan once the offsets exist,
+  republishing the pattern-id / scan-addr / AOB triple so a GameEngine-rooted CE export can still
+  be AOB-wrapped (a deferred win that only set the address would have left that empty).
+- `UE5_Init` calls it directly after `ValidateAndFixOffsets` and re-caches the seven
+  `g_cachedGEngine*` globals the pipe serves to the System tab.
+- The `apply_rescan` pipe path got the same second pass: a recovery rescan that revives
+  GObjects/GNames is exactly the case where the offsets GEngine was waiting on have just arrived.
+
+### Follow-up (same day) — the two rows that had no AOBMaker buttons
+
+**LIVE-VERIFIED on Everspace 2**: `&GEngine (engine slot) = 0x7FF6430237B0` via `GENG_X3`.
+
+With the address finally resolving, the Pointer panel's last two rows were still Copy-only.
+`FSparseDelegateStorage` and `&GEngine` gained a **HEX** button (same contract as the three
+above them), and `&GEngine` gained a **SYM** button matching GWorld's.
+
+`SYM` registers the **slot**, not the UEngine object — which is the entire point. The slot
+address is restart-stable, so a GameEngine-rooted CE record auto-follows engine recreation
+instead of freezing a stale `UEngine*`. Symbol name `gengine_addr`, mirroring `gworld_addr`.
+`CanRegisterGEngineSymbol` requires the AOB triple, not just an address, for the same reason
+GWorld's does: without the pattern the generated AA script cannot re-scan on enable.
+
+### Notes for next time
+
+- The 0.2–0.7 s per game the wasted scan cost was invisible because it was folded into the
+  scan-progress bar.
+- Nothing was wrong in `Himmel.h`. Every GEngine pattern is fine and the target hits on 5/5 live
+  games spanning UE 4.18 / 4.27 / 5.4 / 5.5 / 5.6 — **adding more GEngine AOBs would have fixed
+  nothing.** A "not found" in the UI is only evidence about the *pipeline*, not the patterns,
+  until the scan log's candidate list has been read.
+- `RecoverGWorldViaEngine` has the same reflection dependency but is already invoked from a later
+  path (`Frieren.cpp:447`, after offsets), so it was never affected.
+
+-----
+
+## 2026-07-26 - Stack-displacement rule codified and applied; GWLD_SF_4 coverage 4 -> 15 binaries (build 2437)
+
+The user stated a design rule I had been applying too bluntly: **`lea rdx,[rsp+????????]` is fine
+in a pattern; `lea rdx,[rsp+00000318]` is not.** The instruction form is acceptable — the literal
+frame offset is not. I had read it as "avoid stack instructions" and dropped a leading `lea` from
+`SPARSE_MEL55_1` for no reason.
+
+### Why the rule is right — and what it is really about
+
+A frame displacement encodes the **callee's frame layout**: local count, register spills, inlining
+decisions, alignment. None of that is a property of Unreal Engine; it is a property of one
+compilation, and it moves when a patch adds a single local.
+
+A **struct** displacement is the exact opposite and must be kept: `cmp [rcx+0x2C0],rax` (a UWorld
+member) or `cmp eax,[rdi+0x34]` (TSet Max) pin UE's real data layout, which is version-stable and
+is precisely the evidence that makes a pattern trustworthy. So the rule is not "avoid stack
+instructions" — it is **wildcard FRAME displacements, keep STRUCT displacements**.
+
+Auditing the whole database for literal rsp-relative displacements found 18, splitting cleanly:
+ten are small shadow-space constants (`sub rsp,0x28`, `mov [rsp+0x20],rbx`, all ≤ 0x40) which are
+the idiomatic x64 prologue and stable across compilers; eight are genuinely frame-specific
+(0x50–0x70), in four patterns.
+
+**An honest note on evidence:** breadth statistics do *not* separate the two groups (frame-offset
+patterns average 6.5 binaries hit / 3.5 correct vs 7.5 / 3.3 overall), and the one same-game
+cross-build pair in the corpus cannot test them (all four score zero hits on both ES2 builds). The
+rule stands on the mechanism, not on a correlation this corpus can show. What the corpus *can* do
+is test each change directly, which is what was done.
+
+### Measured, one pattern at a time
+
+| pattern | literal bytes | wildcarding the frame offset | action |
+|---|---|---|---|
+| `GWLD_GH_3` | 22 | 5 → 7 binaries, **UNIQUE-OK and decoy-free on every one** | applied |
+| `GWLD_SF_4` | 9 | 2 → 6 binaries, UNIQUE-OK on five, one late decoy on 4.27 | applied |
+| `GOBJ_G42_4` | 24 | neutral — still 1/1 on Everspace 4.20 where it is the lander | applied (free build-tolerance) |
+| `GWLD_G42_4` | **7** | gains 4.24 but breaks three versions to OK-BEHIND and **38 hits / 37 decoys on UE 4.27** | **rejected** |
+
+Final coverage after the full re-sweep: `GWLD_SF_4` **4 → 15 binaries** hit and **3 → 9** correct;
+`GWLD_GH_3` 9 → 12 and 4 → 6. `GWLD_G42_4` and `GOBJ_G42_4` unchanged.
+
+That last row is the qualifier worth keeping: **wildcard the frame displacement only if the
+pattern has enough other literal context.** On a seven-literal-byte pattern the frame offset *is*
+the selectivity — which is itself a reason to distrust that pattern, but removing it makes things
+worse, not better. Both the rule and this exception are now recorded in the band-discipline block
+in `Himmel.h`.
+
+### A bug the verification caught
+
+Restoring the leading `lea rdx,[rsp+d32]` to `SPARSE_MEL55_1` shifted its RIP-relative
+instruction from byte 0 to byte 8, but `instrOffset` was left at 0 — so it resolved off the wrong
+instruction and silently dropped to **0 correct** while still reporting 3 hits. The sweep caught
+it; the regression matrix did not move only because that pattern sits last at priority 160.
+This is the characteristic failure mode of an `instrOffset` mistake: hits look healthy, the
+resolved address is garbage. Fixed to `instrOffset = 8` and re-verified (1 correct, and the three
+binaries it hits are unchanged).
+
+Full 35-program re-sweep after every change: every target on all 20 oracles still correct.
+Build + tests green.
+
+-----
+
+## 2026-07-26 - Sparse-delegate coverage audit: a second 5.5/5.6 anchor; FF7 Rebirth answered but not fixed (build 2432)
+
+Prompted by "should FF7 Rebirth get insurance AOBs, and does it even have FSparseDelegateStorage?"
+Auditing that produced a corpus-wide finding worth more than the original question.
+
+### SparseDelegates is the systematically weakest target
+
+Counting anchors per binary showed **eight** binaries resolving sparse through exactly ONE
+pattern (`SPARSE_ES2_1`), spanning UE 5.2 / 5.5 / 5.6. Many other `n=0` rows are *correct* —
+pre-4.23 engines have no sparse delegates (FF7 Remake 4.18, Everspace 4.20, Satisfactory 4.22,
+Octopath), and the modular DLLs where it does not live. The genuine gaps were the `n=1` band plus
+**Avowed 5.3 and FF7 Rebirth**.
+
+`n=1` matters more here than for other targets: `ValidateSparseDelegates` can only range-check
+two ints, so unlike the GObjects/GNames/GWorld/GEngine validators it cannot reject a wrong hit or
+rescue a miss.
+
+### `SPARSE_MEL55_1` — mined on Meltopia, covers three of the eight
+
+Meltopia's PDB names the whole family (`Add` / `AddUnique` / `Clear` / `Remove` / `RemoveAll` /
+`Get*MulticastDelegate` / `SetMulticastDelegate` / `NotifyUObjectDeleted`), which made the shapes
+easy to compare. The one that generalises is a **twin reference**:
+
+```
+lea    rcx,[SparseDelegates]     <- passed as `this` to TSet::FindOrAddId
+call   <FindOrAddId>
+movsxd rax,[rsp+d32]             <- out-param element index (displacement WILDCARDED)
+lea    rdi,[rax+rax*2]; shl rdi,5   <- element stride 0x60
+add    rdi,[SparseDelegates]     <- the SAME global again
+```
+
+Two references to one static with the stride math between them — the same property that makes
+`SPARSE_ES2_1` reliable. Meltopia 3/3 decoy-free; also hits **Manor Lords** and **TQ2**, both
+previously `n=1`, converging on a single address on each. Zero hits on Everspace 2 5.5,
+Satisfactory 5.2/5.6, Solarpunk, DropIn, Avowed and FF7 Rebirth — codegen-specific rather than
+version-specific, i.e. genuinely additive. Priority **160, last**, so it cannot perturb anything.
+
+Sparse `n=1` binaries: **8 → 5** (the remaining five are the two Everspace 2 builds and
+Satisfactory's 5.2/5.6 CoreUObject).
+
+### Two rejected candidates, both worth recording
+
+- The **TSet hash-bucket probe** (`dec ecx; mov eax,rNd; and rcx,rax; mov eax,[rdx+rcx*4];
+  cmp eax,-1; jz; mov rdx,[Sparse]`) reads like an ideal anchor and is the opposite: it is the
+  *generic* TSet lookup every TSet in the engine uses. It resolved to **39–43 different globals
+  per binary** and was DECOY-ONLY on Solarpunk and Satisfactory 5.2.
+- The **register-nibbled** form of the accepted pattern took **0 hits**. Over-wildcarding does
+  not generalise a pattern; it just stops it matching. That is now the third independent
+  confirmation of the exact-register rule for this target.
+
+The leading `lea rdx,[rsp+d32]` was also dropped on purpose — a frame-layout detail is not a
+semantic anchor, and the pattern is equally unique without it.
+
+### FF7 Rebirth: question answered, patterns deliberately NOT added
+
+**Yes, it has `FSparseDelegateStorage`.** Proven from `.rdata`, which carries
+`SparseDelegateFunction`, `MulticastSparseDelegateProperty` and even the `SparseDelegateReport`
+console command with its help text. So the storage exists and every one of our sparse patterns
+simply misses this fork's codegen — including both new ones.
+
+Its other four targets are in reasonable shape (GNames `1490D3C00` n=5, GObjects `14871EB38`
+n=5 with `GOBJ_RE1` independently finding the `-0x10` base, GWorld `148F30420` n=3, GEngine
+`148F4B580` n=2), and the tool is recorded as working in-game on it.
+
+No pattern was added, for two reasons worth stating rather than hiding:
+
+1. **Cost/benefit.** Locating the global needs a dedicated RE pass on a 377K-function
+   symbol-less binary — the `SparseDelegateReport` console command is the obvious lead (find the
+   string xref, follow the `FAutoConsoleCommand` handler) and is recorded here for whoever picks
+   it up. Sparse is lazily resolved and non-critical: only the sparse-delegate drill-down
+   degrades, nothing in the boot path.
+2. **It probably would not transfer.** The hope was insurance for FF7 part 3. But the history
+   argues against it: FF7 Remake (4.18) and FF7 Rebirth (4.26 fork) share *no* signatures —
+   `GOBJ_RE2`/`GOBJ_V12` work on Remake, `GOBJ_RE1` on Rebirth, and `GENG_X4` is DECOY-ONLY on
+   Remake while merely divergent on Rebirth. A pattern mined from Rebirth would only help part 3
+   if it reuses the same fork *and* toolchain, which those two titles did not manage between
+   themselves. Better to re-mine when the binary exists.
+
+-----
+
+## 2026-07-26 - Two AOBs mined from Palworld (UE 5.1): a second sparse anchor + the broadest GEngine pattern yet (build 2426)
+
+Palworld ships no PDB, so this is a worked example of mining from a symbol-less binary. Ground
+truth first, patterns second — the reverse order silently produces patterns for a wrong address.
+
+### Establishing Palworld's truth without symbols
+
+The consensus table gave GNames `14944DB80` and GWorld `14965BBE0` at **12 agreeing patterns**
+each — not in doubt. GObjects showed a `1494ED280` / `1494ED290` pair (6 patterns each, exactly
+`base` and `base+0x10` = ObjObjects). SparseDelegates had **one** pattern and nothing to
+corroborate it, so it was confirmed structurally instead: disassembling the `SPARSE_ES2_1` site
+gives `FSparseDelegateStorage::NotifyUObjectDeleted` —
+
+```
+LEA  RCX,[0x148FB66B0]   ; passed as `this`
+CALL <TMap::Remove>
+MOV  EAX,[0x148FB66B8]   ; +0x8   \ the two int32s ValidateSparseDelegates range-checks
+CMP  EAX,[0x148FB66E4]   ; +0x34  /
+...
+LEA  RCX,[0x1494ED280]   ; then RemoveUObjectDeleteListener  => confirms GObjects too
+```
+
+### What was actually weak, and what was not
+
+| target | Palworld anchors | action |
+|---|---|---|
+| GNames / GWorld | 12 patterns each | nothing needed |
+| GObjects | 12 patterns | nothing needed (the ~40 wasted validations are cost, not risk) |
+| GEngine | 3 patterns, but X1/X3 overlap by construction ⇒ **2 independent shapes** | added one |
+| **SparseDelegates** | **1** — and its validator is the weakest we have, so it cannot rescue a miss | added one |
+
+### `SPARSE_PAL51_1` — a second sparse anchor
+
+Anchors the element-address block rather than `NotifyUObjectDeleted`:
+`lea r,[rax+rax*2]; shl r,5` (stride 0x60) → **`add r,[SparseDelegates]`** → `lea r,[r+8];
+cmovz; test; jz near` → `mov eax,[r+8]; cmp eax,[r+0x34]` (the TSet Num-vs-Max compare).
+`SPARSE_DI427_2` models the same semantics but with a *short* jz and a different instruction
+order, which is why it takes 0 hits here. 29 literal bytes; fires on exactly three binaries,
+decoy-free on all: Palworld 2/2, **UE 4.26 Satisfactory 2/2 UNIQUE-OK** (an unplanned bonus — it
+is not 5.1-only), and DQ I&II HD-2D (2 hits converging on one address). Zero hits on the other
+32 programs. Placed at priority **150, deliberately last**, so it cannot perturb any existing
+selection — it is the backup for when `SPARSE_ES2_1`'s site changes, not a replacement.
+
+The register-agnostic nibbled variant was measured and **rejected**: it produced a decoy on
+Palworld itself, reproducing the trap already recorded for `SPARSE_DI427_2`. Exact-register forms
+remain the safe ones for this target — that is now two independent confirmations.
+
+### `GENG_X4` — mined on 5.1, useful nearly everywhere
+
+`mov rax,[GEngine]; test rax,rax; jz; mov rcx,[rax+disp32]; test rcx,rcx; jz` — null-check the
+engine, load one of its object members at a **32-bit** displacement, null-check that. The
+`?? ?? 00 00` is load-bearing: it pins the member load to a disp32, which UEngine's layout forces
+and which keeps the pattern off the far commoner 8-bit-displacement `mov rcx,[rax+0x30]` idiom.
+
+Correct on **twelve** oracles spanning UE 4.20 → 5.7 — UNIQUE-OK on 4.22 / 4.24 / 4.26 / 4.27 /
+5.2 / 5.5 Meltopia / 5.6, and correct-site-first on 4.20 / 4.25 / both 5.5 Everspace builds / 5.7.
+On Avowed all 53 hits converge on one address.
+
+**Recorded honestly, because it is not clean everywhere:** on FF7 Remake it is DECOY-ONLY (106
+hits, 3 distinct targets) and FF7 Rebirth is similarly divergent (90 hits, 6 targets) — the
+SquareEnix forks reuse this shape for something else. It costs nothing today because `GENG_X3`
+(pri 105) wins on FF7 Remake first, and `ValidateGEngineSlot` derefs the slot and demands a
+reflected `GameViewport` property. Placed at 115, behind the three cleaner X-family patterns.
+
+A rejected candidate is worth recording too: `mov rcx,[G]; test; jz; call [vtable]` looked
+plausible and produced **76–93 different targets per binary**. Divergent hits mean a generic
+idiom; convergent hits mean a real global. That single test separated the two candidates.
+
+### Verification
+
+Full 35-program re-sweep after both additions: **the regression matrix is byte-for-byte
+identical** — every target on all 20 oracles still resolves correctly and no landing pattern
+moved. Palworld's SparseDelegates is now `n=2`. Build + tests green.
+
+-----
+
+## 2026-07-26 - Corpus to 35 programs / 20 oracles: UE 4.24 + 5.1 + a same-game cross-build pair; sparse delegates settled (build 2420)
+
+Five more Ghidra projects, all produced with the current Ghidra: `DropIn_UE424` (UE 4.24.3, PDB),
+`ES2_UE55` (UE 5.5, 2025-06-17 build, PDB), `Meltopia_V2` (UE 5.5, PDB **now applied**),
+`Palworld` (UE 5.1) and `FF7Re` (FF7 Rebirth). Corpus: **35 programs, 20 with ground truth,
+twelve engine versions.** No new pattern was needed — **every target on every one of the 20
+oracles still resolves to the correct address**, and the four pre-existing fall-throughs are
+unchanged.
+
+### UE 4.24 settles the sparse-delegate question
+
+`DropIn_UE424` carries a `FSparseDelegateStorage::SparseDelegates` symbol whose mangled name
+demangles to
+
+```
+TMap<UObjectBase const*, TMap<FName, TSharedPtr<TMulticastScriptDelegate<FWeakObjectPtr>>>>
+```
+
+— a **raw pointer key**, identical to 4.25 / 4.26 / 4.27 / 5.x. Sparse delegates arrived in 4.23,
+so **only 4.23 itself is now unverified** and no 4.23 binary exists in the corpus. `Aura` still
+probes the live key shape rather than gating on a version number, which is what keeps 4.23 and
+any licensee fork safe without a binary; the note in `Himmel.h` that once claimed
+"4.23-4.26 remain unverified" is now down to one version. All five 4.24 targets resolve with no
+new patterns (`GOBJ_ES53_1` / `GNAM_V8` / `GWLD_TQ_1` / `SPARSE_DI427_1` / `GENG_X1`).
+
+### The same-game cross-build pair — patterns survive a game update
+
+`ES2-0517` (2025-05-17) and `ES2_UE55` (2025-06-17) are the same game, same engine, two manifests
+apart. Every global moved:
+
+| | 0517 | UE55 | delta |
+|---|---|---|---|
+| GObjects | `149AA7EE0` | `149AA5F60` | -0x1f80 |
+| GNames | `149C009C0` | `149BFE940` | -0x2080 |
+| GWorld | `149B37D18` | `149B35DD8` | -0x1f40 |
+| SparseDelegates | `149AA7E90` | `149AA5F10` | -0x1f80 |
+| GEngine | `149DA5810` | `149DA37B0` | -0x2060 |
+
+so this is a real re-find, not a trivially identical binary. Both builds land on the **same
+pattern with the same cost for all five targets**. That is the first direct evidence in the
+corpus that a signature survives a shipped patch rather than merely a version bump — every other
+pair differs by engine version too.
+
+### Meltopia: PDB applied via MSDIA, and it vindicates the consensus method
+
+The first import silently failed to apply Meltopia's 347 MB PDB; the retry succeeded by selecting
+the **MSDIA** loader — **PDB-Universal fails on this file**. Worth remembering as a first
+resort when a game ships a PDB and the probe still reports zero UE globals.
+
+The payoff is a clean, blind validation. While Meltopia had no symbols, the sweep's consensus
+table predicted GEngine `149F002F8`, GWorld `149F03D10`, GObjects `149D87430`, GNames
+`149CA3C80`. The PDB then gave `149f002f8`, `149f03d10`, `149d87420` (+0x10 = `149d87430`) and
+`149ca3c80` — **all four exact**. The ≥3-independent-patterns-agree heuristic has now been
+confirmed against symbols twice (Everspace, Meltopia).
+
+### A caution about pruning, learned the same day
+
+`GWLD_V7` ("Palworld long context") sat at **0 correct across the whole corpus** and appeared in
+the dead-weight table — and then went **UNIQUE-OK the moment Meltopia gained symbols**. A pattern
+with *no proof* is not the same as a pattern with *counter-proof*.
+
+So the four GWorld patterns removed in build 2409 were re-tested against all three new oracles
+rather than assumed. `GWLD_V2` / `V4` / `V5` / `V6` are still `DECOY-ONLY` on every one — now
+**0 correct across 12 oracle groups** while firing 11–395 times each. That is counter-proof, and
+it is precisely why those went and V7 stayed. Both facts are recorded in the corpus note in
+`Himmel.h` so the next pruning pass starts from the right test.
+
+### Palworld and FF7 Rebirth close two attribution loops
+
+Both are symbol-less noise probes, but each is the binary its namesake patterns were contributed
+for, and neither had ever been in the corpus:
+
+- **`GOBJ_RE1`** ("FF7 Rebirth add+cmp+jge") had **zero hits anywhere** across 31 programs. On
+  FF7 Rebirth it hits exactly once — it was never broken, just never tested on its own game.
+- **`GWLD_V7`**, **`GOBJ_V13`** and **`GOBJ_V9`** ("Palworld …") all fire on Palworld, the UE 5.1
+  title they were named after and the corpus's only 5.1 sample.
+
+Fourteen patterns still hit nothing anywhere (`GOBJ_SAT425_1`, `GOBJ_RE3`, `GOBJ_V11`,
+`GOBJ_SF_1`, `GOBJ_PS4`, `GOBJ_PS5`, `GOBJ_CT3`, `GNAM_SAT52_1`, `GNAM_V6`, `GWLD_GH_2`,
+`GWLD_V1`, `GWLD_SF_3`, `GWLD_G427_3`, `GWLD_G427_4`). On the evidence above they are being left
+alone: zero cost at their priorities, and the corpus keeps demonstrating that "never seen to
+fire" often means "the right binary is not here yet".
+
+-----
+
+## 2026-07-26 - Pattern tables sorted + compile-time-enforced; 4 never-correct GWorld patterns removed (build 2414)
+
+### The tables had drifted out of priority order, and the file was lying about it
+
+The user asked why `GNAM_V1`/`V3`/`V4` "still have not been re-prioritised". They **had** been —
+demoted to 870/880/890 in build 2405 — but the array had not been re-sorted, so all three still
+sat under a `// 500–590: Tier 3 — short patterns` header. `GNAM_V5` (850) sat inside the Tier-1
+block, `GNAM_V2` (860) inside Tier 2, `GOBJ_PS7` (970) under `// 600–690`, and `GWLD_G42_1`
+(880) inside the 325–365 run. `ScanForTarget` sorts by priority so **behaviour was always
+correct** — but anyone reading the file got a different order from the one that actually runs.
+That is a worse failure than a plain bug: it silently invalidates review.
+
+All five tables are now written in priority order, the band headers match their contents, and
+the invariant is **enforced by the compiler** rather than by discipline:
+
+```cpp
+ASSERT_TABLE_ORDER(GOBJECTS_PATTERNS);   // static_assert: sorted AND no duplicate priorities
+```
+
+Verified the guard actually fires by deliberately mis-numbering an entry:
+`error C2338: static assertion failed: 'GNAMES_PATTERNS must be listed in priority order'`.
+Duplicate priorities are rejected too — two patterns on one number have an order that depends on
+the sort's stability, which makes a regression sweep unreproducible.
+
+### GWLD_V2 / V4 / V5 / V6 removed — never once correct in 31 programs
+
+The user's read that `AOB_GWORLD_V5` / `V6` "look a bit short, priority should be low" was right,
+and the data went further than that. Across 31 programs (9 groups with GWorld ground truth):
+
+| pattern | literal bytes | matches | reaches truth on |
+|---|---|---|---|
+| `GWLD_V4` `48 8B 3D ?? ?? ?? ?? 48 85 FF` | 6 | 5,809 | **0 of 9** |
+| `GWLD_V6` `48 89 1D ?? ?? ?? ?? E8` (write) | 4 | 2,403 | **0 of 9** |
+| `GWLD_V2` `48 89 05 ?? ?? ?? ?? 48 85 C0 74` (write) | 7 | 1,301 | **0 of 9** |
+| `GWLD_V5` `48 39 05 ?? ?? ?? ?? 74` | 4 | 929 | **0 of 9** |
+| `GWLD_V3` `48 8B 1D ?? ?? ?? ?? 48 85 DB` — **kept** | 6 | 22,581 | 6 of 9 |
+
+Every shape is already covered by a longer sibling that does work: the `mov rdi,[GWorld]` read by
+`SP57_3`/`G427_2`/`SF_4`, the rax-write by `SAT426_2`/`ES53_1`/`SAT425_3`, the rbx-write by
+`SF_3`. Removing them loses no mechanism, only the degenerate context-free form.
+
+**The deciding argument is specific to GWorld: a wrong GWorld is worse than no GWorld.**
+`ValidateGWorldBasic` is deliberately loose, and when it is fooled the damage is silent — exactly
+what happened on Solarpunk, where `GWLD_SF_2` matched a decoy `.data` global, passed validation
+and produced a wrong world. With nothing resolving, Genau instead falls back to instance-scan
+recovery, which found the *right* world on that same title. A pattern that has never once been
+correct is therefore pure downside here, however low its priority.
+
+### Why the GNames short patterns were NOT removed
+
+Same question, different answer, because the evidence differs. Over the same corpus
+(10 GNames oracle groups): `GNAM_V2` 8 correct / 2 decoy-only, `V5` 8/2, `V3` 7/3, `V4` 6/4,
+`V1` 6/4. They are **redundant, not wrong** — where each is correct there are 3–14 other correct
+patterns, so deleting them changes no result today, but "correct yet redundant" is worth keeping
+as insurance for an engine build the corpus does not cover, whereas "never correct" is not. The
+second half of the argument is the validator: `ValidateGNames` reads the pool structure and is
+strong, while `ValidateGWorldBasic` is loose and has been fooled in the field. At 850–890 they
+are only reached when everything above failed; on all 10 oracles GNames resolves by 715 at the
+latest, so they are never even scanned.
+
+Re-ran the full 31-program sweep after both changes: the regression matrix is **byte-for-byte
+identical**, and all eight symbol-less titles still pick GWorld at priority 100–390, far above
+the removed slots.
+
+### The file header was stale, and a second dead constant fell out of checking it
+
+The top-of-file block still said *"128+ AOB pattern database"* and *"signatures for GObjects,
+GNames, GWorld"* — it never mentioned **SparseDelegates or GEngine at all**, despite both being
+first-class `AobTarget` values. Its source list also overclaimed: `RE1-RE5` when only RE1–RE3
+exist, `UD1-UD3`, `CT1-CT5`, and `D7_1` which was deleted back in 2404.
+
+Rewritten with a per-target breakdown (counts machine-verified against
+`extract_patterns.py`, not hand-copied), the priority-order + `static_assert` rule, the
+"verify against the corpus before trusting it" step with the actual command, and a description
+of what the 31-program / 17-oracle corpus contains and why half of it deliberately has no
+ground truth.
+
+Auditing "is every declared constant actually in a table?" then turned up
+**`AOB_GOBJECTS_CT2`** — dead in exactly the way `AOB_GNAMES_UD1` was, and worse on inspection:
+`push rbx; sub rsp,0x20; mov rbx,rcx; test rdx,rdx; jz; mov` is a bare MSVC prologue matching
+thousands of functions, and it contains **no RIP-relative operand at all**, so there was nothing
+for `TryResolveMatch` to resolve — wiring it up could never have produced an address. Removed.
+
+Since this class of rot has now bitten twice, `extract_patterns.py` reports it: any `AOB_*`
+constant declared but referenced by no `PATTERNS[]` array is listed as `DEAD`, with a whitelist
+for the one deliberate exception (`AOB_NAMEDECRYPT_ME1`, which `Genau::ResolveNameKeyTable`
+consumes directly because it de-obfuscates FName payloads rather than resolving a pointer).
+Verified by planting a fake constant and watching it get flagged.
+
+-----
+
+## 2026-07-26 - 31-program AOB sweep: GEngine symbol export + FF7R coverage, two dead patterns removed, one unmatchable pattern fixed (build 2408)
+
+The corpus grew from 8 binaries to **31 programs across 18 Ghidra projects — 17 of them with PDB
+truth**, spanning UE 4.18 / 4.20 / 4.22 / 4.25 / 4.26 / 4.27 / 5.2 / 5.3 / 5.5 / 5.6 / 5.7. The
+sweep is now a script (`tools/ghidra/sweep.sh` + `aggregate_sweep.py`) rather than a hand-run
+command per project, because the next round has to be repeatable.
+
+**Headline: every target on every one of the 17 oracles resolves to the correct address.** No
+pattern added in this or the previous two builds changed what any engine version lands on.
+
+### What the bigger corpus exposed
+
+| finding | detail |
+|---|---|
+| **GEngine was never given a symbol export** | `?GEngine@@3PEAVUEngine@@EA` is exported by the Engine module in every modular build we have binaries for — verified in the export table of Satisfactory's `FactoryGame-Engine-Win64-Shipping.dll` on **both** UE 4.26 (ordinal 13690) and UE 5.2 (19170), sitting directly beside `?GWorld@@3VUWorldProxy@@A`. GObjects and GWorld had `SIG_EXPORT` entries; GEngine simply never got one, so modular titles paid for a full AOB sweep to find something `GetProcAddress` returns in O(1). Added at priority 0. |
+| **`AOB_GNAMES_SAT422_1` could never match anything** | It omitted the `48 85 C0` (`test rax,rax`) between the load and the jump — and MSVC cannot emit `mov`+`jnz` with no flag-setting instruction between them, so the string was unmatchable *by construction*. Zero hits across all 31 programs, including the very Satisfactory UE 4.22 build it is named after. Re-derived from that build's PDB (`FName::GetNames` @ `0x140BCEBF0`, load at +4) and moved 730 → 715, so UE 4.22 now lands on its purpose-built anchor instead of falling through to `GNAM_CT4`, a `ret; mov [rip],rbx` **write** pattern that only got there after rejecting a decoy. |
+| **`AOB_GNAMES_UD1` was dead code** | Declared since the DB was written, never referenced by `GNAMES_PATTERNS[]` — it has never been scanned for in any build. The suspicion about it was well founded: `cmp dword [rbp-0x18], 0` pins an exact frame-pointer-relative stack slot, a property of one compilation of one function in one game. Deleted rather than wired up. |
+| **`GNAM_CT2` is byte-for-byte redundant with `GNAM_UD2`** | CT2 is UD2 minus its final `05`. Measured over all 31 programs the two produced **identical** hit counts on every single one (0/0, 10/10, 11/11, 15/15, 36/36, 932/932 on FF7R…). The `C6` CT2 stops on is `mov byte ptr`, and the only encoding that ever follows here is the `C6 05` UD2 pins. CT2 removed; UD2 takes priority 300. |
+
+### FF7 Remake: the one binary where GEngine found nothing
+
+Of 31 programs, FF7R was the only one where **every** GEngine pattern missed. Its
+`GetWorldFromContextObject` wrapper spills the result (`mov rbx,rax`) *before* the null check, so
+`GENG_X1`'s trailing `48 85 C0` no longer follows the call — a length change no nibble can
+bridge. New **`GENG_X3`** is X1's head only (`sub rsp,0x2X; mov rdx,rcx; mov rcx,[GEngine];
+call`, REX nibble-masked, tail dropped). Dropping the tail was measured, not assumed: X3 is
+UNIQUE-OK with **zero decoys** on both calibration oracles and finds strictly *more* correct
+sites than X1 (DropIn 3 vs 2, Solarpunk 2 vs 1). It also closes UE 5.5, where X1 misses.
+
+Disassembling X3's single FF7R hit confirmed the address and handed over two more constants for
+free — the caller runs the returned UWorld's `InternalIndex` through
+`cmp [0x1453BD48C]` / `mov rax,[0x1453BD480]` / `lea rcx,[rax+idx*24]`, i.e. textbook
+`GUObjectArray.IndexToObject`. So FF7R is now a **partial oracle**: `GEngine = 0x145879EE8`,
+`GObjects = 0x1453BD470`, both corroborated by independent patterns. GNames/GWorld are
+deliberately left unset — a guessed truth is worse than none, because it mislabels every hit as
+a decoy (the mistake that once got two good GEngine patterns demoted).
+
+GEngine coverage is now complete over the corpus: `GENG_X1` lands on 8 engine versions,
+`GENG_X3` on the 2 it misses.
+
+### Band discipline extended to GObjects and GWorld
+
+Build 2405 fixed the GNames table; the same audit had never been applied to the other two.
+`GWLD_V3` alone takes **22,017 matches** — 95.7 per MB of `.text` on a monolithic game EXE, 2,658
+on FF7 Remake by itself — out of six literal bytes. `GOBJ_V1` takes 10,152 (53/MB).
+
+Be precise about what moving them buys, because the two tables differ:
+
+- **GObjects** (V1/V2/V3/V5/V6/V7/CT3 + PS6/PS7, 390–660 → 890–970): a **real** ordering change.
+  They previously outranked `GOBJ_G427_2` (700), `G427_4` (720), `CT1` (800) and the Octopath
+  `OT_1`/`OT_2` pair (820/840) — all 9–13 literal bytes against these six or seven.
+- **GWorld** (V2/V3/V4/V5/V6, 500–580 → 900–980): **consistency only**. They already sat behind
+  every other GWorld pattern (highest was 435), so the validator never reached them on any
+  oracle. The point is that the band now *means* something. The one genuine ordering change here
+  is `GWLD_G42_1` (7 literal bytes) 340 → 880.
+
+**Counter-example kept in the header comment,** because literal-byte count is necessary but not
+sufficient: `GOBJ_ES53_1` has 16 literal bytes yet takes 21–475 matches on every monolithic
+title — its shape is the generic MSVC function-scope-static + `atexit` registration thunk, so it
+matches once per static with a destructor. It stays at priority 100 anyway: it is the landing
+pattern for six module-instances, and patterns are scanned in **batches of 8** with an early
+return on the first validated match, so winning from batch 1 avoids every later `.text` pass.
+Rejecting a few hundred candidates by validation is far cheaper than an extra AVX2 sweep of a
+130 MB `.text`. Do not demote a noisy pattern that is also a winner.
+
+### Harness defects fixed along the way
+
+Three of these silently corrupted results rather than failing loudly, which is the dangerous kind:
+
+- `scan_patterns.java` wrote a fixed `scan_patterns.txt`, so a `-process` run over a **modular**
+  project overwrote itself and only the last DLL survived. Outputs are now keyed by
+  `tag + program + image base` — all three are needed: `FactoryGame-FactoryGame-Win64-Shipping.dll`
+  exists in both the 4.26 and 5.2 projects, and Satisfactory v1.2.3.1 holds a good *and* a broken
+  import of Core/CoreUObject/Engine under identical names. The broken duplicate had overwritten
+  the real 5.6 Engine results.
+- Programs with zero executable bytes (failed imports, image base `0000:0000`) are now skipped.
+- Hit counts were reported as `hits.size()`, which is capped at 40,000 — hot patterns were
+  under-counted. Now counted uncapped, with only the *detail* list capped.
+- `extract_patterns.py` parsed the `#define SIG_RIP(...)` macro **definition** as a signature,
+  producing a phantom 154th row with `pattern = "<UNRESOLVED:pat>"`.
+- The regression model itself was wrong: `>>> SELECTED` names the first pattern that *hits*, but
+  `ScanForTarget` validates every match and moves on when they all fail. A `DECOY-ONLY` top
+  pattern is a **fall-through (cost)**, not a wrong answer **(correctness)**. `aggregate_sweep.py`
+  now replays the real walk. Reading the old line as "what we resolve to" overstated risk.
+
+### Corpus notes for next time
+
+- `Satisfactory_UE521.rep` is **mis-imported**: only the *game* DLL is 5.2, and its
+  Core/CoreUObject/Engine are duplicates of the 4.26 DLLs (plus four broken empty programs). The
+  real 5.2 engine DLLs + PDBs were imported into a separate `SF521_pdb` project so the original
+  stays untouched. UE 5.2 is now a full oracle.
+- `Meltopia` ships a 347 MB PDB that its import never applied — it works as a monolithic UE 5.5
+  noise probe, and re-importing with the PDB would make it a second symbolised 5.5 oracle.
+- `ES2-0517` needs a one-time Ghidra language-version upgrade that `-readOnly` cannot save.
+- `Satfi426` is superseded by `Satisfactory_UE426` and can be deleted.
+
+All of this — the truth table, the per-project quirks, and the derivation procedure — is in
+[tools/ghidra/GROUND-TRUTH.md](../tools/ghidra/GROUND-TRUTH.md).
+
+-----
+
+## 2026-07-26 - GNames band discipline: short patterns demoted, hand-derived UE4 ones promoted; UE 4.25 folded in (build 2405)
+
+### The GNames table had drifted in *both* directions
+
+The user's read of it was right, and the sweep data was blunt about it. A pattern's band is
+supposed to track how **specific** it is — count its literal (non-wildcard) bytes — but:
+
+| pattern | old pri | bytes | literal | measured |
+|---|---|---|---|---|
+| `GNAM_V5` | **110** (Tier 1) | 19 | 7 | 16,686 hits on 4.27; OK-BEHIND on every engine it touches |
+| `GNAM_V2` | 400 | 14 | 6 | 16,692 hits on 4.27 |
+| `GNAM_V1`/`V3`/`V4` | 500/520/540 | 8 | **4** | DECOY-ONLY on 4.20/5.5/5.7; 539-2060 hits elsewhere |
+| `GNAM_CT3` | **800** | 27 | **20** | UNIQUE-OK on 4.20, MISS on every FNamePool binary |
+| `GNAM_G42_1` | 840 | 18 | 9 | UNIQUE-OK on 4.20, MISS elsewhere |
+
+The four-literal-byte patterns were running *before* the twenty-literal-byte ones. The
+pre-FNamePool UE4 entries had been hand-derived later and deliberately lengthened to cut
+collisions — but nobody moved them out of the last-resort band afterwards.
+
+Re-sorted from measurement, not vibes: `V5→850`, `V2→860`, `V1→870`, `V3→880`, `V4→890`;
+`CT3→700`, `G42_1→710`, `CT4→720`, `SAT422_1→730`. Promoting the UE4 set is provably free —
+they target `TStaticIndirectArrayThreadSafeRead`/`TNameEntryArray`, a different structure, and
+MISS on all four FNamePool binaries. A band-discipline note now sits in `Himmel.h` so the rule
+survives: **fewer than ~8 literal bytes means 800+, regardless of what it anchors on.**
+
+**Four of five engine versions improved, none regressed:**
+
+| | before | after |
+|---|---|---|
+| UE 4.20 | `GNAM_V5` DECOY-ONLY (after ~710 wasted validations) | **`GNAM_CT3` CORRECT (all hits)** |
+| UE 5.5 | `GNAM_V5` OK-BEHIND, 15 hits | **`GNAM_ES53_1` CORRECT (all hits)** |
+| UE 5.6 | `GNAM_V5` AT RISK, 5 decoys first | **`GNAM_ES53_1` CORRECT (all hits)** |
+| UE 5.7 | `GNAM_V5` OK-BEHIND, 86 hits | **`GNAM_SAT425_3` CORRECT (all hits)** |
+| UE 4.27 | `GNAM_DI427_2` CORRECT | unchanged |
+
+### UE 4.25 added — and it closes the sparse-delegate gap
+
+`ES2-UE425.rep` (Everspace 2 from a Steam depot, **UE 4.25.2**, full PDB) is the FField/FProperty
+transition band. Ground truth: `GUObjectArray` `0x1444B0510`, `NamePoolData` `0x144497D00`
+(via `FNameDebugVisualizer::GetBlocks` @ `0x140EF8410`), `GWorld` `0x1445F1160`,
+`SparseDelegates` `0x1440070C0`, `GEngine` `0x1445EDAD8`.
+
+**It needs no new patterns** — GEngine `GENG_X1`, GNames `GNAM_V8`, GWorld `GWLD_TQ_1` and
+Sparse `SPARSE_DI427_1` are all CORRECT-on-all-hits; GObjects reaches truth via
+`GOBJ_SAT425_2`. More usefully it *extends* two families: `SPARSE_DI427_1/_2` and
+`GNAM_DI427_1/_2`, both mined on 4.27, are correct here too.
+
+And it settles a documented unknown: the 4.25 PDB gives
+`TMap<UObjectBase const*, …>` for `FSparseDelegateStorage::SparseDelegates` — **a raw pointer
+key, identical to 4.27 and 5.x**. The "UE 4.23-4.26 uses FObjectKey" claim is now falsified on
+two independent UE4 builds; only 4.23/4.24 remain unverified.
+
+`GENG_X1` is now correct-first on **4.20, 4.25, 4.27, 5.6 and 5.7** — five engine versions from
+one signature. `GROUND-TRUTH.md` updated with the 4.25 row and its `GS_TRUE` line.
+
+-----
+
+## 2026-07-25 - Removed the 27k-decoy GNames pattern; sparse validator now checks content (build 2404)
+
+Closed the two weaknesses the six-engine harness surfaced last build.
+
+### `GNAM_D7_1` removed
+
+It was `"48 8D 0D ?? ?? ?? ?? E8"` — `lea rcx,[rip+X]; call`, **three literal bytes**, i.e. a
+match on essentially every this-call in the image. Measured hit counts: **27,001** on UE 4.20,
+**104,897** on UE 4.27, **40,000** on UE 5.5. Every one of those was resolved and validated
+(several SEH-guarded reads each) *before* the scan could reach the patterns that actually work
+on those titles — on UE 4.20 the winners are `GNAM_CT3` (pri 800) and `GNAM_G42_1` (pri 840),
+both well after D7_1 at 560.
+
+It was never the sole correct pattern on any of the eight binaries in the sweep, and its own
+comment already said "same as V2 but shorter context; already covered by V2/V5". Dumper-7 can
+afford the bare string because it follows the CALL and checks the callee for
+`InitializeSRWLock` + a `"ByteProperty"` reference — a second stage we do not implement, so for
+us it was pure cost. Re-adding it would need `AobResolve::CallFollow` plus that callee check,
+not the byte string.
+
+**Removing it improved DropIn**: GNames now selects `GNAM_DI427_2` → CORRECT (all hits),
+where it previously fell through `GNAM_V7` and D7_1's 104,897 validations first.
+
+### Validation is now bounded
+
+Independently of that pattern, `ScanForTarget`'s per-match validation loop gained a
+`kMaxValidatePerPattern = 4096` cap with a `LOG_WARN`. If the correct site is not in a
+pattern's first 4096 matches, that pattern was not selective enough to trust anyway — and the
+warning makes the next over-generic signature visible instead of silently expensive.
+
+### `ValidateSparseDelegates` now checks content, not just shape
+
+The old validator only range-checked two int32s, so it accepted any `.data` blob that looked
+vaguely like a TMap — which is why offline sweeps kept finding sparse patterns whose decoys
+resolve to unrelated 0x60-stride TSets, and why an `OK-BEHIND` sparse pattern would have been
+genuinely dangerous. When the map is **non-empty** it now also requires that one of the first
+32 slots holds a key that is a userspace pointer **whose own first qword is a vtable inside the
+module image** — which is exactly what `TMap<UObjectBase const*, …>` guarantees and what a map
+keyed by FName/int/FString cannot fake. Empty maps are still accepted on shape alone, on
+purpose: `FindAll` can legitimately run before anything binds a sparse delegate.
+
+### And the "SPARSE_SP57_1 risk" was a reporting bug, not a real one
+
+Last build flagged `SPARSE_SP57_1` on Solarpunk as "2 decoys scan first". It does not — its
+correct site is the *first* match (`0x1413D5EE5`, well below the decoys at `0x143DB6E21`). The
+harness printed the warning whenever any decoy existed, ignoring scan order. Fixed to compare
+the two indices, so the verdict now reads `CORRECT first (2 decoy(s) scan later, never
+reached)`. The strengthened validator above is still worth having — it protects the genuinely
+`AT RISK` orderings that a future game may produce.
+
+### Re-verified
+
+Full six-engine sweep re-run after the removal: no target regressed on any binary, `GENG_X1`
+still correct-first on 4.20/4.27/5.6/5.7, `SPARSE_ES2_1` still correct on 4.27/5.5/5.6.
+`tools/ghidra/GROUND-TRUTH.md` added — the per-project `GS_TRUE` strings, the verdict glossary,
+and the procedure for folding in the next PDB game, so the next sweep is copy-paste.
+
+-----
+
+## 2026-07-25 - Six-engine regression harness; a measurement error corrected (build 2402)
+
+Two more symbolised projects arrived — **Everspace re-analysed WITH its PDB** (`ES1-420.rep`,
+UE 4.20) and **Satisfactory v1.2.3.1** (UE 5.6.1, modular, CoreUObject+Core+Engine+FactoryGame
+all imported). Both were folded into the sweep, which now covers **six engine versions with
+real symbols on five of them**: 4.20, 4.27, 5.5, 5.6, 5.7 (+ Avowed 5.3, symbol-less).
+
+### The correction
+
+Last build demoted `GENG_X1` and `GENG_DI427_1` on the strength of "5 decoys on Everspace 4.20".
+**That was a measurement artifact.** Everspace had no symbols then, so the sweep had been given
+a *placeholder* truth value (`GEngine=5`); every hit necessarily compared unequal and got
+labelled a decoy. With the real PDB both are **UNIQUE-OK on 4.20** — `GENG_X1` 1/1,
+`GENG_DI427_1` 5/5. Priorities restored, and `GENG_X1` is now the lead GEngine pattern: it is
+correct-first on **4.20, 4.27, 5.6 and 5.7**, the broadest single signature in the file.
+
+Systemic fix so it cannot recur: `scan_patterns.java` now emits **`NO-TRUTH`** instead of
+`DECOY-ONLY` when a target has no plausible truth value, and refuses to render decoy counts at
+all in that case. It also skips `CallFollow`/`Symbol*` resolutions, whose model it cannot
+reproduce (`GNAM_V7` is CallFollow and had been scoring phantom decoys the same way).
+
+### The regression harness (answers "does adding AOBs break anything?")
+
+`scan_patterns.java` gained a **`>>> SELECTED`** line: walking priority order, which is the
+FIRST pattern that hits, and does it reach truth? That mirrors `Genau::ScanForTarget`, which
+validates each match and takes the first that passes — so a newly-added lower-numbered pattern
+can only do harm if it hits, survives validation, AND is wrong.
+
+Result across all eight binaries/modules: **every time a newly-added pattern is selected it is
+CORRECT on all hits** (`GENG_X1` ×4, `GENG_ES55_1`, `GWLD_DI427_1`, `SPARSE_DI427_1`). No
+existing target changed hands on any binary — Solarpunk still selects `GWLD_SP57_1` /
+`SPARSE_SP57_1`, ES2 still selects `GWLD_ES2_1` / `SPARSE_ES2_1`.
+
+The harness also surfaced two **pre-existing** (not new) weaknesses worth recording:
+* `GOBJ_ES53_1` (pri 100) and `GNAM_V5`/`GNAM_V7` are selected first on several binaries and
+  reach truth only after the validator rejects their decoys — by design, since
+  `ValidateGObjects`/`ValidateGNames*` are strong. The one to watch is `SPARSE_SP57_1` on
+  Solarpunk (2 decoys scan first) because `ValidateSparseDelegates` is deliberately weak.
+* UE 4.20 GNames is covered only in the last-resort band (`GNAM_CT3` pri 800, `GNAM_G42_1`
+  pri 840 — both UNIQUE-OK, anchored on `FName::GetNames`) while `GNAM_D7_1` fires **27,001**
+  decoys at pri 560 first. Correct, but slow.
+
+### Satisfactory 5.6.1 — no new patterns needed
+
+All five targets already resolve: GObjects `GOBJ_ES53_1`, GNames `GNAM_V5`, GWorld `GWLD_SF_1`,
+Sparse `SPARSE_ES2_1`, GEngine `GENG_X1`. Layout note: **the name pool moved from CoreUObject
+to Core by 5.6** — `NamePoolData` `0x18082E8C0`, recovered from `FNameDebugVisualizer::GetBlocks`
+(`lea rax,[pool+0x10]; ret`), the same 2-instruction oracle that worked on DropIn.
+
+`SPARSE_ES2_1` is now verified correct on **UE 4.27, 5.5, 5.6 and 5.7** — four engine versions
+from one signature.
+
+### Everspace 4.20 also validated the consensus technique
+
+Before its PDB existed, running the full database and keeping addresses that ≥3 independent
+patterns agreed on gave GWorld `0x1432E1AC0`, GObjects `0x142E797F0`, GNames `0x1431DEAD8`.
+The symbols confirmed **all three exactly** (`Names` is reached via `FName::GetNames`, which
+lazily `new`s a 0x408-byte `TNameEntryArray` — 4.20 predates FNamePool). Consensus is a sound
+fallback for any symbol-less binary.
+
+-----
+
+## 2026-07-25 - Three more Ghidra projects swept; GEngine gains UE5.5 (build 2401)
+
+Followed the DropIn work by running the same audit over three donated Ghidra projects.
+Net result: **one new signature, two demotions, and a clear "this one can't help" verdict.**
+
+**Everspace 2 `ES2-0517` — UE 5.5, and the second symbolised oracle.** The project name's
+`0517` is a **date, not a version**. There is no `++UE5+Release-` string in the image, so the
+version was pinned **structurally**: `FFieldVariant`=0x08 (≥5.1.1), `UEnum::Names` still
+`TArray<TTuple<FName,int64>>` (<5.6), `FUObjectItem` 24B **with `RefCount`@+0x14**, classic
+`FChunkedFixedUObjectArray` order (<5.8), and — decisively — the PDB's
+`EUnrealEngineObjectUE5Version` enum ends at `ASSETREGISTRY_PACKAGEBUILDDEPENDENCIES`, whereas
+vendored UE 5.8 adds `METADATA_SERIALIZATION_OFFSET` / `VERSE_CELLS` after it. `dump_types.java`
+gained enum support for exactly this: **the last member of that enum is the most reliable UE
+version marker available when the build strings are stripped and there is no PE on disk.**
+
+Audit found GObjects/GNames/GWorld/Sparse well covered but **GEngine hitting on only 1 of 4
+patterns** — `GENG_X1`/`X2` both MISS on 5.5 because 5.5 emits `FEngineLoop::Tick`'s null check
+as a NEAR `0F 84` where 4.27/5.7 use a short `74`, a length change no nibble can bridge.
+Added **`GENG_ES55_1`** (`UEngine::GetEngineSubsystem<T>` prologue): UNIQUE-OK on **both** 5.5
+(7 sites) and 5.7 (6 sites), zero hits on 4.27/5.3/4.20.
+
+The obvious 5.5 `FEngineLoop::Tick` pattern was **rejected**: 6 hits on Avowed resolving to six
+*different* globals. Recorded as a rule — **divergent hits mean a generic shape; accepted
+patterns' extra hits all converge on one address.**
+
+**Everspace 1 `ES1` — UE 4.20, no PDB.** Usable two ways. As a **negative control** it demoted
+two GEngine patterns that had looked fine on a 3-binary sweep (`GENG_X1` 1 decoy, `GENG_DI427_1`
+5 decoys here), so `GENGINE_PATTERNS` was reordered to put the three all-clean patterns
+(`X2`, `ES55_1`, `SP57_1`) first. And via **pattern consensus** — an address independently
+agreed on by N distinct signatures — it yielded truth without symbols: GWorld `0x1432E1AC0`
+(12 patterns), GObjects `0x142E797F0` (8), GNames `0x1431DEAD8` (3). No GEngine/Sparse
+consensus, as expected: 4.20 predates sparse delegates (4.23+).
+
+**Satisfactory `Satfi426` — UE 4.26 modular: cannot help as supplied.** The .rep holds only 3
+game DLLs; `FactoryGame-CoreUObject`/`-Engine`, which DEFINE the globals, were never imported.
+The game module does carry the IAT slots (`__imp_?GUObjectArray` `0x180722950`,
+`__imp_?GWorld` `0x180727CB8`, `__imp_?GEngine` `0x180727CB0`) — the "via `_imp_`" shape
+`GOBJ_SF_1` already models, with `RipDeref` doing the second hop at runtime — but **all 490
+referencing sites are game code** (`UFG*`/`AFG*`/`FFG*`), so nothing mined there would
+generalise, and no existing pattern scores a correct hit on it. Re-importing those two DLLs
+would make the project productive. (`find_syms3.java` stopped filtering `__imp_*` so the IAT
+is visible at all.)
+
+**Re-verified: all 12 DI427 signatures are 0-hit / 0-decoy on both new binaries**, so the
+gauntlet now stands at five: DropIn 4.27, ES2 5.5, Solarpunk 5.7, Avowed 5.3, Everspace 4.20.
+
+-----
+
+## 2026-07-25 - DropIn UE 4.27 PDB: 12 new AOBs, a new GEngine target, and three corrected premises (build 2399)
+
+**DropIn - VR Battle Royale** (Steam, `DropIn.exe`) is **UE 4.27.2** (`++UE4+Release-4.27-CL-18319896`,
+2021-11-30) and ships its full **286 MB PDB** — the project's first symbolised UE 4.27 oracle.
+It is a **Development** build (`.msvcjmc` + Live++ `.lpp_*` + `.uedbg` + engine source paths in
+`.rdata`), non-editor. Ghidra project `D:\Tools\GHIDRA_Projs\DropIn.rep`.
+
+**Method — the three-binary gauntlet.** Every candidate had to be `UNIQUE-OK` on DropIn (every
+hit resolves to the true VA, zero decoys) **and** 0-hit-or-correct on Solarpunk (UE 5.7) and
+Avowed (UE 5.3). This is stricter than the SP57 rule and it earned its keep twice: a 14-byte
+GObjects form that is decoy-free on DropIn produces 1 decoy on Solarpunk and **9** on Avowed,
+and making a sparse pattern register-agnostic with nibbles made it *worse* (picked up two
+unrelated 0x60-stride `TSet`s that scan **before** the real sites — fatal, because
+`ValidateSparseDelegates` only range-checks two ints).
+
+**What the audit of the existing database found.** Replaying all 140 signatures over the whole
+129 MB `.text`: GWorld 12 working, GNames 12, SparseDelegates 1 — and **GObjects 0 of 52**.
+Root cause, measured across all 400 xrefs to `ObjObjects.Objects`: the chunk-load destination
+register is rdi(156)/rsi(92)/r14(63)/rbx(40)/… and **never rcx**, because rcx is the *index*
+register at every one of those sites. `GOBJ_V1` hardcodes `48 8B 0C C8` (dest = rcx), so the
+entire V-series is structurally unable to fire. Compounding it, this build's `FUObjectItem` is
+**32 bytes** (`StatID` compiled in), so the within-chunk math is `shl r,5`, not the 24-byte
+`lea r,[r+r*2]; shl 4` the patterns assume.
+
+**Added — 12 signatures (source tag `DI427`)**: `GOBJ_DI427_1/2/3`, `GNAM_DI427_1/2`,
+`GWLD_DI427_1/2`, `SPARSE_DI427_1/2`, and 4 for the new GEngine target.
+`GWLD_DI427_2` is the first `mov qword[rip], imm32` (C7-form) **store** pattern in the file —
+that opcode shape was absent from all 52 GWorld entries, so this class of site was invisible in
+every game, not just this one (note `totalLen = 11`, not 7).
+
+**New — `AobTarget::GEngine`** (`Himmel.h`, `GENGINE_PATTERNS[]`). Resolves **`&GEngine`, the
+static slot**, not the object. `GENG_X1` (`UWorld::GetGameViewport`) and `GENG_X2`
+(`FEngineLoop::Tick`) are **cross-version** — verified on UE 4.27 *and* UE 5.7, and X1 also
+matches Avowed (5.3). Two payoffs: `FindLiveGameEngine` stops walking the entire object pool
+resolving a property offset per class (one deref instead), and — the user-visible one — a
+GameEngine-rooted CE record can be AOB-wrapped like a GWorld-rooted one instead of baking in an
+`allocateMemory` snapshot of a `UEngine*` that goes stale on restart. Scanned after
+GObjects/GNames in `FindAll` because the validator asks the reflected class for `GameViewport`.
+Surfaced over the pipe (`gengine`, `gengine_method`, `gengine_aob*`) and as a System-tab row.
+
+**Three premises corrected by ground truth:**
+
+1. **Sparse delegates on UE4 (feature unlocked).** `Aura.cpp`'s `UEVersion < 500` gate rested on
+   "UE 4.23-4.27 keys the outer map by `FObjectKey {FWeakObjectPtr, int32}` (16B)". The PDB says
+   the key is a raw `UObjectBase const*` — same as UE5 — and `FObjectKey` is **8** bytes
+   (`{int32 ObjectIndex; int32 ObjectSerialNumber}`); `FWeakObjectPtr` *is* those two ints, so
+   the old note double-counted. All six walker constants already matched 4.27 exactly. The gate
+   is now a **runtime key-shape probe** (first occupied outer key must look like a userspace
+   pointer), so 4.23-4.26 — for which we still have no symbols — fail safe rather than being
+   guessed at. `SPARSE_ES2_1` was verified to resolve correctly on 4.27 all along.
+2. **`Grimoire::FPROPERTY_ELEMSIZE` was 0x38 = `ArrayDim`, not `ElementSize` (0x3C).** Latent:
+   only used when dynamic offset validation fails. The `Genau` heuristic was likewise
+   `Offset_Internal - 0x14`; the correct delta is **0x10** in *both* known layouts
+   (4.25-4.27/5.0-5.1 → 0x4C-0x3C, 5.1.1+ → 0x44-0x34).
+3. **`DetectVersion` Tier 1 could essentially never match.** Its needles carry a trailing dot
+   (`"4.27."`) but real tags are `++UE4+Release-4.27` with nothing after the minor. Tier 1 now
+   drops the dot (the `++UEx+Release-` prefix is already all the context it needs) **and** runs a
+   second UTF-16LE pass — DropIn keeps the tag *only* as a wide literal (4 copies, zero ASCII).
+   `DetectVersionFromPEResource` also gained a StringFileInfo `ProductVersion`/`FileVersion`
+   fallback: DropIn's is literally `++UE4+Release-4.27-CL-18319896`, an O(1) lookup we were
+   ignoring. `kVersionDetectLogicRev` 1 → 2 so cached versions recompute once.
+   *(Correction to an earlier read: DropIn **does** have a valid `VS_FIXEDFILEINFO` (4.27.2) —
+   .NET's `FileVersionInfo` returns empty strings for it because they sit under a non-default
+   translation, which is why it first looked absent.)*
+
+**ProcessEvent detection hardened** (the primary pattern path was already correct — build 648 —
+and this PDB is its 4th independent 4.27 confirmation at **+0x220**, the first with a symbol
+proving the slot *is* `UObject::ProcessEvent`):
+* `kBodySize` `0xF00` → `0x2000`. Measured: pattern 2 sits at byte **3537** of a 5182-byte
+  `UObject::ProcessEvent` — 303 bytes (7.9%) inside the old window.
+* `FindAnyValidVTable` → `CollectCandidateVTables` (up to 12 distinct). `AActor::ProcessEvent`
+  is a thin override containing the FUNC_Native test but **not** the high-flag test, so the scan
+  returns −1 for any Actor vtable and used to fall through to the version table.
+* Version fallback: `>= 427 → 0x220`. `0x218` is slot 67 = `UObject::OverridePerObjectConfigSection`,
+  one slot before PE — exactly the build-647 failure. 4.25/4.26 deliberately left at `0x218`:
+  unmeasured, and RE-UE4SS's vendored `VTableLayout_4_2*_Template.ini` cannot settle it (computed
+  absolute slots give 4.27 = 70/`0x230`, i.e. those templates are editor-inclusive and sit 2 slots
+  above every non-editor measurement).
+
+**Tooling landed in `tools/ghidra/`** — `scan_patterns.java` (supersedes `verify_aob.java`: TSV
+input, nibble wildcards, and a decoy-**ordering** verdict), `extract_patterns.py` (whole
+`Himmel.h` → TSV), `gen_cands.py` (xrefs → mechanically enumerated candidates), plus
+`dump_xrefs2` / `dump_types` / `dump_vtables` / `pe_probe` / `dump_dataat` / `dump_func` /
+`find_syms3` / `scan_strings` / `probe`. `tools/README.md` documents the full PDB→AOB loop.
+
+**Layout facts now backed by real 4.27 symbols** (see technical-notes): `FProperty` ordering
+confirms the hard-won `feedback-fproperty-layout` note exactly (`ArrayDim@0x38`,
+`ElementSize@0x3C`, `PropertyFlags@0x40` — +4, not +8); `Offset_Internal@0x4C`,
+`FStructProperty::Struct@0x78`, `FField Next@0x20/Name@0x28`, `Outer@0x20` are byte-identical to
+what the tool already reports for SBDR; `UEnum::Names` is still the classic
+`TArray<TTuple<FName,int64>>` (the `FNameData` change really is 5.6+); legacy `UProperty` does
+not exist at 4.27; the `FNamePool` model (`FRWLock@0`, `CurrentBlock@8`, `Blocks[8192]@0x10`,
+`0x20000`-byte blocks, stride 2) that `ValidateGNamesStructural` assumes is exact.
+
+**Not done (deliberate):** re-rooting a *GWorld*-rooted CE export through GEngine when GWorld's
+AOB fails. `GEngine→GameViewport→World` does re-enter the GWorld subtree, but it needs path-prefix
+re-derivation — bigger than this change. Also unaddressed: the stride sweep still tries only
+{16, 24, 20}, so a 32-byte `FUObjectItem` like DropIn's is not in the candidate list (adding 32
+naively is unsafe — it aliases on 16-byte-item games, where it would validate and halve the
+object count).
+
+-----
+
 ## 2026-07-25 - AOB priority scheme widened 0–100 → sparse 0–1000 bands (build 2393)
 
 `Himmel.h`'s AOB priorities were cramped in 0–100 with collisions (e.g. three GObjects patterns all at

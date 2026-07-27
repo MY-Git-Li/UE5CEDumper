@@ -68,6 +68,15 @@ public interface IProxyDeployService
     /// 2+ of our proxy DLLs actually coexist in the same folder (only one
     /// activates at runtime).
     /// </summary>
+    /// <remarks>
+    /// THREADING: every method on this interface that writes a <see cref="DetectedGame"/>
+    /// must do so on the CALLER's thread, not on a worker. Those properties are bound to
+    /// the Proxy Deploy DataGrid, and raising PropertyChanged off the UI thread lets
+    /// Avalonia mutate the visual tree under the render thread — an access violation
+    /// inside libSkiaSharp that kills the process with no managed stack. Do the I/O on a
+    /// worker, then apply the results after the await. Callers must not use
+    /// ConfigureAwait(false).
+    /// </remarks>
     Task RefreshDeployStatusAsync(
         IList<DetectedGame> games, string sourceDllPath, ProxyType proxyType,
         CancellationToken ct = default);

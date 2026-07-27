@@ -484,6 +484,119 @@ public class ProxyDeployTests
     }
 
     [Fact]
+    public void ProxyImportInfo_Imports_CoversEveryProxyFlavour()
+    {
+        // The analyzer tracked version/dinput8/dxgi but NOT winmm, even though ProxyType has had
+        // a Winmm member — so winmm could never be recommended, and it is the ONLY proxy that
+        // works on Octopath Traveler. Same desync class the DumperModuleDetector comment warns
+        // about. Assert every enum value is answerable, so a fifth flavour cannot repeat it.
+        var all = new ProxyImportAnalyzer.ProxyImportInfo(true, true, true, true);
+        var none = new ProxyImportAnalyzer.ProxyImportInfo(false, false, false, false);
+        foreach (var t in Enum.GetValues<ProxyType>())
+        {
+            Assert.True(all.Imports(t));
+            Assert.False(none.Imports(t));
+        }
+        Assert.True(none.ImportsNone);
+        Assert.False(new ProxyImportAnalyzer.ProxyImportInfo(false, false, false, true).ImportsNone);
+    }
+
+    [Fact]
+    public async Task FindUeGames_WrappedLayout_FindsGameTwoLevelsDown()
+    {
+        string lib = MakeTempLibrary();
+        try
+        {
+            // NEKOPALIVE-shape: an extra "Package" folder between the Steam game
+            // directory and the project, so Binaries\Win64 is TWO levels down —
+            // and the exe carries no -Win64-Shipping suffix. A one-level scan
+            // misses the whole game, and the Engine fallback misses it too
+            // because Engine is not a direct child either.
+            string game = Path.Combine(lib, "steamapps", "common", "NEKOPALIVE");
+            string gameBin = Path.Combine(game, "Package", "Nekopara", "Binaries", "Win64");
+            string engineBin = Path.Combine(game, "Package", "Engine", "Binaries", "Win64");
+
+            MakeEmptyFile(Path.Combine(gameBin, "Nekopara.exe"));
+            MakeEmptyFile(Path.Combine(engineBin, "CrashReportClient.exe"));
+
+            var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
+            var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
+
+            var neko = Assert.Single(found, g => g.Name == "NEKOPALIVE");
+            Assert.Equal(gameBin, neko.BinariesDir);
+            Assert.EndsWith("Nekopara.exe", neko.ExePath);
+            // The Engine tier holds only a stub, so it must not contribute a second row.
+            Assert.DoesNotContain("CrashReport", neko.ExePath);
+        }
+        finally
+        {
+            Directory.Delete(lib, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FindUeGames_ShallowestDepthWins_BonusContentSuppressed()
+    {
+        string lib = MakeTempLibrary();
+        try
+        {
+            // P3R-shape: the real game sits at depth 1, while Artbook and Soundtrack are
+            // depth-2 bonus apps that are ALSO genuine UE builds with their own Engine folder —
+            // so nothing about their contents separates them. Depth does.
+            string game = Path.Combine(lib, "steamapps", "common", "P3R");
+            string realBin = Path.Combine(game, "P3R", "Binaries", "Win64");
+            string artBin = Path.Combine(game, "Artbook", "P3R_Artbook", "Binaries", "Win64");
+            string ostBin = Path.Combine(game, "Soundtrack", "P3R_Soundtrack", "Binaries", "Win64");
+
+            MakeEmptyFile(Path.Combine(realBin, "P3R.exe"));
+            MakeEmptyFile(Path.Combine(artBin, "P3R_Artbook.exe"));
+            MakeEmptyFile(Path.Combine(ostBin, "P3R_Soundtrack.exe"));
+            MakeEmptyFile(Path.Combine(game, "Engine", "Binaries", "Win64", "CrashReportClient.exe"));
+
+            var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
+            var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
+
+            var p3r = Assert.Single(found, g => g.Name == "P3R");
+            Assert.Equal(realBin, p3r.BinariesDir);
+            Assert.DoesNotContain("Artbook", p3r.ExePath);
+            Assert.DoesNotContain("Soundtrack", p3r.ExePath);
+        }
+        finally
+        {
+            Directory.Delete(lib, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FindUeGames_DeepSearch_DoesNotDescendIntoContent()
+    {
+        string lib = MakeTempLibrary();
+        try
+        {
+            // A shipped game's Content tree can hold thousands of folders. Descending it
+            // would make every library scan pay for nothing, and a stray .exe parked under
+            // Content\...\Binaries\Win64 must not be mistaken for the game.
+            string game = Path.Combine(lib, "steamapps", "common", "DeepGame");
+            string realBin = Path.Combine(game, "Proj", "Binaries", "Win64");
+            string contentBin = Path.Combine(game, "Content", "Trap", "Binaries", "Win64");
+
+            MakeEmptyFile(Path.Combine(realBin, "Proj-Win64-Shipping.exe"));
+            MakeEmptyFile(Path.Combine(contentBin, "NotTheGame.exe"));
+
+            var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
+            var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
+
+            var g = Assert.Single(found, x => x.Name == "DeepGame");
+            Assert.Equal(realBin, g.BinariesDir);
+            Assert.DoesNotContain("NotTheGame", g.ExePath);
+        }
+        finally
+        {
+            Directory.Delete(lib, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ApplyProxySuggestions_RememberedPickWins_ElseVersionDefault_AndClearsWhenDisabled()
     {
         string dir = Path.Combine(Path.GetTempPath(), "ue5lkg_" + Guid.NewGuid().ToString("N"));

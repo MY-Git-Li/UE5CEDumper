@@ -807,6 +807,7 @@ static void FillPointerSnapshot(json& data) {
     extern bool        g_cachedVersionDetected;
     extern bool        g_cachedIsUserOverride;
     extern bool        g_cachedIsLowConfidence;
+    extern bool        g_cachedVersionTooOld;
     extern const char* g_cachedPublisherThumbprint;
     extern const char* g_cachedGObjectsMethod;
     extern const char* g_cachedGNamesMethod;
@@ -827,6 +828,13 @@ static void FillPointerSnapshot(json& data) {
     extern const char* g_cachedGWorldAob;
     extern int         g_cachedGWorldAobPos;
     extern int         g_cachedGWorldAobLen;
+    extern uintptr_t   g_cachedGEngine;
+    extern const char* g_cachedGEngineMethod;
+    extern const char* g_cachedGEnginePatternId;
+    extern uintptr_t   g_cachedGEngineScanAddr;
+    extern const char* g_cachedGEngineAob;
+    extern int         g_cachedGEngineAobPos;
+    extern int         g_cachedGEngineAobLen;
 
     data["gobjects"]             = Renge::AddrToStr(g_cachedGObjects);
     data["gnames"]               = Renge::AddrToStr(g_cachedGNames);
@@ -836,6 +844,7 @@ static void FillPointerSnapshot(json& data) {
     data["version_detected"]     = g_cachedVersionDetected;
     data["is_user_override"]     = g_cachedIsUserOverride;
     data["is_low_confidence"]    = g_cachedIsLowConfidence;
+    data["is_version_too_old"]   = g_cachedVersionTooOld;
     // build_number: compile-time DLL build (e.g. 648). Also emitted on the
     // init response; surfacing it on every snapshot lets the UI's
     // get_pointers refreshes preserve the value across panel state rebuilds.
@@ -879,6 +888,17 @@ static void FillPointerSnapshot(json& data) {
     data["gworld_aob_pos"] = g_cachedGWorldAobPos;
     data["gworld_aob_len"] = g_cachedGWorldAobLen;
 
+    // &GEngine (the slot, not the object). Empty aob == no AOB hit, in which case the UI
+    // must treat a GameEngine-rooted export the way it treats a recovered GWorld: address
+    // only, no restart-proof CE symbol.
+    data["gengine"]            = Renge::AddrToStr(g_cachedGEngine);
+    data["gengine_method"]     = g_cachedGEngineMethod    ? g_cachedGEngineMethod    : "not_found";
+    data["gengine_pattern_id"] = g_cachedGEnginePatternId ? g_cachedGEnginePatternId : "";
+    data["gengine_scan_addr"]  = Renge::AddrToStr(g_cachedGEngineScanAddr);
+    data["gengine_aob"]        = g_cachedGEngineAob ? g_cachedGEngineAob : "";
+    data["gengine_aob_pos"]    = g_cachedGEngineAobPos;
+    data["gengine_aob_len"]    = g_cachedGEngineAobLen;
+
     data["invoke_timeout_ms"] = Stark::GetInvokeTimeoutMs();
 
     uintptr_t moduleBase = Macht::GetModuleBase(nullptr);
@@ -894,6 +914,10 @@ static void FillPointerSnapshot(json& data) {
         moduleName += (wc < 128) ? static_cast<char>(wc) : '?';
     }
     data["module_name"] = moduleName;
+    // The ONLY unambiguous answer to "which process is this pipe talking to". The pipe name
+    // is a single global, so two injected games both serve it and a connecting client lands on
+    // whichever instance is free -- the UI cannot otherwise tell it attached to the wrong game.
+    data["pid"] = static_cast<uint32_t>(GetCurrentProcessId());
 
     // load_mode: how the dumper got into this process, from THIS module's own file
     // name (g_hDllModule). "proxy:version.dll" | "proxy:dinput8.dll" | "proxy:dxgi.dll"
@@ -4235,6 +4259,33 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             if (g_cachedGObjects && g_cachedGNames) {
                 if (!Genau::ValidateAndFixOffsets(g_cachedUEVersion)) {
                     Sein::Warn("PIPE:cmd", "apply_rescan: ValidateAndFixOffsets returned false");
+                }
+
+                // Same second pass UE5_Init does: &GEngine can only be VALIDATED once the
+                // offsets exist, so a recovery rescan that revives GObjects/GNames has to
+                // retry it too — otherwise this path keeps reporting "AOB not found" for
+                // GEngine forever even though the offsets it was waiting on just arrived.
+                extern uintptr_t   g_cachedGEngine;
+                extern const char* g_cachedGEngineMethod;
+                extern const char* g_cachedGEnginePatternId;
+                extern uintptr_t   g_cachedGEngineScanAddr;
+                extern const char* g_cachedGEngineAob;
+                extern int         g_cachedGEngineAobPos;
+                extern int         g_cachedGEngineAobLen;
+                if (g_cachedGEngine == 0) {
+                    Genau::EnginePointers eng;   // scratch — carries the AOB metadata triple
+                    if (Genau::ResolveGEngineDeferred(eng)) {
+                        g_cachedGEngine          = eng.GEngine;
+                        g_cachedGEngineMethod    = eng.gengineMethod;
+                        g_cachedGEnginePatternId = eng.genginePatternId;
+                        g_cachedGEngineScanAddr  = eng.gengineScanAddr;
+                        g_cachedGEngineAob       = eng.gengineAob;
+                        g_cachedGEngineAobPos    = eng.gengineAobPos;
+                        g_cachedGEngineAobLen    = eng.gengineAobLen;
+                        Sein::Info("PIPE:cmd", "apply_rescan: Applied GEngine=0x%llX (%s)",
+                                   (unsigned long long)g_cachedGEngine, g_cachedGEngineMethod);
+                        applied = true;
+                    }
                 }
             }
 
