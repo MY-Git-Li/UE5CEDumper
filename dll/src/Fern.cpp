@@ -914,6 +914,10 @@ static void FillPointerSnapshot(json& data) {
         moduleName += (wc < 128) ? static_cast<char>(wc) : '?';
     }
     data["module_name"] = moduleName;
+    // The ONLY unambiguous answer to "which process is this pipe talking to". The pipe name
+    // is a single global, so two injected games both serve it and a connecting client lands on
+    // whichever instance is free -- the UI cannot otherwise tell it attached to the wrong game.
+    data["pid"] = static_cast<uint32_t>(GetCurrentProcessId());
 
     // load_mode: how the dumper got into this process, from THIS module's own file
     // name (g_hDllModule). "proxy:version.dll" | "proxy:dinput8.dll" | "proxy:dxgi.dll"

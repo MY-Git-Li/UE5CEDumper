@@ -86,6 +86,63 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     /// the banner's IsVisible.</summary>
     [ObservableProperty] private bool _gameThreadStalled;
 
+    /// <summary>Filled in when MORE THAN ONE running process currently hosts our dumper DLL.
+    /// Empty otherwise, and bound directly to the banner's IsVisible via
+    /// <see cref="HasMultipleDumperHosts"/>.
+    ///
+    /// The pipe name is a single global, so every injected game serves the SAME name and a
+    /// connecting client lands on whichever instance happens to be free. There is no way to
+    /// ask for a particular game. That produces two bad outcomes the user cannot otherwise
+    /// distinguish: a connect that fails because the instances are taken, and — far worse — a
+    /// connect that SUCCEEDS against the wrong game and quietly shows its data. Naming the
+    /// process we actually reached is the cheapest honest answer until the pipe is
+    /// per-process.</summary>
+    [ObservableProperty] private string _multipleDumperHostsWarning = "";
+
+    public bool HasMultipleDumperHosts => !string.IsNullOrEmpty(MultipleDumperHostsWarning);
+
+    partial void OnMultipleDumperHostsWarningChanged(string value)
+        => OnPropertyChanged(nameof(HasMultipleDumperHosts));
+
+    /// <summary>Warn when more than one running process currently hosts our dumper DLL.
+    ///
+    /// Fire-and-forget: it enumerates processes, which is slow enough that blocking the connect
+    /// path on it would be felt, and a late warning is still useful. Failures are swallowed —
+    /// this is advisory, and an enumeration that hits access-denied must never break a
+    /// connection that otherwise worked.</summary>
+    private async Task CheckForCompetingDumperHostsAsync(EngineState state)
+    {
+        if (_proxyDeployForChecks == null) return;
+        try
+        {
+            var procs = await _proxyDeployForChecks.ListGameProcessesAsync();
+            var hosts = procs.Where(p => p.DumperLoaded).ToList();
+            if (hosts.Count <= 1) { MultipleDumperHostsWarning = ""; return; }
+
+            // Name the one we actually reached by PID when the DLL reports it; an older DLL
+            // sends 0, in which case the module name is the best we can say.
+            string connected = state.ProcessId > 0
+                ? $"{state.ModuleName} (PID {state.ProcessId})"
+                : state.ModuleName;
+            var others = hosts.Where(p => p.Pid != state.ProcessId)
+                              .Select(p => $"{p.Name} (PID {p.Pid})");
+            MultipleDumperHostsWarning =
+                $"{hosts.Count} processes have the dumper DLL loaded. You are connected to "
+                + $"{connected} — also loaded: {string.Join(", ", others)}. "
+                + "The pipe name is shared, so which game you reach is first-come-first-served. "
+                + "Close the ones you are not using.";
+            _log.Warn(Constants.LogCatInit, MultipleDumperHostsWarning);
+        }
+        catch (Exception ex)
+        {
+            _log.Warn(Constants.LogCatInit, $"Competing-dumper-host check failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Kept so the post-connect ambiguity check can enumerate processes. Null when the
+    /// host did not supply one (tests), in which case the check simply never runs.</summary>
+    private readonly IProxyDeployService? _proxyDeployForChecks;
+
     /// <summary>Global stale-DLL badge shown in the always-visible top bar:
     /// only while connected AND the DLL build differs from / pre-dates the UI's.
     /// Mirrors the per-tab Diagnostics badge (PointerPanelViewModel) but is
@@ -557,6 +614,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Gate the handoff menu items to the experimental flag (and pivot existence).
         UpdatePivotHandoffEnabled();
 
+        _proxyDeployForChecks = proxyDeploy;
+
         if (proxyDeploy != null)
         {
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
@@ -631,6 +690,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 _ = Teleport.CheckAobMakerAsync();
 
                 StatusText = $"Connected — UE{state.UEVersion} ({state.ObjectCount} objects)";
+                _ = CheckForCompetingDumperHostsAsync(state);
 
                 // Re-load objects if tree was empty
                 if (ObjectTree.ObjectCount == 0 && state.ObjectCount > 0)

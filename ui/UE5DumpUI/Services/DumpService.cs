@@ -122,6 +122,7 @@ public sealed class DumpService : IDumpService
             SparseDelegatesAddr = ptrs["sparse_delegates"]?.GetValue<string>() ?? "",
             ObjectCount = ptrs["object_count"]?.GetValue<int>() ?? 0,
             ModuleName = ptrs["module_name"]?.GetValue<string>() ?? "",
+            ProcessId  = ptrs["pid"]?.GetValue<int>() ?? 0,
             ModuleBase = ptrs["module_base"]?.GetValue<string>() ?? "",
             // How the DLL was loaded (self-reported); "" on older DLLs.
             LoadMode = ptrs["load_mode"]?.GetValue<string>() ?? "",

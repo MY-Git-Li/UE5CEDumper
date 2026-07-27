@@ -38,6 +38,12 @@ public sealed class EngineState
 
     public int ObjectCount { get; init; }
     public string ModuleName { get; init; } = "";
+
+    /// <summary>PID of the process on the other end of the pipe. 0 when the DLL predates the
+    /// field. The pipe name is a single global, so when two games have the dumper loaded they
+    /// both serve it and the client lands on whichever instance is free -- this is what lets
+    /// the UI say WHICH game it actually reached.</summary>
+    public int ProcessId { get; init; }
     public string ModuleBase { get; init; } = "";
 
     // --- FUObjectItem layout (UE5.7+ packed-mode awareness) ---
