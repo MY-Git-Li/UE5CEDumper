@@ -20,6 +20,63 @@ builds ≤696 in
 
 -----
 
+## 2026-07-27 - Proxy Deploy CTD: bound rows were mutated from thread-pool threads (build 2445)
+
+**Symptom:** Proxy Deploy tab → *Scan Steam* → *Update all* → the whole app disappears. No managed
+exception, no error dialog, nothing after the last log line. Windows recorded
+`0xc0000005` (access violation) in **`libSkiaSharp.DLL`**, i.e. inside the renderer.
+
+The deploy itself had *succeeded* — `Updated: 26, up-to-date: 0, failed: 0` is the last line in
+`view-0.log`, ~2 s before the crash. So the work was fine; the painting of the result was not.
+
+### Root cause
+
+`DetectedGame` is an `ObservableObject` whose `Status` / `InstalledVersion` / `ErrorMessage` /
+`SuggestedProxy` are bound to the Proxy Deploy `DataGrid`. Four `ProxyDeployService` methods
+(`RefreshDeployStatusAsync`, `DeployAsync`, `UndeployAsync`, `ApplyProxySuggestionsAsync`) wrote
+those properties **from inside their `Task.Run` bodies**, so `PropertyChanged` fired on
+thread-pool threads for 29 bound rows at once. Avalonia then mutated the visual tree while the
+render thread was composing it. That is not an exception path — it is an AV in Skia, which takes
+the process down with no managed stack to look at.
+
+The codebase had already met this bug and mistaken it for a cosmetic one. From
+`ProxyDeployPanel.axaml`:
+
+> *"Marking the whole grid IsReadOnly=True caused row visuals to lag behind item PropertyChanged
+> events **from the background-thread Refresh**, requiring a second click to repaint."*
+
+The late repaint and the crash are the same race. Setting `IsReadOnly` per column instead of on
+the grid fixed the visible symptom and left the thread violation in place.
+
+### Fix — compute off-thread, apply on the caller's thread
+
+All four methods now do their file I/O inside `Task.Run`, collect the results into a
+`GameStatusUpdate` record, and apply them **after** the `await`, which resumes on the caller's
+context. All 11 call sites are UI-thread `[RelayCommand]`s in `ProxyDeployViewModel` with no
+`ConfigureAwait(false)`, so that context is the UI thread.
+
+`GameStatusUpdate` carries `SetInstalledVersion` / `SetErrorMessage` flags because some paths
+deliberately leave a field alone (the "already up to date" deploy sets only `Status`) and `null`
+is itself a meaningful value for the other two — a blanket three-field apply would have changed
+behaviour.
+
+The contract is now written down on `IProxyDeployService` rather than left implicit, since
+nothing enforced it the first time.
+
+### Notes
+
+- `ProxyDeployService` deliberately does **not** take a dependency on `Avalonia.Threading`. In
+  this codebase `Dispatcher.UIThread` appears only in ViewModels and Views; services stay
+  UI-framework-free, so the marshalling is done by *where the code runs*, not by a dispatcher call.
+- Swept the rest of `Services/`: `PipeClient` and `SnapshotStore` are the only other files using
+  `Task.Run`, and neither references any `ObservableObject` model. `DriveDescriptor.IsSelected` is
+  read but never written off-thread. `ProxyDeployService` was the only offender.
+- A UI crash whose faulting module is `libSkiaSharp` and whose trigger is a batch operation over
+  a bound collection should be treated as a threading bug until proven otherwise — SOS cannot
+  read the dump (Native AOT publish has no CoreCLR), so the dump is a dead end and the code is not.
+
+-----
+
 ## 2026-07-27 - &GEngine was never resolvable: the validator ran before the offsets it needs (build 2441)
 
 **Symptom:** the System tab reported `&GEngine — AOB not found` on *every* game. Reported against
