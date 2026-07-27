@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using Microsoft.Win32;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
@@ -156,28 +157,25 @@ public sealed class ProxyDeployService : IProxyDeployService
         //         <Game>\<Sub>\Binaries\Win64\  ← no .exe at all (only .modules + DLLs)
         //         <Game>\Engine\Binaries\Win64\<Game>-Win64-Shipping.exe  ← real launcher
         //
+        //   4. Wrapped (NEKOPALIVE) — an extra folder between the game root and
+        //      the project, and the exe is not named *-Win64-Shipping:
+        //         <Game>\Package\<Sub>\Binaries\Win64\Nekopara.exe   ← real
+        //         <Game>\Package\Engine\Binaries\Win64\CrashReportClient.exe
+        //
         // Walking Engine\ unconditionally produces phantom rows for layouts 1+2
         // (the user sees both rows for the same game). Skipping Engine\ kills
         // layout 3 (Satisfactory). Solution: try primary roots first; only fall
         // back to Engine\Binaries\Win64\ when primary contributed no rows for
         // this gameDir.
-        var primary = new List<string> { gameDir };
-        string? engineRoot = null;
-
-        try
-        {
-            foreach (string sub in Directory.EnumerateDirectories(gameDir))
-            {
-                if (string.Equals(Path.GetFileName(sub), "Engine", StringComparison.OrdinalIgnoreCase))
-                    engineRoot = sub;
-                else
-                    primary.Add(sub);
-            }
-        }
-        catch
-        {
-            // Permission error etc. — just use the root
-        }
+        //
+        // Layout 4 is why this searches to a bounded DEPTH rather than exactly one
+        // level down. A single level finds <Game>\<Sub>\Binaries\Win64 and misses
+        // <Game>\Package\<Sub>\Binaries\Win64 entirely — that is a whole game the
+        // scan never sees, and the Engine fallback misses it too because the
+        // Engine folder is not a direct child either.
+        var primary = new List<string>();
+        var engineRoots = new List<string>();
+        CollectBinariesRoots(gameDir, gameDir, 0, primary, engineRoots);
 
         int gamesBefore = games.Count;
         foreach (string root in primary)
@@ -186,8 +184,65 @@ public sealed class ProxyDeployService : IProxyDeployService
         // Engine fallback: only walked when primary yielded zero rows for this
         // gameDir. Catches pure-modular layouts like Satisfactory where the
         // real launcher .exe lives in <Game>\Engine\Binaries\Win64\.
-        if (games.Count == gamesBefore && engineRoot != null)
-            ScanBinariesDir(gameName, gameDir, engineRoot, games, seenBinDirs);
+        if (games.Count == gamesBefore)
+            foreach (string root in engineRoots)
+                ScanBinariesDir(gameName, gameDir, root, games, seenBinDirs);
+    }
+
+    /// <summary>Deepest wrapper level below a game root that is still searched for a
+    /// <c>Binaries\Win64</c>. 2 covers the observed <c>&lt;Game&gt;\Package\&lt;Sub&gt;\</c>
+    /// wrapping with one level spare; going deeper buys nothing and costs directory walks
+    /// across every game in the library.</summary>
+    private const int MaxBinariesSearchDepth = 3;
+
+    /// <summary>Directory names never worth descending into while looking for a
+    /// <c>Binaries\Win64</c>. <c>Content</c> is the one that matters — a shipped game's
+    /// content tree can hold thousands of folders, and none of them is a binaries root.</summary>
+    private static readonly string[] BinariesSearchSkipDirs =
+        { "Binaries", "Content", "Saved", "Intermediate", "Config", "DerivedDataCache", "Plugins" };
+
+    /// <summary>
+    /// Walk down from <paramref name="dir"/> collecting every directory that owns a
+    /// <c>Binaries\Win64</c>, split into Engine-side and everything else so the caller can keep
+    /// the two-tier "primary first, Engine only as fallback" rule that stops modular games
+    /// producing two rows.
+    /// </summary>
+    private static void CollectBinariesRoots(
+        string dir, string gameDir, int depth, List<string> primary, List<string> engineRoots)
+    {
+        // A root is worth recording whether or not it has a Binaries child — ScanBinariesDir
+        // re-checks — but only descend while there is depth left.
+        bool underEngine = IsUnderEngineFolder(dir, gameDir);
+        (underEngine ? engineRoots : primary).Add(dir);
+
+        if (depth >= MaxBinariesSearchDepth)
+            return;
+
+        try
+        {
+            foreach (string sub in Directory.EnumerateDirectories(dir))
+            {
+                string name = Path.GetFileName(sub);
+                if (BinariesSearchSkipDirs.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    continue;
+                CollectBinariesRoots(sub, gameDir, depth + 1, primary, engineRoots);
+            }
+        }
+        catch
+        {
+            // Permission error / reparse point — this branch just contributes nothing.
+        }
+    }
+
+    /// <summary>True when any path component between the game root and <paramref name="dir"/>
+    /// (inclusive) is named <c>Engine</c>. Checking the whole relative path rather than the
+    /// immediate parent is what makes the Engine tier work under a wrapper folder.</summary>
+    private static bool IsUnderEngineFolder(string dir, string gameDir)
+    {
+        string rel = Path.GetRelativePath(gameDir, dir);
+        if (rel == ".") return false;
+        return rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                  .Any(part => string.Equals(part, "Engine", StringComparison.OrdinalIgnoreCase));
     }
 
     private void ScanBinariesDir(

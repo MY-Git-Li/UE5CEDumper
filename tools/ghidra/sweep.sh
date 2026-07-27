@@ -91,6 +91,16 @@ ROWS=(
 # Do NOT be tempted by the symbolised `GNameBlocksDebug` (0x14632A4D0) on a future PDB game —
 # it is a SEPARATE pointer variable, not NamePoolData+0x10, and it is all-zero in the file.
 "UE5.1-Grimhook|Grimhook|-|GObjects=14643d800|14643d810,GNames=14639e140,GWorld=1465aa438,SparseDelegates=1461417d0,GEngine=1465a6630"
+# THE TWO OLDEST BINARIES IN THE CORPUS. No PDB, no RTTI (/GR-), truth by disassembly.
+# Both are FLAT FFixedUObjectArray presented at the FUObjectArray BASE (Objects@+0x10,
+# Max@+0x18, Num@+0x1C) — which is what the "Flat-Base" preset was added for. Item stride
+# differs: 4.11 is 16 bytes (Object/Flags/SerialNumber, NO ClusterRootIndex), 4.13 is the
+# familiar 24. Stride is auto-detected, so nothing depends on that difference.
+# Nekopara is 4.11.0-PREVIEW7 (build path `Engine\4_11_0_preview7\`), so do not read its 16-byte
+# item as "UE 4.11 = stride 16" — 4.11 final may already carry ClusterIndex.
+# Pre-4.23 on both: GNames is a TNameEntryArray*, and SparseDelegates is correctly ABSENT.
+"UE4.11-Nekopara|NEKOPALIVE_UE411|-|GObjects=1423c1510|1423c1520,GNames=1423b8f58,GWorld=1424a4370,GEngine=1424a2de0"
+"UE4.13-Fantasynth|Fantasynth_UE413|-|GObjects=142779240|142779250,GNames=14273ffd0,GWorld=1427851f0,GEngine=14277d350"
 # FREUD GATE 4.21 and LIGHT MAZE 5.0.3 — no PDB, but both projects are fully analyzed and every
 # global was pinned by disassembly AND corroborated by independent pattern consensus. They close
 # the last two version holes: 4.21 had no sample at all, and 4.27 previously jumped straight to

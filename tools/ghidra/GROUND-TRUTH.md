@@ -117,6 +117,37 @@ Each cost at least one headless run to establish. Recorded so nobody spends anot
   harness**, not worryingly unknown: `scan_patterns.java` scans byte patterns only, and the `EXP`
   ones cannot fire on a monolithic EXE because nothing is exported.
 
+### The strongest truth source is not a binary — it is `vendor/UnrealEngine`
+
+`vendor/UnrealEngine` is a **full-refspec `blob:none` partial clone**, so every release tag back to
+4.0 is reachable and blobs fetch on demand. For any *structure* question — field order, when a
+type was introduced, what a member is actually called — read Epic's source instead of inferring
+it from disassembly:
+
+```bash
+cd vendor/UnrealEngine
+git show 4.11.0-release:Engine/Source/Runtime/CoreUObject/Public/UObject/UObjectArray.h
+```
+
+This settled in minutes what several headless runs could only bracket:
+
+| tag | `TUObjectArray` | `FUObjectItem` |
+|---|---|---|
+| 4.10.2 | `TStaticIndirectArrayThreadSafeRead` | **does not exist** |
+| 4.11.0 / 4.12.5 | `FFixedUObjectArray` | 16 B — `Object` / **`ClusterAndFlags`** / `SerialNumber` |
+| 4.13.0 … 4.19.2 | `FFixedUObjectArray` | 24 B — `Object` / `Flags` / `ClusterIndex` / `SerialNumber` |
+| 4.20.3 + | `FChunkedFixedUObjectArray` | 24 B |
+
+Two traps in that file specifically: there is a **commented-out `//typedef TStaticIndirect…
+TUObjectArray;` immediately above the live one** in every version (grep must exclude `^\s*//`),
+and `ObjObjects` is declared as `TUObjectArray ObjObjects;`, so the typedef is the only thing that
+tells you flat from chunked.
+
+**What source CANNOT tell you**, and why the binaries still matter: which address a pattern
+resolves to, what the compiler actually emitted, whether a licensee forked the layout, and
+anything about noise. Use source for "what is the structure", binaries for "where is it and can
+we find it".
+
 ### Recipe — pre-4.23 GNames on a binary with NO symbols
 
 `TNameEntryArray` is `128*8+8 = 0x408` bytes, so scan `.text` for `mov ecx,0x408` and take the

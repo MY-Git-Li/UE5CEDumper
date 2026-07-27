@@ -8,8 +8,10 @@
 
 | Version | Key Differences |
 |---------|----------------|
-| UE4.11–4.20 | `FFixedUObjectArray` (flat, single indirection). `UProperty` chain. TNameEntryArray on some builds |
-| UE4.21–4.24 | `FChunkedFixedUObjectArray` introduced. `UProperty` still in use |
+| **UE4.10 and earlier** | **Pre-`FUObjectItem` regime — the dumper does NOT support this.** `FUObjectArray::ObjObjects` is a `TStaticIndirectArrayThreadSafeRead<UObjectBase,8388608,16384>` whose element is a **raw `UObjectBase*` (stride 8)**, and whose chunk table is an **INLINE `UObjectBase*[512]` array**, not a pointer — see the dedicated section below |
+| **UE4.11–4.12** | `FFixedUObjectArray` (flat). **`FUObjectItem` is 16 BYTES** — `Object` / `ClusterAndFlags` / `SerialNumber`: the cluster index and the internal flags share ONE `int32`. `UProperty` chain |
+| **UE4.13–4.19** | `FFixedUObjectArray` (flat, single indirection). `FUObjectItem` splits into `Object` / `Flags` / `ClusterIndex` / `SerialNumber` = **24 bytes**. `UProperty` chain. TNameEntryArray |
+| **UE4.20–4.24** | `FChunkedFixedUObjectArray` — chunked. `UProperty` still in use |
 | UE4.25–4.27 | `FField`/`FProperty` replaces `UProperty` (no longer inherits UObject). `ChildProperties` chain added |
 | UE5.0–5.1.0 | FNamePool standard format. FFieldVariant = `{ void*, bool }` (0x10 bytes with padding) |
 | UE5.1.1+ | FFieldVariant = `{ void* }` (0x08 bytes) — affects ChildProperties offset |
@@ -111,7 +113,7 @@ Or for UE4 with extra members:
   +0x04: NumElements (or ObjLastNonGCIndex)
 ```
 
-### Flat (FFixedUObjectArray, UE4.11–4.20)
+### Flat (FFixedUObjectArray, UE4.1?–4.20)
 
 ```
 GObjects → FUObjectArray
@@ -121,6 +123,91 @@ GObjects → FUObjectArray
 ```
 
 Detection: when `numElements > OBJECTS_PER_CHUNK`, check if `*(Objects + 8)` is a valid heap pointer. If not (e.g., `0x40000000` = EObjectFlags::Const), the array is flat.
+
+> **Both boundaries are now read off Epic's own source**, not extrapolated — `vendor/UnrealEngine`
+> is a full-refspec clone, so `git show <tag>:Engine/Source/Runtime/CoreUObject/Public/UObject/UObjectArray.h`
+> answers these directly. The active `typedef …  TUObjectArray;` is the thing to read (there is a
+> commented-out decoy typedef right above it in every version):
+>
+> | tag | `TUObjectArray` |
+> |---|---|
+> | 4.18.3 / 4.19.0 / 4.19.2 | `FFixedUObjectArray` — **flat** |
+> | 4.20.3 / 4.21.2 / 4.22.3 / 4.23.1 | `FChunkedFixedUObjectArray` — **chunked** |
+>
+> So the flat→chunked change is **4.19 → 4.20**. The table previously said the chunked array
+> arrived at "4.21", and that the flat range started at "4.11"; both were guesses.
+>
+> **A flat array can be presented at either of two anchors**, which is why there are two flat
+> presets. Patterns carrying `adjustment = -0x10` hand over `ObjObjects` (preset `"Flat"`,
+> `{0x00,0x08,0x0C}`); everything else hands over the `FUObjectArray` **base**, where the same
+> three fields sit at `{0x10,0x18,0x1C}` (preset `"Flat-Base"`). Only five of ~56 GObjects
+> patterns carry that adjustment, so before `"Flat-Base"` existed, any pre-4.20 title those five
+> missed was unfixable by pattern work at *any* priority.
+
+### Pre-`FUObjectItem` (UE 4.10 and earlier) — NOT SUPPORTED
+
+Verified against a **UE 4.10.2 PDB** (IS Defense Editor's `UE4Editor-Cmd.pdb`, 30.9 MB of type
+records), with every offset independently re-confirmed from instruction encodings in
+`UE4Editor-CoreUObject.dll` / `-Core.dll`. `FUObjectItem`, `FChunkedFixedUObjectArray`,
+`FFixedUObjectArray` and the whole `FField`/`FProperty` and `FNamePool` families are all **absent
+from the type manager** — they do not exist yet at this version.
+
+```
+FUObjectArray                                        size 0x1098
+  +0x0000: ObjFirstGCIndex / ObjLastNonGCIndex / OpenForDisregardForGC  (int32 ×3)
+  +0x0010: ObjObjects = TStaticIndirectArrayThreadSafeRead<UObjectBase,8388608,16384>
+             +0x0000 (abs +0x0010): Chunks — INLINE UObjectBase*[512], NOT a pointer
+             +0x1000 (abs +0x1010): NumElements (int32)
+             +0x1004 (abs +0x1014): NumChunks   (int32)
+           No MaxElements / MaxChunks FIELDS — the maxima are template parameters,
+           emitted as compile-time literals (8388608 total, 16384 per chunk).
+  +0x1018: ObjObjectsCritical ...
+
+IndexToObject:  ChunkIndex = Index >> 14        (sar 0xE)
+                Within     = Index & 0x3FFF
+                Chunk      = Chunks[ChunkIndex]  <- indexed off the array base DIRECTLY
+                Object     = *(UObjectBase**)(Chunk + Within*8)   <- stride 8, ONE deref
+```
+
+Why every GObjects pattern misses, and why a new AOB alone cannot fix it:
+
+| | Dumper assumes | UE 4.10 |
+|---|---|---|
+| element | `FUObjectItem`, stride 16/24/20 (`Aura.cpp` `candidates[]`) | raw `UObjectBase*`, **stride 8** — not a candidate |
+| chunk table | a `Objects**` pointer field: load it, then index | **inline array** — its address *is* the table |
+| elements/chunk | `Grimoire::OBJECTS_PER_CHUNK` = 65536 | **16384** |
+| Num / Max | runtime fields near the base | NumElements `+0x1010`, NumChunks `+0x1014`; no Max fields at all |
+| the global | `GUObjectArray` data symbol / RIP load | **Meyers singleton `GetUObjectArray()`** — the address exists only in a `lea` inside the magic-static guard, so `GOBJ_EXP` can never hit |
+| GC flags | `EInternalObjectFlags` in the item | `EObjectFlags` at `UObjectBase+0x08` |
+
+`ArrayLayout`'s `objectsOffset` means *"read a pointer at this offset"*; 4.10 needs *"take the
+**address** of this offset"*. That is an expressiveness gap, not a wrong constant — so even a
+pattern that matched by luck would be rejected by `ValidateGObjects`.
+
+**The name side is already correct**: `Serie.cpp`'s `UE4_CHUNK_SIZE = 0x4000` and the
+double-deref with the string at `+0x10` match 4.10 exactly, which is why GNames resolves on these
+old titles while GObjects does not.
+
+**One editor-build caveat that must not leak.** That PDB is an Editor build, where
+`WITH_CASE_PRESERVING_NAME` makes `FName` **12 bytes** instead of 8. `UObjectBase`'s
+`ObjectFlags +0x08` / `InternalIndex +0x0C` / `Class +0x10` / `Name +0x18` are identical in a
+shipping build, but **`Outer` is +0x28 in the editor and +0x20 shipping** — do not carry +0x28
+anywhere. `FUObjectArray`, `TStaticIndirectArrayThreadSafeRead`, `FNameEntry`/`TNameEntryArray`
+and `EObjectFlags` are not editor-gated and transfer as-is; the `UField`/`UStruct`/`UProperty`
+family does NOT (which is moot — those are resolved dynamically by `DynOff`).
+
+**Deciding which regime an unknown old binary is in** — one instruction-level look at the
+index→object accessor:
+
+| | old (4.10-like) | new (`FUObjectItem`) |
+|---|---|---|
+| chunk split | `sar r,0xE` + `and r,0x3FFF` | `sar r,0x10` (65536/chunk) |
+| element scale | `lea rax,[chunk+idx*8]` — scale **8** | `*16` / `shl 4` / `imul 24` |
+| table fetch | `mov r,[base+chunkIdx*8]` — **no prior load** | `mov rcx,[base]` **first**, then index |
+
+Cheapest single tell: an immediate **`cmp r32, 0x800000`** checked against an object index. In the
+old regime `MaxTotalElements` is a compile-time literal in the bounds check; in the new regime the
+maximum is a runtime field, so that immediate does not appear.
 
 ### FUObjectItem Sizes
 

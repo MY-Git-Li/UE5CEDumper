@@ -197,6 +197,26 @@ static bool ValidateGObjects(uintptr_t addr) {
         { 0x10, 0x00, 0x04, 0x08, 0x0C, "Back4Blood" },
         { 0x18, 0x10, 0x00, 0x14, 0x20, "Multiversus" },
         { 0x18, 0x00, 0x14, 0x10, 0x04, "MindsEye" },
+        // Flat-Base — a FLAT FFixedUObjectArray presented at the FUObjectArray BASE rather than
+        // at its ObjObjects sub-struct. Same obj/max/num as "UE4-Extended" but with no chunk
+        // fields, so it is that row's flat twin.
+        //
+        // Why it has to exist: the "Flat" row below is written ObjObjects-RELATIVE
+        // ({0x00,0x08,0x0C}), which silently assumes a flat array is only ever handed to us at
+        // ObjObjects. That held only because five of ~56 GObjects patterns carry
+        // adjustment = -0x10 (GOBJ_V10 / AV1 / AV2 / RE2 / V12) and so offer ObjObjects as a
+        // second candidate. On UE 4.11 and 4.13 those five all MISS, every pattern that does hit
+        // resolves the BASE, and the ObjObjects-relative row then reads NumElements out of the
+        // OpenForDisregardForGC *bool* at +0x0C. That is why both titles failed with all 55
+        // patterns "no winner" — a preset gap, not a pattern gap.
+        //
+        // Ordered BEFORE UE4-Extended deliberately: otherwise whether a flat title is read as
+        // flat depends on whether the FCriticalSection dwords at +0x20/+0x24 happen to look like
+        // sane chunk counts. It cannot steal a chunked title — applied to one, objPtr is the
+        // chunk TABLE, so Item[0].Object is a chunk pointer and ValidateCyclicClassChain reads
+        // its +0x10 (which is Item[0].ClusterRootIndex/SerialNumber, small ints) as ClassPrivate;
+        // the self-referential-UClass terminator never appears and the row rejects.
+        { 0x10, 0x18, 0x1C,   -1,   -1, "Flat-Base" },
         { 0x10, 0x18, 0x1C, 0x20, 0x24, "UE4-Extended" },
         { 0x10, 0x20, 0x24, 0x28, 0x2C, "UE5-Extended" },  // GC prefix + PreAllocatedObjects ptr
         { 0x00, 0x0C, 0x08, 0x14, 0x10, "UE5.8" },          // 5.8 dev: cache-locality reorder, PreAllocatedObjects @+0x18
@@ -268,6 +288,7 @@ static bool ValidateGObjects(uintptr_t addr) {
     struct { int numOff; int maxOff; int objOff; bool isFlat; const char* name; } relaxed[] = {
         { 0x14, 0x10, 0x00, false, "A/C" },
         { 0x04, 0x00, 0x10, false, "B"   },
+        { 0x1C, 0x18, 0x10, true,  "D-Flat" },  // flat twin of D — see "Flat-Base" above
         { 0x1C, 0x18, 0x10, false, "D"   },
         { 0x24, 0x20, 0x10, false, "E"   },    // UE5-Extended: GC prefix + PreAllocatedObjects
         { 0x08, 0x0C, 0x00, false, "F"   },    // UE5.8: cache-locality reorder

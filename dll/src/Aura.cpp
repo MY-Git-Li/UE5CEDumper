@@ -308,8 +308,27 @@ static constexpr int NUM_UE4_EXTENDED_PRESETS = sizeof(s_ue4ExtendedPresets) / s
 // Objects* points directly to FUObjectItem[] (no chunk pointer indirection).
 // Used by early UE4 (4.11-4.22) including Octopath Traveller.
 // Layout: { Objects*(8), MaxElements(4), NumElements(4) } — total 16 bytes before FCriticalSection.
+//
+// TWO ANCHORS, because a flat array can be handed to us at either address:
+//   "Flat"      — ObjObjects-relative. What the five adjustment=-0x10 GObjects patterns
+//                 (GOBJ_V10 / AV1 / AV2 / RE2 / V12) deliver, e.g. Octopath.
+//   "Flat-Base" — the FUObjectArray BASE, i.e. +0x10 further out, past
+//                 ObjFirstGCIndex / ObjLastNonGCIndex / MaxObjectsNotConsideredByGC /
+//                 OpenForDisregardForGC. Verified by disassembly on UE 4.11.0-preview7
+//                 (Nekopara, FUObjectItem = 16 B) and UE 4.13 (Fantasynth, 24 B): both do one
+//                 Malloc(Max * stride) with no chunk table, and EVERY pattern that hits them
+//                 resolves the base.
+//
+// Without the second row, a pre-4.21 title whose five ObjObjects-anchored patterns all miss is
+// unfixable by pattern work at ANY priority — nothing else can present the ObjObjects anchor.
+// That is the real reach argument here; the two old titles are just what exposed it.
+//
+// This tier runs BEFORE the relaxed tier on purpose: it pre-empts the Layout A/C and B
+// fallbacks, which would otherwise latch objectsOffset = 0x00 (reading the two GC index int32s
+// as a pointer) or numElementsOffset = 0x04 (the disregard-pool count).
 static const LayoutPreset s_flatPresets[] = {
-    { "Flat", { 0x00, 0x08, 0x0C, -1, -1 } },
+    { "Flat",      { 0x00, 0x08, 0x0C, -1, -1 } },
+    { "Flat-Base", { 0x10, 0x18, 0x1C, -1, -1 } },
 };
 static constexpr int NUM_FLAT_PRESETS = sizeof(s_flatPresets) / sizeof(s_flatPresets[0]);
 
