@@ -122,7 +122,21 @@ GObjects → FUObjectArray
   +0x0C: NumElements (int32)
 ```
 
-Detection: when `numElements > OBJECTS_PER_CHUNK`, check if `*(Objects + 8)` is a valid heap pointer. If not (e.g., `0x40000000` = EObjectFlags::Const), the array is flat.
+Detection, in priority order:
+
+1. **If the layout preset already resolved to a flat one, believe it.** `s_isFlat` is set when
+   `"Flat"` / `"Flat-Base"` validates, and that is a stronger signal than any heuristic.
+2. Otherwise, when `numElements > OBJECTS_PER_CHUNK`, check whether `*(Objects + 8)` is a valid
+   heap pointer. If not (e.g. `0x40000000` = `EObjectFlags::Const`), the array is flat.
+
+> Step 1 exists because step 2 **cannot speak for a small flat array**. It only runs when the
+> count needs two chunks, so a flat array with fewer than 65536 objects fell straight through to
+> the CHUNKED probe — which treats `Item[0].Object` as a chunk pointer and then probes a
+> UObject's own bytes as an item array. Measured on NEKOPALIVE (4.11, Num=27016): `P1 stride 16:
+> good=1, named=1, null=51, bad=148`, and ~10% of names resolving downstream. Fantasynth (4.13)
+> has the identical layout but Num=80162, needed two chunks, and scored `P0-flat stride 24:
+> good=200, named=200, null=0, bad=0`. **The only difference between the two was the object
+> count.**
 
 > **Both boundaries are now read off Epic's own source**, not extrapolated — `vendor/UnrealEngine`
 > is a full-refspec clone, so `git show <tag>:Engine/Source/Runtime/CoreUObject/Public/UObject/UObjectArray.h`

@@ -759,7 +759,27 @@ static void DetectStrideForCurrentObjOffset(uintptr_t chunkTable, uintptr_t chun
         int32_t numElements = GetCount();
         bool mightBeFlat = false;
 
-        if (chunk0 && numElements > 0) {
+        // If the LAYOUT PRESET already said flat, believe it — do not re-derive flatness from
+        // the object count. The chunk[1] heuristic below can only speak when the array is big
+        // enough to need two chunks, so a flat array with fewer than OBJECTS_PER_CHUNK (65536)
+        // objects silently fell through to the CHUNKED probe, which then treats Item[0].Object
+        // as a chunk pointer and probes a UObject's own bytes as an item array.
+        //
+        // Measured on NEKOPALIVE (UE 4.11, Num=27016): "Layout 'Flat-Base' detected
+        // (flat, non-chunked)" was logged, then `P1 stride 16: good=1, named=1, null=51,
+        // bad=148` — 1 usable item in 200, and ~10% of names resolving downstream. Fantasynth
+        // (UE 4.13) has the identical layout but Num=80162, so it needed 2 chunks, the heuristic
+        // fired, and it scored `P0-flat stride 24: good=200, named=200, null=0, bad=0`. The only
+        // difference between the two was the object count.
+        //
+        // Pre-existing: this gate has always been count-based. It simply could not bite until a
+        // flat array smaller than 65536 objects reached it, which is what the Flat-Base preset
+        // made possible. Chunked titles are unaffected — s_isFlat is false for them.
+        if (s_isFlat) {
+            mightBeFlat = true;
+            LOG_INFO("ObjectArray: layout preset is flat (%d objects) — testing flat layout first",
+                     numElements);
+        } else if (chunk0 && numElements > 0) {
             int chunksNeeded = (numElements + Grimoire::OBJECTS_PER_CHUNK - 1) / Grimoire::OBJECTS_PER_CHUNK;
             if (chunksNeeded >= 2) {
                 // Validate chunk[1]: in a real chunk table, chunk[1] must be a valid heap pointer.
