@@ -3739,20 +3739,40 @@ uintptr_t ExtraScanGObjects() {
 // FField property chain + super-struct chain). Uses the runtime-calibrated DynOff
 // offsets, so it is version-independent (the NAMES — e.g. "OwningGameInstance" — are
 // stable UE members; only their offsets vary). Returns -1 if not found.
+// Walks the reflected property chain of a UStruct (and its supers) for a named property.
+//
+// TWO CHAINS, because UE4.25 moved properties off UObject:
+//   FField era (4.25+)  — UStruct::ChildProperties -> FField::Next, name is FField::NamePrivate,
+//                         offset is FProperty::Offset_Internal.
+//   UProperty era (<4.25) — UStruct::Children -> UField::Next. A UProperty IS a UObject, so its
+//                         name is UObjectBase::NamePrivate and the offset is
+//                         UProperty::Offset_Internal.
+//
+// Grimoire.h says it outright: USTRUCT_CHILDPROPS is "absent in UE4 <4.25". This function used to
+// walk only that one, so on every pre-4.25 title it read a non-existent member and returned -1 —
+// which quietly disabled EVERY caller: ValidateGEngineSlot (so no GEngine AOB could ever
+// validate), FindLiveGameEngine, and RecoverGWorldViaEngine. Seen on NEKOPALIVE 4.11, where
+// GENG_X1/X3/X4 all hit the correct address and all three were rejected.
 static int FindPropertyOffsetByName(uintptr_t structPtr, const char* propName) {
+    const bool useFField = DynOff::bUseFProperty;
+    const int  chainHead = useFField ? DynOff::USTRUCT_CHILDPROPS : DynOff::USTRUCT_CHILDREN;
+    const int  nextOff   = useFField ? DynOff::FFIELD_NEXT        : DynOff::UFIELD_NEXT;
+    const int  nameOff   = useFField ? DynOff::FFIELD_NAME        : Grimoire::OFF_UOBJECT_NAME;
+    const int  valueOff  = useFField ? DynOff::FPROPERTY_OFFSET   : DynOff::UPROPERTY_OFFSET;
+
     int superGuard = 0;
     for (uintptr_t s = structPtr; s && superGuard++ < 64; ) {
         uintptr_t field = 0;
-        if (Macht::ReadSafe(s + DynOff::USTRUCT_CHILDPROPS, field)) {
+        if (Macht::ReadSafe(s + chainHead, field)) {
             int fieldGuard = 0;
             while (field && fieldGuard++ < 8192) {
                 uint32_t nameIdx = 0;
-                if (Macht::ReadSafe(field + DynOff::FFIELD_NAME, nameIdx) &&
+                if (Macht::ReadSafe(field + nameOff, nameIdx) &&
                     Serie::GetString(nameIdx) == propName) {
                     int32_t off = 0;
-                    return Macht::ReadSafe(field + DynOff::FPROPERTY_OFFSET, off) ? off : -1;
+                    return Macht::ReadSafe(field + valueOff, off) ? off : -1;
                 }
-                if (!Macht::ReadSafe(field + DynOff::FFIELD_NEXT, field)) break;
+                if (!Macht::ReadSafe(field + nextOff, field)) break;
             }
         }
         uintptr_t super = 0;
