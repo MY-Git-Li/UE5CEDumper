@@ -141,7 +141,24 @@ uintptr_t FindSparseDelegateStorage();
 // and asks the reflected class for a non-null "GameViewport" property, which is the
 // same version-independent test FindLiveGameEngine uses. Returns 0 if no pattern
 // validated; callers then fall back to the GObjects walk (object only, no slot).
+//
+// That precondition is ENFORCED, not just documented: if DynOff::bOffsetsValidated is
+// still false this returns 0 immediately (method "deferred") without scanning, because the
+// validator cannot possibly succeed and the scan costs 0.2-0.7 s. Call
+// ResolveGEngineDeferred once the offsets are up.
 uintptr_t FindGEngineSlot();
+
+// Second-pass GEngine resolution, run after ValidateAndFixOffsets + FNamePool init.
+//
+// FindAll cannot resolve &GEngine: it runs before the dynamic FField/UStruct offsets and the
+// FNamePool exist, and ValidateGEngineSlot needs both to look up the reflected "GameViewport"
+// property. Before this existed, &GEngine reported "AOB not found" on every game even though
+// the patterns were resolving to the correct address (verified against the Everspace 2 PDB).
+//
+// No-op when out.GEngine is already set. On success it updates the cached slot used by
+// FindLiveGameEngine's fast path and republishes the pattern-id / scan-addr / AOB triple so a
+// GameEngine-rooted CE export can still be AOB-wrapped.
+uintptr_t ResolveGEngineDeferred(EnginePointers& out);
 
 // Detect UE version from memory or PE resources
 uint32_t DetectVersion();

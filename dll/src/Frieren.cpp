@@ -320,6 +320,20 @@ bool UE5_Init() {
             LOG_WARN("UE5_Init: Offset validation failed — using default offsets (may be wrong for this UE version)");
         }
 
+        // &GEngine, second pass. FindAll runs BEFORE the FNamePool and the DynOff offsets exist,
+        // and ValidateGEngineSlot needs both to resolve the reflected "GameViewport" property —
+        // so the slot can only be validated here. Skipping this step is what made the System tab
+        // report "&GEngine — AOB not found" on every title while the patterns were in fact
+        // landing on the right address.
+        Genau::ResolveGEngineDeferred(ptrs);
+        g_cachedGEngine          = ptrs.GEngine;
+        g_cachedGEngineMethod    = ptrs.gengineMethod;
+        g_cachedGEnginePatternId = ptrs.genginePatternId;
+        g_cachedGEngineScanAddr  = ptrs.gengineScanAddr;
+        g_cachedGEngineAob       = ptrs.gengineAob;
+        g_cachedGEngineAobPos    = ptrs.gengineAobPos;
+        g_cachedGEngineAobLen    = ptrs.gengineAobLen;
+
         // Post-DynOff version correction: UProperty mode definitively means UE4 pre-4.25.
         // Structural detection beats user input here — wrong offsets break exports far worse
         // than a wrong label, so we override even when bUserOverride is set (and log loudly

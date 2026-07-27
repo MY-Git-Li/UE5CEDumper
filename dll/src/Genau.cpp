@@ -4061,10 +4061,45 @@ static bool ValidateGEngineSlot(uintptr_t slotAddr) {
     return true;
 }
 
+// Copy the GEngine scan metadata out of s_gengineReport. Shared by FindAll and
+// ResolveGEngineDeferred so the deferred re-run publishes exactly what the eager path would —
+// otherwise a deferred win would resolve the address but leave the CE-export AOB triple empty.
+static void PublishGEngineMetadata(EnginePointers& out) {
+    out.gengineMethod    = s_gengineMethod;
+    out.genginePatternId = s_gengineReport.winningId;
+    out.gengineScanAddr  = s_gengineReport.scanAddr;
+    out.gengineAob    = nullptr;
+    out.gengineAobPos = 0;
+    out.gengineAobLen = 0;
+    if (auto* es = s_gengineReport.winningSig) {
+        out.gengineAob    = es->pattern;
+        out.gengineAobPos = es->instrOffset + es->opcodeLen;
+        out.gengineAobLen = es->instrOffset + es->totalLen;
+    }
+}
+
 uintptr_t FindGEngineSlot() {
     s_gengineReport = ScanReport{};
     s_gengineReport.targetName = "GEngine";
     s_gengineMethod = "not_found";
+
+    // ValidateGEngineSlot asks the reflected class for a "GameViewport" property. That needs
+    // BOTH the dynamic FField/UStruct offsets (DynOff) and a live FNamePool (Serie::GetString),
+    // and neither exists yet while FindAll is running — ValidateAndFixOffsets and the FNamePool
+    // init both happen AFTER it. So every candidate is rejected and the ~0.2-0.7 s AVX2 pass is
+    // pure waste.
+    //
+    // This is not hypothetical. It made "&GEngine — AOB not found" the answer on EVERY game
+    // while the patterns themselves were fine: on Everspace 2 (UE 5.5) 14 of 15 candidates
+    // resolved to 0x7FF68ACC37B0, which is exactly the PDB's &GEngine (image VA 0x149DA37B0),
+    // and all 14 were thrown away here. Bail out cheaply instead, and let
+    // ResolveGEngineDeferred re-run the scan once the offsets land.
+    if (!DynOff::bOffsetsValidated.load(std::memory_order_acquire)) {
+        s_gengineMethod = "deferred";
+        Sein::Info("SCAN:Eng", "FindGEngineSlot: deferred — dynamic offsets not validated yet "
+                               "(re-runs after ValidateAndFixOffsets)");
+        return 0;
+    }
 
     uintptr_t result = ScanForTarget(
         Sig::GENGINE_PATTERNS, std::size(Sig::GENGINE_PATTERNS),
@@ -4082,6 +4117,27 @@ uintptr_t FindGEngineSlot() {
                                "(non-critical — FindGameEngine falls back to the GObjects walk)");
     }
     return result;
+}
+
+uintptr_t ResolveGEngineDeferred(EnginePointers& out) {
+    if (out.GEngine) return out.GEngine;   // already resolved eagerly — nothing to redo
+
+    // Offset detection can itself fail (ValidateAndFixOffsets returned false). Say so rather
+    // than emitting FindGEngineSlot's "re-runs after ValidateAndFixOffsets" a second time,
+    // which would point at a step that has already been and gone.
+    if (!DynOff::bOffsetsValidated.load(std::memory_order_acquire)) {
+        s_gengineMethod = "not_found";
+        Sein::Warn("SCAN:Eng", "ResolveGEngineDeferred: offsets never validated — cannot "
+                               "reflect 'GameViewport', so &GEngine stays unresolved");
+        PublishGEngineMetadata(out);
+        return 0;
+    }
+
+    uintptr_t slot = FindGEngineSlot();
+    s_gengineSlot = slot;
+    out.GEngine   = slot;
+    PublishGEngineMetadata(out);
+    return slot;
 }
 
 // Resolve the live GEngine object for the Live Walker "Start from GameEngine"
@@ -4333,13 +4389,9 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
     }
     // Same triple for GEngine, so a GameEngine-rooted CE export can be AOB-wrapped
     // exactly like a GWorld-rooted one instead of baking in a stale UEngine* snapshot.
-    out.genginePatternId = s_gengineReport.winningId;
-    out.gengineScanAddr  = s_gengineReport.scanAddr;
-    if (auto* es = s_gengineReport.winningSig) {
-        out.gengineAob    = es->pattern;
-        out.gengineAobPos = es->instrOffset + es->opcodeLen;
-        out.gengineAobLen = es->instrOffset + es->totalLen;
-    }
+    // Shared with ResolveGEngineDeferred — GEngine is normally resolved THERE, not here,
+    // because its validator needs offsets that do not exist yet at this point.
+    PublishGEngineMetadata(out);
 
     LOG_INFO("FindAll: Complete — GObjects=0x%llX (%s), GNames=0x%llX (%s), GWorld=0x%llX (%s), Sparse=0x%llX (%s), GEngine=0x%llX (%s), UE=%u, UE4Names=%s, hdrOff=%d",
              static_cast<unsigned long long>(out.GObjects), out.gobjectsMethod,

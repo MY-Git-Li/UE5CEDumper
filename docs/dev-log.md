@@ -20,6 +20,68 @@ builds ≤696 in
 
 -----
 
+## 2026-07-27 - &GEngine was never resolvable: the validator ran before the offsets it needs (build 2441)
+
+**Symptom:** the System tab reported `&GEngine — AOB not found` on *every* game. Reported against
+DQ7R (4.27), The Adventures of Elliot (5.4), DQ XI S (4.18), Titan Quest II (5.6) and
+Everspace 2 (5.5) — the last two being cases where the offline sweep says the patterns resolve
+correctly, which is what made it obviously a code bug rather than a coverage gap.
+
+### The patterns were right the whole time
+
+The scan log records every candidate. On Everspace 2, **14 of 15 candidates across four
+independent patterns resolved to `0x7FF68ACC37B0`** — and the PDB's `&GEngine` is image VA
+`0x149DA37B0`, which at that process's load base is exactly `0x7FF68ACC37B0`. Same picture
+everywhere else: DQ7R 41 hits on one address, Elliot 27, TQ2 28, DQ XI S 12. Textbook
+convergence. Then every one of them was rejected.
+
+### Root cause — an ordering contract that was documented but not honoured
+
+`Genau.cpp`'s `FindGEngineSlot` carried a comment stating it *"MUST be called after
+GObjects/GNames/offsets are up"*, because `ValidateGEngineSlot` derefs the candidate and asks the
+reflected class for a `GameViewport` property. `FindPropertyOffsetByName` needs
+`DynOff::USTRUCT_CHILDPROPS` / `FFIELD_NAME` / `FFIELD_NEXT` / `FPROPERTY_OFFSET` **and**
+`Serie::GetString` — i.e. the dynamic offsets *and* a live FNamePool.
+
+The call site did not satisfy it. From the Everspace 2 log:
+
+| time | event |
+|---|---|
+| `12:10:01.340` | GEngine AOB scan + validation (inside `Genau::FindAll`, `Frieren.cpp:122`) |
+| `12:10:02.505` | `FNamePool: Initialized` |
+| `12:10:02.506` | `ValidateAndFixOffsets: Starting…` (`Frieren.cpp:319`) |
+| `12:10:02.508` | `ChildProperties found at struct+0x50`, `FField::Name at +0x20` |
+
+The validator ran **1.2 s before** the values it reads were discovered, so it walked the property
+chain with compile-time default offsets and a dead name pool. Every candidate failed, on every
+game, always — the feature had never worked since it was added at build 2399.
+
+### Fix — resolve &GEngine in a second pass
+
+- `FindGEngineSlot` now **enforces** its own precondition instead of documenting it: if
+  `DynOff::bOffsetsValidated` is false it returns 0 with method `deferred` **without scanning**.
+  That also stops burning the 0.2–0.7 s AVX2 pass on a scan whose result cannot be accepted.
+- New `Genau::ResolveGEngineDeferred(EnginePointers&)` re-runs the scan once the offsets exist,
+  republishing the pattern-id / scan-addr / AOB triple so a GameEngine-rooted CE export can still
+  be AOB-wrapped (a deferred win that only set the address would have left that empty).
+- `UE5_Init` calls it directly after `ValidateAndFixOffsets` and re-caches the seven
+  `g_cachedGEngine*` globals the pipe serves to the System tab.
+- The `apply_rescan` pipe path got the same second pass: a recovery rescan that revives
+  GObjects/GNames is exactly the case where the offsets GEngine was waiting on have just arrived.
+
+### Notes for next time
+
+- The 0.2–0.7 s per game the wasted scan cost was invisible because it was folded into the
+  scan-progress bar.
+- Nothing was wrong in `Himmel.h`. Every GEngine pattern is fine and the target hits on 5/5 live
+  games spanning UE 4.18 / 4.27 / 5.4 / 5.5 / 5.6 — **adding more GEngine AOBs would have fixed
+  nothing.** A "not found" in the UI is only evidence about the *pipeline*, not the patterns,
+  until the scan log's candidate list has been read.
+- `RecoverGWorldViaEngine` has the same reflection dependency but is already invoked from a later
+  path (`Frieren.cpp:447`, after offsets), so it was never affected.
+
+-----
+
 ## 2026-07-26 - Stack-displacement rule codified and applied; GWLD_SF_4 coverage 4 -> 15 binaries (build 2437)
 
 The user stated a design rule I had been applying too bluntly: **`lea rdx,[rsp+????????]` is fine

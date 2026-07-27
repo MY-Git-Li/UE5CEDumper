@@ -4254,6 +4254,33 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 if (!Genau::ValidateAndFixOffsets(g_cachedUEVersion)) {
                     Sein::Warn("PIPE:cmd", "apply_rescan: ValidateAndFixOffsets returned false");
                 }
+
+                // Same second pass UE5_Init does: &GEngine can only be VALIDATED once the
+                // offsets exist, so a recovery rescan that revives GObjects/GNames has to
+                // retry it too — otherwise this path keeps reporting "AOB not found" for
+                // GEngine forever even though the offsets it was waiting on just arrived.
+                extern uintptr_t   g_cachedGEngine;
+                extern const char* g_cachedGEngineMethod;
+                extern const char* g_cachedGEnginePatternId;
+                extern uintptr_t   g_cachedGEngineScanAddr;
+                extern const char* g_cachedGEngineAob;
+                extern int         g_cachedGEngineAobPos;
+                extern int         g_cachedGEngineAobLen;
+                if (g_cachedGEngine == 0) {
+                    Genau::EnginePointers eng;   // scratch — carries the AOB metadata triple
+                    if (Genau::ResolveGEngineDeferred(eng)) {
+                        g_cachedGEngine          = eng.GEngine;
+                        g_cachedGEngineMethod    = eng.gengineMethod;
+                        g_cachedGEnginePatternId = eng.genginePatternId;
+                        g_cachedGEngineScanAddr  = eng.gengineScanAddr;
+                        g_cachedGEngineAob       = eng.gengineAob;
+                        g_cachedGEngineAobPos    = eng.gengineAobPos;
+                        g_cachedGEngineAobLen    = eng.gengineAobLen;
+                        Sein::Info("PIPE:cmd", "apply_rescan: Applied GEngine=0x%llX (%s)",
+                                   (unsigned long long)g_cachedGEngine, g_cachedGEngineMethod);
+                        applied = true;
+                    }
+                }
             }
 
             json data;
