@@ -5,7 +5,7 @@
 
 // ============================================================
 // Himmel — 欣梅爾 (勇者 — The Hero, Remembered Forever)
-// Signatures: the AOB pattern database — 153 entries over FIVE targets
+// Signatures: the AOB pattern database — 157 entries over FIVE targets
 //
 // Every byte-pattern signature the scanner uses lives in this file, for all five
 // AobTarget values:
@@ -13,8 +13,10 @@
 //   GObjects         FUObjectArray / GUObjectArray            55 AOB + 1 symbol export
 //   GNames           FNamePool (4.23+) or TNameEntryArray      28 AOB + 1 CallFollow
 //                                                              + 3 symbol exports
-//   GWorld           UWorldProxy                               49 AOB + 1 symbol export
-//   SparseDelegates  FSparseDelegateStorage::SparseDelegates    7 AOB — lazily resolved on
+//                                                              (CT2 removed b2407 — see note)
+//   GWorld           UWorldProxy                               50 AOB + 1 symbol export
+//                                                              (V2/V4/V5/V6 removed b2409)
+//   SparseDelegates  FSparseDelegateStorage::SparseDelegates   10 AOB — lazily resolved on
 //                    (UE 4.23+)                                  first sparse-delegate
 //                                                                drill-down, NOT in FindAll
 //   GEngine          the &GEngine SLOT, not the object          7 AOB + 1 symbol export —
@@ -22,9 +24,15 @@
 //                                                                because its validator needs
 //                                                                reflection (see that section)
 //
-// The authoritative per-target counts are at the BOTTOM of this file; regenerate them with
+//   = 150 AOB + 1 CallFollow + 6 symbol exports = 157 entries, over 30 distinct `source` tags
+//     (counting the combined ones like DI427+SP57, which record every binary that vouches).
+//
+// THESE COUNTS GO STALE SILENTLY — regenerate them, do not hand-edit:
 //   py tools/ghidra/extract_patterns.py dll/src/Himmel.h out.tsv
-// which prints exactly what it parses out of here.
+// prints exactly what it parses out of here. This block was once duplicated by a second summary
+// at the BOTTOM of the file, which is precisely how it drifted: the header delegated authority
+// downward, stopped being maintained, and ended up four patterns short while the tail was right.
+// One copy only. (Merged build 2478.)
 //
 // HOW TO ADD NEW PATTERNS:
 //   1. Add a constexpr const char* in the appropriate section
@@ -37,7 +45,7 @@
 //      table above the arrays — not from how new it is or who contributed it.
 //   5. VERIFY IT AGAINST THE CORPUS before trusting it:
 //         bash tools/ghidra/sweep.sh && py tools/ghidra/aggregate_sweep.py out/sweep
-//      35 programs, 20 with PDB ground truth, UE 4.18-5.7. The bar is: correct on the binary
+//      46 programs, 32 with ground truth, UE 4.11-5.7. The bar is: correct on the binary
 //      it was mined from, and zero hits *or* correct everywhere else. A pattern that looks
 //      clean on one binary routinely produces decoys on another engine version — that is the
 //      entire point of the multi-binary gauntlet. See tools/ghidra/GROUND-TRUTH.md.
@@ -90,22 +98,29 @@
 //             UEnum::Names still TArray<TTuple> (<5.6), FUObjectItem 24B WITH RefCount,
 //             classic FChunkedFixedUObjectArray order (<5.8), and the PDB's
 //             EUnrealEngineObjectUE5Version enum ends at ASSETREGISTRY_PACKAGEBUILDDEPENDENCIES.
-//   DI427+SP57 / X+FF7R
+//   AV53    : Avowed (UE 5.3) sparse delegates specifically — found STRUCTURALLY, not by string
+//             xref (`SparseDelegateReport` is compiled out of this binary). Avowed's known
+//             deviations stop at the object array; its sparse storage is stock UE 5.3.
+//   FD      : UWorld::FinishDestroy — the read-then-conditional-write-back GWorld shape,
+//             PDB-confirmed on HeliumRain 4.20 + DropIn 4.24 + DropIn 4.27, correct 4.11-5.2.
+//   DI427+SP57 / X+FF7R / PAL51+X / X+GH51
 //           : CROSS-VERSION patterns — mined on one oracle, then confirmed decoy-free on
 //             others, so the source records every binary that vouches for them rather than
-//             just the one they came from. Both are GEngine entries: GENG_X1 (UWorld::
-//             GetGameViewport, correct on 8 engine versions) and GENG_X3 (its head only,
-//             which is what reaches FF7 Remake's UE 4.18 fork and UE 5.5).
+//             just the one they came from. GENG_X1 (UWorld::GetGameViewport, correct on 8
+//             engine versions), GENG_X3 (its head only, which is what reaches FF7 Remake's
+//             UE 4.18 fork and UE 5.5), and the SPARSE_X1/X2 pair mined on Grimhook 5.1 that
+//             closed the sparse "n=1" cluster.
 //
-// SWEEP CORPUS as of build 2419 — 35 programs, of which 20 carry ground truth. Those 20 are
-// PROGRAMS not games: a modular Satisfactory project contributes Core + CoreUObject + Engine
-// separately, since each defines different globals. They span twelve engine versions —
-// UE 4.20 Everspace, 4.22 Satisfactory (monolithic), 4.24 DropIn, 4.25 Everspace 2,
-// 4.26 Satisfactory, 4.27 DropIn, 5.2 Satisfactory, 5.5 Everspace 2 (TWO builds) + Meltopia
-// (monolithic), 5.6 Satisfactory (+ its CrashReportClient, a bonus monolithic 5.6),
-// 5.7 Solarpunk — all from PDBs, plus FF7 Remake 4.18 whose GObjects/GEngine were derived by
-// disassembly instead.
-// The remaining 15 are symbol-less MONOLITHIC titles (Palworld 5.1, Avowed 5.3, TQ2, Octopath,
+// SWEEP CORPUS as of build 2478 — 46 programs, of which 32 carry ground truth, spanning
+// UE 4.11 through 5.7 and CONTIGUOUS from 4.24 up. Those 32 are PROGRAMS not games: a modular
+// Satisfactory project contributes Core + CoreUObject + Engine separately, since each defines
+// different globals. Most come from full PDBs; a handful (4.11 Nekopara, 4.13 Fantasynth,
+// 4.18 FF7 Remake, 4.18 DQ XI S, 4.21 Freud Gate, 4.27 DQ7R, 5.0 Light Maze, 5.4 Elliot) were
+// DERIVED BY DISASSEMBLY instead, which is why the per-game reasoning lives in GROUND-TRUTH.md
+// rather than here — that file is the authoritative corpus table and this paragraph is a summary
+// of it. Below 4.11 is gated as UNSUPPORTED (Genau checks MIN_SUPPORTED_UE_VERSION): 4.10 has no
+// FUObjectItem at all and ArrayLayout structurally cannot express its inline chunk table.
+// The remaining 14 are symbol-less MONOLITHIC titles (Palworld 5.1, Avowed 5.3, TQ2, Octopath,
 // FF7 Rebirth, Manor Lords, DQ I&II HD-2D, The Artisan of Glimmith, ...) used as noise probes.
 // They cannot say "right", only "did anything hit that should not have" — and that question
 // needs monolithic EXEs, because a 4-30 MB Satisfactory engine DLL understates the collision
@@ -1766,6 +1781,12 @@ constexpr bool HasUniquePriorities(const AobSignature (&arr)[N]) {
     static_assert(IsSortedByPriority(tbl), #tbl " must be listed in priority order"); \
     static_assert(HasUniquePriorities(tbl), #tbl " has two entries on the same priority")
 
+// These fire at COMPILE TIME, so a mis-ordered or duplicate priority cannot reach a build.
+// Worth knowing why they exist: the file HAD drifted out of order before they were added —
+// GNAM_V5 (850) sat inside the Tier-1 block, GOBJ_PS7 (970) under a "600-690" header, and
+// GWLD_G42_1 (880) inside the 325-365 run. None of that changed behaviour, because
+// ScanForTarget sorts a copy at scan time; what it did was make the file MISREPORT ITSELF to a
+// reader, who would then reason about scan order from the listing and be wrong.
 ASSERT_TABLE_ORDER(GOBJECTS_PATTERNS);
 ASSERT_TABLE_ORDER(GNAMES_PATTERNS);
 ASSERT_TABLE_ORDER(GWORLD_PATTERNS);
@@ -1774,27 +1795,7 @@ ASSERT_TABLE_ORDER(GENGINE_PATTERNS);
 
 #undef ASSERT_TABLE_ORDER
 
-
-// ============================================================
-// Pattern count summary
-// ============================================================
-// GObjects: 55 AOB patterns + 1 symbol export
-// GNames:   28 AOB patterns + 1 CallFollow + 3 symbol exports  (CT2 removed b2407 — see note)
-// GWorld:   50 AOB patterns + 1 symbol export  (V2/V4/V5/V6 removed b2409 — see note)
-// SparseDelegates: 10 — lazily resolved, not part of the FindAll boot sequence
-// GEngine:   7 AOB patterns + 1 symbol export — resolved after GObjects/GNames
-// Total:   150 AOB patterns + 1 CallFollow + 6 symbol exports = 157 entries (from 21 sources)
-//
-// These five lines go stale silently. Regenerate them, do not hand-edit:
-//     py tools/ghidra/extract_patterns.py dll/src/Himmel.h out/sweep/patterns.tsv
-// prints exactly these counts. They were last found 4 short (SPARSE_AV53_1/X1/X2 + GWLD_FD_1).
-//
-// EVERY ARRAY IS SORTED BY PRIORITY, and a checker enforces it — keep it that way. The file had
-// drifted out of order (GNAM_V5 at 850 sat inside the Tier-1 block, GOBJ_PS7 at 970 under a
-// "600–690" header, GWLD_G42_1 at 880 inside the 325–365 run), which does not change behaviour
-// because ScanForTarget sorts, but does make the file misreport itself to a reader.
-//
-// Keep these in sync by running:  py tools/ghidra/extract_patterns.py dll/src/Himmel.h out.tsv
-// which prints the per-target counts it parses out of this file.
+// NOTE: the per-target pattern counts live in the FILE HEADER and nowhere else. A second copy
+// used to sit here; keeping both is what let the header go four patterns stale. One copy only.
 
 } // namespace Sig
