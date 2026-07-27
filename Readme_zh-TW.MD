@@ -51,6 +51,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
 | UE 版本 | GObjects | GNames | DynOff | 已驗證遊戲 |
 |---|:---:|:---:|:---:|---|
+| **4.11 – 4.14** | ✅ | ✅† | ✅ | NEKOPALIVE (ネコパラ) |
 | **4.15 – 4.17** | ✅ | ✅ | ✅ | Extinction |
 | **4.18 – 4.20** | ✅ | ✅ | ✅ | Final Fantasy VII Remake Intergrade, The Occupation |
 | **4.21 – 4.24** | ✅ | ✅ | ✅ | 《STAR WARS 絕地：組織殞落™》, 勇者鬥惡龍 XI S, 偶像大師 星耀季節, 八方旅人, 勇者鬥惡龍 I&II / III HD-2D 重製版 |
@@ -61,6 +62,9 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
 *\*GNames 在 5.5+ 版本使用 .data 指標掃描回退機制。*
 *\**DynOff 支援 **CasePreservingName (FName = 16 bytes)** 佈局。
+*†4.23 以前沒有 `FNamePool`，GNames 是 `FName::GetNames` 延遲配置的 `TNameEntryArray`；sparse delegate 也完全
+不存在（4.23 才引入）。**UE 4.11 是支援下限**：4.10 以下沒有 `FUObjectItem`，且採用掃描器無法表達的 inline chunk
+table，因此會直接顯示為不支援，而不是讓它以難以理解的方式失敗。*
 
 ---
 
@@ -149,7 +153,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 ## 重要注意事項 (Important Notes)
 
 * **自定義數據結構**: 在如《FF7 Rebirth》等遊戲中，部分關鍵數據（如 HP）存儲在標準 `UObject` 之外的自定義結構中。Live Walker 可協助探查這些區域，但無法直接自動發現。
-* **GWorld 連通性**: 截至 2026-07-23，`GWorld` 遍歷在 **100% 實測遊戲中正常運作（39 / 39）**，已涵蓋 Satisfactory（modular UE，獨立 `CoreUObject-Win64-Shipping.dll`）、《STAR WARS 絕地：組織殞落》(UE 4.21，EA 啟動器 / Steam)、*Avowed*（其 `GWorld` AOB 落在誘餌位址，改以掃描 `.data` 尋找指向作用中遊戲世界的指標來回復 — 取 `OwningGameInstance` 非空的那個，並略過 World-Partition 的 `_Generated_` cell）、劍星 (Stellar Blade)、女神異聞錄３ Reload，Pionero Capital Demo，MindsEye（UE 5.4.4 licensee fork，遊戲版本 7.3.1），以及《Star Trek Voyager – Across the Unknown》（原生 UE 5.6）。如遇尚未驗證的遊戲，請改用 **Object Tree** 或 **Instance Finder** 作為主要進入點。
+* **GWorld 連通性**: 截至 2026-07-27，`GWorld` 遍歷在 **100% 實測遊戲中正常運作（40 / 40）**，已涵蓋 *NEKOPALIVE*（UE 4.11 — 目前支援的最舊引擎，透過 `GWLD_FD_1` 直接解析）、Satisfactory（modular UE，獨立 `CoreUObject-Win64-Shipping.dll`）、《STAR WARS 絕地：組織殞落》(UE 4.21，EA 啟動器 / Steam)、*Avowed*（其 `GWorld` AOB 落在誘餌位址，改以掃描 `.data` 尋找指向作用中遊戲世界的指標來回復 — 取 `OwningGameInstance` 非空的那個，並略過 World-Partition 的 `_Generated_` cell）、劍星 (Stellar Blade)、女神異聞錄３ Reload，Pionero Capital Demo，MindsEye（UE 5.4.4 licensee fork，遊戲版本 7.3.1），以及《Star Trek Voyager – Across the Unknown》（原生 UE 5.6）。如遇尚未驗證的遊戲，請改用 **Object Tree** 或 **Instance Finder** 作為主要進入點。
 * **EA 啟動器遊戲的 Proxy DLL 限制**: 《STAR WARS 絕地：組織殞落》透過 EA 啟動器啟動，`version.dll` 或 `dinput8.dll` proxy 皆無法被遊戲行程載入（EA 啟動器會限制 DLL 搜尋路徑）。需待遊戲啟動後改以 CE Dll Injection 注入。掃描端本身無問題 — DLL 進入行程後 GObjects / GNames / GWorld 均能正常解析。其他 EA 啟動器標題可能也有相同情況；若遇到請開 issue 回報。
 * **針對既不匯入 `version.dll` 也不匯入 `dinput8.dll` 的遊戲使用 `dxgi.dll` proxy**: 少數遊戲（例如 *The Adventures of Elliot*，一款 SQUARE ENIX D3D12 遊戲 — 其 PE 版本字串被移除而被偵測為 UE4.27，但執行期已校正為 UE5.4；*Echoes of Aincrad Demo*，一款 Bandai Namco UE5.4 D3D12 遊戲）的 EXE 根本不匯入 `version.dll` 或 `dinput8.dll`，因此 Windows 永遠不會載入那些 proxy — 與 EA 的情況不同，這是遊戲自身的 import table，而非啟動器限制。請改用 **`dxgi.dll`** proxy（`build.ps1 -Target ProxyDxgi`，或在 Proxy Deploy 分頁選 *dxgi.dll*）：每款 D3D11/D3D12 UE 遊戲都會匯入 `dxgi`，因此能可靠載入。已在 Elliot、Echoes of Aincrad Demo，以及 *Pionero Capital Demo*（一款 stock UE5.7 遊戲 — 第一款透過此 proxy 驗證的 stock-5.7 遊戲）上端到端實測（連接 + 掃描 + 物件瀏覽）。
 * **切到背景就暫停的遊戲**: 部分遊戲（例如女神異聞錄３ Reload，`t.IdleWhenNotForeground=1`）在非前景視窗時會凍結遊戲執行緒 — 此時遊戲執行緒上的呼叫會逾時。本工具會**偵測停擺**（顯示琥珀色「game thread stalled」橫幅；相機 POV 讀取改走 raw 快取而不會卡住管道），而實驗性的 **Keep Foreground** 開關能直接解決根本原因，讓遊戲在背景時呼叫仍可運作。

@@ -53,6 +53,7 @@ Games grouped by UE version range. Per-game detail — layout quirks, proxy note
 
 | UE Version | GObjects | GNames | DynOff | Verified Games |
 |---|:---:|:---:|:---:|---|
+| **4.11 – 4.14** | ✅ | ✅† | ✅ | NEKOPALIVE |
 | **4.15 – 4.17** | ✅ | ✅ | ✅ | Extinction |
 | **4.18 – 4.20** | ✅ | ✅ | ✅ | FF7 Remake Intergrade, The Occupation |
 | **4.21 – 4.24** | ✅ | ✅ | ✅ | Star Wars Jedi, DQ XI S, IDOLM@STER STARLIT SEASON, Octopath Traveler, DQ I&II / III HD-2D Remaster |
@@ -63,6 +64,10 @@ Games grouped by UE version range. Per-game detail — layout quirks, proxy note
 
 *\*GNames uses .data pointer-scan fallback for 5.5+.*
 *\**DynOff supports **CasePreservingName (FName = 16 bytes)** layout.*
+*†Pre-4.23 has no `FNamePool` — GNames is the `TNameEntryArray` that `FName::GetNames` lazily allocates, and
+sparse delegates do not exist at all (they arrived in 4.23). **UE 4.11 is the supported floor**: 4.10 and below
+have no `FUObjectItem` and use an inline chunk table the scanner cannot express, so they are reported as
+unsupported rather than left to fail confusingly.*
 
 ---
 
@@ -150,7 +155,7 @@ Inject `UE5Dumper.dll` into an **already-running** game — the quickest path (n
 ## Important Notes
 
 * **Custom Data Structures**: In games like *FF7 Rebirth*, some critical data (e.g., HP) is stored in custom structures outside standard `UObjects`. The Live Walker can help investigate these regions, but direct discovery is not possible.
-* **GWorld Connectivity**: `GWorld` traversal works in **100% of tested games (39 / 39)** as of 2026-07-23, including Satisfactory (modular UE build with a separate `CoreUObject-Win64-Shipping.dll`), *Star Wars Jedi: Fallen Order* (UE 4.21, EA Origin / Steam launcher), *Avowed* (where the `GWorld` AOB lands on a decoy and is recovered by scanning `.data` for a pointer to the active game world — the one with a non-null `OwningGameInstance`, skipping World-Partition `_Generated_` cells), *Stellar Blade*, *Persona 3 Reload*, *Pionero Capital Demo*, *MindsEye* (UE 5.4.4 licensee fork, game v7.3.1), and *Star Trek Voyager – Across the Unknown* (stock UE 5.6). For unverified games, fall back to **Object Tree** or **Instance Finder** as the primary entry point.
+* **GWorld Connectivity**: `GWorld` traversal works in **100% of tested games (40 / 40)** as of 2026-07-27, including *NEKOPALIVE* (UE 4.11 — the oldest engine supported; resolves directly via `GWLD_FD_1`), Satisfactory (modular UE build with a separate `CoreUObject-Win64-Shipping.dll`), *Star Wars Jedi: Fallen Order* (UE 4.21, EA Origin / Steam launcher), *Avowed* (where the `GWorld` AOB lands on a decoy and is recovered by scanning `.data` for a pointer to the active game world — the one with a non-null `OwningGameInstance`, skipping World-Partition `_Generated_` cells), *Stellar Blade*, *Persona 3 Reload*, *Pionero Capital Demo*, *MindsEye* (UE 5.4.4 licensee fork, game v7.3.1), and *Star Trek Voyager – Across the Unknown* (stock UE 5.6). For unverified games, fall back to **Object Tree** or **Instance Finder** as the primary entry point.
 * **Proxy DLL caveat for EA-launcher games**: *Star Wars Jedi: Fallen Order* launches via the EA app; neither `version.dll` nor `dinput8.dll` proxy is loaded by the wrapped process (EA's launcher restricts the DLL search path). The DLL must be CE-injected after the game is running. The scan side itself works fine — GObjects / GNames / GWorld all resolve cleanly once the DLL is inside the process. Same pattern likely applies to other EA-launched titles; report any new ones as an issue.
 * **`dxgi.dll` proxy for games that import neither `version.dll` nor `dinput8.dll`**: a few titles (e.g. *The Adventures of Elliot*, a SQUARE ENIX D3D12 title — its stripped PE detects as UE4.27 but it is runtime-reconciled to UE5.4; *Echoes of Aincrad Demo*, a Bandai Namco UE5.4 D3D12 title) simply don't import `version.dll` or `dinput8.dll` in their EXE, so those proxies are never loaded by Windows — unlike the EA case, this is the game's own import table, not a launcher restriction. Use the **`dxgi.dll`** proxy (`build.ps1 -Target ProxyDxgi`, or pick *dxgi.dll* in the Proxy Deploy tab): every D3D11/D3D12 UE game imports `dxgi`, so it loads reliably. Live-verified end-to-end on Elliot, Echoes of Aincrad Demo, *Pionero Capital Demo* (a stock UE5.7 title — the first stock-5.7 game verified through this proxy), and *Star Trek Voyager – Across the Unknown* (stock UE5.6) — connect + scan + object browse.
 * **Games that pause when backgrounded**: some titles (e.g. *Persona 3 Reload*, `t.IdleWhenNotForeground=1`) freeze their game thread whenever they are not the foreground window — game-thread invokes then time out. The tool **detects the stall** (an amber "game thread stalled" banner appears; camera-POV reads fall back to a raw cached read instead of hanging the pipe), and the experimental **Keep Foreground** toggle addresses the root cause so invokes keep working while the game is backgrounded.

@@ -289,7 +289,7 @@
         </Grid>
       </Border>
 
-      <!-- FSparseDelegateStorage::SparseDelegates (Optional, UE 5.0+) -->
+      <!-- FSparseDelegateStorage::SparseDelegates (Optional, UE 4.23+ — matches IsSparseDelegatesUnsupported's < 423 gate) -->
       <Border Background="#2D2D30" CornerRadius="4" Padding="16,12">
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel>

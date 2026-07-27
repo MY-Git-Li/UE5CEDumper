@@ -33,7 +33,7 @@ public sealed class EngineState
     public bool HasGWorld =>
         !string.IsNullOrEmpty(GWorldAddr) && GWorldAddr != "0" && GWorldAddr != "0x0";
 
-    /// <summary>FSparseDelegateStorage::SparseDelegates address (UE 5.0+, optional — empty/0 when scan failed or version unsupported).</summary>
+    /// <summary>FSparseDelegateStorage::SparseDelegates address (UE 4.23+, optional — empty/0 when scan failed or version unsupported).</summary>
     public string SparseDelegatesAddr { get; init; } = "";
 
     public int ObjectCount { get; init; }
