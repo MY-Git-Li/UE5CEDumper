@@ -20,6 +20,38 @@ builds ≤696 in
 
 -----
 
+## 2026-07-27 - UE_GameEngine binds the &GEngine slot instead of a frozen pointer (build 2453)
+
+The Teleport tab's Global Pointers card exported two CE symbols with asymmetric backing:
+`UE_GWorld` bound directly to the stable `&GWorld` slot (auto-follows), but `UE_GameEngine` was an
+`allocateMemory(8)` buffer holding a `UEngine*` **snapshot**. That asymmetry existed for one
+reason — `&GEngine` could not be resolved — and that stopped being true today.
+
+- **DLL:** new `QUERY_OP_GENGINE_SLOT = 2` returns the SLOT (`g_cachedGEngine`) plus its deref,
+  same shape as `QUERY_OP_GWORLD`. Op 1 still returns the live instance.
+- **Script:** `UE_GameEngine` now asks for the slot first and registers the symbol straight to it.
+  Only when no GEngine AOB validated does it fall back to op 1 + the buffer.
+
+**The choice is made at ENABLE time, not at generation time.** A CE record gets saved into a `.CT`
+and re-enabled in later sessions, where the AOB may resolve even though it did not when the record
+was created. Baking the decision in when the script is generated would make the artifact silently
+wrong later — and a downgrade to a frozen pointer is precisely the failure a user would not notice.
+
+Two details worth keeping:
+
+- **A marker symbol, not a heuristic, decides what to free.** The snapshot path also registers
+  `UE_GameEngine_buf`; `[DISABLE]` frees only through that. Deciding from `UE_GameEngine` itself
+  would call `deAlloc` on a game address on the slot path. The GWorld script emits no `deAlloc`
+  or `allocateMemory` **at all** — a test asserts the string is absent, so a reader can see the
+  record cannot free a game address without tracing logic.
+- **The busy check had to become a bounded wait.** `SetDone`/`SetError` publish `status = DONE`
+  **before** clearing `cmd` (deliberately). A script issuing two round-trips back to back can
+  exit its status poll and still observe the previous `cmd` for an instant, so a single sample
+  would report "mailbox busy" and silently abandon the fallback. The prior scripts never hit this
+  because they only ever queried once. Now `MailboxIdleWaitMs = 100` ms, bounded.
+
+-----
+
 ## 2026-07-27 - Avowed 5.3 sparse closed; 3 games added as oracles; GENG_X4 demoted in prose
 
 ### Avowed (UE 5.3) sparse delegates — found, and the fork did NOT change the structure

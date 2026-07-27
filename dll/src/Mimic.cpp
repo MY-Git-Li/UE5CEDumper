@@ -42,6 +42,7 @@ extern "C" int32_t  UE5_CallProcessEventDirect(uintptr_t, uintptr_t, uintptr_t);
 extern uintptr_t    g_cachedGObjects;
 extern uintptr_t    g_cachedGNames;
 extern uintptr_t    g_cachedGWorld;   // &GWorld (address of the global UWorld* pointer)
+extern uintptr_t    g_cachedGEngine;  // &GEngine (the static slot holding UEngine*), 0 if unresolved
 
 // UE FunctionFlags subset we care about for the static-native fast path.
 // Pulled from Engine/Source/Runtime/CoreUObject/Public/UObject/Script.h.
@@ -1077,6 +1078,27 @@ static void HandleQueryPtr() {
                  (unsigned long long)info.engineAddr, info.className.c_str());
         if (!info.engineAddr) {
             SetError(-1, "GameEngine not found (no live UEngine in GObjects)");
+            return;
+        }
+        SetDone(0);
+        return;
+    }
+    case QUERY_OP_GENGINE_SLOT: {
+        // The SLOT, not the object — same shape as QUERY_OP_GWORLD. A CE symbol bound
+        // here survives engine recreation because the game keeps writing the current
+        // UEngine* into this address; a symbol bound to the object freezes at whatever
+        // was live when the record was ticked.
+        uintptr_t slot   = g_cachedGEngine;
+        uintptr_t engine = 0;
+        if (slot) Macht::ReadSafe(slot, engine);
+        uint64_t out[2] = { static_cast<uint64_t>(slot), static_cast<uint64_t>(engine) };
+        memcpy(g_invokeMailbox.paramsData, out, sizeof(out));
+        LOG_INFO("Mailbox: QUERY_PTR GEngineSlot -> &GEngine=0x%llX UEngine*=0x%llX",
+                 (unsigned long long)slot, (unsigned long long)engine);
+        if (!slot) {
+            // Not fatal for the caller: the CE script falls back to QUERY_OP_GAME_ENGINE
+            // and publishes a snapshot instead.
+            SetError(-1, "GEngine slot not resolved (no AOB validated)");
             return;
         }
         SetDone(0);

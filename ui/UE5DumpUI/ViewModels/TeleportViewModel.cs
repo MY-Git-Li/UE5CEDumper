@@ -1665,10 +1665,13 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         => PushOrCopyQueryScriptAsync(
             UE5DumpUI.Services.PointerQueryScriptGenerator.Target.GWorld);
 
-    /// <summary>Add a stateful CE record that asks the injected DLL for the live
-    /// GameEngine instance (UEngine*) and registers it as the CE symbol
-    /// <c>UE_GameEngine</c> (enable = register, disable = unregister + free).
-    /// Uses the mailbox (CMD_QUERY_PTR).</summary>
+    /// <summary>Add a stateful CE record that publishes the CE symbol
+    /// <c>UE_GameEngine</c>. It prefers the <c>&amp;GEngine</c> SLOT (restart-stable, so
+    /// the record auto-follows engine recreation exactly like <c>UE_GWorld</c>) and only
+    /// falls back to an <c>allocateMemory</c> snapshot of the live <c>UEngine*</c> on
+    /// games where no GEngine AOB validated. The choice is made at ENABLE time, not here
+    /// — see <see cref="Services.PointerQueryScriptGenerator"/>. Uses the mailbox
+    /// (CMD_QUERY_PTR).</summary>
     [RelayCommand]
     private Task GetGameEngineAddressAsync()
         => PushOrCopyQueryScriptAsync(
@@ -1688,17 +1691,27 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         {
             ClearError();
             string sym = UE5DumpUI.Services.PointerQueryScriptGenerator.SymbolName(target);
-            string desc = target == UE5DumpUI.Services.PointerQueryScriptGenerator.Target.GWorld
-                ? $"Get GWorld → symbol {sym}"
-                : $"Get GameEngine → symbol {sym}";
+            bool isEngine = target == UE5DumpUI.Services.PointerQueryScriptGenerator.Target.GameEngine;
+            string desc = isEngine
+                ? $"Get GameEngine → symbol {sym}"
+                : $"Get GWorld → symbol {sym}";
             string script = UE5DumpUI.Services.PointerQueryScriptGenerator.Generate(target);
+
+            // The record decides slot-vs-snapshot when it is ENABLED, so state the rule
+            // rather than a result — claiming one here would be a guess about a later
+            // session (and a silent downgrade to a frozen pointer is exactly the failure
+            // the user would not notice).
+            string backing = isEngine
+                ? " It binds to the &GEngine slot when that AOB resolved (auto-follows a restart), " +
+                  "otherwise to a UEngine* snapshot you re-tick to refresh."
+                : "";
 
             bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
             if (available && await _aobMaker!.CreateAAScriptAsync(
                     desc, script, autoActivate: false, group: CeGroupDll))
             {
                 StatusText = $"Added '{desc}' to Cheat Engine via AOBMaker — enable it in-game to " +
-                             $"register the '{sym}' symbol, disable to free it.";
+                             $"register the '{sym}' symbol, disable to free it." + backing;
                 _log.Info($"Teleport query-ptr -> CE via AOBMaker: {desc}");
                 return;
             }

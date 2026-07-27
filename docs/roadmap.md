@@ -138,7 +138,7 @@ state.
 >   (CreateRemoteThread+LoadLibraryW into a running game, auto-elevate on Access-Denied, +
 >   `inject-ue.ps1` CLI; picker flags already-loaded dumpers) + **generic non-Steam drive
 >   scan** in Proxy Deploy + **Teleport Global Pointers → CE symbols** (`UE_GWorld` registered
->   on the static slot, `UE_GameEngine` snapshot buffer; `CMD_QUERY_PTR=13`) + CE export
+>   on the static slot, `UE_GameEngine` prefers the `&GEngine` slot and falls back to a snapshot buffer; `CMD_QUERY_PTR=13` ops 0/1/2) + CE export
 >   XML/Field/CSX **cancellable** (builds 1974-1977).
 > - builds **1888–1913 (2026-07-03/04)** — **standalone no-DLL CE Lua trainer** export +
 >   **game-thread stall detection** (POV fast-fail + app-wide amber "paused" banner) +

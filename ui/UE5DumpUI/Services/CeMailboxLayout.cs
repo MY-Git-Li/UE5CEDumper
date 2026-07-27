@@ -57,4 +57,17 @@ internal static class CeMailboxLayout
     // Shared mailbox poll timeout (ms) — the upper bound of the `while status ~= 1`
     // busy-wait loop in every emitted mailbox round-trip.
     public const int MailboxPollTimeoutMs = 10000;
+
+    /// <summary>How long an emitted script waits for the mailbox to go IDLE before
+    /// declaring it busy, in ms (sleep(1) per iteration).
+    ///
+    /// <para>This is NOT the same thing as <see cref="MailboxPollTimeoutMs"/>, and it
+    /// exists because of an ordering detail: <c>SetDone</c>/<c>SetError</c> publish
+    /// <c>status = DONE</c> BEFORE clearing <c>cmd</c> (deliberately — see Mimic.cpp).
+    /// A script that issues two round-trips back to back can therefore exit its
+    /// status-poll and still observe the PREVIOUS command in <c>cmd</c> for an instant.
+    /// Sampling <c>cmd</c> once would report "busy" and abandon the second query, so
+    /// the wait is bounded rather than a single read. 100 ms is far more than the
+    /// one-instruction window and still fails fast when CE really is mid-command.</para></summary>
+    public const int MailboxIdleWaitMs = 100;
 }
