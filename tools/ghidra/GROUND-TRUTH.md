@@ -88,6 +88,24 @@ govern. Read that block too before adding, moving or deleting anything. The shor
   symbolised 5.1. Per rule 5 a MISS is not counter-proof, so it stays — but do not read its
   `PAL51` provenance as version coverage. The 5.1 sparse coverage that actually works is
   `SPARSE_ES2_1` (+ now `X1`/`X2`).
+- ~~**4.11 / 4.13 GWorld reaches truth only via `GWLD_G42_1` at priority 880**~~ **CLOSED
+  2026-07-27 by `GWLD_FD_1` (priority 265).** `UWorld::FinishDestroy`'s read-then-conditional-
+  write-back of the same global — PDB-confirmed on HeliumRain 4.20, DropIn 4.24 and DropIn 4.27,
+  22 bytes / 12 literal. Result: **21 hits, 16 UNIQUE-OK, ZERO decoys on all 46 programs**, never
+  more than 1 hit on any binary, and it appears in neither the hotspot nor the dead-weight table.
+  It became the lander on four binaries, three of which improved and none of which regressed:
+  4.11 Nekopara (`G42_1`, 5 wasted → 0), 4.13 Fantasynth (`G42_1`, 6 → 0), 4.26 Satisfactory
+  Engine (`SF_2`, 2 → 0), 5.2 Satisfactory Engine (lateral from `SF_2`, 0 → 0). **The GWorld
+  fall-through list is now empty.** `GWLD_SF_2` is no longer the lander anywhere but still reaches
+  truth on both Satisfactory DLLs, so it is redundancy and stays (rule 5).
+  > **READ THIS BEFORE CONCLUDING THE PATTERN WAS UNNECESSARY.** The *baseline* sweep showed 4.11
+  > and 4.13 already ✅/⚠️ correct — this harness has the truth and walks past a decoy, whereas the
+  > live `ValidateGWorldBasic` is deliberately loose and ACCEPTS the first one handed to it. Both
+  > titles were landing on a wrong GWorld in-game (Nekopara via `SAT52_1`→`1423C9940`, Fantasynth
+  > via `SF_2`→`14288E648`) and were rescued only by instance-scan recovery. **The sweep cannot
+  > show that class of bug at all** — it can only show that the fix pre-empts the decoy patterns
+  > in priority order, which at 265 (ahead of `SF_2` 300 and `SAT52_1` 365) it does. Section 1's
+  > model note says the same thing in general terms; this is the worked instance of it.
 - ~~**`GWLD_TQ_1` sits at priority 210**~~ **DONE 2026-07-27 — promoted 210 → 101.** Measured
   first: it wins on **6 of 16** oracles (no other GWorld pattern wins more than 2) and has **zero
   decoys anywhere** (10 UNIQUE-OK, 6 NO-TRUTH, 23 MISS). The saving is a whole `.text` pass, not
@@ -166,6 +184,11 @@ they are the SAME `FName::GetNames` lazy-init prologue shape.** Both are OK-BEHI
 GNames on every pre-4.23 title at once. This is the sparse-`n=1` situation again, on a different
 target; if a third pre-4.23 sample ever arrives, mining a structurally different anchor there is
 the highest-value thing to do with it.
+
+**Pre-4.20 GWorld used to be thinner still and no longer is.** On 4.11 and 4.13 the only pattern
+that reached truth was `GWLD_G42_1` — 7 literal bytes, priority 880, the last-resort read form —
+i.e. one degenerate shape standing between those titles and no GWorld at all. `GWLD_FD_1` (265,
+`UWorld::FinishDestroy`) makes it two, from a structurally different site. Do not re-mine this.
 
 **Why this file exists:** re-deriving these costs a headless run per binary, and getting one
 wrong silently corrupts every verdict downstream. It has already happened once — a placeholder

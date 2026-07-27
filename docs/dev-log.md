@@ -20,6 +20,68 @@ builds ≤696 in
 
 -----
 
+## 2026-07-27 - GWLD_FD_1: the GWorld fall-through list is now empty (build 2478)
+
+Landed the `UWorld::FinishDestroy` GWorld pattern mined at the end of the 4.11/4.13 support pass.
+It was held back deliberately — `GROUND-TRUTH.md`'s own rule requires a full 46-program sweep
+before any pattern change, and the priority placement was undecided.
+
+```
+48 8B 05 ?? ?? ?? ?? 48 3B C? 48 0F 44 C? 48 89 05 ?? ?? ?? ?? E8   pri 265, io 0
+```
+
+22 bytes, 12 fully-literal. The shape is a **read of a global followed by a conditional write-back
+of the same global**, which is self-evidencing — that, not the length, is why it is clean. Source
+PDB-confirmed on three independent oracles (HeliumRain 4.20, DropIn 4.24, DropIn 4.27).
+
+### Measured over the full sweep: 46 programs / 32 oracles
+
+**21 hits, 16 UNIQUE-OK, zero decoys anywhere**, never more than 1 hit on any binary. It appears
+in neither the hotspot table nor the dead-weight table, and the band audit stays clean.
+It became the lander on four binaries — three improvements, one lateral, **no regressions**:
+
+| binary | before | after |
+|---|---|---|
+| UE4.11 Nekopara | `GWLD_G42_1` (880), 5 wasted | `GWLD_FD_1`, **0 wasted** |
+| UE4.13 Fantasynth | `GWLD_G42_1` (880), 6 wasted | `GWLD_FD_1`, **0 wasted** |
+| UE4.26 Satisfactory Engine | `GWLD_SF_2` (300), 2 wasted | `GWLD_FD_1`, **0 wasted** |
+| UE5.2 Satisfactory Engine | `GWLD_SF_2` (300), 0 wasted | `GWLD_FD_1`, 0 wasted |
+
+Those were the *only* three GWorld entries in the report's fall-through list, so **that list is now
+GObjects-only**. GWorld redundancy rose by one on 13 oracles and fell nowhere. `GWLD_SF_2` is no
+longer the lander anywhere but still reaches truth on both Satisfactory DLLs, so it stays as
+redundancy (never prune on "no proof", only on counter-proof).
+
+### Why the sweep understates what this fixes
+
+The *baseline* sweep already showed 4.11 and 4.13 resolving GWorld correctly. That is the harness
+model, not the runtime: `scan_patterns.java` has the truth and walks past a decoy, whereas the live
+`ValidateGWorldBasic` is deliberately loose and accepts the first one it is handed. In-game both
+titles were landing on a **wrong** GWorld — Nekopara via `GWLD_SAT52_1` → `1423C9940` (a
+`TSharedPtr {Object, ReferenceController}` singleton whose `+0` reads like a UWorld pointer),
+Fantasynth via `GWLD_SF_2` → `14288E648` — and were rescued only by instance-scan recovery.
+
+At 265 the new pattern is scanned **ahead of both** (`SF_2` 300, `SAT52_1` 365), so the true GWorld
+is validated and returned before either decoy is ever presented. This is the shape the maintainer
+asked for when declining to tighten the validator: *add a pattern, do not touch something 30+
+oracles depend on to fix one 2016 title.*
+
+### Placement: 265 over a Tier-1 slot
+
+`GWORLD_PATTERNS` went 49 → 50 byte patterns, i.e. 6 full batches + 2 either way — **no batch
+boundary moves**. At 265 it lands in batch 3, leaving batches 1–2 byte-identical, so nothing that
+resolves off the modern Tier-1 block could be perturbed at all. Tier 1 (~102) is defensible on the
+raw numbers (16 UNIQUE-OK / 0 decoys beats `GWLD_TQ_1`'s 10) but the existing Tier-1 block has not
+been re-measured corpus-wide, so what a promotion would displace is unknown. Recorded in
+`Himmel.h`, not decided by taste.
+
+Also corrected the pattern-count summary block in `Himmel.h`, which had drifted 4 short
+(`SPARSE_AV53_1`/`X1`/`X2` were never added to it): now **150 AOB + 1 CallFollow + 6 symbol
+exports = 157 entries**, with a note to regenerate it from `extract_patterns.py` rather than
+hand-edit.
+
+-----
+
 ## 2026-07-27 - Five new oracles close the 4.21 and 5.0 holes; GWLD_TQ_1 promoted 210 -> 101
 
 Five games added — Helium Rain (4.20.3, PDB), Freud Gate (4.21, no PDB), Breeders of the Nephelym

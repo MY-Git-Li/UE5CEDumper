@@ -1127,6 +1127,69 @@ constexpr const char* AOB_GENGINE_X4 =
 constexpr const char* AOB_GENGINE_ES55_1 =
     "48 89 5C 24 08 57 48 83 EC 20 48 8B 3D ?? ?? ?? ?? E8 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 48 8B D8";
 
+// ============================================================
+// GWorld — FD (UWorld::FinishDestroy, mined 2026-07-27 for the pre-4.20 flat-array era)
+// ============================================================
+// FD_1: mov rax,[GWorld]; cmp rax,<this>; cmovz rax,<replacement>; mov [GWorld],rax; call
+//
+//   mov   rax,[rip+GWorld]     48 8B 05 d32   <- resolved here (instrOffset = 0)
+//   cmp   rax,<this>           48 3B C?       C6 on 4.11, C7 on 4.13, C3 on 4.20-5.2
+//   cmovz rax,<replacement>    48 0F 44 C?
+//   mov   [rip+GWorld],rax     48 89 05 d32   <- the SAME global, written back
+//   call  ...                  E8
+//
+// 22 bytes: 12 fully-literal + 2 nibble-fixed + 8 wildcard. Both nibble masks pin the operand
+// to rax, tying the compare and the cmov to the value just loaded. A READ FOLLOWED BY A
+// CONDITIONAL WRITE-BACK OF THE SAME GLOBAL IS SELF-EVIDENCING — that, not the length, is why
+// it is clean. Source confirmed from PDB symbols on THREE independent oracles (HeliumRain 4.20,
+// DropIn 4.24, DropIn 4.27).
+//
+// WHY IT WAS MINED — and READ THIS BEFORE CONCLUDING FROM THE SWEEP THAT IT IS POINTLESS.
+// The offline sweep shows 4.11 and 4.13 already resolving GWorld correctly, via GWLD_G42_1 at
+// priority 880 after 5 and 6 fall-throughs. That is the harness model, not the runtime:
+// scan_patterns.java HAS the truth and walks past a decoy, whereas ValidateGWorldBasic is
+// deliberately loose and ACCEPTS the first one it is handed. So live, both titles land on a
+// wrong GWorld and are rescued only by instance-scan recovery.
+//   * NEKOPALIVE's decoy is a TSharedPtr {Object, ReferenceController} singleton at 0x1423C9940
+//     whose +0 reads like a UWorld pointer — reached by GWLD_SAT52_1 (365).
+//   * Fantasynth's is reached EARLIER, by GWLD_SF_2 (300); its analogues are 14288E648 /
+//     1427B0B40 / 14277D3C0.
+// At 265 this pattern is scanned BEFORE both (300 and 365), so the true GWorld is validated and
+// returned before either decoy is ever presented. That — not the fall-through count — is the
+// fix. It was explicitly checked against all four decoy addresses and hits none of them.
+//
+// This exists because the maintainer's call was "add a pattern, do NOT tighten a validator 30+
+// oracles depend on, to fix one 2016 title" (see the V2/V4/V5/V6 removal note below for why a
+// wrong GWorld is worse than no GWorld).
+//
+// RELATION TO GWLD_G427_5 (390, same function): this is a strict generalisation. The nibbled
+// CMP reaches the rsi/rdi codegen that G427_5's hardcoded `48 3B C3` cannot, the exact
+// `48 0F 44 C?` tightens a CMOV that G427_5 leaves wildcarded, and the trailing `E8` adds a
+// literal byte. G427_5 is DECOY-ONLY on both 4.11 and 4.13.
+//
+// MEASURED on the full landing sweep — 46 programs / 23 with GWorld truth, UE 4.11 -> 5.7:
+// 21 hits, 16 UNIQUE-OK, 5 NO-TRUTH, 25 MISS. ZERO decoys anywhere, and NEVER more than ONE hit
+// on any single binary. Absent from both the hotspot and the dead-weight table.
+//   UNIQUE-OK (16): 4.11, 4.13, 4.18 DQ XI S, 4.20 x2, 4.21, 4.24, 4.25, 4.26, 4.27 x3, 5.0,
+//                   5.1, 5.2
+//   NO-TRUTH,1 hit: FF7 Remake, Octopath, Artisan, Palworld, DQ I&II
+//   MISS:           4.22, FF7 Rebirth, Avowed, Elliot, all 5.5/5.6, Solarpunk
+// It became the LANDER on four binaries, three of them an improvement and none a regression:
+// 4.11 (G42_1 @880, 5 wasted -> 0), 4.13 (G42_1 @880, 6 -> 0), 4.26 Satisfactory Engine
+// (SF_2 @300, 2 -> 0), 5.2 Satisfactory Engine (lateral from SF_2). Those were the only three
+// GWorld entries in the report's fall-through list, so that list is now GObjects-only.
+//
+// CAVEATS, recorded rather than papered over:
+//   * NO 4.12 BINARY EXISTS in the corpus. 4.12 is bracketed structurally (identical shape on
+//     4.11 and 4.13 and every version through 5.2) but never measured. Do not write it up as
+//     verified.
+//   * `48 3B C?` also admits `cmp rcx,r??`. It cost zero decoys over 45 programs, but it is
+//     looser than the intent — noted rather than tightened blind.
+//   * instrOffset was PROVEN by counter-example: setting it to 4 keeps the hit count IDENTICAL
+//     while the resolved address lands outside the image. The usual silent failure.
+constexpr const char* AOB_GWORLD_FD_1 =
+    "48 8B 05 ?? ?? ?? ?? 48 3B C? 48 0F 44 C? 48 89 05 ?? ?? ?? ?? E8";
+
 
 // ============================================================
 // Unified Pattern Arrays (sorted by priority)
@@ -1468,6 +1531,17 @@ constexpr AobSignature GWORLD_PATTERNS[] = {
 
     // 260–320: SatisfFactory DLL patterns + Ghidra cross-game
     SIG_GWORLD_RIP("GWLD_GH_3",  AOB_GWORLD_GH_3,  12, 3, 7, 0, 260, false, "GH", "Ghidra GetWorldFromContextObject cross-game"),
+    // 265 was chosen over a Tier-1 slot DELIBERATELY, and the reasoning is worth keeping:
+    //   * It is PROVABLY FREE. GWORLD_PATTERNS holds 50 byte patterns = 6 full batches + 2;
+    //     adding one keeps that at 7 batches, so no batch boundary moves. At 265 it lands in
+    //     batch 3, leaving batches 1-2 byte-identical — nothing that resolves off the modern
+    //     Tier-1 block can be perturbed by it at all.
+    //   * It must sit AHEAD OF GWLD_SF_2 (300). That is the pattern Fantasynth 4.13 was
+    //     mis-selecting on, so anything at 300+ would have fixed NEKOPALIVE and NOT Fantasynth.
+    //   * Tier 1 (~102) is defensible on the raw data — 16 UNIQUE-OK / 0 decoys beats
+    //     GWLD_TQ_1's recorded 10 — but the existing Tier-1 block has NOT been re-measured
+    //     corpus-wide, so what a promotion would displace is unknown. Measure before moving it.
+    SIG_GWORLD_RIP("GWLD_FD_1",  AOB_GWORLD_FD_1,   0, 3, 7, 0, 265, false, "FD", "UWorld::FinishDestroy read + conditional write-back (4.11-5.2, generalises G427_5)"),
     SIG_GWORLD_RIP("GWLD_SF_1",  AOB_GWORLD_SF_1,   0, 3, 7, 0, 270, false, "SF", "Engine DLL UGameEngine::Tick"),
     SIG_GWORLD_RIP("GWLD_SF_2",  AOB_GWORLD_SF_2,   0, 3, 7, 0, 300, false, "SF", "Engine DLL FAudioDeviceManager"),
     SIG_GWORLD_RIP("GWLD_SF_3",  AOB_GWORLD_SF_3,   0, 3, 7, 0, 305, false, "SF", "Engine DLL UWorld::FinishDestroy"),
@@ -1706,10 +1780,14 @@ ASSERT_TABLE_ORDER(GENGINE_PATTERNS);
 // ============================================================
 // GObjects: 55 AOB patterns + 1 symbol export
 // GNames:   28 AOB patterns + 1 CallFollow + 3 symbol exports  (CT2 removed b2407 — see note)
-// GWorld:   49 AOB patterns + 1 symbol export  (V2/V4/V5/V6 removed b2409 — see note)
-// SparseDelegates: 7 — lazily resolved, not part of the FindAll boot sequence
+// GWorld:   50 AOB patterns + 1 symbol export  (V2/V4/V5/V6 removed b2409 — see note)
+// SparseDelegates: 10 — lazily resolved, not part of the FindAll boot sequence
 // GEngine:   7 AOB patterns + 1 symbol export — resolved after GObjects/GNames
-// Total:   146 AOB patterns + 1 CallFollow + 6 symbol exports = 153 entries (from 20 sources)
+// Total:   150 AOB patterns + 1 CallFollow + 6 symbol exports = 157 entries (from 21 sources)
+//
+// These five lines go stale silently. Regenerate them, do not hand-edit:
+//     py tools/ghidra/extract_patterns.py dll/src/Himmel.h out/sweep/patterns.tsv
+// prints exactly these counts. They were last found 4 short (SPARSE_AV53_1/X1/X2 + GWLD_FD_1).
 //
 // EVERY ARRAY IS SORTED BY PRIORITY, and a checker enforces it — keep it that way. The file had
 // drifted out of order (GNAM_V5 at 850 sat inside the Tier-1 block, GOBJ_PS7 at 970 under a
