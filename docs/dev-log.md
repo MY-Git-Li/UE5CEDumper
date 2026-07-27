@@ -20,6 +20,86 @@ builds ≤696 in
 
 -----
 
+## 2026-07-27 - Grimhook: the first symbolised UE 5.1; sparse n=1 cluster closed
+
+Grimhook ships a **full public PDB** on a `-Win64-Shipping.exe` (2.7 M symbols, 232 K functions).
+Until now the corpus's only 5.1 was Palworld, which has no symbols — so every 5.1 claim rested on
+consensus. All five globals read straight off the PDB, and the version was confirmed
+*structurally* rather than from the label: the PDB's `EUnrealEngineObjectUE5Version` terminates at
+`ADD_SOFTOBJECTPATH_LIST = 1008`, which is exactly 5.1 (5.0 stops at 1004, 5.2 adds 1009). Stock
+layout — 24-byte `FUObjectItem`, `UObject*` at `+0x00`, chunked.
+
+### What it settled about Palworld
+
+Different binary, so the addresses cannot match — what transfers is which *sets* of patterns
+converge. They match almost exactly, which corroborates Palworld's derived values:
+
+- GEngine: the identical 4-set `[X1,X2,X3,X4]` converges on truth here and on `149657F38` there.
+- GNames: the identical **12**-pattern set converges on truth here and on `14944DB80` there.
+- GObjects: the base gets one 6-set on both and `+0x10` a different 5-set on both — so Palworld's
+  base/`ObjObjects` split was the right way round.
+- Sparse: `SPARSE_ES2_1` is now *proven* correct on real 5.1, and it is what hit Palworld.
+
+And three patterns that had never been checked against 5.1 symbols are now proven: `GOBJ_V13`
+(136 hits, 136 ok), `GNAM_V8` (the priority-100 winner), `GWLD_V7` (its second oracle after
+Meltopia).
+
+**One falsification.** `SPARSE_PAL51_1` takes **0 hits** on Grimhook. It is not a generic UE 5.1
+shape — it is Palworld-specific inlining. A MISS is not counter-proof so it stays, but its
+`PAL51` tag must not be read as "covers 5.1".
+
+### The n=1 cluster — closed except Avowed
+
+Six binaries reached SparseDelegates through `SPARSE_ES2_1` and **nothing else**; a patch moving
+that one site would have taken sparse support with it. `SPARSE_X1` / `X2`, mined here, anchor on
+`Remove`/`RemoveAll`/`Clear` — different *functions* from `ES2_1`'s `NotifyUObjectDeleted`, so
+this is real redundancy, not a re-anchor on the same instruction stream.
+
+| binary | patterns reaching truth |
+|---|---|
+| Everspace 2 5.5 / 5.5b | 1 → **2** |
+| Satisfactory 5.2 / 5.6 CoreUObject, CrashReportClient 5.6, Grimhook 5.1 | 1 → **3** |
+| Avowed 5.3 | 1 → 1 — **now the only n=1 left** |
+
+Both are decoy-free across 39 programs including 8 monolithic EXEs up to 414 MB of `.text`.
+No binary that currently fails starts working; this is insurance, on the same footing as
+`PAL51_1` / `MEL55_1` / `AV53_1`.
+
+### The adversarial pass earned its keep — twice
+
+**X1 was refuted as submitted and shipped shorter.** Its mined form ended with one more
+`48 8D 0D` (the `GUObjectArray` ref). Measured, those 3 bytes are inert on 36 of 38 programs — and
+they *cost* both Everspace 2 5.5 builds, because 5.5 emits `lea rdx,…; call` with no second `lea`.
+Since ES2 5.5 is one of the exact `n=1` binaries the pattern exists to fix, **the longer form
+failed at its own purpose.** Longer is not safer; it is only safer where the extra bytes are
+load-bearing. This is the mirror image of the `GWLD_G42_4` finding, where wildcarding *more* was
+the mistake.
+
+**The `instrOffset` trap was demonstrated, not just asserted.** X2 needs `instrOffset = 11`. A
+deliberate wrong-value control at 26 resolves to `SparseDelegateObjectListener` — a plausible
+adjacent global 8 bytes below truth — and goes DECOY-ONLY on all 15 binaries *while the hit count
+stays healthy*. That is exactly the silent failure rule 7 warns about, now with a worked example.
+
+### Build quirks worth remembering
+
+- `.rodata` is marked **executable** here (2 KB) — every other corpus binary has it non-exec, so
+  "exec bytes" for Grimhook is `.text` + that.
+- A `.msvcjmc` section is present: MSVC `/JMC` instrumentation on ~512 functions, which adds a
+  `call __CheckForDebuggerJustMyCode` prologue. It disturbed nothing here, but it is the kind of
+  thing that would shift a prologue-anchored AOB in a game that enabled it globally.
+- `GNameBlocksDebug` **is** symbolised (`0x14632A4D0`) and is a **trap**: it is a separate pointer
+  variable, not `NamePoolData+0x10`, and it is all-zero in the file. Recorded in GROUND-TRUTH.md
+  so nobody takes the shortcut on a future PDB game.
+
+### Version coverage after this
+
+4.18, 4.20, 4.22, 4.24, 4.25, 4.26, 4.27, **5.1**, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7. The named holes
+are **4.23** (still the only unverified sparse-delegate version — mitigated because `Aura` probes
+the live key shape rather than gating on a version number) and **5.0** (bracketed by 4.27 and a
+now-symbolised 5.1, so low risk). 4.19 / 4.21 sit between covered neighbours.
+
+-----
+
 ## 2026-07-27 - UE_GameEngine binds the &GEngine slot instead of a frozen pointer (build 2453)
 
 The Teleport tab's Global Pointers card exported two CE symbols with asymmetric backing:

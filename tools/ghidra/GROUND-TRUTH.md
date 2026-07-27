@@ -73,8 +73,18 @@ govern. Read that block too before adding, moving or deleting anything. The shor
 - ~~**Avowed (5.3)** sparse: zero hits.~~ **CLOSED 2026-07-27** — `SparseDelegates = 0x14B5BD9A8`,
   found structurally (the `SparseDelegateReport` string does not exist in this binary), structure
   is stock UE 5.3, `SPARSE_AV53_1` added at priority 170.
-- **Sparse `n=1`** on five binaries (both Everspace 2 builds, Satisfactory 5.2/5.6 CoreUObject) —
-  their sparse accessors are inlined, leaving only the one site `SPARSE_ES2_1` already owns.
+- ~~**Sparse `n=1`** on five binaries~~ **MOSTLY CLOSED 2026-07-27** by `SPARSE_X1`/`X2`, mined on
+  Grimhook: Everspace 2 5.5/5.5b 1→2, Satisfactory 5.2/5.6 CoreUObject 1→3, CrashReportClient
+  1→3, Grimhook 1→3. **Avowed 5.3 is now the only `n=1` left** — `SPARSE_AV53_1` is its sole
+  reach, so a patch that moves that site takes sparse support on Avowed with it.
+- **`SPARSE_PAL51_1` is Palworld-specific, not "UE 5.1".** It takes **0 hits** on Grimhook, a real
+  symbolised 5.1. Per rule 5 a MISS is not counter-proof, so it stays — but do not read its
+  `PAL51` provenance as version coverage. The 5.1 sparse coverage that actually works is
+  `SPARSE_ES2_1` (+ now `X1`/`X2`).
+- **`GWLD_TQ_1` sits at priority 210 with 13 Tier-1 GWorld patterns missing ahead of it** on
+  Grimhook, and it is the winner on several other oracles too. Promoting it inside its band looks
+  like a free saving, but it is a REORDER: it needs its own full sweep to attribute, so it was
+  deliberately not bundled with a pattern addition. Measure before moving.
 
 **Why this file exists:** re-deriving these costs a headless run per binary, and getting one
 wrong silently corrupts every verdict downstream. It has already happened once — a placeholder
@@ -101,7 +111,8 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | UE4.27-Artisan | `The_Artisan_of_Glimmith` | 4.27 | ❌ none | monolithic noise probe |
 | UE4.x-Octopath | `Octopath` | 4.x | ❌ none | monolithic noise probe (version stripped) |
 | UE4.x-FF7Rebirth | `FF7Re` | 4.26 fork | ❌ none | the only binary that exercises `GOBJ_RE1` / `GNAM_V7` |
-| UE5.1-Palworld | `Palworld` | 5.1 | ❌ none | monolithic noise probe; the corpus's only 5.1 |
+| UE5.1-Grimhook | `Grimhook` | 5.1.1 | ✅ full PDB | **the first symbolised 5.1** — see below |
+| UE5.1-Palworld | `Palworld` | 5.1 | ❌ none | monolithic noise probe; its consensus is now corroborated by Grimhook |
 | UE5.2-Satisfactory | `SF521_pdb` | 5.2.1 | ✅ full PDB | **created by us** — see the UE5.2 note below |
 | UE5.2-SatGameDLL | `Satisfactory_UE521` | 5.2.1 | ⚠ game DLL only | noise probe; project mis-imported, see below |
 | UE5.3-Avowed | `Avowed` | 5.3 | ❌ none | negative control (packed 20-byte `FUObjectItem`) |
@@ -315,6 +326,16 @@ GS_TRUE="-CoreUObject-:GObjects=1803f9210|1803f9220,-CoreUObject-:SparseDelegate
 # UE 4.27 — DropIn. NamePoolData from FNameDebugVisualizer::GetBlocks
 # @0x1426F59C0 = `lea rax,[0x14A363950]; ret`, minus 0x10.
 GS_TRUE="GObjects=14a3aa670|14a3aa660,GNames=14a363940,GWorld=14a52ced8,SparseDelegates=149ec0910,GEngine=14a528890"
+
+# UE 5.1 — Grimhook. The FIRST symbolised 5.1; every 5.1 claim before it rested on Palworld's
+# unproven consensus. NamePoolData from FNameDebugVisualizer::GetBlocks @0x141BEEAD0 =
+# `lea rax,[0x14639E150]; ret`, minus 0x10 — and independently corroborated by its 58 xrefs
+# being FName::ToString / GetEntry / AppendString / FLazyName::Resolve loading it as the pool.
+# Stock layout: 24-byte FUObjectItem, UObject* at +0x00, chunked (FChunkedFixedUObjectArray).
+# Version confirmed structurally, not from the label: the PDB's EUnrealEngineObjectUE5Version
+# terminates at ADD_SOFTOBJECTPATH_LIST = 1008, which is exactly 5.1 (5.0 stops at 1004,
+# 5.2 adds 1009).
+GS_TRUE="GObjects=14643d800|14643d810,GNames=14639e140,GWorld=1465aa438,SparseDelegates=1461417d0,GEngine=1465a6630"
 
 # UE 5.2 — Satisfactory, MODULAR (project SF521_pdb, built by us — see above). Cross-checked
 # against the DLL export table: GEngine RVA 0x1CD1140, GWorld 0x1CD4828, GUObjectArray 0x4194D0.

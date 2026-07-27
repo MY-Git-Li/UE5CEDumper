@@ -927,6 +927,53 @@ constexpr const char* AOB_SPARSE_AV53_1 =
     "48 8B 05 ?? ?? ?? ?? 48 63 C9 48 8D 14 49 48 C1 E2 05 48 8D 0C 10 48 39 34 10";
 
 // ============================================================
+// SparseDelegates — X1/X2 (cross-version; mined on Grimhook UE 5.1)
+// ============================================================
+// These close the "sparse n=1" cluster that GROUND-TRUTH.md has carried as an open item: six
+// binaries reached SparseDelegates through SPARSE_ES2_1 and NOTHING else, so a patch that moved
+// that one site would have taken sparse-delegate support with it. After these, only Avowed is
+// still n=1.
+//
+//   Everspace 2 5.5 / 5.5b  1 -> 2      Satisfactory 5.2 CoreUObject  1 -> 3
+//   Satisfactory 5.6        1 -> 3      CrashReportClient 5.6         1 -> 3
+//   Grimhook 5.1            1 -> 3      Avowed 5.3                    1 -> 1 (unchanged)
+//
+// NO binary that currently fails starts working — this is redundancy, on the same footing as
+// PAL51_1 / MEL55_1 / AV53_1, each of which was added to a binary that already resolved.
+//
+// Both anchor on FSparseDelegateStorage::Remove / RemoveAll / Clear, at DIFFERENT sites from
+// SPARSE_ES2_1's (which lives in NotifyUObjectDeleted) — genuine redundancy across functions,
+// not a re-anchor on the same instruction stream. Verified decoy-free on 39 programs including
+// 8 monolithic game EXEs up to 414 MB of .text: 0 decoys, anywhere, for either.
+//
+// X1 is the empty-map epilogue: after removing the last entry, unregister the UObject delete
+// listener. That is not a generic TSet idiom — only FSparseDelegateStorage does it — which is
+// why 62 hits produce zero decoys. `8B ?5 [+0x08]` / `3B ?5 [+0x34]` are the outer-TSet Num/Max,
+// i.e. the very two ints ValidateSparseDelegates range-checks, so they stay literal (STRUCT
+// displacements, not frame).
+//
+// TRUNCATED DELIBERATELY. The mined form ended with one more `48 8D 0D` (the GUObjectArray ref).
+// Measured, those 3 bytes are inert on 36 of 38 programs — and they COST both Everspace 2 5.5
+// builds, because 5.5 emits `lea rdx,…; call` with no second lea. Since ES2 5.5 is one of the
+// exact n=1 binaries this exists to fix, the longer form failed at its own purpose. Longer is
+// not safer; it is only safer where the extra bytes are load-bearing.
+// UNIQUE-OK on 11 oracles / 9 engine versions (4.24 -> 5.6).
+constexpr const char* AOB_SPARSE_X1 =
+    "48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 8B ?5 ?? ?? ?? ?? 3B ?5 ?? ?? ?? ?? 75 ?? 48 8D 15";
+
+// X2 anchors one block EARLIER — the inner-TMap emptiness test that guards the same call. It is
+// the only new pattern that fires on Everspace 2 5.5, and it keeps `+0x08` / `+0x34` as LITERAL
+// struct displacements (version-stable UE layout, the evidence that makes a pattern
+// trustworthy). instrOffset = 11: `8B 4? 08`(3) + `3B 4? 34`(3) + `75 ??`(2) + `4? 8B D?`(3),
+// so the RIP-relative `48 8D 0D` starts at byte 11, NOT byte 0. A deliberate wrong-offset
+// control confirmed how quiet that mistake is: instrOffset 26 resolves to
+// SparseDelegateObjectListener — a plausible adjacent global 8 bytes below truth — and goes
+// DECOY-ONLY on all 15 binaries while the hit count stays healthy.
+// UNIQUE-OK on 10 oracles / 6 engine versions.
+constexpr const char* AOB_SPARSE_X2 =
+    "8B 4? 08 3B 4? 34 75 ?? 4? 8B D? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 8B ?5 ?? ?? ?? ?? 3B ?5";
+
+// ============================================================
 // GObjects — DI427 (UE 4.27, 32-byte FUObjectItem)
 // ============================================================
 // WHY these exist: on DropIn every one of the 52 pre-existing GObjects patterns MISSES or
@@ -1533,6 +1580,18 @@ constexpr AobSignature SPARSE_PATTERNS[] = {
     SIG_RIP_DIRECT("SPARSE_AV53_1", AOB_SPARSE_AV53_1, AobTarget::SparseDelegates,
                    0, 3, 7, 0, 170,
                    "AV53", "UE5.3 (Avowed fork) element addr + pointer-key compare; stock 0x60 stride"),
+    // 180/190 — the pair that closes the n=1 cluster. They take this table from 8 to 10 entries,
+    // i.e. from ONE batch to TWO (kBatchSize = 8), so the second batch is paid for by the FIRST
+    // of them and the marginal cost of the second is exactly zero. That cost lands only on
+    // titles where all 8 batch-1 patterns miss — and it is paid precisely when it is needed: if
+    // the SPARSE_ES2_1 site changes in a patch, batch 1 comes back empty and batch 2 catches it.
+    // Ordered last so they cannot perturb any existing selection.
+    SIG_RIP_DIRECT("SPARSE_X1", AOB_SPARSE_X1, AobTarget::SparseDelegates,
+                   0, 3, 7, 0, 180,
+                   "X+GH51", "Remove/RemoveAll/Clear empty-map epilogue (unregister delete listener)"),
+    SIG_RIP_DIRECT("SPARSE_X2", AOB_SPARSE_X2, AobTarget::SparseDelegates,
+                   11, 3, 7, 0, 190,
+                   "X+GH51", "inner-TMap emptiness test guarding the same call; reaches ES2 5.5"),
 };
 
 // ── GEngine (UEngine* GEngine — the &GEngine SLOT) ───────────────────────

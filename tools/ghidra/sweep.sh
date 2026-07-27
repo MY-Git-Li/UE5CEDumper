@@ -75,6 +75,13 @@ ROWS=(
 # GNames/GWorld are deliberately left unset — the consensus is suggestive but unproven, and a
 # guessed truth value is worse than none (it silently mislabels every hit as a decoy).
 "UE4.18-FF7R|FF7R|-|GObjects=1453bd470|1453bd480,GEngine=145879ee8"
+# GRIMHOOK — the corpus's FIRST symbolised UE 5.1. Palworld is 5.1 but has no PDB, so every 5.1
+# claim rested on unproven consensus until this landed. GNames is NOT a bare -0x10 assumption:
+# 0x14639E140 has 58 code xrefs and they are FName::ToString / GetEntry / AppendString /
+# FLazyName::Resolve, all loading it as the pool `this`.
+# Do NOT be tempted by the symbolised `GNameBlocksDebug` (0x14632A4D0) on a future PDB game —
+# it is a SEPARATE pointer variable, not NamePoolData+0x10, and it is all-zero in the file.
+"UE5.1-Grimhook|Grimhook|-|GObjects=14643d800|14643d810,GNames=14639e140,GWorld=1465aa438,SparseDelegates=1461417d0,GEngine=1465a6630"
 # ---- symbol-less, truth DERIVED BY DISASSEMBLY (2026-07-27) ----
 # All three were live-run first (our own validators accepted GObjects/GNames/GWorld/Sparse),
 # then corroborated in Ghidra. Both Auto Analyze runs were saved PARTWAY through; raw data
