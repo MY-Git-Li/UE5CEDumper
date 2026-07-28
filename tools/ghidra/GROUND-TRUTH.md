@@ -64,15 +64,14 @@ govern. Read that block too before adding, moving or deleting anything. The shor
 
 ### Still open (as of build 2474)
 
-- ~~**UE 4.23** is the only unverified sparse-delegate version~~ — **DELIBERATELY NOT CHASED**
-  (decided 2026-07-27). 4.23 shipped 2019-09 and 4.24 landed that December, so its window was
-  three months and essentially every surviving title has been bumped to 4.27; building a sample
-  would need an old Visual Studio the maintainer has no intention of installing. It is also the
-  version where the feature matters least — sparse delegates were barely adopted that early, so
-  an unverified 4.23 is close to unobservable in practice. The real mitigation is structural, not
-  a sample: **`Aura` probes the live key shape instead of gating on a version number**, which is
-  what makes 4.23 *and any licensee fork* safe without a binary to test against. Do not reopen
-  this unless a 4.23 binary falls into your lap.
+- ~~**UE 4.23** is the only unverified sparse-delegate version~~ — **CLOSED 2026-07-28.** The
+  "do not reopen this unless a 4.23 binary falls into your lap" escape clause fired: the
+  maintainer built the 4.23.1 "Flying" template himself against Epic's INSTALLED Launcher engine.
+  `SparseDelegates` is PDB-confirmed at 4.23 with a **raw `UObjectBase const*` key**, character-
+  identical to 4.24 — so the key shape now holds at *every* version the feature has ever had, by
+  measurement rather than interpolation. `SPARSE_DI427_1` resolves it live. The structural
+  mitigation still stands and should stay: **`Aura` probes the live key shape instead of gating on
+  a version number**, which is what covers licensee forks that no sample can.
 - **FF7 Rebirth's SparseDelegates** exists (proved from `.rdata`: `SparseDelegateFunction`,
   `MulticastSparseDelegateProperty`, the `SparseDelegateReport` console command) but no pattern
   finds it. Lead for whoever picks it up: find the `SparseDelegateReport` string xref and follow
@@ -127,10 +126,43 @@ Each cost at least one headless run to establish. Recorded so nobody spends anot
 - **`tdb` @ `0xFF00000000` is a Ghidra loader artifact, not a PE section.** Four analysts have now
   investigated it independently; one dumped the on-disk section table to disprove it.
 - **The default PDB loader is fine.** MSDIA remains a *Meltopia-only* workaround, not a habit.
-- **Pre-4.23 has no `NamePoolData` symbol at any version** — do not look for one. Go straight to
-  `FName::GetNames`. It also has no sparse delegates: 10/10 `SPARSE_*` MISS on a 4.20/4.21 binary
+- **One-second test for the UE 5.8 reflection layout, from the PDB alone:** grep for
+  `??1FFieldClass@@UEAA@XZ`. The `U` is MSVC's mangling for a **virtual** member — 5.8 made
+  `~FFieldClass()` virtual, which puts a vfptr at `FFieldClass+0x00` and moves `FName Name` to
+  `+0x08`. Pre-5.8 exports `??1FFieldClass@@QEAA@XZ` (`Q` = non-virtual, Name at `+0x00`). A
+  `??_7FFieldClass@@6B@` vftable symbol is the same signal. Confirmed on the StackOBot 5.7.4/5.8
+  pair, which differ in nothing else.
+  **Offline only — do NOT turn this into a runtime probe.** Monolithic shipping games export
+  nothing, so `GetProcAddress` cannot see it (a *modular* build would, since the dtor is
+  `COREUOBJECT_API`, but that is the minority case). More importantly it would key on the wrong
+  thing: with `UE_WITH_CONSTINIT_UOBJECT` enabled `FFieldClass` becomes abstract with per-type
+  `TFieldClass<T>` vftables — **Name is still `+0x08`**, but any vtable-shape test breaks. The DLL
+  instead probes the *value* (`DynOff::PickFFieldClassNameOffset`, two safe reads once per
+  process, accepts whichever offset yields a `*Property` name), which is version-, fork- and
+  constinit-agnostic.
+- **These two StackOBot Shipping PDBs carry public symbols + line info but only PARTIAL merged
+  type info.** `FFieldClass`, `UObjectBase` and `FUObjectItem` have **no TPI record at all**;
+  `FField`/`FProperty`/`UStruct` are forward-references only. Layout recovery here is public
+  symbols + capstone, never `LF_FIELDLIST`. Do not burn another session discovering this.
+- **NO version has a usable `NamePoolData` symbol, and the boundary is not where it looks.**
+  Pre-4.23 has no `FNamePool` at all, so go straight to `FName::GetNames`. But **4.23 itself has
+  NEITHER** — zero occurrences of `NamePoolData` *and* zero of `?GetNames@FName@@` in all three
+  config PDBs — so both halves of this rule fail at exactly the transition version. At 4.23+ the
+  route that works is `FNameDebugVisualizer::GetBlocks` minus 0x10.
+- **Pre-4.23 also has no sparse delegates.** It also has no sparse delegates: 10/10 `SPARSE_*` MISS on a 4.20/4.21 binary
   is the CORRECT answer, and raw ASCII+UTF-16 data-section scans for `SparseDelegate` have already
   been run on both and returned zero.
+- **The CallFollow body scan WAS UNBOUNDED, and one live success was accidental.** Until build
+  2500 `ScanFunctionBodyForRipRef` scanned a flat 256 bytes with no extent check, so on a short
+  callee it read into the next function. Measured: **17 of 19 callees in the corpus overrun**. On
+  UE 4.23 `GNAM_V7` followed a 124-byte `FName` ctor and resolved GNames from a ref at **+0x94** —
+  132 bytes past the end, inside a DIFFERENT `FName` constructor's lazy-init prologue. Now bounded
+  via `Macht::GetFunctionExtent` (`RtlLookupFunctionEntry`, clamped with `end - funcAddr` because
+  the target is often mid-entry; a NULL return means leaf *or* stripped xdata — indistinguishable —
+  and keeps the old 256). **LIVE-VERIFIED on STVoyager 5.6**, which was the one case that could not
+  be settled offline: `GNAM_V7 hits=1 (not validated)` — the out-of-bounds ref is now unreachable —
+  and the scan fell through to `GNAM_V8`, which resolves correctly. The `FuncBodyScan` log line now
+  states `bounded by .pdata` or `UNBOUNDED (leaf/no-xdata)`, so a future overrun is visible.
 - **`GNAM_V7` (CallFollow) and the three `GNAM_EXP_*` (SymbolCallFollow) are UNMEASURABLE by this
   harness**, not worryingly unknown: `scan_patterns.java` scans byte patterns only, and the `EXP`
   ones cannot fire on a monolithic EXE because nothing is exported.
@@ -178,8 +210,19 @@ is 65536 elems/chunk (`sar 0x10`) while its `TNameEntryArray` is 16384 (`sar 0xE
 
 ### Thinnest coverage in the table
 
-**Pre-4.23 GNames rests on exactly two patterns — `GNAM_CT3` (700) and `GNAM_G42_1` (710) — and
-they are the SAME `FName::GetNames` lazy-init prologue shape.** Both are OK-BEHIND, both in batch
+**Pre-4.23 GNames rested on ONE SHAPE MATCHED TWICE — worse than "two patterns".** Measured
+2026-07-28: `GNAM_G42_1`'s byte string is a **strict superset window of `GNAM_CT3` offset by +4**
+(`CT3[4:]` equals `G42_1` except that `G42_1` wildcards the two bytes `CT3` pins as literal
+`00 00`), so every `CT3` match at A implies a `G42_1` match at A+4 — verified token-by-token and
+empirically on all 36 programs. They credited a redundancy that never existed.
+**Mitigated 2026-07-28 by `GNAM_XX_1` (717)**, the success-path write-back + epilogue of the same
+function: 8/8 pre-4.23 oracles with the correct hit at index 0, the only pattern in the file that
+covers all of them, zero spurious-correct on 36 programs. It is a different SITE, not a different
+FUNCTION — an xref census found the only other referencing functions are inline expansions of
+`GetNames` carrying the identical shape, and a caller-side anchor was mined and REFUSED (the
+`and edx,0x3FFF` idiom sits at distance {11,12,27,30} on 4.15.3 but {14,19,20} on 4.22, so no
+fixed-offset AOB spans the band). That is the most independence the engine offers.
+The original note follows, still accurate about the failure mode: Both are OK-BEHIND, both in batch
 3, confirmed identical on HeliumRain *and* Freud Gate. A compiler change to that prologue takes
 GNames on every pre-4.23 title at once. This is the sparse-`n=1` situation again, on a different
 target; if a third pre-4.23 sample ever arrives, mining a structurally different anchor there is
@@ -208,6 +251,7 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | UE4.18-DQXIS | `DQ_XI_S` | 4.18 | ❌ none | truth by disassembly; ASLR base recovered; **GNames absent on purpose** |
 | UE4.27-DQ7R | `DQ7R` | 4.27 | ❌ none | truth by disassembly; **GEngine ≠ the live consensus** — see below |
 | UE5.4-Elliot | `Elliot` | 5.4 | ❌ none | truth by disassembly; the corpus's **only UE 5.4** sample |
+| UE4.15-Flying | `UE415_Flyinh-Win64-Shipping` | 4.15.3 | ✅ full PDB | **built by us** (Shipping, monolithic). **The OLDEST symbolised binary in the corpus** and the only oracle below 4.20 — it turns the 4.13–4.19 FLAT `FFixedUObjectArray` / 24-byte `FUObjectItem` band from source interpolation into measurement. Project name misspells "Flying" as **"Flyinh"** |
 | UE4.20-Everspace | `ES1-420` | 4.20 | ✅ full PDB | oldest sample; supersedes the symbol-less `ES1.rep` |
 | UE4.20-HeliumRain | `HeliumRain` | 4.20.3 | ✅ full PDB | **second symbolised 4.20** — pre-4.23 GNames no longer rests on Everspace alone |
 | UE4.21-FreudGate | `Freud_Gate_UE421` | 4.21 | ❌ none | truth by disassembly; **closes the 4.21 hole** |
@@ -215,6 +259,10 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | UE4.27-Maelstrom | `Maelstrom` | 4.27.2 | ✅ full PDB | |
 | UE5.0-LightMaze | `Light_Maze` | 5.0.3 | ❌ none | truth by disassembly; **closes the 5.0 hole** (4.27 used to jump to 5.1) |
 | UE4.22-Satisfactory | `Satisfactory_UE422` | 4.22 | ✅ full PDB | **monolithic EXE with symbols** — the only pre-4.25 one |
+| UE4.23-Flying | `UE423_Flying-Win64_Shipping` | 4.23.1 | ✅ full PDB | **built by us** (Shipping, monolithic; note the UNDERSCORE in the project name). The only 4.23, and the FIRST version of BOTH FNamePool and sparse delegates. **Live-verified** — the packaged copy was run and all five resolved |
+| UE5.7.4-StackOBot | `StackOBot_Shipping_UE574` | 5.7.4 | ✅ full PDB | **built by us**, Shipping. The 5.7.4/5.8 pair is a controlled A/B — same game, same config, adjacent engines |
+| UE5.8-StackOBot | `StackOBot_Shipping_UE58` | 5.8.0 | ✅ full PDB | **built by us**, Shipping. **The only 5.8.** GObjects takes a SINGLE truth value (5.8 moved `ObjObjects` to +0x00). The oracle for the `virtual ~FFieldClass()` reflection break |
+| UE4.27-Hogwarts | `Hogwarts_Legacy` | 4.27 | ❌ none | noise probe — **⚠ DENUVO-PACKED, no `.text` at all** (`.udata` 105 MB + `.xpdata` 274 MB). Its hits are against encrypted data and it dilutes the §6 hits/MB denominator; see the sweep.sh comment |
 | UE4.24-DropIn | `DropIn_UE424` | 4.24.3 | ✅ full PDB | **closed the last checkable sparse-delegate gap** — see below |
 | UE4.25-Everspace2 | `ES2-UE425` | 4.25.2 | ✅ full PDB | the FField/FProperty transition band |
 | UE4.26-Satisfactory | `Satisfactory_UE426` | 4.26.2 | ✅ full PDB | modular, 4 DLLs — supersedes the unusable `Satfi426` |
@@ -254,7 +302,8 @@ demangles to
     TMap<UObjectBase const*, TMap<FName, TSharedPtr<TMulticastScriptDelegate<FWeakObjectPtr>>>>
 
 — a **raw pointer key**, identical to 4.25 / 4.26 / 4.27 / 5.x. Sparse delegates were introduced
-in 4.23, so **only 4.23 itself is now unverified**, and no 4.23 binary exists in the corpus.
+in 4.23, and **4.23 itself is now verified too** (see the UE4.23-Flying row): its PDB carries the
+same raw-pointer key, so the shape is measured at every version the feature has existed.
 `Aura`'s walker still probes the live key shape rather than gating on a version number; keep it
 that way — that is what makes 4.23 and any licensee fork safe without a binary to test against.
 
@@ -436,6 +485,28 @@ GS_TRUE="GObjects=142e797f0|142e79800,GNames=1431dead8,GWorld=1432e1ac0,GEngine=
 # UE 4.22 — Satisfactory (monolithic). GNames = `Names`, the TNameEntryArray* lazily new'd in
 # FName::GetNames @0x140BCEBF0 (the load is at +4). Pre-4.23: no sparse delegates.
 GS_TRUE="GObjects=144006f80|144006f90,GNames=144002a78,GWorld=1441073b8,GEngine=144104e58"
+
+# UE 4.23 — the "Flying" template, SHIPPING, built by us against Epic's INSTALLED 4.23.1 Launcher
+# engine (CL 9631420, IsPromotedBuild=1, IsLicenseeVersion=0 — engine objects are Epic stock, and a
+# Shared build environment forbids overriding bUseChecksInShipping etc., so fork/override risk is
+# nil). This is the version that introduced BOTH FNamePool and sparse delegates, so it is the
+# EARLIEST binary either target can be checked against.
+#
+# GNames is the interesting one: 4.23 has NEITHER a `NamePoolData` symbol NOR `?GetNames@FName@@`
+# (zero occurrences of both strings in all three config PDBs), so BOTH recipes this file documents
+# — "pre-4.23: go straight to FName::GetNames" and "4.23+: NamePoolData often has no symbol" —
+# fail at exactly this version. Taken from FNameDebugVisualizer::GetBlocks @0x14062c010
+# (`48 8d 05 f9 83 82 02 c3` -> 0x142e54410), minus 0x10.
+#
+# Every value is TRIPLE-derived and the three agree exactly: (1) a PDB S_PUB32/S_GDATA32 decode,
+# (2) a full 150-pattern byte replay of Himmel.h against .text, (3) the live run, which rebases all
+# five off ONE shared ASLR base (0x7FF7ED7D0000) with ZERO residual. Ghidra was never opened.
+#
+# DECOYS, all three confirmed present: GCoreObjectArrayForDebugVisualizers has a PLAIN name (no
+# leading `?`), so find_syms3.java — which skips only `?`-prefixed names — WILL hand it to you, and
+# its RUNTIME VALUE equals the ObjObjects VA. GObjectArrayForDebugVisualizers is a C++ reference to
+# that, i.e. TWO indirections off. GNameBlocksDebug holds NamePoolData + 0x10.
+GS_TRUE="GObjects=142e6b968|142e6b978,GNames=142e54400,GWorld=142f6cf10,SparseDelegates=142c4d060,GEngine=142f6a8a0"
 
 # UE 4.24 — DropIn (a second, older build of the same unplayable VR title). NamePoolData from
 # FNameDebugVisualizer::GetBlocks @0x141323510 = `lea rax,[0x1471BCA10]; ret`, minus 0x10.

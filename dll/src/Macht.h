@@ -60,6 +60,25 @@ size_t GetModuleSize(const wchar_t* moduleName = nullptr);
 // .text, so the correct Func offset holds such a pointer for every native func.
 bool LooksLikeCodePointer(uintptr_t addr);
 
+// Exact [begin, end) of the x64 function containing `addr`, from the PE exception
+// directory. Returns false for a genuine LEAF function (no unwind data) and for a
+// binary whose exception directory is absent or stripped — the two are not
+// distinguishable, so callers must treat false as "unknown extent", not "no code".
+//
+// Uses RtlLookupFunctionEntry rather than parsing .pdata by hand, for two measured
+// reasons. It is MODULE-AWARE: its ImageBase out-param maps an arbitrary address
+// back to its own module, which matters because a symbol-export lookup can land in
+// a DLL other than the main image, and every other NT-header walk in this codebase
+// is hardcoded to the main module. And it does not depend on SECTION NAMES: DQ7R
+// ships no `.pdata` and no `.text` at all (its exception directory sits in
+// `.srdata`, its code in `.debug`), and Elliot / Stellar Blade / Hogwarts are each
+// named differently again — yet all expose a working IMAGE_DIRECTORY_ENTRY_EXCEPTION.
+//
+// NOTE `addr` may be MID-function (measured: 6.8%-39.8% of call targets across the
+// corpus land where the covering entry's BeginAddress != addr), so clamp a scan with
+// `end - addr`, NEVER with `end - begin`.
+bool GetFunctionExtent(uintptr_t addr, uintptr_t& begin, uintptr_t& end);
+
 // --- AOB pattern scanning ---
 
 // Parsed pattern: pre-processed bytes/mask for efficient SIMD scanning.

@@ -1,0 +1,362 @@
+# AOB corpus preservation — what to keep, what to reinstall, what to drop
+
+> **Read this before deleting anything under `D:\Tools\GHIDRA_Projs`, `D:\tmp\Game archive`,
+> `X:\UE_Analyze_Data`, or before uninstalling a corpus Steam title.**
+>
+> Companion to [tools/ghidra/GROUND-TRUTH.md](../tools/ghidra/GROUND-TRUTH.md) (which patterns
+> are proven by which binary) and [tools/ghidra/sweep.sh](../tools/ghidra/sweep.sh) (the corpus
+> list itself, and the source of truth for it).
+
+Every number in this document is **measured**, not estimated, and carries the date it was
+measured. Free space and archive sizes move; re-measure with `preflight.py --sizes` before acting.
+
+-----
+
+## 0. The one fact that reorders everything
+
+`sweep.sh` runs
+
+```
+analyzeHeadless <projdir> <proj> -process <glob> -noanalysis -readOnly -postScript scan_patterns.java
+```
+
+(`sweep.sh:237-240`). **It never opens the original game binary.** Ghidra applied the PDB at
+import time and the symbols live inside the `.rep`.
+
+Consequences, and they are the spine of this whole document:
+
+* A `.rep` is the **artifact of record**. Losing one loses the capability.
+* The game install / archived binary is only needed to **RE-IMPORT** — i.e. to rebuild a `.rep`
+  you deleted, or to re-analyse after a pattern change that needs fresh decompilation.
+* Therefore "is the game still installed?" is a **recovery** question, never a **can I sweep
+  today** question. `preflight.py` reports the two at different severities on purpose.
+
+Verified empirically: in the last sweep, `UE4.18-FF7R` and `UE4.27-DropIn` both produced complete
+scan TSVs while their binaries were off-disk.
+
+-----
+
+## 1. The manifest — `tools/ghidra/corpus-manifest.json`
+
+Schema `ue5cedumper.corpus-manifest/2`. Regenerate with:
+
+```
+py tools/ghidra/build_corpus_manifest.py            # writes .json and .tsv
+py tools/ghidra/build_corpus_manifest.py --no-hash  # skip the ~15 GB of hashing
+```
+
+Nothing in it is typed by hand. Five measured sources, in order of authority:
+
+| # | Source | Gives |
+|---|--------|-------|
+| 1 | `tools/ghidra/sweep.sh` `ROWS=()` | TAG, project, glob, GS_TRUE → the tag list and `ROLE` |
+| 2 | `<proj>.rep/idata/**/*.gbf` | program names, Ghidra's `Executable Location` + `Executable MD5` — **read straight off disk, no Ghidra, no project lock, ~3 s for all 43 projects** |
+| 3 | the recorded path | does the binary still exist, is a `.pdb` beside it, what does it hash to today |
+| 4 | `libraryfolders.vdf` + `appmanifest_*.acf` | appid / installdir / SizeOnDisk / buildid for what is installed **now** |
+| 5 | `appcache/appinfo.vdf` (entry framing) | appid for titles that are **not** installed |
+
+Anything none of the five can answer is `null` = UNKNOWN. **A guessed app id is worse than a gap** —
+it sends you to install the wrong game.
+
+### Grain and counts
+
+`38 tags / 51 selected programs / 55 TSV rows`, all three asserted by the drift check.
+
+* 38 = `ROWS=()` entries in `sweep.sh`. **Not 51.**
+* 55 = one row per (tag, Ghidra program); modular projects hold several programs.
+* 51 = rows the `-process` glob actually selects (the 4 unselected ones are the
+  wrong-version programs inside the mis-imported `Satisfactory_UE521` project — the glob there is
+  load-bearing **correctness**, not scoping convenience).
+
+`corpus-manifest.tsv` is the same data at program grain, for diffing.
+
+### Fields that exist because they were needed
+
+* **`binary_md5`** — Ghidra's recorded import MD5. Unlike `steam_buildid` / `binary_size_bytes` /
+  `binary_sha256` (which the generator deliberately nulls on a drifted row, so it never asserts
+  the replacement build is the corpus build) this is **never nulled**: it describes the corpus
+  build, not today's file. It is the only identity a GONE or DRIFTED row still has, and it is what
+  lets `preflight --verify-hash` say *"this file is NOT the corpus build"* instead of shrugging.
+* **`duplicate_copies`** — other paths whose bytes are byte-identical, MD5-confirmed. Searched only
+  for rows no store can re-serve (self-built / archive). Same-name **same-size is not proof**:
+  measured, a repackage of UE423_Flying emits a fresh PE at identical size
+  (`43f6b130…` vs the imported `f61ec1be…`).
+* **`pdb_relpath` / `pdb_size_bytes`** — the PDB checklist has to be machine-readable, or it drifts.
+
+### Drift check
+
+`preflight.py` parses `sweep.sh` itself and compares three ways: sweep-only tags, manifest-only
+tags, project-name mismatches. **Any drift → exit 3.** Verified in both directions (adding a tag
+and renaming one). A changed `GLOB` or `GS_TRUE` is *not* yet compared — see Open questions.
+
+-----
+
+## 2. Preflight — `tools/ghidra/preflight.py`
+
+Pure-stdlib Python, no third-party deps, **never invokes Ghidra** (project state comes from
+`.rep/idata/**/*.prp` XML on disk, so it takes no project lock and honours the read-only rule by
+construction).
+
+```
+py tools/ghidra/preflight.py                  # the normal pre-sweep check, seconds
+py tools/ghidra/preflight.py --sizes          # + per-project .rep sizes (for triage)
+py tools/ghidra/preflight.py --verify-hash    # + MD5 every located binary (minutes, reads ~15 GB)
+py tools/ghidra/preflight.py UE5.7            # filter to matching tags
+py tools/ghidra/preflight.py --json           # machine-readable
+```
+
+**Two independent notions of "present", because the actions differ:**
+
+| Level | Condition | Severity |
+|-------|-----------|----------|
+| A — Ghidra project | missing / locked / no `.gpr` / empty / glob matches nothing | **the sweep FAILS.** Gates (exit 2). |
+| B — binary / PDB | not installed / wrong build / no symbols | sweep is fine; **re-import** is impossible. Advisory; gates only under `--strict` (exit 4). |
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | GO |
+| 1 | tool error (**including argparse usage errors**, remapped from 2 so a typo can never read as "corpus incomplete") |
+| 2 | NO-GO — a blocking Ghidra project problem (`--allow-partial` downgrades) |
+| 3 | DRIFT — manifest vs `sweep.sh` disagree, either direction (`--allow-drift` downgrades) |
+| 4 | GAPS — only under `--strict` |
+
+Highest precedence wins; **all sections always print**, so a gate never hides information.
+
+### What it cannot determine, and why
+
+* **Whether a re-download reproduces the corpus build** without `--verify-hash`. Steam serves only
+  the current build; only the MD5 comparison answers it.
+* **`needs_pdb` for a title that is not installed.** It is derived by `stat()`-ing beside a located
+  binary, so an uninstalled row reports `UNKNOWN_UNCHECKABLE` — *unmeasured, not "no"*.
+* **PDB coverage of a modular project.** `pdb_relpath` tracks the anchor program only; the other
+  8 programs of `UE5.6-Satisfactory` are not accounted for.
+* **Ghidra database health.** It reads project *metadata*, never opens a program database. A
+  silently corrupted `.rep` (the realistic failure mode when moving 120 GB onto a spinning HDD)
+  looks perfectly healthy here. Only an actual sweep would notice.
+* **App ids it was never given.** Where the manifest has `null` it prints
+  *"app id UNKNOWN in manifest — cannot name what to install"* rather than guessing.
+
+### Section [2] is informational, not a defect
+
+`Maelstrom` and `Satisfactory_v1.2.3.1` contain `<name>.0` programs. **Measured**: these are
+MS-DOS/MZ-loader imports that map only the 1104-byte DOS stub (`scanning … CODE_0 size=1104` at
+image base `0000:0000`) and score `hits=0` on all 151 patterns. `aggregate_sweep.py` already
+excludes them (`exec_mb <= 0` → "broken import"), which is why `REPORT.md` reads
+**"programs scanned: 51"** and not 55. They do **not** double-score truth and do **not** inflate
+any statistic. Deleting them in Ghidra is optional disk hygiene (~0.2 GB).
+
+They do expose a **real bug**: `scan_patterns.java:206` builds the output filename from
+`currentProgram.getImageBase()` and `sanitize()` does not strip `:`. On NTFS `…@0000:0000.txt`
+truncates at the colon, so the content lands in **alternate data streams** of a 0-byte file:
+
+```
+Get-Item 'out/sweep/scan_UE4.27-Maelstrom__MaelstromV2-Win64-Shipping.exe@0000' -Stream *
+    :$DATA 0   0000.tsv 16769   0000.txt 14167
+```
+
+Harmless for a stub; **silent data loss** for any real program Ghidra loads with a segmented
+address space.
+
+-----
+
+## 3. PDB checklist — which titles must be installed to keep symbols
+
+Measured 2026-07-29. **21 sweep rows resolve to a PDB, but only 20 distinct PDB files exist**
+(`UE5.5-Everspace2` and `UE5.5-Everspace2b` point at the same path — see §5). Total 8.11 GB.
+
+### 3a. Steam-resident — FRAGILE, a game patch overwrites these in place
+
+10 distinct files, 6.25 GB. **There is no way to get an old PDB back.**
+
+| Tag | Title (Steam) | App id | PDB MB |
+|-----|---------------|--------|--------|
+| UE5.5-Everspace2b | EVERSPACE™ 2 | 1128920 | 1801.0 |
+| UE5.7-Solarpunk | Solarpunk | 1805110 | 1553.2 |
+| UE4.27-Maelstrom | Maelstrom | 764050 | 954.2 |
+| UE4.27-Breeders | Breeders of the Nephelym | 1161770 | 762.6 |
+| UE4.20-Everspace | EVERSPACE | 396750 | 382.9 |
+| UE5.5-Meltopia | Meltopia | 3601800 | 347.4 |
+| UE4.27-DropIn | Drop In - VR F2P | 1144800 | 273.2 |
+| UE5.1-Grimhook | Grimhook | 2667430 | 159.4 |
+| UE4.20-HeliumRain | HeliumRain | 681330 | 109.6 |
+| UE5.6-Satisfactory | Satisfactory | 526870 | 53.4 (anchor only) |
+
+> **Action:** copying these 10 files into maintainer-held storage is 6.25 GB and removes the
+> single largest fragility in the corpus. `UE5.6-Satisfactory` needs the whole
+> `Engine/Binaries/Win64` PDB set, not just the anchor.
+
+### 3b. Archive-held — safe, already yours
+
+6 files, 1.39 GB, under `D:\tmp\Game archive` (mirrored to `X:\UE_Analyze_Data\Game archive`):
+`UE4.22-Satisfactory` 700.1, `UE4.24-DropIn` 272.6, `UE5.2-SatGameDLL` 200.5,
+`UE4.25-Everspace2` 165.8, `UE5.2-Satisfactory` 44.6, `UE4.26-Satisfactory` 36.3 MB.
+These are superseded depot versions — **Steam cannot re-serve them.**
+
+### 3c. Self-built — safe, and the cheapest backup on the machine
+
+4 files, 484.4 MB. `UE5.8-StackOBot` 180.0, `UE5.7.4-StackOBot` 169.2, `UE4.23-Flying` 79.1,
+`UE4.15-Flying` 56.1 MB.
+
+> **The whole self-built oracle set — 4 exe + 4 pdb — is 897.0 MB.** Backing that up is under 1 GB
+> and is the highest value-per-byte action available. All four have a second byte-identical copy
+> today (see `duplicate_copies`), but three of those live in **volatile** locations
+> (`D:\Unreal Projects\…\Binaries\` / `Saved\StagedBuilds\`) that a rebuild or Clean destroys.
+
+Engines for a rebuild are installed on `C:\Program Files\Epic Games`: **UE_4.15 (22.54 GB),
+UE_4.23 (45.33), UE_4.27 (54.19), UE_5.7 (74.13), UE_5.8 (84.70)** = 280.89 GB. Nothing is
+registered with the Epic Launcher (`LauncherInstalled.dat` → `"InstallationList": []`), so a
+delete is likely not re-downloadable in place — verify before removing.
+
+### 3d. Not installed
+
+**`UE4.18-FF7R` — app 1462040, Steam title "FINAL FANTASY VII REMAKE INTERGRADE"** (the manifest's
+`FINAL FANTASY VII REMAKE` is the *installdir*, not the store name — search the store for
+INTERGRADE). `needs_pdb` is `null` = unmeasured. `sweep.sh` comments say it has no PDB and its
+truth was derived by disassembly, but that is prose, not measurement. Install → re-run
+`build_corpus_manifest.py` → the field settles itself.
+
+### When a title reinstalls to a different path
+
+**It already happened four times.** Octopath moved D:→E:, Manor Lords D:→H:, DQ I&II HD-2D D:→H:,
+and Drop In reinstalled to a *different folder name* than the manifest recorded
+(`Drop In - VR Battle Royale`, not `DropIn`).
+
+The rule the tooling implements, and the rule to follow by hand:
+
+1. **Key on Steam app id**, never on a path. `binary_last_seen` is a *hint*.
+2. Resolve `appmanifest_<id>.acf` → `installdir` → bounded depth-3 search for `Binaries/Win64`,
+   **shallowest depth wins** (otherwise P3R's Artbook and Soundtrack become phantom rows). Same
+   logic as `ui/UE5DumpUI/Services/ProxyDeployService.cs` (`MaxBinariesSearchDepth = 3`).
+3. `libraryfolders.vdf`'s `apps` map is **not proof of installation** — only
+   `appmanifest_<id>.acf` **plus** the installdir folder are.
+4. Re-run `build_corpus_manifest.py`; it records the new location and tags the row
+   `relocated-library`. Do not hand-edit.
+5. Modular builds scatter programs across **both** `Engine/Binaries/Win64` and
+   `<Game>/Binaries/Win64` — resolve per program, not per title.
+
+-----
+
+## 4. Footprint (measured 2026-07-29 00:20–00:45 local)
+
+| Asset | Size | Notes |
+|-------|------|-------|
+| `D:\Tools\GHIDRA_Projs` (43 `.rep`) | **120.94 GB** | 38 referenced by `sweep.sh` = 113.51; 5 orphans = 7.43 |
+| — of which ORACLE projects (29 tags) | 92.60 GB | `sweep.sh` supplies `GS_TRUE` |
+| — of which NOISE-PROBE projects (9 tags) | 20.93 GB | no truth; they only prove a pattern still fires |
+| `C:\Program Files\Epic Games\UE_*` (5) | **280.89 GB** | biggest single item on the machine |
+| Steam corpus payload (26 installed apps) | **558.47 GB** | 1 not installed (FF7R) |
+| `D:\Unreal Projects` | 83.57 GB | only **22.47 GB** is corpus (ProjectTitan 61.11 GB is not) |
+| `D:\tmp\Game archive` | **20.95 GB** / 1354 files | already pruned to Binaries trees |
+| `X:\UE_Analyze_Data\Game archive` | **20.95 GB** / 1354 files | mirror of the above, same file count |
+| `X:\UE_Analyze_Data\Varies Version builds` | 7.28 GB | the self-built oracle packages |
+| Self-built oracle exe+pdb only | **897.0 MB** | the backup that matters most |
+
+Free space at 00:18: C 980.3 · D 2362.1 · E 258.2 · F 801.2 · G 931.3 · H 636.2 · X 1670.1 GB.
+**There is no disk crunch today.** D: alone can absorb the entire 120.94 GB Ghidra move. E: is the
+tightest at 28.6% and holds two corpus titles — it is the drive most likely to force a decision
+first, and it is *not* the Ghidra target.
+
+### Drop order under pressure
+
+Take these strictly in order. Re-run `preflight.py --sizes` between steps.
+
+| Step | What | Frees | Capability lost |
+|------|------|-------|-----------------|
+| 0 | The 5 orphan `.rep` — `Meltopia` 3.35, `UE423_Flying-Win64-DebugGame` 3.08, `Satfi426` 0.68, `ISDefenseEditor_UE410` 0.16, `ES1` 0.16 | **7.43 GB** | **None** for 3 of them (GROUND-TRUTH.md already calls Meltopia "superseded and can be deleted" and Satfi426 "superseded, do not re-chase"). ⚠ `UE423_Flying-Win64-DebugGame` is **queued work** (todo.md:36, "~free — its project is already analysed") and `ISDefenseEditor_UE410` (UE 4.10) is plausibly the only evidence behind the documented pre-4.11 unsupported floor. Drop only the 4.19 GB of the three superseded ones without further thought. |
+| 1 | 4 zero-contribution noise probes — `UE4.27-Artisan` 1.35, `UE5.5-ManorLords` 2.88, `UEx-DQ12HD2D` 1.60, `UE5.2-SatGameDLL` 2.28 | **8.11 GB** | Nothing measurable. Simulated exclusion: **0** patterns stop firing, **0** lose correctness evidence. Only §6 denominator mass. |
+| 2 | 5 exclusive-exercise noise probes — `UE4.27-Hogwarts` 3.65, `UE5.6-TQ2` 3.30, `UE5.1-Palworld` 2.77, `UE4.x-FF7Rebirth` 2.33, `UE4.18-Octopath` 0.77 | **12.82 GB** | **0** correctness. 6 patterns fall into the already-populated "never hits anywhere" bucket (`GOBJ_RE1`, `GOBJ_V9`, `GOBJ_OT_2`, `GWLD_TQ_2`, `GWLD_SF_3`, `GWLD_TQ_3`). Taking steps 1+2 removes 865.5 MB of the 2,877.2 MB monolithic executable mass (30.1%). Hogwarts first: it is Denuvo-packed and contributes 4.0% of §6 **numerator** hits from non-`.text` bytes. |
+| 3 | Version-redundant ORACLES, **one at a time**, re-sweeping between each — `UE5.5-Meltopia` 4.54, `UE4.27-DQ7R` 3.89, `UE4.27-Maelstrom` 3.81, `UE4.27-Breeders` 2.84, `UE4.20-HeliumRain` 1.39 | ≤ **16.47 GB** | Individually nothing. **Not jointly redundant**: Breeders + Maelstrom are the two independent symbolised 4.27s that proved DropIn's 32-byte `FUObjectItem` is a config artifact — keep at least one. Meltopia is the second symbolised *monolithic* 5.5 in a modular-heavy corpus. |
+| 4 | Steam uninstalls, biggest first — FF7 Rebirth 159.31, Hogwarts 71.19, Avowed 67.60, Palworld 38.35 | **336.45 GB** (60% of the Steam payload) | **Nothing today.** All four are `needs_pdb=false`; their `.rep` (13.83 GB total) already holds everything the sweep reads. Cost is re-download time *if* a re-import is ever wanted. |
+| 5 | Epic engines you will not rebuild against | up to **280.89 GB** | Only the ability to rebuild a self-built oracle. Redundant *if* §3c's 897 MB is backed up. Verify Launcher re-download first. |
+
+### Never drop
+
+`.rep` files holding a **sole-landing** pattern (removing one regresses a target on an engine
+version outright) — 7 such patterns across 5 tags:
+
+| Tag | .rep GB | Sole-landing patterns |
+|-----|---------|----------------------|
+| UE5.7-Solarpunk | 5.43 | `GNAM_SAT425_3`, `SPARSE_SP57_1` (two — the most of any entry) |
+| UE4.22-Satisfactory | 2.58 | `GNAM_SAT422_1` (+ 5 sole-ok, the highest count in the corpus) |
+| UE5.6-Satisfactory | 4.08 | `GWLD_SF_1` |
+| UE4.20-Everspace | 1.67 | `GOBJ_G42_4` |
+| UE5.3-Avowed | 5.08 | `SPARSE_AV53_1` |
+
+> `UE4.18-FF7R` is the sole *landing* site of `GOBJ_RE2` but its **sole-ok count is 0** — the
+> pattern stays proven on `UE4.15-Flying` and `UE4.18-DQXIS`, and FF7R's truth coverage
+> `{GEngine, GObjects}` is a strict subset of `UE4.18-DQXIS`'s. It belongs in the redundant tier,
+> not the floor. This corrects an earlier "6 tags" framing.
+
+**Version coverage is an override axis, never a tiebreak.** 18 engine versions rest on exactly one
+oracle, and 12 of those oracles score `soleLanding = 0` **and** `soleOk = 0` — including the only
+4.23, the only 5.4 and the only 5.8. A script ranking on pattern uniqueness alone would delete
+them without a single metric objecting.
+
+**The Satisfactory family is a concentration trap.** `{UE4.22, UE4.26, UE5.2-Satisfactory,
+UE5.2-SatGameDLL, UE5.6-Satisfactory}` = 12.47 GB across 5 projects, and is the sole source of
+truth for **13 patterns**. A single "I'll clear out the Satisfactory stuff" is the most damaging
+action available on this disk.
+
+### Unrecoverable
+
+* **`UE5.5-Everspace2` / `ES2-0517.rep` (11.38 GB, the largest project).** The file at its recorded
+  path hashes `85daf780…`, which is exactly `UE5.5-Everspace2b`'s recorded MD5 — a game update
+  overwrote the 05-17 build in place, **and its PDB with it**. Steam serves only the current build,
+  so **no reinstall restores it**. Searched: all four Steam libraries, both archive roots, and
+  drives D/E/F/G/H/X — no copy exists. Its `.rep` is the last copy of that analysis, and `sweep.sh`
+  calls the ES2 pair the corpus's *only* same-game cross-build control — the only thing that can
+  answer *"does a pattern survive a game update?"*. **Never delete it. Back it up first.**
+  ⚠ Caveat: in the last sweep both ES2 rows resolved **identically** on all five targets, so its
+  present differential signal is a null result. The value is in retaining the control, not in a
+  disagreement it currently shows.
+* **`UE4.18-FF7R`** — binary gone. Reinstallable (`steam://install/1462040`, ~100 GB), but a
+  reinstall yields *today's* build; whether that reproduces MD5 `3ea9092f…` is **UNVERIFIED**.
+  There is also a 91.64 GB depot-cache backup under `X:\SteamLibrary backup\FINAL FANTASY VII
+  REMAKE INTERGRADE` (depot 1462041, `.csd`/`.csm`) — a local restore path nobody has tested.
+
+### Cheap hedges worth knowing
+
+* `D:\tmp\Game archive\DropIn` already holds an **unimported second 4.24 build**
+  (`UE4.24.2`, MD5 `3D245058…`, distinct from `UE4.24`'s `2F640FF0…`). Importing it creates a
+  second same-game cross-build pair for ~1.9 h of analysis — the cheapest available hedge against
+  ever losing the ES2 pair.
+* `X:\$RECYCLE.BIN` holds a complete `depot_1128921` ES2 4.25.2 tree (exe + 165.8 MB pdb).
+  **"Empty recycle bin" silently deletes a corpus copy.**
+* `X:\Ghidra_Projs_Backup` **is empty**, while `X:\sync_Ghidra_Projs.PS1` and `X:\sync.cmd` exist.
+  A `.rep` backup was configured and has produced nothing. Given that the whole ~120 GB lives on
+  one machine, this is the single most actionable item in this document.
+
+-----
+
+## 5. Routine
+
+**Before a sweep:** `py tools/ghidra/preflight.py`. Exit 0 → run it. Exit 2 → fix the project first.
+Exit 3 → the manifest and `sweep.sh` disagree; regenerate the manifest, do not hand-edit.
+
+**After installing/uninstalling/moving a corpus title, or after any game patch:**
+`py tools/ghidra/build_corpus_manifest.py`, then `preflight.py --verify-hash` to catch a build that
+drifted under you. The manifest is a **point-in-time snapshot** — it was already stale within an
+hour of first generation (a title reinstalled and it still read `BINARY GONE`).
+
+**Before deleting anything:** `preflight.py --sizes`, then this document's §4 in order.
+
+-----
+
+## 6. Open questions
+
+* Does restoring the `X:\SteamLibrary backup` FF7R depot cache reproduce MD5 `3ea9092f…`?
+  Untestable without doing it.
+* Do the Epic engine trees re-download from the Launcher after deletion, given
+  `"InstallationList": []`?
+* `UE5.6-Satisfactory` PDB coverage is tracked for the anchor program only; the other 8 programs
+  are unaccounted for.
+* Drift detection does not yet compare `GLOB` or `GS_TRUE` — a re-scoped truth prefix changes
+  sweep results silently.
+* No integrity/restore check exists for the `.rep` databases themselves. On a spinning HDD, silent
+  corruption is a more likely loss mode than a deletion decision, and only a sweep would notice.
+* Re-analysis cost per project is **UNKNOWN**. The `.gpr`-creation → newest-`.gbf` heuristic is not
+  reproducible (it returns ≤ 0 h for six projects whose timestamps were reset by a copy, and
+  924 h for Avowed), so any "GB reclaimed per re-analysis hour" ranking is unsupported. Time a
+  real re-import before relying on one.

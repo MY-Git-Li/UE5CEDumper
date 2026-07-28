@@ -4109,6 +4109,9 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             json data;
             data["build_info"]         = BuildStamp::VersionString();
             data["validated"]          = DynOff::bOffsetsValidated.load(std::memory_order_acquire);
+            data["probe_ran"]          = DynOff::bOffsetsProbeRan.load(std::memory_order_acquire);
+            data["fallback_reason"]    = DynOff::g_offsetsFallbackReason;
+            data["ffieldclass_name"]   = DynOff::FFIELDCLASS_NAME;
             data["case_preserving"]    = DynOff::bCasePreservingName;
             data["use_fproperty"]      = DynOff::bUseFProperty;
             data["uobject_outer"]      = DynOff::UOBJECT_OUTER;

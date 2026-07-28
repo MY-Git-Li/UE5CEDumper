@@ -6,13 +6,18 @@
 // ============================================================
 
 #include <atomic>
+#include <string>    // DynOff::LooksLikeFieldClassName / PickFFieldClassNameOffset
 
 namespace Grimoire {
 
 // --- Logging ---
 constexpr const wchar_t* LOG_FOLDER_NAME  = L"UE5CEDumper";
 constexpr const wchar_t* LOG_SUBFOLDER    = L"Logs";
-constexpr int            LOG_ROTATE_MAX   = 4;        // 4-file rotation per category
+// Retention is AGE-based, not generation-based. The old fixed shuffle
+// (-0 -> -1 -> ... -> -4, oldest deleted) could not express an age at all: it ran on
+// every process start, so four launches of the same game in one afternoon discarded
+// everything earlier regardless of date. See the retention block in Sein.cpp.
+constexpr int            LOG_RETENTION_DAYS = 21;     // archived runs older than this are deleted
 constexpr size_t         LOG_MAX_SIZE_MB  = 8;
 constexpr size_t         LOG_MAX_SIZE     = LOG_MAX_SIZE_MB * 1024 * 1024;
 
@@ -119,8 +124,50 @@ inline int FPROPERTY_ELEMSIZE = 0x3C;
 inline int FPROPERTY_FLAGS    = 0x40;  // uint64 PropertyFlags
 inline int FPROPERTY_OFFSET   = 0x4C;  // int32 Offset_Internal
 
-// === FFieldClass — stable ===
-inline int FFIELDCLASS_NAME   = 0x00;  // FName at start of FFieldClass
+// === FFieldClass — PROBED, not stable ===
+// `FName Name` IS the first declared member, but UE 5.8 made ~FFieldClass() virtual
+// (Field.h:101 @5.8.0-release; non-virtual at 5.7.4-release:100). FFieldClass has no
+// base class, so the vfptr lands at +0x00 and EVERY member shifts +8 — Name is +0x00
+// up to UE 5.7 and +0x08 from UE 5.8.
+//
+// This one constant cost a full RE session, because it was the ONLY UE offset never
+// dynamically verified while every other one self-corrects. When it is wrong the
+// damage is total but silent: the ChildProperties probe identifies a candidate by
+// resolving this name, so it matches nothing at ANY offset (-> "keeping defaults"),
+// and the walker types every property as unknown -> Scalar (-> no drill-down).
+// Latched by the JOINT (ChildProperties, FFieldClass::Name) probe in
+// Genau::ValidateAndFixOffsets — it must be decided inside that loop, because that
+// loop is what discovers ChildProperties in the first place. No later phase can set it.
+inline int FFIELDCLASS_NAME   = 0x00;  // pre-probe default = the <=5.7 layout
+
+// Candidate order is LOAD-BEARING. 0x00 is tried first with unchanged semantics, so
+// every game that works today latches exactly as it does today and cannot regress.
+inline constexpr int kFFieldClassNameProbes[] = { 0x00, 0x08 };
+
+// True iff `s` is a plausible FFieldClass type name. Every FFieldClass name in the
+// engine ends in "Property" (IntProperty, ObjectProperty, ...), so a SUFFIX test is
+// strictly stronger than a substring find and is what makes the new 0x08 candidate
+// safe — at +0x08 on a <=5.7 build sits EClassFlags, and a substring test on garbage
+// is far likelier to false-positive than a suffix test.
+inline bool LooksLikeFieldClassName(const std::string& s) {
+    return s.size() > 8 && s.size() <= 64 &&
+           s.compare(s.size() - 8, 8, "Property") == 0;
+}
+
+// Pure decision core, reader-templated so it is unit-testable without a live process.
+// `resolve(off)` returns the string the FName at fieldClass+off decodes to.
+// Returns the winning offset, or -1 if neither candidate looks like a type name.
+template <class Resolve>
+inline int PickFFieldClassNameOffset(Resolve&& resolve) {
+    for (int off : kFFieldClassNameProbes) {
+        const std::string n = resolve(off);
+        // 0x00 keeps the historical substring semantics so behaviour on every
+        // already-working title is bit-identical; 0x08 requires the stricter suffix.
+        if (off == 0x00) { if (n.find("Property") != std::string::npos) return off; }
+        else             { if (LooksLikeFieldClassName(n))              return off; }
+    }
+    return -1;
+}
 
 // === FStructProperty (subclass of FProperty) ===
 // UScriptStruct* — first field after FProperty base layout.
@@ -180,10 +227,29 @@ inline std::atomic<bool> bUEnumNamesFailed{false};
 inline bool bCasePreservingName  = false;  // FName is 0x10 bytes (CompIdx + DisplayIdx + Number + pad)
 inline bool bUseFProperty        = true;   // true = FField/FProperty (UE4.25+), false = UProperty (UE4 <4.25)
 inline bool bTaggedFFieldVariant = false;  // UE5.3+: FFieldVariant is 0x08 tagged ptr (LSB=1 → UObject)
-// bOffsetsValidated is atomic with release/acquire ordering: the release-store after
-// writing all DynOff values fences the preceding non-atomic writes, ensuring they are
-// visible to any thread that acquire-loads this flag and sees 'true'.
+// TWO flags, deliberately. They used to be one, which reported a run as
+// "validated=yes" three lines after logging "Offset validation failed — using default
+// offsets" (seen on UE 5.8). A user reading the honest-looking summary had no way to
+// know the walker was about to be useless.
+//
+//   bOffsetsProbeRan   — "detection executed and DynOff is settled" (success OR give-up)
+//   bOffsetsValidated  — "the values were actually MEASURED and are trustworthy"
+//
+// The split is mandatory, not cosmetic: FindGEngineSlot / ResolveGEngineDeferred gate on
+// the flag purely to order themselves AFTER offset detection, and on the 5.8 run the old
+// (bogus) store-true on the give-up path was the ONLY reason &GEngine resolved at all.
+// Those gates therefore take bOffsetsProbeRan — flipping them to the strict flag would
+// silently regress &GEngine on exactly the builds this split exists to expose.
+//
+// Both are atomic with release/acquire ordering: the release-store after writing all
+// DynOff values fences the preceding non-atomic writes, so any thread that acquire-loads
+// either flag and sees 'true' also sees the values.
+inline std::atomic<bool> bOffsetsProbeRan{false};
 inline std::atomic<bool> bOffsetsValidated{false};
+
+// Why the probe fell back to defaults, for the summary and the pipe. String literals
+// only — never a heap string, so there is no lifetime question across threads.
+inline const char* g_offsetsFallbackReason = "";
 
 // Strip the FFieldVariant tag bit (LSB) from a pointer if we're on UE 5.3+.
 // On UE 5.3+, FFieldVariant stores type info in the LSB:

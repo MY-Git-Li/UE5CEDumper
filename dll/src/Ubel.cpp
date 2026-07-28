@@ -5453,6 +5453,21 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         result.name.c_str(), result.className.c_str(), result.fields.size(), totalMs, walkClassMs,
         nObj, tObj, nStruct, tStruct, nArray, tArray, nScalar, tScalar);
 
+    // A class with many fields and ZERO object/struct/array properties does not exist in a
+    // real UE build — a UGameEngine alone has hundreds. When this fires, property TYPE
+    // resolution is broken (FFieldClass::Name at the wrong offset), every field falls into
+    // the classifier's catch-all Scalar branch, and the Live Walker shows no drill-down.
+    // This is the shape UE 5.8 presented before FFIELDCLASS_NAME became a probed offset:
+    // 279/279 Scalar on GameEngine, 29/29 on Level. Loud beats silent — the failure is
+    // otherwise invisible except as "the tree looks wrong".
+    if (nObj == 0 && nStruct == 0 && nArray == 0 &&
+        static_cast<size_t>(nScalar) == result.fields.size() && result.fields.size() > 8) {
+        Sein::Warn("WALK:perf",
+            "All %zu fields of '%s' typed Scalar with no Obj/Struct/Array — property type "
+            "resolution is probably broken (FFieldClass::Name=+0x%02X). Expect no drill-down.",
+            result.fields.size(), result.className.c_str(), DynOff::FFIELDCLASS_NAME);
+    }
+
     return result;
 }
 

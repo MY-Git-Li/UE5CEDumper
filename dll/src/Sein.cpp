@@ -143,15 +143,117 @@ static std::string GetTimestamp() {
 }
 
 // ================================================================
-// File rotation
+// Retention — archive by timestamp, then prune by age
 // ================================================================
+//
+// The scheme here is:
+//
+//   <base>-0.log                 ALWAYS the current run. Readers, docs and the UI
+//                                depend on this, so it is deliberately unchanged.
+//   <base>-YYYYMMDD-HHMMSS.log   an archived earlier run
+//   anything older than Grimoire::LOG_RETENTION_DAYS is deleted at startup
+//
+// The archive name is stamped from the file's OWN last-write time, never from
+// "now". That is what makes the age prune honest — a log written a month ago but
+// archived today still prunes on its real date. Stamping with the archive time
+// would silently resurrect stale data for another full retention window.
+//
+// Why not the old generation shuffle: it ran on EVERY process start, not only on
+// size, so N launches of one game in an afternoon evicted everything before them
+// no matter how recent. An age policy cannot be expressed as a file count.
 
-static void RotateLogsInDir(const fs::path& dir, const wchar_t* baseName, int maxFiles) {
-    for (int i = maxFiles - 1; i >= 1; --i) {
-        auto older = dir / (std::wstring(baseName) + L"-" + std::to_wstring(i) + L".log");
-        auto newer = dir / (std::wstring(baseName) + L"-" + std::to_wstring(i - 1) + L".log");
-        if (i == maxFiles - 1 && fs::exists(older)) fs::remove(older);
-        if (fs::exists(newer)) fs::rename(newer, older);
+static bool FileWriteTime(const fs::path& p, FILETIME& out) {
+    WIN32_FILE_ATTRIBUTE_DATA fad{};
+    if (!GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &fad)) return false;
+    out = fad.ftLastWriteTime;
+    return true;
+}
+
+static ULONGLONG AsU64(const FILETIME& ft) {
+    ULARGE_INTEGER u;
+    u.LowPart  = ft.dwLowDateTime;
+    u.HighPart = ft.dwHighDateTime;
+    return u.QuadPart;
+}
+
+// FILETIME ticks are 100 ns, so one day is 24*60*60*10^7.
+static constexpr ULONGLONG kTicksPerDay = 864000000000ULL;
+
+static ULONGLONG RetentionTicks() {
+    return static_cast<ULONGLONG>(Grimoire::LOG_RETENTION_DAYS) * kTicksPerDay;
+}
+
+// "YYYYMMDD-HHMMSS" in LOCAL time. Uses the Win32 conversion rather than the CRT
+// for the same reason GetTimestamp() does — see the comment there.
+static std::wstring StampFor(const FILETIME& ft) {
+    FILETIME local{};
+    SYSTEMTIME st{};
+    if (!FileTimeToLocalFileTime(&ft, &local)) return std::wstring();
+    if (!FileTimeToSystemTime(&local, &st))    return std::wstring();
+    wchar_t buf[32];
+    swprintf(buf, 32, L"%04u%02u%02u-%02u%02u%02u",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    return std::wstring(buf);
+}
+
+// Rename `src` to <base>-<its own mtime>.log. On any failure the file is removed
+// rather than left behind: an un-archivable log would otherwise be invisible to
+// the age prune (which keys on the dated name's mtime) and accumulate forever.
+static void ArchiveByWriteTime(const fs::path& src, const fs::path& dir,
+                               const wchar_t* baseName) {
+    std::error_code ec;
+    if (!fs::exists(src, ec)) return;
+
+    FILETIME ft{};
+    std::wstring stamp;
+    if (FileWriteTime(src, ft)) stamp = StampFor(ft);
+    if (stamp.empty()) { fs::remove(src, ec); return; }
+
+    // Two rotations inside the same second are possible on a busy category
+    // (8 MB fills fast during a scan), so disambiguate rather than overwrite.
+    for (int dup = 0; dup < 100; ++dup) {
+        std::wstring name = std::wstring(baseName) + L"-" + stamp;
+        if (dup > 0) name += L"-" + std::to_wstring(dup);
+        name += L".log";
+        auto dst = dir / name;
+        if (!fs::exists(dst, ec)) {
+            fs::rename(src, dst, ec);
+            if (!ec) return;
+            break;                 // rename failed (locked?) — fall through to remove
+        }
+    }
+    fs::remove(src, ec);
+}
+
+// Delete archived logs past the retention window. Only touches *.log, and never
+// the live -0.log (callers archive that first, so it does not exist here).
+static void PruneAgedLogs(const fs::path& dir) {
+    std::error_code ec;
+    FILETIME nowFt{};
+    GetSystemTimeAsFileTime(&nowFt);
+    const ULONGLONG now    = AsU64(nowFt);
+    const ULONGLONG maxAge = RetentionTicks();
+
+    for (auto& entry : fs::directory_iterator(dir, ec)) {
+        if (ec) break;
+        if (!entry.is_regular_file(ec)) continue;
+        if (entry.path().extension() != L".log") continue;
+
+        FILETIME ft{};
+        if (!FileWriteTime(entry.path(), ft)) continue;
+        const ULONGLONG t = AsU64(ft);
+        if (now > t && (now - t) > maxAge) fs::remove(entry.path(), ec);
+    }
+}
+
+// One-time migration of the pre-retention numbered generations (-1 .. -9).
+// Without this they orphan: nothing rotates them any more, and the age prune
+// would only reach them once they aged out on their own.
+static void MigrateLegacyGenerations(const fs::path& dir, const wchar_t* baseName) {
+    std::error_code ec;
+    for (int i = 1; i <= 9; ++i) {
+        auto legacy = dir / (std::wstring(baseName) + L"-" + std::to_wstring(i) + L".log");
+        if (fs::exists(legacy, ec)) ArchiveByWriteTime(legacy, dir, baseName);
     }
 }
 
@@ -160,9 +262,10 @@ static void RotateIfNeeded(LogFileState& fs_state) {
 
     fflush(fs_state.file);
     fclose(fs_state.file);
+    fs_state.file = nullptr;
 
-    RotateLogsInDir(fs_state.currentPath.parent_path(), fs_state.baseName.c_str(),
-                    Grimoire::LOG_ROTATE_MAX);
+    ArchiveByWriteTime(fs_state.currentPath, fs_state.currentPath.parent_path(),
+                       fs_state.baseName.c_str());
 
     fs_state.file = _wfopen(fs_state.currentPath.c_str(), L"w");
     fs_state.written = 0;
@@ -181,10 +284,13 @@ static void RotateIfNeeded(LogFileState& fs_state) {
 // ================================================================
 
 static bool OpenFileInDir(LogFileState& fs_state, const fs::path& dir,
-                          const wchar_t* baseName, int maxRotate) {
-    fs_state.baseName = baseName;
-    RotateLogsInDir(dir, baseName, maxRotate);
+                          const wchar_t* baseName) {
+    fs_state.baseName    = baseName;
     fs_state.currentPath = dir / (std::wstring(baseName) + L"-0.log");
+
+    MigrateLegacyGenerations(dir, baseName);
+    ArchiveByWriteTime(fs_state.currentPath, dir, baseName);   // last run -> dated archive
+
     fs_state.file = _wfopen(fs_state.currentPath.c_str(), L"w");
     if (!fs_state.file) return false;
     fs_state.written = 0;
@@ -218,28 +324,41 @@ static void WriteToFile(LogFileState& fs_state, const char* line) {
 // Process folder cleanup
 // ================================================================
 
-static void CleanupProcessFolders(const fs::path& parentDir, int maxKeep) {
-    std::vector<std::pair<fs::file_time_type, fs::path>> folders;
+// Age-based, matching the file policy: a per-process folder goes when NOTHING in
+// it has been written for LOG_RETENTION_DAYS. Judging by the newest file inside
+// (not the folder's own mtime, which Windows does not reliably bump on writes to
+// existing children) is also what makes this safe while another game is running:
+// a live folder's files are seconds old, so it can never be selected.
+//
+// `keep` is the folder this process owns and is never removed, even in the
+// pathological case of a system clock jump.
+static void PruneStaleProcessFolders(const fs::path& parentDir, const fs::path& keep) {
     std::error_code ec;
+    FILETIME nowFt{};
+    GetSystemTimeAsFileTime(&nowFt);
+    const ULONGLONG now    = AsU64(nowFt);
+    const ULONGLONG maxAge = RetentionTicks();
+
     for (auto& entry : fs::directory_iterator(parentDir, ec)) {
-        if (entry.is_directory(ec)) {
-            auto latestTime = entry.last_write_time(ec);
-            for (auto& sub : fs::directory_iterator(entry.path(), ec)) {
-                auto t = sub.last_write_time(ec);
-                if (t > latestTime) latestTime = t;
-            }
-            folders.emplace_back(latestTime, entry.path());
+        if (ec) break;
+        if (!entry.is_directory(ec)) continue;
+        if (fs::equivalent(entry.path(), keep, ec)) continue;
+
+        ULONGLONG newest = 0;
+        bool sawFile = false;
+        for (auto& sub : fs::directory_iterator(entry.path(), ec)) {
+            if (ec) break;
+            FILETIME ft{};
+            if (!FileWriteTime(sub.path(), ft)) continue;
+            sawFile = true;
+            const ULONGLONG t = AsU64(ft);
+            if (t > newest) newest = t;
         }
-    }
+        ec.clear();
 
-    if (static_cast<int>(folders.size()) <= maxKeep) return;
-
-    std::sort(folders.begin(), folders.end(), [](auto& a, auto& b) {
-        return a.first > b.first;
-    });
-
-    for (size_t i = static_cast<size_t>(maxKeep); i < folders.size(); ++i) {
-        fs::remove_all(folders[i].second, ec);
+        // An empty folder is removable immediately; there is nothing to retain.
+        if (!sawFile) { fs::remove_all(entry.path(), ec); continue; }
+        if (now > newest && (now - newest) > maxAge) fs::remove_all(entry.path(), ec);
     }
 }
 
@@ -307,7 +426,7 @@ bool Init() {
     return true;
 }
 
-void InitProcessMirror(const std::wstring& processName, int maxSubfolders) {
+void InitProcessMirror(const std::wstring& processName) {
     std::lock_guard<std::mutex> lock(s_mutex);
 
     if (processName.empty()) return;
@@ -328,9 +447,9 @@ void InitProcessMirror(const std::wstring& processName, int maxSubfolders) {
     fs::create_directories(s_processDir, ec);
     if (ec) return;
 
-    // Open all 5 category files
+    // Open all 5 category files. Each archives its own previous -0.log first.
     for (int i = 0; i < LF_COUNT; ++i) {
-        OpenFileInDir(s_files[i], s_processDir, s_fileNames[i], Grimoire::LOG_ROTATE_MAX);
+        OpenFileInDir(s_files[i], s_processDir, s_fileNames[i]);
     }
     s_filesOpen = true;
 
@@ -342,8 +461,10 @@ void InitProcessMirror(const std::wstring& processName, int maxSubfolders) {
     s_earlyBuffer.clear();
     s_earlyBuffer.shrink_to_fit();
 
-    // Clean up old process folders
-    CleanupProcessFolders(s_logDir, maxSubfolders);
+    // Retention sweep. Runs AFTER the files are open, so the live -0.log of every
+    // category already exists and the archives are the only *.log left to age out.
+    PruneAgedLogs(s_processDir);
+    PruneStaleProcessFolders(s_logDir, s_processDir);
 }
 
 void Shutdown() {
