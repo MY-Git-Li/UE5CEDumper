@@ -64,15 +64,14 @@ govern. Read that block too before adding, moving or deleting anything. The shor
 
 ### Still open (as of build 2474)
 
-- ~~**UE 4.23** is the only unverified sparse-delegate version~~ — **DELIBERATELY NOT CHASED**
-  (decided 2026-07-27). 4.23 shipped 2019-09 and 4.24 landed that December, so its window was
-  three months and essentially every surviving title has been bumped to 4.27; building a sample
-  would need an old Visual Studio the maintainer has no intention of installing. It is also the
-  version where the feature matters least — sparse delegates were barely adopted that early, so
-  an unverified 4.23 is close to unobservable in practice. The real mitigation is structural, not
-  a sample: **`Aura` probes the live key shape instead of gating on a version number**, which is
-  what makes 4.23 *and any licensee fork* safe without a binary to test against. Do not reopen
-  this unless a 4.23 binary falls into your lap.
+- ~~**UE 4.23** is the only unverified sparse-delegate version~~ — **CLOSED 2026-07-28.** The
+  "do not reopen this unless a 4.23 binary falls into your lap" escape clause fired: the
+  maintainer built the 4.23.1 "Flying" template himself against Epic's INSTALLED Launcher engine.
+  `SparseDelegates` is PDB-confirmed at 4.23 with a **raw `UObjectBase const*` key**, character-
+  identical to 4.24 — so the key shape now holds at *every* version the feature has ever had, by
+  measurement rather than interpolation. `SPARSE_DI427_1` resolves it live. The structural
+  mitigation still stands and should stay: **`Aura` probes the live key shape instead of gating on
+  a version number**, which is what covers licensee forks that no sample can.
 - **FF7 Rebirth's SparseDelegates** exists (proved from `.rdata`: `SparseDelegateFunction`,
   `MulticastSparseDelegateProperty`, the `SparseDelegateReport` console command) but no pattern
   finds it. Lead for whoever picks it up: find the `SparseDelegateReport` string xref and follow
@@ -127,8 +126,12 @@ Each cost at least one headless run to establish. Recorded so nobody spends anot
 - **`tdb` @ `0xFF00000000` is a Ghidra loader artifact, not a PE section.** Four analysts have now
   investigated it independently; one dumped the on-disk section table to disprove it.
 - **The default PDB loader is fine.** MSDIA remains a *Meltopia-only* workaround, not a habit.
-- **Pre-4.23 has no `NamePoolData` symbol at any version** — do not look for one. Go straight to
-  `FName::GetNames`. It also has no sparse delegates: 10/10 `SPARSE_*` MISS on a 4.20/4.21 binary
+- **NO version has a usable `NamePoolData` symbol, and the boundary is not where it looks.**
+  Pre-4.23 has no `FNamePool` at all, so go straight to `FName::GetNames`. But **4.23 itself has
+  NEITHER** — zero occurrences of `NamePoolData` *and* zero of `?GetNames@FName@@` in all three
+  config PDBs — so both halves of this rule fail at exactly the transition version. At 4.23+ the
+  route that works is `FNameDebugVisualizer::GetBlocks` minus 0x10.
+- **Pre-4.23 also has no sparse delegates.** It also has no sparse delegates: 10/10 `SPARSE_*` MISS on a 4.20/4.21 binary
   is the CORRECT answer, and raw ASCII+UTF-16 data-section scans for `SparseDelegate` have already
   been run on both and returned zero.
 - **`GNAM_V7` (CallFollow) and the three `GNAM_EXP_*` (SymbolCallFollow) are UNMEASURABLE by this
@@ -215,6 +218,7 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | UE4.27-Maelstrom | `Maelstrom` | 4.27.2 | ✅ full PDB | |
 | UE5.0-LightMaze | `Light_Maze` | 5.0.3 | ❌ none | truth by disassembly; **closes the 5.0 hole** (4.27 used to jump to 5.1) |
 | UE4.22-Satisfactory | `Satisfactory_UE422` | 4.22 | ✅ full PDB | **monolithic EXE with symbols** — the only pre-4.25 one |
+| UE4.23-Flying | `UE423_Flying-Win64_Shipping` | 4.23.1 | ✅ full PDB | **built by us** (Shipping, monolithic; note the UNDERSCORE in the project name). The only 4.23, and the FIRST version of BOTH FNamePool and sparse delegates. **Live-verified** — the packaged copy was run and all five resolved |
 | UE4.24-DropIn | `DropIn_UE424` | 4.24.3 | ✅ full PDB | **closed the last checkable sparse-delegate gap** — see below |
 | UE4.25-Everspace2 | `ES2-UE425` | 4.25.2 | ✅ full PDB | the FField/FProperty transition band |
 | UE4.26-Satisfactory | `Satisfactory_UE426` | 4.26.2 | ✅ full PDB | modular, 4 DLLs — supersedes the unusable `Satfi426` |
@@ -254,7 +258,8 @@ demangles to
     TMap<UObjectBase const*, TMap<FName, TSharedPtr<TMulticastScriptDelegate<FWeakObjectPtr>>>>
 
 — a **raw pointer key**, identical to 4.25 / 4.26 / 4.27 / 5.x. Sparse delegates were introduced
-in 4.23, so **only 4.23 itself is now unverified**, and no 4.23 binary exists in the corpus.
+in 4.23, and **4.23 itself is now verified too** (see the UE4.23-Flying row): its PDB carries the
+same raw-pointer key, so the shape is measured at every version the feature has existed.
 `Aura`'s walker still probes the live key shape rather than gating on a version number; keep it
 that way — that is what makes 4.23 and any licensee fork safe without a binary to test against.
 
@@ -436,6 +441,28 @@ GS_TRUE="GObjects=142e797f0|142e79800,GNames=1431dead8,GWorld=1432e1ac0,GEngine=
 # UE 4.22 — Satisfactory (monolithic). GNames = `Names`, the TNameEntryArray* lazily new'd in
 # FName::GetNames @0x140BCEBF0 (the load is at +4). Pre-4.23: no sparse delegates.
 GS_TRUE="GObjects=144006f80|144006f90,GNames=144002a78,GWorld=1441073b8,GEngine=144104e58"
+
+# UE 4.23 — the "Flying" template, SHIPPING, built by us against Epic's INSTALLED 4.23.1 Launcher
+# engine (CL 9631420, IsPromotedBuild=1, IsLicenseeVersion=0 — engine objects are Epic stock, and a
+# Shared build environment forbids overriding bUseChecksInShipping etc., so fork/override risk is
+# nil). This is the version that introduced BOTH FNamePool and sparse delegates, so it is the
+# EARLIEST binary either target can be checked against.
+#
+# GNames is the interesting one: 4.23 has NEITHER a `NamePoolData` symbol NOR `?GetNames@FName@@`
+# (zero occurrences of both strings in all three config PDBs), so BOTH recipes this file documents
+# — "pre-4.23: go straight to FName::GetNames" and "4.23+: NamePoolData often has no symbol" —
+# fail at exactly this version. Taken from FNameDebugVisualizer::GetBlocks @0x14062c010
+# (`48 8d 05 f9 83 82 02 c3` -> 0x142e54410), minus 0x10.
+#
+# Every value is TRIPLE-derived and the three agree exactly: (1) a PDB S_PUB32/S_GDATA32 decode,
+# (2) a full 150-pattern byte replay of Himmel.h against .text, (3) the live run, which rebases all
+# five off ONE shared ASLR base (0x7FF7ED7D0000) with ZERO residual. Ghidra was never opened.
+#
+# DECOYS, all three confirmed present: GCoreObjectArrayForDebugVisualizers has a PLAIN name (no
+# leading `?`), so find_syms3.java — which skips only `?`-prefixed names — WILL hand it to you, and
+# its RUNTIME VALUE equals the ObjObjects VA. GObjectArrayForDebugVisualizers is a C++ reference to
+# that, i.e. TWO indirections off. GNameBlocksDebug holds NamePoolData + 0x10.
+GS_TRUE="GObjects=142e6b968|142e6b978,GNames=142e54400,GWorld=142f6cf10,SparseDelegates=142c4d060,GEngine=142f6a8a0"
 
 # UE 4.24 — DropIn (a second, older build of the same unplayable VR title). NamePoolData from
 # FNameDebugVisualizer::GetBlocks @0x141323510 = `lea rax,[0x1471BCA10]; ret`, minus 0x10.

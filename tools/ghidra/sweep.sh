@@ -53,6 +53,22 @@ ROWS=(
 # delegates, so SparseDelegates is absent BY DESIGN here, not missing.
 "UE4.20-HeliumRain|HeliumRain|-|GObjects=14321fb58|14321fb68,GNames=143216ec8,GWorld=14331de50,GEngine=14331b7d8"
 "UE4.22-Satisfactory|Satisfactory_UE422|-|GObjects=144006f80|144006f90,GNames=144002a78,GWorld=1441073b8,GEngine=144104e58"
+# UE 4.23 — the "Flying" template, SHIPPING, built by the maintainer against Epic's INSTALLED
+# 4.23.1 Launcher engine (CL 9631420, IsPromotedBuild=1, IsLicenseeVersion=0), so the engine
+# objects are Epic stock and a Shared build environment forbids overriding the check/logging
+# macros. Closes the 4.23 hole this file carried as "DELIBERATELY NOT CHASED" — its own escape
+# clause ("unless a 4.23 binary falls into your lap") fired.
+# It matters TWICE: 4.23 is the version FNamePool was introduced in AND the version sparse
+# delegates were introduced in, so it is the EARLIEST binary either target can be checked against.
+# GNames: NO NamePoolData symbol AND no ?GetNames@FName@@ at 4.23 (0 occurrences of both in the
+#   PDB), so BOTH recipes documented in GROUND-TRUTH.md fail here. Taken from
+#   FNameDebugVisualizer::GetBlocks @0x14062c010 (`48 8d 05 f9 83 82 02 c3` -> 0x142e54410) minus
+#   0x10. All five values are triple-derived: PDB S_PUB32 decode, a 150-pattern byte replay
+#   against .text, and the live run — which rebases all five off ONE ASLR base with zero residual.
+# DECOYS: GCoreObjectArrayForDebugVisualizers has a PLAIN name (find_syms3.java WILL surface it)
+#   and its RUNTIME value equals the ObjObjects VA; GNameBlocksDebug holds NamePoolData+0x10.
+# NOTE the project name uses an UNDERSCORE before "Shipping", unlike every other row.
+"UE4.23-Flying|UE423_Flying-Win64_Shipping|-|GObjects=142e6b968|142e6b978,GNames=142e54400,GWorld=142f6cf10,SparseDelegates=142c4d060,GEngine=142f6a8a0"
 "UE4.24-DropIn|DropIn_UE424|-|GObjects=1471db720|1471db730,GNames=1471bca00,GWorld=1472ea620,SparseDelegates=146da38d0,GEngine=1472e74a0"
 "UE4.25-Everspace2|ES2-UE425|-|GObjects=1444b0520|1444b0510,GNames=144497d00,GWorld=1445f1160,SparseDelegates=1440070c0,GEngine=1445edad8"
 "UE4.26-Satisfactory|Satisfactory_UE426|-|-CoreUObject-:GObjects=1803f9210|1803f9220,-CoreUObject-:SparseDelegates=1803f37d0,-Core-Win64:GNames=180659380,-Engine-:GWorld=18182a0b8,-Engine-:GEngine=181826658"
