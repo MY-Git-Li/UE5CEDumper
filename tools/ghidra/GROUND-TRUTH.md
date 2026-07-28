@@ -152,6 +152,17 @@ Each cost at least one headless run to establish. Recorded so nobody spends anot
 - **Pre-4.23 also has no sparse delegates.** It also has no sparse delegates: 10/10 `SPARSE_*` MISS on a 4.20/4.21 binary
   is the CORRECT answer, and raw ASCII+UTF-16 data-section scans for `SparseDelegate` have already
   been run on both and returned zero.
+- **The CallFollow body scan WAS UNBOUNDED, and one live success was accidental.** Until build
+  2500 `ScanFunctionBodyForRipRef` scanned a flat 256 bytes with no extent check, so on a short
+  callee it read into the next function. Measured: **17 of 19 callees in the corpus overrun**. On
+  UE 4.23 `GNAM_V7` followed a 124-byte `FName` ctor and resolved GNames from a ref at **+0x94** —
+  132 bytes past the end, inside a DIFFERENT `FName` constructor's lazy-init prologue. Now bounded
+  via `Macht::GetFunctionExtent` (`RtlLookupFunctionEntry`, clamped with `end - funcAddr` because
+  the target is often mid-entry; a NULL return means leaf *or* stripped xdata — indistinguishable —
+  and keeps the old 256). **LIVE-VERIFIED on STVoyager 5.6**, which was the one case that could not
+  be settled offline: `GNAM_V7 hits=1 (not validated)` — the out-of-bounds ref is now unreachable —
+  and the scan fell through to `GNAM_V8`, which resolves correctly. The `FuncBodyScan` log line now
+  states `bounded by .pdata` or `UNBOUNDED (leaf/no-xdata)`, so a future overrun is visible.
 - **`GNAM_V7` (CallFollow) and the three `GNAM_EXP_*` (SymbolCallFollow) are UNMEASURABLE by this
   harness**, not worryingly unknown: `scan_patterns.java` scans byte patterns only, and the `EXP`
   ones cannot fire on a monolithic EXE because nothing is exported.

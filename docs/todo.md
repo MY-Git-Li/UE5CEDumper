@@ -111,25 +111,6 @@ pre-empting it. Absent `GNAM_V7`, the byte winner would have been `GNAM_DI427_2`
 
 -----
 
-## `GNAM_V7` resolves the right address for the WRONG reason
-
-*Parent: found while landing 4.23 (2026-07-28).* **Effort S · Risk med.**
-
-On the 4.23 Shipping build `GNAM_V7` (CallFollow, pri 40) returns the correct `NamePoolData`, and
-it is the pattern the live runtime lands on — but **the function it follows the CALL into contains
-no reference to the pool**. It succeeds only because the body scanner **overruns the callee** and
-keeps reading into whatever follows. That is a latent defect wearing a green light: any relayout
-that changes what sits after that function silently changes the answer, and the offline harness
-cannot see it at all (`scan_patterns.java` scans byte patterns only, so every CallFollow entry is
-invisible to the sweep — meaning the REPORT names the wrong winner wherever a CallFollow entry
-outranks the reported byte pattern).
-
-Fix shape: bound the CallFollow body scan to the callee's real extent (`.pdata` / the next
-function's start), then re-measure whether `GNAM_V7` still resolves anything. Also decide whether
-`aggregate_sweep.py` should flag "a CallFollow entry outranks this winner and may pre-empt it live".
-
------
-
 ## In-game text: S2T conversion + local-LLM translation — EVALUATED (2026-07-24), mostly NOT BUILT
 
 Full 41-agent evaluation in [text-translation-eval.md](text-translation-eval.md) (all 12 load-bearing
