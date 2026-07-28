@@ -46,6 +46,22 @@ py "$REPO/tools/ghidra/extract_patterns.py" "$REPO/dll/src/Himmel.h" "$SWEEP_OUT
 # ---------------------------------------------------------------------------------------------
 ROWS=(
 # ---- symbolised oracles (full PDB) ----
+# UE 4.15.3 — the "Flying" template, Shipping. THE OLDEST SYMBOLISED BINARY IN THE CORPUS and the
+# only oracle below 4.20: it turns the 4.13-4.19 FLAT FFixedUObjectArray / 24-byte FUObjectItem
+# band from source interpolation into measurement (Objects@base+0x10, Max@+0x18, Num@+0x1C).
+# GNames is NOT a symbol — pre-4.23 has no FNamePool; it is the static FName::GetNames @0x1401F54B0
+# tests-and-stores (load at +4), corroborated by 9 RIP xrefs across GetNames/StaticInit/
+# InitInternal_FindOrAddNameEntry<char,wchar_t>. SparseDelegates correctly ABSENT (4.23+ feature):
+# 0 ASCII and 0 UTF-16LE occurrences in the 47 MB image.
+# DECOYS, all three carrying PLAIN GDATA records that find_syms3.java will surface:
+#   GCoreObjectArrayForDebugVisualizers @142CC37F8 -> runtime value IS the ObjObjects VA
+#   GObjectArrayForDebugVisualizers     @142B0F0A0 -> holds the above (TWO indirections off)
+#   GFNameTableForDebuggerVisualizers_MT@142B915C8 -> runtime value is *GNames (one level deeper)
+# It also gave DIRECT SYMBOL CONFIRMATION of the previously-inferred 4.11 TSharedPtr GWorld decoy:
+# GWLD_SAT52_1's decoys here are PDB-named FGCObject::GGCObjectReferencer and
+# FSlateApplication::CurrentApplication.
+# NOTE the project name misspells "Flying" as "Flyinh" — use it verbatim.
+"UE4.15-Flying|UE415_Flyinh-Win64-Shipping|-|GObjects=142ccc200|142ccc210,GNames=142c92508,GWorld=142ce7770,GEngine=142ce6898"
 "UE4.20-Everspace|ES1-420|-|GObjects=142e797f0|142e79800,GNames=1431dead8,GWorld=1432e1ac0,GEngine=1432df470"
 # HELIUM RAIN 4.20.3 — the SECOND symbolised 4.20, so the pre-4.23 GNames derivation no longer
 # rests on Everspace alone. Pre-4.23: no FNamePool (GNames is the TNameEntryArray* that

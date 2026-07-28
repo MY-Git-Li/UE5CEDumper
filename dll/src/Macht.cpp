@@ -103,6 +103,27 @@ bool LooksLikeCodePointer(uintptr_t addr) {
     return (mbi.Protect & execMask) != 0;
 }
 
+bool GetFunctionExtent(uintptr_t addr, uintptr_t& begin, uintptr_t& end) {
+    begin = end = 0;
+    if (!addr) return false;
+
+    // ImageBase is the reason this beats a hand-rolled .pdata walk: it resolves the
+    // owning module for us, so the caller does not have to know which DLL `addr`
+    // came from. See the header comment.
+    DWORD64 imageBase = 0;
+    PRUNTIME_FUNCTION rf = nullptr;
+    __try {
+        rf = RtlLookupFunctionEntry(static_cast<DWORD64>(addr), &imageBase, nullptr);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    if (!rf || !imageBase) return false;   // leaf function, or no exception directory
+
+    begin = static_cast<uintptr_t>(imageBase) + rf->BeginAddress;
+    end   = static_cast<uintptr_t>(imageBase) + rf->EndAddress;
+    return end > begin;
+}
+
 // ============================================================
 // AOBScan internals
 // ============================================================

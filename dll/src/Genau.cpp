@@ -788,7 +788,31 @@ static uintptr_t ResolveSymbolExport(const AobSignature& sig, ValidatorFn valida
 static uintptr_t ScanFunctionBodyForRipRef(
     uintptr_t funcAddr, const char* sigId, ValidatorFn validate, int scanBytes = 256)
 {
-    for (int off = 0; off + 7 <= scanBytes; ++off) {
+    // BOUND THE SCAN TO THE REAL CALLEE. Without this the loop runs a flat 256 bytes
+    // and its only stop condition is an unreadable page, which never fires inside a
+    // module's .text — so on a short callee it reads straight into the next function
+    // and can "succeed" on a reference that has nothing to do with the one we
+    // followed. That is not hypothetical: on UE 4.23 GNAM_V7 followed a 124-byte
+    // FName ctor and resolved GNames from a ref at +0x94, i.e. 132 bytes past the
+    // end, inside a DIFFERENT FName constructor's lazy-init prologue. It got the
+    // right answer for the wrong reason, and 17 of 19 callees in the corpus overrun.
+    //
+    // Clamp with (end - funcAddr), NOT the entry length: funcAddr is frequently
+    // mid-entry (6.8%-39.8% of call targets across the corpus), so the entry's own
+    // length would over-run by exactly the part already behind us.
+    //
+    // A false return means LEAF or no exception directory — indistinguishable, and
+    // both keep the historical 256, so that path is bit-identical to today's
+    // behaviour and cannot regress anything. It is also the only path that can still
+    // overrun; measured leaf share is 12-17% of call targets.
+    int limit = scanBytes;
+    uintptr_t fnBegin = 0, fnEnd = 0;
+    const bool bounded = Macht::GetFunctionExtent(funcAddr, fnBegin, fnEnd)
+                      && fnEnd > funcAddr
+                      && static_cast<uintptr_t>(limit) > (fnEnd - funcAddr);
+    if (bounded) limit = static_cast<int>(fnEnd - funcAddr);
+
+    for (int off = 0; off + 7 <= limit; ++off) {
         uint8_t b0 = 0, b1 = 0, b2 = 0;
         if (!Macht::ReadSafe(funcAddr + off, b0)) break;
         if (b0 != 0x48 && b0 != 0x4C) continue;
@@ -806,9 +830,13 @@ static uintptr_t ScanFunctionBodyForRipRef(
         }
 
         if (validate(candidate)) {
-            LOG_INFO("FuncBodyScan [%s]: Found at 0x%llX (func+0x%X, %s)",
-                     sigId, (unsigned long long)candidate, off,
-                     b1 == 0x8D ? "LEA" : "MOV");
+            // Log WHICH limit applied. If a future engine shifts the site, an
+            // "unbounded" hit near the 256 mark is the tell that we are reading past
+            // the callee again — the failure this bound exists to make visible.
+            LOG_INFO("FuncBodyScan [%s]: Found at 0x%llX (func+0x%X of %d, %s, %s)",
+                     sigId, (unsigned long long)candidate, off, limit,
+                     b1 == 0x8D ? "LEA" : "MOV",
+                     bounded ? "bounded by .pdata" : "UNBOUNDED (leaf/no-xdata)");
             return candidate;
         }
     }

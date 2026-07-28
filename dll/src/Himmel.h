@@ -1205,6 +1205,56 @@ constexpr const char* AOB_GENGINE_ES55_1 =
 constexpr const char* AOB_GWORLD_FD_1 =
     "48 8B 05 ?? ?? ?? ?? 48 3B C? 48 0F 44 C? 48 89 05 ?? ?? ?? ?? E8";
 
+// ============================================================
+// GNames — XX (pre-4.23 FName::GetNames write-back, mined 2026-07-28)
+// ============================================================
+// XX_1: call malloc; mov rax,rbx; mov [rip+Names],rbx; mov rbx,[rsp+20]; add rsp,28; ret
+//
+// WHY IT EXISTS. GROUND-TRUTH.md called pre-4.23 GNames the corpus's thinnest coverage,
+// resting on "two patterns, GNAM_CT3 (700) and GNAM_G42_1 (710), of the SAME shape".
+// Measuring it made that worse, not better: G42_1's byte string is a STRICT SUPERSET
+// WINDOW of CT3 offset by +4 (CT3[4:] equals G42_1 except that G42_1 wildcards the two
+// bytes CT3 pins as literal 00 00), so every CT3 match at A implies a G42_1 match at
+// A+4 — verified token-by-token and empirically on all 36 programs. They are ONE SHAPE
+// MATCHED TWICE. A compiler change to that lazy-init prologue takes pre-4.23 GNames out
+// entirely, and always could have.
+//
+// WHY IT IS THE SAME FUNCTION, and why that is the honest ceiling. An xref census of the
+// TNameEntryArray global (capstone over every .pdata-covered function + a raw .text
+// disp32 sweep) finds 3 xrefs on Satisfactory 4.22 (all inside FName::GetNames) and 9 on
+// 4.15.3 over 4 functions — but the extra functions are INLINE EXPANSIONS of GetNames
+// carrying the identical lazy-init shape (disassembled and confirmed verbatim), so they
+// add no structural independence. FName::ToString / AppendString / the comparison and
+// hash paths contain ZERO references: they call GetNames and use the returned register.
+// A caller-side anchor was mined and REFUSED — `and edx,0x3FFF` preceded by a call to
+// GetNames sits at distance {11,12,27,30} on 4.15.3 but at {14,19,20} on 4.22, so no
+// fixed-offset AOB spans the band and there is nothing to hang a CallFollow on.
+// So this is a different SITE in the same function, not a different function. That is
+// the most independence the engine actually offers, and saying otherwise would be false.
+//
+// The site is chosen to share nothing with the prologue the other three anchor on: the
+// SUCCESS-PATH WRITE-BACK plus epilogue. No load, no test, no conditional branch, no
+// shadow-space spill, no allocation-size immediate — the five things that differ between
+// builds are exactly the five things absent here.
+//
+// MEASURED, 8 of 8 pre-4.23 oracles, correct hit at INDEX 0 on every one — the only
+// pattern in this file that covers all of them:
+//   4.11 Nekopara 1 hit UNIQUE-OK    4.20 Everspace   41 hits OK-FIRST
+//   4.13 Fantasynth 1 hit UNIQUE-OK  4.20 HeliumRain  29 hits OK-FIRST
+//   4.15.3 Flying 1 hit UNIQUE-OK    4.21 FreudGate   29 hits OK-FIRST
+//   4.15.3 CrashRC 1 hit UNIQUE-OK   4.22 Satisfactory 1 hit UNIQUE-OK
+// Contrast the incumbents, which reach truth on only 6 of 8: UNIQUE-OK on 4.11 / 4.13 /
+// 4.15-Flying / 4.20-Everspace, OK-BEHIND on 4.20-HeliumRain AND 4.21-FreudGate, and
+// MISS on 4.22-Satisfactory and 4.15.3-CrashReportClient.
+// Whole corpus, 36 programs: 4 UNIQUE-OK, 3 OK-FIRST, 10 DECOY-ONLY, 12 MISS, 7 NO-TRUTH,
+// and ZERO spurious-correct anywhere.
+//
+// BAND: 717 is justified by SEMANTICS, not by its 17 literal bytes — the GOBJ_ES53_1
+// precedent above. A bare `call; mov; mov [rip]; epilogue` is a common shape, so it earns
+// no Tier-1 slot; it sits beside the other pre-4.23 anchors it is insurance for.
+constexpr const char* AOB_GNAMES_XX_1 =
+    "E8 ?? ?? ?? ?? 48 8B C3 48 89 1D ?? ?? ?? ?? 48 8B 5C 24 20 48 83 C4 28 C3";
+
 
 // ============================================================
 // Unified Pattern Arrays (sorted by priority)
@@ -1471,6 +1521,7 @@ constexpr AobSignature GNAMES_PATTERNS[] = {
     // 715: ahead of CT4 (720) so a UE 4.22 title lands on its purpose-built anchor rather than
     // on CT4's write-pattern, which only gets there after the validator rejects a decoy.
     SIG_RIP("GNAM_SAT422_1", AOB_GNAMES_SAT422_1, AobTarget::GNames, 0, 3, 7, 0, 715, "SAT422", "Satisfactory UE4.22 FName::GetNames + game-thread assert (PDB-corrected b2407)"),
+    SIG_RIP("GNAM_XX_1",  AOB_GNAMES_XX_1,   AobTarget::GNames, 8, 3, 7, 0, 717, "XX", "pre-4.23 FName::GetNames write-back+epilogue — 8/8 pre-4.23 oracles at index 0"),
     SIG_RIP("GNAM_CT4",   AOB_GNAMES_CT4,    AobTarget::GNames, 3, 3, 7, 0, 720, "CT", "UE4 pre-FNamePool write pattern"),
 
     // 850–890: last resort — the short V-series, demoted here in build 2405.
@@ -1523,6 +1574,31 @@ constexpr AobSignature GWORLD_PATTERNS[] = {
     // free. Deliberately 101 and not 95: the 40-90 band means "symbol-derived", and being 1st vs
     // 2nd inside a batch is worth nothing anyway.
     SIG_GWORLD_RIP("GWLD_TQ_1",  AOB_GWORLD_TQ_1,  0, 3, 7, 0, 101, false, "TQ", "TQ2 extended V3 — corpus's most successful GWorld shape"),
+    // PROMOTED 265 -> 102, after the corpus-wide measurement the previous note demanded.
+    // The deciding number is ZERO: replaying ScanForTarget's priority order over all 51
+    // measured binaries at 265 vs 102 changes ZERO landers, adds ZERO wasted validations,
+    // and moves ZERO programs to a later batch — while moving SIX from batch 3 to batch 1
+    // (4.11 Nekopara, 4.13 Fantasynth, 4.15.3 Flying, FF7R, 4.26-Sat Engine.dll,
+    // 5.2-Sat Engine.dll).
+    //
+    // What it displaces is worth nothing: GWLD_SP57_3 falls to batch 2 but hits exactly 1
+    // of 51 binaries (Solarpunk), where GWLD_SP57_1 @100 lands first in batch 1 under BOTH
+    // layouts — so it is unreachable there either way; and GWLD_GH_2 falls to batch 3 with
+    // 0 hits on 51 binaries (it is in REPORT.md's "never hits anything, anywhere" list).
+    // The census also showed five of the eight batch-1 slots — DI427_1, DI427_2, SP57_2,
+    // ES2_2, SP57_3 — win on ZERO binaries. Batch 1 was not scarce.
+    //
+    // The strongest corroboration is the 4.15.3 oracle: EVERY pattern at priority 100-260
+    // MISSES on it, FD_1 is the FIRST HITTING pattern, and the one that would win in its
+    // absence (GWLD_SF_2 @300) resolves a DECOY (FNiagaraDataSetID::DeathEvent+0xB0) —
+    // the exact failure mode FD_1 was written to stop, now reproduced on a symbolised
+    // binary in a band that previously had no symbols at all.
+    //
+    // SCOPE THE CLAIM HONESTLY: "changes no answer" is true ON THIS 51-BINARY CORPUS, not
+    // unbounded. The move puts FD_1 ahead of 17 patterns, so on an unmeasured engine where
+    // FD_1 and one of those both hit, FD_1 now decides. Residual risk is small (0 decoys
+    // on 51 binaries, never more than 1 hit on any) but it is an inference, not a proof.
+    SIG_GWORLD_RIP("GWLD_FD_1",  AOB_GWORLD_FD_1,   0, 3, 7, 0, 102, false, "FD", "UWorld::FinishDestroy read + conditional write-back (4.11-5.2, generalises G427_5)"),
     // 105/115: UE 4.27 (DropIn, PDB-verified). Both are WRITE sites -> allowNull.
     // NOTE DI427_2 has totalLen = 11: `mov qword[rip+d32], imm32` — the disp32 still starts
     // at byte 3 but the instruction carries a trailing imm32. Mis-encoding this as 7 is the
@@ -1546,17 +1622,6 @@ constexpr AobSignature GWORLD_PATTERNS[] = {
 
     // 260–320: SatisfFactory DLL patterns + Ghidra cross-game
     SIG_GWORLD_RIP("GWLD_GH_3",  AOB_GWORLD_GH_3,  12, 3, 7, 0, 260, false, "GH", "Ghidra GetWorldFromContextObject cross-game"),
-    // 265 was chosen over a Tier-1 slot DELIBERATELY, and the reasoning is worth keeping:
-    //   * It is PROVABLY FREE. GWORLD_PATTERNS holds 50 byte patterns = 6 full batches + 2;
-    //     adding one keeps that at 7 batches, so no batch boundary moves. At 265 it lands in
-    //     batch 3, leaving batches 1-2 byte-identical — nothing that resolves off the modern
-    //     Tier-1 block can be perturbed by it at all.
-    //   * It must sit AHEAD OF GWLD_SF_2 (300). That is the pattern Fantasynth 4.13 was
-    //     mis-selecting on, so anything at 300+ would have fixed NEKOPALIVE and NOT Fantasynth.
-    //   * Tier 1 (~102) is defensible on the raw data — 16 UNIQUE-OK / 0 decoys beats
-    //     GWLD_TQ_1's recorded 10 — but the existing Tier-1 block has NOT been re-measured
-    //     corpus-wide, so what a promotion would displace is unknown. Measure before moving it.
-    SIG_GWORLD_RIP("GWLD_FD_1",  AOB_GWORLD_FD_1,   0, 3, 7, 0, 265, false, "FD", "UWorld::FinishDestroy read + conditional write-back (4.11-5.2, generalises G427_5)"),
     SIG_GWORLD_RIP("GWLD_SF_1",  AOB_GWORLD_SF_1,   0, 3, 7, 0, 270, false, "SF", "Engine DLL UGameEngine::Tick"),
     SIG_GWORLD_RIP("GWLD_SF_2",  AOB_GWORLD_SF_2,   0, 3, 7, 0, 300, false, "SF", "Engine DLL FAudioDeviceManager"),
     SIG_GWORLD_RIP("GWLD_SF_3",  AOB_GWORLD_SF_3,   0, 3, 7, 0, 305, false, "SF", "Engine DLL UWorld::FinishDestroy"),

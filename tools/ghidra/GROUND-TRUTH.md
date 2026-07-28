@@ -199,8 +199,19 @@ is 65536 elems/chunk (`sar 0x10`) while its `TNameEntryArray` is 16384 (`sar 0xE
 
 ### Thinnest coverage in the table
 
-**Pre-4.23 GNames rests on exactly two patterns — `GNAM_CT3` (700) and `GNAM_G42_1` (710) — and
-they are the SAME `FName::GetNames` lazy-init prologue shape.** Both are OK-BEHIND, both in batch
+**Pre-4.23 GNames rested on ONE SHAPE MATCHED TWICE — worse than "two patterns".** Measured
+2026-07-28: `GNAM_G42_1`'s byte string is a **strict superset window of `GNAM_CT3` offset by +4**
+(`CT3[4:]` equals `G42_1` except that `G42_1` wildcards the two bytes `CT3` pins as literal
+`00 00`), so every `CT3` match at A implies a `G42_1` match at A+4 — verified token-by-token and
+empirically on all 36 programs. They credited a redundancy that never existed.
+**Mitigated 2026-07-28 by `GNAM_XX_1` (717)**, the success-path write-back + epilogue of the same
+function: 8/8 pre-4.23 oracles with the correct hit at index 0, the only pattern in the file that
+covers all of them, zero spurious-correct on 36 programs. It is a different SITE, not a different
+FUNCTION — an xref census found the only other referencing functions are inline expansions of
+`GetNames` carrying the identical shape, and a caller-side anchor was mined and REFUSED (the
+`and edx,0x3FFF` idiom sits at distance {11,12,27,30} on 4.15.3 but {14,19,20} on 4.22, so no
+fixed-offset AOB spans the band). That is the most independence the engine offers.
+The original note follows, still accurate about the failure mode: Both are OK-BEHIND, both in batch
 3, confirmed identical on HeliumRain *and* Freud Gate. A compiler change to that prologue takes
 GNames on every pre-4.23 title at once. This is the sparse-`n=1` situation again, on a different
 target; if a third pre-4.23 sample ever arrives, mining a structurally different anchor there is
@@ -229,6 +240,7 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | UE4.18-DQXIS | `DQ_XI_S` | 4.18 | ❌ none | truth by disassembly; ASLR base recovered; **GNames absent on purpose** |
 | UE4.27-DQ7R | `DQ7R` | 4.27 | ❌ none | truth by disassembly; **GEngine ≠ the live consensus** — see below |
 | UE5.4-Elliot | `Elliot` | 5.4 | ❌ none | truth by disassembly; the corpus's **only UE 5.4** sample |
+| UE4.15-Flying | `UE415_Flyinh-Win64-Shipping` | 4.15.3 | ✅ full PDB | **built by us** (Shipping, monolithic). **The OLDEST symbolised binary in the corpus** and the only oracle below 4.20 — it turns the 4.13–4.19 FLAT `FFixedUObjectArray` / 24-byte `FUObjectItem` band from source interpolation into measurement. Project name misspells "Flying" as **"Flyinh"** |
 | UE4.20-Everspace | `ES1-420` | 4.20 | ✅ full PDB | oldest sample; supersedes the symbol-less `ES1.rep` |
 | UE4.20-HeliumRain | `HeliumRain` | 4.20.3 | ✅ full PDB | **second symbolised 4.20** — pre-4.23 GNames no longer rests on Everspace alone |
 | UE4.21-FreudGate | `Freud_Gate_UE421` | 4.21 | ❌ none | truth by disassembly; **closes the 4.21 hole** |
