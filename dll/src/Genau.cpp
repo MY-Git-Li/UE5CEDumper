@@ -3154,7 +3154,10 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
             DynOff::USTRUCT_SUPER, DynOff::USTRUCT_CHILDPROPS, DynOff::USTRUCT_PROPSSIZE,
             DynOff::FFIELD_NEXT, DynOff::FFIELD_NAME, DynOff::FPROPERTY_OFFSET);
 
-        DynOff::bOffsetsValidated.store(true, std::memory_order_release);
+        // The probe RAN but gave up — DynOff holds unmeasured defaults. Say so, so the
+        // summary cannot claim validated=yes (it used to, three lines after this warning).
+        DynOff::g_offsetsFallbackReason = "no-guid-or-vector-struct";
+        DynOff::bOffsetsProbeRan.store(true, std::memory_order_release);
         return false;
     }
 
@@ -3188,18 +3191,34 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
         if (DynOff::bUseFProperty) {
             // FProperty mode: check if this pointer has an FFieldClass* at +0x08
             uintptr_t fieldClass = 0;
-            if (!Macht::ReadSafe(ptr + 0x08, fieldClass) || !fieldClass) continue;
+            if (!Macht::ReadSafe(ptr + DynOff::FFIELD_CLASS, fieldClass) || !fieldClass) continue;
             if (!Grimoire::IsUserspacePointer(fieldClass)) continue;
 
-            // The FFieldClass should have an FName that resolves to a *Property type name
-            uint32_t fcNameIdx = 0;
-            if (!Macht::ReadSafe(fieldClass, fcNameIdx)) continue;
-            std::string fcName = Serie::GetString(fcNameIdx);
-            if (fcName.find("Property") != std::string::npos) {
+            // The FFieldClass should have an FName that resolves to a *Property type name.
+            //
+            // This read is ALSO where FFIELDCLASS_NAME gets decided, and it has to be:
+            // UE 5.8 made ~FFieldClass() virtual, putting a vfptr at +0x00 and moving Name
+            // to +0x08 (see the DynOff::FFIELDCLASS_NAME comment). Since this very loop is
+            // what discovers ChildProperties, a later phase cannot fix it — a wrong name
+            // offset here means NO candidate matches at ANY probed struct offset, the whole
+            // validation gives up on defaults, and the walker then types every property as
+            // Scalar. That is exactly what UE 5.8 did before this joint probe existed.
+            const int fcNameOff = DynOff::PickFFieldClassNameOffset(
+                [&](int o) -> std::string {
+                    uint32_t idx = 0;
+                    if (!Macht::ReadSafe(fieldClass + o, idx)) return std::string();
+                    return Serie::GetString(idx);
+                });
+            if (fcNameOff >= 0) {
+                uint32_t fcNameIdx = 0;
+                Macht::ReadSafe(fieldClass + fcNameOff, fcNameIdx);
+                const std::string fcName = Serie::GetString(fcNameIdx);
+
+                DynOff::FFIELDCLASS_NAME = fcNameOff;   // latch for every downstream reader
                 childProps = ptr;
                 childPropsOff = off;
-                Sein::Info("DYNO", "ValidateAndFixOffsets: ChildProperties found at struct+0x%02X → 0x%llX (FFieldClass='%s')",
-                         off, (unsigned long long)ptr, fcName.c_str());
+                Sein::Info("DYNO", "ValidateAndFixOffsets: ChildProperties found at struct+0x%02X → 0x%llX (FFieldClass='%s', FFieldClass::Name=+0x%02X)",
+                         off, (unsigned long long)ptr, fcName.c_str(), fcNameOff);
                 break;
             }
         } else {
@@ -3258,7 +3277,8 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
 
     if (!childProps) {
         Sein::Warn("DYNO", "ValidateAndFixOffsets: Cannot find ChildProperties in '%s', keeping defaults", testName);
-        DynOff::bOffsetsValidated.store(true, std::memory_order_release);
+        DynOff::g_offsetsFallbackReason = "childprops-probe-failed";
+        DynOff::bOffsetsProbeRan.store(true, std::memory_order_release);
         return false;
     }
 
@@ -3324,7 +3344,9 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
             if (!Macht::ReadSafe(nextPtr + DynOff::FFIELD_CLASS, nextFieldClass) || !nextFieldClass) continue;
 
             uint32_t fcNameIdx2 = 0;
-            if (!Macht::ReadSafe(nextFieldClass, fcNameIdx2)) continue;
+            // Latched by the ChildProperties probe above (Step 4 runs before this) — a bare
+            // +0 read here would break on UE 5.8, where FFieldClass::Name is at +0x08.
+            if (!Macht::ReadSafe(nextFieldClass + DynOff::FFIELDCLASS_NAME, fcNameIdx2)) continue;
             std::string fcName2 = Serie::GetString(fcNameIdx2);
             if (fcName2.find("Property") == std::string::npos) continue;
 
@@ -3592,6 +3614,8 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
         Sein::Info("DYNO", "ValidateAndFixOffsets: Inferred tagged FFieldVariant from FField::Next=0x18");
     }
 
+    DynOff::g_offsetsFallbackReason = "";
+    DynOff::bOffsetsProbeRan.store(true, std::memory_order_release);
     DynOff::bOffsetsValidated.store(true, std::memory_order_release);
 
     // Summary log
@@ -4135,7 +4159,11 @@ uintptr_t FindGEngineSlot() {
     // resolved to 0x7FF68ACC37B0, which is exactly the PDB's &GEngine (image VA 0x149DA37B0),
     // and all 14 were thrown away here. Bail out cheaply instead, and let
     // ResolveGEngineDeferred re-run the scan once the offsets land.
-    if (!DynOff::bOffsetsValidated.load(std::memory_order_acquire)) {
+    // Gate on PROBE-RAN, not on VALIDATED: this exists only to order us after offset
+    // detection. Using the strict flag would regress &GEngine on every build where
+    // detection gives up on defaults — e.g. UE 5.8 before the FFieldClass::Name fix,
+    // where the give-up path was the only reason the slot resolved at all.
+    if (!DynOff::bOffsetsProbeRan.load(std::memory_order_acquire)) {
         s_gengineMethod = "deferred";
         Sein::Info("SCAN:Eng", "FindGEngineSlot: deferred — dynamic offsets not validated yet "
                                "(re-runs after ValidateAndFixOffsets)");
@@ -4166,7 +4194,7 @@ uintptr_t ResolveGEngineDeferred(EnginePointers& out) {
     // Offset detection can itself fail (ValidateAndFixOffsets returned false). Say so rather
     // than emitting FindGEngineSlot's "re-runs after ValidateAndFixOffsets" a second time,
     // which would point at a step that has already been and gone.
-    if (!DynOff::bOffsetsValidated.load(std::memory_order_acquire)) {
+    if (!DynOff::bOffsetsProbeRan.load(std::memory_order_acquire)) {
         s_gengineMethod = "not_found";
         Sein::Warn("SCAN:Eng", "ResolveGEngineDeferred: offsets never validated — cannot "
                                "reflect 'GameViewport', so &GEngine stays unresolved");

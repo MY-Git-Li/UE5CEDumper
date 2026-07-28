@@ -28,6 +28,7 @@
 #include "../src/Neu.h"     // UEnum::Names layout parse (legacy TArray vs UE5.6+ FNameData)
 #include "../src/GraphPath.h"   // Pure BFS shortest-path core ("Locate in GWorld")
 #include "../src/Solitar.h"     // GodMode FBoolProperty bit write (ApplyBoolBit, header-inline)
+#include "../src/Grimoire.h"    // DynOff FFieldClass::Name probe (UE5.8 virtual-dtor shift)
 #include "../src/Solide.h"      // Force-field / stealth-meter matcher (MatchStealthField, header-inline)
 #include "../src/Orden.h"       // Multi-value group scan: source-agnostic SDR matcher (MatchGroup)
 #include "../src/Ubel.h"        // Native-C scan P0: ComputeHoles / ComputeClassHoles / NormalizeGuessedTypeToProperty (inline, pure)
@@ -3069,6 +3070,77 @@ static void Test_Macht_ParsePattern_Nibble() {
     EXPECT("rejects empty", !Macht::ParsePattern("", p));
 }
 
+
+// ============================================================
+// DynOff — FFieldClass::Name offset probe (the UE 5.8 drill-down fix)
+//
+// UE 5.8 made ~FFieldClass() virtual, inserting a vfptr at +0x00 and moving
+// FName Name from +0x00 to +0x08. This was the ONLY UE offset never probed, and
+// when wrong the damage is total but silent: the ChildProperties probe matches
+// nothing at any offset, validation gives up on defaults, and the walker types
+// every property as Scalar -> no drill-down in the Live Walker.
+//
+// The picker is reader-templated exactly so it can be tested here with no game.
+// ============================================================
+static void Test_FFieldClassName_Probe() {
+    std::printf("\n[DynOff::PickFFieldClassNameOffset]\n");
+
+    // <=5.7: Name at +0x00. Must pick 0x00 — this is the no-regression case, and
+    // 0x08 must never even be consulted (on 5.7 it holds EClassFlags).
+    {
+        int consulted = 0;
+        auto r = DynOff::PickFFieldClassNameOffset([&](int off) -> std::string {
+            ++consulted;
+            return off == 0x00 ? "IntProperty" : "SHOULD-NOT-BE-READ";
+        });
+        EXPECT("5.7 layout picks +0x00", r == 0x00);
+        EXPECT("5.7 layout short-circuits", consulted == 1);
+    }
+
+    // 5.8: +0x00 is the low dword of a vtable pointer, which decodes to junk or
+    // an empty string; the real name is at +0x08.
+    {
+        auto r = DynOff::PickFFieldClassNameOffset([](int off) -> std::string {
+            return off == 0x08 ? "ObjectProperty" : std::string();
+        });
+        EXPECT("5.8 layout picks +0x08", r == 0x08);
+    }
+
+    // The exact 5.8 observation: FName index taken from vtable bits resolved to a
+    // real but wrong name. It must not contain "Property" or the 0x00 arm wins.
+    {
+        auto r = DynOff::PickFFieldClassNameOffset([](int off) -> std::string {
+            return off == 0x08 ? "BoolProperty" : "None";
+        });
+        EXPECT("junk 'None' at +0x00 rejected", r == 0x08);
+    }
+
+    // Neither candidate plausible -> -1, so the caller keeps scanning other
+    // struct offsets rather than latching a wrong pair.
+    {
+        auto r = DynOff::PickFFieldClassNameOffset([](int) { return std::string("Actor"); });
+        EXPECT("no candidate -> -1", r == -1);
+    }
+
+    // Suffix, not substring, on the 0x08 arm. "PropertyBag" contains "Property"
+    // but is not a field-class name; accepting it would let garbage latch +0x08
+    // on a <=5.7 build, which is the one way this change could regress.
+    {
+        auto r = DynOff::PickFFieldClassNameOffset([](int off) -> std::string {
+            return off == 0x08 ? "PropertyBag" : std::string();
+        });
+        EXPECT("0x08 arm requires the SUFFIX", r == -1);
+    }
+
+    EXPECT("suffix: IntProperty",   DynOff::LooksLikeFieldClassName("IntProperty"));
+    EXPECT("suffix: ObjectProperty", DynOff::LooksLikeFieldClassName("ObjectProperty"));
+    EXPECT("suffix: bare 'Property' too short", !DynOff::LooksLikeFieldClassName("Property"));
+    EXPECT("suffix: prefix-only rejected", !DynOff::LooksLikeFieldClassName("PropertyBag"));
+    EXPECT("suffix: empty rejected",  !DynOff::LooksLikeFieldClassName(""));
+    EXPECT("suffix: overlong rejected",
+           !DynOff::LooksLikeFieldClassName(std::string(60, 'x') + "Property"));
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + Radar)\n");
     std::printf("------------------------------------------\n");
@@ -3207,6 +3279,9 @@ int main() {
 
     // Macht — AOB pattern parser: nibble wildcards (4? / ?5) + anchor selection
     Test_Macht_ParsePattern_Nibble();
+
+    // DynOff — FFieldClass::Name probe (UE 5.8 virtual-dtor member shift)
+    Test_FFieldClassName_Probe();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

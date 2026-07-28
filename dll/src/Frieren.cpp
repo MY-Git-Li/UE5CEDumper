@@ -502,19 +502,30 @@ bool UE5_Init() {
                 static_cast<unsigned long long>(ptrs.GNames),
                 static_cast<unsigned long long>(ptrs.GWorld),
                 Aura::GetCount());
-    LOG_SUMMARY("DynOff: CPN=%s FProp=%s TagFFV=%s Outer=+0x%02X validated=%s",
+    // validated= is now HONEST: it used to be stored true on the give-up paths too, so a
+    // run could print validated=yes three lines after "Offset validation failed — using
+    // default offsets". When it is no, say WHY, because the offsets below are then
+    // unmeasured defaults rather than probe results.
+    const bool offValidated = DynOff::bOffsetsValidated.load(std::memory_order_acquire);
+    LOG_SUMMARY("DynOff: CPN=%s FProp=%s TagFFV=%s Outer=+0x%02X validated=%s%s%s",
                 DynOff::bCasePreservingName ? "yes" : "no",
                 DynOff::bUseFProperty ? "yes" : "no",
                 DynOff::bTaggedFFieldVariant ? "yes" : "no",
                 DynOff::UOBJECT_OUTER,
-                DynOff::bOffsetsValidated.load(std::memory_order_acquire) ? "yes" : "no");
+                offValidated ? "yes" : "NO (DEFAULTS)",
+                offValidated ? "" : " reason=",
+                offValidated ? "" : DynOff::g_offsetsFallbackReason);
     LOG_SUMMARY("  UStruct: Super=+0x%02X Children=+0x%02X ChildProps=+0x%02X PropsSize=+0x%02X",
                 DynOff::USTRUCT_SUPER, DynOff::USTRUCT_CHILDREN,
                 DynOff::USTRUCT_CHILDPROPS, DynOff::USTRUCT_PROPSSIZE);
     if (DynOff::bUseFProperty) {
-        LOG_SUMMARY("  FField: Next=+0x%02X Name=+0x%02X | FProp: Offset=+0x%02X ElemSize=+0x%02X StructProp=+0x%02X",
+        // FCName is here because its absence from every diagnostic channel is what made the
+        // UE 5.8 drill-down failure cost a full RE session — it was the only UE offset
+        // neither probed nor printed.
+        LOG_SUMMARY("  FField: Next=+0x%02X Name=+0x%02X | FProp: Offset=+0x%02X ElemSize=+0x%02X StructProp=+0x%02X | FCName=+0x%02X",
                     DynOff::FFIELD_NEXT, DynOff::FFIELD_NAME,
-                    DynOff::FPROPERTY_OFFSET, DynOff::FPROPERTY_ELEMSIZE, DynOff::FSTRUCTPROP_STRUCT);
+                    DynOff::FPROPERTY_OFFSET, DynOff::FPROPERTY_ELEMSIZE, DynOff::FSTRUCTPROP_STRUCT,
+                    DynOff::FFIELDCLASS_NAME);
     } else {
         LOG_SUMMARY("  UProperty: Next=+0x%02X Offset=+0x%02X ElemSize=+0x%02X",
                     DynOff::UFIELD_NEXT, DynOff::UPROPERTY_OFFSET, DynOff::UPROPERTY_ELEMSIZE);
