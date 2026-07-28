@@ -16,7 +16,7 @@ constexpr const wchar_t* LOG_SUBFOLDER    = L"Logs";
 // (-0 -> -1 -> ... -> -4, oldest deleted) could not express an age at all: it ran on
 // every process start, so four launches of the same game in one afternoon discarded
 // everything earlier regardless of date. See the retention block in Sein.cpp.
-constexpr int            LOG_RETENTION_DAYS = 15;     // archived runs older than this are deleted
+constexpr int            LOG_RETENTION_DAYS = 21;     // archived runs older than this are deleted
 constexpr size_t         LOG_MAX_SIZE_MB  = 8;
 constexpr size_t         LOG_MAX_SIZE     = LOG_MAX_SIZE_MB * 1024 * 1024;
 

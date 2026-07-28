@@ -26,7 +26,7 @@ public static class Constants
 
     // Per-process mirror logging
     public const int MaxProcessFolders = 20;           // Clean up oldest beyond this
-    public const int LogMaxAgeDays = 15;               // Delete log folders older than this
+    public const int LogMaxAgeDays = 21;               // Keep this in sync with Grimoire::LOG_RETENTION_DAYS
 
     // Log category names
     public const string LogCatInit = "init";

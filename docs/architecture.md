@@ -266,7 +266,7 @@ All logs written to `%LOCALAPPDATA%\UE5CEDumper\Logs\<ProcessName>\`:
 
 8 MB max per file. UI mirrors to `ui-init`, `ui-pipe`, `ui-view` prefixed files.
 
-**Retention is age-based (15 days), not a generation count.** `<cat>-0.log` is always the current
+**Retention is age-based (21 days), not a generation count.** `<cat>-0.log` is always the current
 run; at startup the previous one is renamed `<cat>-YYYYMMDD-HHMMSS.log` — stamped from the file's
 *own* last-write time, never "now", or archiving would reset a stale log's clock and it would
 survive another full window. Archives past `Grimoire::LOG_RETENTION_DAYS` (DLL) /
