@@ -18,7 +18,10 @@ public static class Constants
     public const string LogSubFolder = "Logs";
     public const string LogSubfolderName = "UE5DumpUI";      // UI module subfolder under Logs/
     public const string MirrorLogPrefix = "ui";               // Prefix for mirror files in game folders
-    public const int LogRotateMax = 2;                        // 2-file rotation per category
+    // Retention is by AGE (LogMaxAgeDays), not by generation count. The previous
+    // session's -0.log is archived to -YYYYMMDD-HHMMSS.log and aged out from there;
+    // a file count could not express "keep 15 days" because rotation runs on every
+    // startup. Matches Grimoire::LOG_RETENTION_DAYS on the DLL side.
     public const long LogMaxSizeBytes = 8 * 1024 * 1024;     // 8MB per file
 
     // Per-process mirror logging

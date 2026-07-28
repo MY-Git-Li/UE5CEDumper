@@ -31,10 +31,14 @@ bool Init();
 
 // Open category log files in a per-process subfolder.
 // Call AFTER Init() and after DLL determines the host process name.
-// Creates <logDir>/<processName>/ with 5 category files, 2-file rotation.
+// Creates <logDir>/<processName>/ with 5 category files; the previous run's
+// -0.log of each is archived to <base>-YYYYMMDD-HHMMSS.log.
 // Flushes any early-buffered lines to the correct files.
-// Cleans up old subfolders if more than maxSubfolders exist.
-void InitProcessMirror(const std::wstring& processName, int maxSubfolders = 20);
+// Then runs the retention sweep: archived logs and whole per-process folders
+// untouched for Grimoire::LOG_RETENTION_DAYS are deleted. Retention is by AGE,
+// not by file or folder count — see the retention block in Sein.cpp for why a
+// count could not express it.
+void InitProcessMirror(const std::wstring& processName);
 
 // Shutdown: flush and close all category files
 void Shutdown();

@@ -15,7 +15,12 @@ namespace UE5DumpUI.Services;
 ///   ui-init-0.log, ui-pipe-0.log, ui-view-0.log
 ///   Prefixed with "ui-" to avoid collision with DLL log files.
 ///
-/// Each file: 2-file rotation, 5MB cap.
+/// Each file: 5MB cap. Retention is by AGE, not generation count — at startup the
+/// previous session's -0.log is archived to -YYYYMMDD-HHMMSS.log (stamped from its
+/// own mtime), and archives older than Constants.LogMaxAgeDays are deleted. A file
+/// count could not express "keep 15 days": rotation runs on every startup, so a few
+/// restarts discarded everything before them regardless of date. Mirrors
+/// Grimoire::LOG_RETENTION_DAYS in the DLL's Sein logger.
 /// </summary>
 public sealed class LoggingService : ILoggingService, IDisposable
 {
@@ -63,10 +68,11 @@ public sealed class LoggingService : ILoggingService, IDisposable
         // Delete log folders older than 15 days
         CleanupOldLogFolders(Constants.LogMaxAgeDays);
 
-        // Per-startup rotation for each category file
+        // Per-startup: archive the previous session, then age out old archives.
         foreach (var cat in CategoryNames)
         {
-            RotateLogFiles(_moduleDir, cat, Constants.LogRotateMax);
+            ArchivePreviousLog(_moduleDir, cat);
+            PruneAgedLogs(_moduleDir, cat, Constants.LogMaxAgeDays);
         }
 
         // Create category loggers
@@ -171,11 +177,12 @@ public sealed class LoggingService : ILoggingService, IDisposable
         {
             Directory.CreateDirectory(mirrorDir);
 
-            // Rotate mirror files for each category
+            // Archive the previous session's mirror files, then age out old archives.
             foreach (var cat in CategoryNames)
             {
                 var mirrorPrefix = $"{Constants.MirrorLogPrefix}-{cat}";
-                RotateLogFiles(mirrorDir, mirrorPrefix, Constants.LogRotateMax);
+                ArchivePreviousLog(mirrorDir, mirrorPrefix);
+                PruneAgedLogs(mirrorDir, mirrorPrefix, Constants.LogMaxAgeDays);
             }
             // Also clean up old-format mirror files
             CleanupOldDailyLogs(mirrorDir, "UE5DumpUI");
@@ -247,26 +254,84 @@ public sealed class LoggingService : ILoggingService, IDisposable
     }
 
     /// <summary>
-    /// Rotate numbered log files: delete oldest, shift N-2 → N-1, ..., 0 → 1.
-    /// After rotation, slot 0 is free for the new session's log.
+    /// Archive the previous session's <c>{prefix}-0.log</c> to
+    /// <c>{prefix}-YYYYMMDD-HHMMSS.log</c>, stamped with the file's OWN last-write
+    /// time, and migrate any legacy numbered generation left by older builds.
+    /// Slot 0 is free for the new session afterwards.
     /// </summary>
-    private static void RotateLogFiles(string directory, string prefix, int maxFiles)
+    /// <remarks>
+    /// Replaces the old fixed generation shuffle (delete N-1, shift the rest). That
+    /// scheme could not express an age: it ran on every startup, so a few restarts
+    /// discarded everything before them no matter how recent. Retention is now by
+    /// age via <see cref="PruneAgedLogs"/>, matching the DLL's Sein logger.
+    /// Stamping from the file's own mtime rather than "now" is what keeps the age
+    /// prune honest — otherwise archiving would reset a stale log's clock.
+    /// </remarks>
+    internal static void ArchivePreviousLog(string directory, string prefix)
     {
         try
         {
-            var oldest = Path.Combine(directory, $"{prefix}-{maxFiles - 1}.log");
-            if (File.Exists(oldest)) File.Delete(oldest);
+            ArchiveOne(Path.Combine(directory, $"{prefix}-0.log"), directory, prefix);
 
-            for (int i = maxFiles - 2; i >= 0; i--)
-            {
-                var src = Path.Combine(directory, $"{prefix}-{i}.log");
-                var dst = Path.Combine(directory, $"{prefix}-{i + 1}.log");
-                if (File.Exists(src)) File.Move(src, dst);
-            }
+            // Legacy generations from builds before age-based retention. Without this
+            // they orphan: nothing rotates them any more, and PruneAgedLogs keys on
+            // *.log mtime so it would only reach them once they aged out anyway.
+            for (int i = 1; i <= 9; i++)
+                ArchiveOne(Path.Combine(directory, $"{prefix}-{i}.log"), directory, prefix);
         }
         catch
         {
             // Best effort — don't prevent app startup over log rotation
+        }
+    }
+
+    internal static void ArchiveOne(string src, string directory, string prefix)
+    {
+        try
+        {
+            if (!File.Exists(src)) return;
+            var stamp = File.GetLastWriteTime(src).ToString("yyyyMMdd-HHmmss");
+
+            // Two archives in the same second are possible on a restart loop.
+            for (int dup = 0; dup < 100; dup++)
+            {
+                var suffix = dup == 0 ? stamp : $"{stamp}-{dup}";
+                var dst = Path.Combine(directory, $"{prefix}-{suffix}.log");
+                if (File.Exists(dst)) continue;
+                File.Move(src, dst);
+                return;
+            }
+            File.Delete(src);
+        }
+        catch
+        {
+            // Locked by another instance, or unreadable — leave it; the age prune
+            // will collect it later.
+        }
+    }
+
+    /// <summary>
+    /// Delete archived <c>{prefix}-*.log</c> files past the retention window.
+    /// Never touches <c>-0.log</c>, which is the live file for this session.
+    /// </summary>
+    internal static void PruneAgedLogs(string directory, string prefix, int maxAgeDays)
+    {
+        try
+        {
+            var cutoff = DateTime.Now.AddDays(-maxAgeDays);
+            foreach (var file in Directory.GetFiles(directory, $"{prefix}-*.log"))
+            {
+                if (Path.GetFileName(file).EndsWith("-0.log", StringComparison.Ordinal)) continue;
+                try
+                {
+                    if (File.GetLastWriteTime(file) < cutoff) File.Delete(file);
+                }
+                catch { /* locked — try again next startup */ }
+            }
+        }
+        catch
+        {
+            // Best effort
         }
     }
 
@@ -275,7 +340,7 @@ public sealed class LoggingService : ILoggingService, IDisposable
     /// from previous Serilog RollingInterval.Day configuration.
     /// Also removes numbered files beyond the rotation max.
     /// </summary>
-    private static void CleanupOldDailyLogs(string directory, string prefix)
+    internal static void CleanupOldDailyLogs(string directory, string prefix)
     {
         try
         {
@@ -284,8 +349,20 @@ public sealed class LoggingService : ILoggingService, IDisposable
                 var name = Path.GetFileNameWithoutExtension(file);
                 var suffix = name[(prefix.Length + 1)..];
 
-                // Keep numbered files that match category format (e.g., "init-0")
-                if (int.TryParse(suffix, out _)) continue;
+                // Keep the live file and any legacy 1-digit generation ("...-0").
+                // Bounded to ONE digit deliberately: the original check was an
+                // unbounded int.TryParse, and "20260304" parses fine (it fits in
+                // int32), so every daily-format file took this branch — meaning
+                // this method never once deleted the format it exists to remove.
+                if (suffix.Length == 1 && char.IsAsciiDigit(suffix[0])) continue;
+
+                // Keep our OWN archives — "YYYYMMDD-HHMMSS" (optionally "-N" on a
+                // same-second collision). Without this guard every archive written
+                // by ArchivePreviousLog would be deleted on the next startup, since
+                // its suffix is not a bare integer. The old daily format this method
+                // exists to remove was "YYYYMMDD" with no time part, so requiring the
+                // "-HHMMSS" separates the two unambiguously.
+                if (IsArchiveSuffix(suffix)) continue;
 
                 // Delete daily files (YYYYMMDD) and other non-matching patterns
                 try { File.Delete(file); } catch { }
@@ -295,6 +372,21 @@ public sealed class LoggingService : ILoggingService, IDisposable
         {
             // Best effort
         }
+    }
+
+    /// <summary>
+    /// True for "YYYYMMDD-HHMMSS" or "YYYYMMDD-HHMMSS-N" — the shape
+    /// <see cref="ArchiveOne"/> produces. Deliberately stricter than a date check:
+    /// the legacy daily format was "YYYYMMDD" with no time part, and that one MUST
+    /// still be deleted.
+    /// </summary>
+    internal static bool IsArchiveSuffix(string suffix)
+    {
+        var parts = suffix.Split('-');
+        if (parts.Length is < 2 or > 3) return false;
+        if (parts[0].Length != 8 || !parts[0].All(char.IsAsciiDigit)) return false;
+        if (parts[1].Length != 6 || !parts[1].All(char.IsAsciiDigit)) return false;
+        return parts.Length == 2 || parts[2].All(char.IsAsciiDigit);
     }
 
     private static string SanitizeFolderName(string name)
@@ -363,7 +455,23 @@ public sealed class LoggingService : ILoggingService, IDisposable
                         StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                if (dir.LastWriteTimeUtc < cutoff)
+                // Judge by the NEWEST file inside, not the directory's own mtime.
+                // Windows bumps a directory's timestamp when entries are added or
+                // removed, but NOT when an existing child is written — so a folder
+                // whose logs are appended in place can look stale and be deleted
+                // out from under a running game. Falls back to the directory's own
+                // timestamp only when it is empty.
+                DateTime newest;
+                try
+                {
+                    var files = dir.GetFiles("*", SearchOption.AllDirectories);
+                    newest = files.Length > 0
+                        ? files.Max(f => f.LastWriteTimeUtc)
+                        : dir.LastWriteTimeUtc;
+                }
+                catch { continue; }
+
+                if (newest < cutoff)
                 {
                     try
                     {

@@ -264,4 +264,17 @@ All logs written to `%LOCALAPPDATA%\UE5CEDumper\Logs\<ProcessName>\`:
 | `pipe-*.log` | Pipe | JSON command dispatch, responses |
 | `walk-*.log` | Walk | UStructWalker field reads |
 
-4-file rotation per category, 8 MB max per file. UI mirrors to `ui-init`, `ui-pipe`, `ui-view` prefixed files.
+8 MB max per file. UI mirrors to `ui-init`, `ui-pipe`, `ui-view` prefixed files.
+
+**Retention is age-based (15 days), not a generation count.** `<cat>-0.log` is always the current
+run; at startup the previous one is renamed `<cat>-YYYYMMDD-HHMMSS.log` — stamped from the file's
+*own* last-write time, never "now", or archiving would reset a stale log's clock and it would
+survive another full window. Archives past `Grimoire::LOG_RETENTION_DAYS` (DLL) /
+`Constants.LogMaxAgeDays` (UI), and whole per-process folders whose newest file is that old, are
+deleted at startup. The 8 MB cap still archives mid-session.
+
+The old fixed shuffle (`-0` → `-1` → … → `-N`, oldest deleted) is gone because it could not express
+an age at all: it ran on **every process start**, so four launches of one game in an afternoon
+discarded everything earlier no matter how recent. Folder staleness is judged by the newest file
+*inside* the folder, not the folder's own mtime — Windows does not bump a directory timestamp when
+an existing child is written, so the latter would delete a live game's folder out from under it.
