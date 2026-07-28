@@ -89,6 +89,24 @@ ROWS=(
 "UE5.5-Meltopia|Meltopia_V2|-|GObjects=149d87420|149d87430,GNames=149ca3c80,GWorld=149f03d10,SparseDelegates=149a9a070,GEngine=149f002f8"
 "UE5.6-Satisfactory|Satisfactory_v1.2.3.1|-|-CoreUObject-:GObjects=1805a3620|1805a3630,-CoreUObject-:SparseDelegates=1805661a0,-Core-Win64:GNames=18082e8c0,-Engine-:GWorld=18216db68,-Engine-:GEngine=182170748,CrashReportClient:GObjects=141a9d4b0|141a9d4c0,CrashReportClient:GNames=1419c7e80,CrashReportClient:SparseDelegates=1419307f0"
 "UE5.7-Solarpunk|Solarpunk|-|GObjects=1476ca920|1476ca910,GNames=1478e50c0,GWorld=1478cce58,SparseDelegates=1476ca4b0,GEngine=147a2fc20"
+# STACK O BOT — Epic's own sample project, built by the maintainer in Shipping against unmodified
+# engine source. The 5.7.4/5.8 PAIR is a controlled A/B: same game, same config, adjacent engine
+# versions, so any behavioural difference is attributable to the engine alone. That pair is what
+# root-caused the UE 5.8 reflection break.
+# NamePoolData from FNameDebugVisualizer::GetBlocks @0x141313030 minus 0x10; all five rebase onto
+# the live run with ZERO residual (live base 0x7FF7B6880000).
+"UE5.7.4-StackOBot|StackOBot_Shipping_UE574|-|GObjects=148fc8dd0|148fc8de0,GNames=148efad40,GWorld=149153b90,SparseDelegates=148d21ff0,GEngine=149156ae0"
+# UE 5.8 — THE ONLY 5.8 IN THE CORPUS, and the one row where GObjects takes a SINGLE value:
+# 5.8 moved FUObjectArray::ObjObjects +0x10 -> +0x00, so the base IS ObjObjects and `base + 0x10`
+# is ObjObjects.NumChunks, an int32. Adding the usual `|base+0x10` alias would score a hit on a
+# chunk counter as "correct". Do not add it back.
+# ALSO THE ORACLE FOR THE 5.8 REFLECTION BREAK: `virtual ~FFieldClass()` (Field.h:101
+# @5.8.0-release) puts a vfptr at FFieldClass+0x00, so FFieldClass::Name is +0x08 here and +0x00
+# on the 5.7.4 row above. One-second PDB test: `??1FFieldClass@@UEAA@XZ` (U = virtual) exists here
+# and NOT in the 5.7.4 PDB, which exports `??1FFieldClass@@QEAA@XZ` (Q = non-virtual).
+# NamePoolData from GetBlocks @0x1415ABEB0 minus 0x10. All five rebase onto the live run with zero
+# residual, confirmed twice at two different ASLR bases.
+"UE5.8-StackOBot|StackOBot_Shipping_UE58|-|GObjects=149f88940,GNames=149eba940,GWorld=14a00b530,SparseDelegates=149c92700,GEngine=14a00e248"
 # ---- partially-symbolised: truth DERIVED BY DISASSEMBLY, not from a PDB ----
 # FF7 Remake has no PDB. These two VAs were recovered by hand and are as solid as a symbol:
 # FUN_140FD1490 is `GEngine->GetWorldFromContextObject(Obj)` — 0x145879EE8 is loaded into RCX as
@@ -146,6 +164,24 @@ ROWS=(
 # ---- MONOLITHIC noise probes (no symbols; consensus only) ----
 # FF7 REBIRTH (distinct from FF7 Remake above): the only binary that can exercise GOBJ_RE1 and
 # the GNAM_V7 CallFollow, both of which were contributed FOR it and hit nothing anywhere else.
+# HOGWARTS LEGACY (UE 4.27, no PDB). NO GS_TRUE on purpose — without symbols there is no truth to
+# supply, and a GUESSED truth is worse than none (it mislabels every hit as a decoy).
+#
+# ⚠ MEASURED CAVEAT — this binary is DENUVO-PROTECTED and has NO `.text` SECTION AT ALL. Ghidra
+# reports 379.69 MB of "executable" bytes across `.udata` (105 MB) and `.xpdata` (274 MB); a normal
+# monolithic probe (TQ2) has 123 MB of real `.text`. So its 9,499 hits are matches against
+# ENCRYPTED DATA, not code.
+#
+# Consequence for §6 of the report: hits/MB is computed over executable bytes, so this row adds
+# ~380 MB of non-code to the DENOMINATOR and pushes every pattern's density DOWN. That statistic
+# exists precisely to predict real-game collision cost, so folding a packed binary into it makes it
+# read better than reality. Treat the §6 numbers as a lower bound while this row is in.
+#
+# It is kept anyway because it answers a different question well: 86 MISS / 0 spurious-correct
+# shows the tables do not explode on a protected binary. If §6 is ever load-bearing for a decision,
+# either give sweep.sh a per-row `noise=0` flag that aggregate_sweep.py honours, or drop this row
+# for that run — do not silently reason from a diluted density.
+"UE4.27-Hogwarts|Hogwarts_Legacy|-|"
 "UE4.x-FF7Rebirth|FF7Re|-|"
 # OCTOPATH is 4.18, not "4.x": its .rdata carries `++UE4+Release-4.18`, and its pattern
 # fingerprint is IDENTICAL to DQ XI S (a known 4.18) -- GNames 7/28 hit, SPARSE 0/10.

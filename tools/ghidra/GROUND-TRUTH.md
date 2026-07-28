@@ -126,6 +126,24 @@ Each cost at least one headless run to establish. Recorded so nobody spends anot
 - **`tdb` @ `0xFF00000000` is a Ghidra loader artifact, not a PE section.** Four analysts have now
   investigated it independently; one dumped the on-disk section table to disprove it.
 - **The default PDB loader is fine.** MSDIA remains a *Meltopia-only* workaround, not a habit.
+- **One-second test for the UE 5.8 reflection layout, from the PDB alone:** grep for
+  `??1FFieldClass@@UEAA@XZ`. The `U` is MSVC's mangling for a **virtual** member — 5.8 made
+  `~FFieldClass()` virtual, which puts a vfptr at `FFieldClass+0x00` and moves `FName Name` to
+  `+0x08`. Pre-5.8 exports `??1FFieldClass@@QEAA@XZ` (`Q` = non-virtual, Name at `+0x00`). A
+  `??_7FFieldClass@@6B@` vftable symbol is the same signal. Confirmed on the StackOBot 5.7.4/5.8
+  pair, which differ in nothing else.
+  **Offline only — do NOT turn this into a runtime probe.** Monolithic shipping games export
+  nothing, so `GetProcAddress` cannot see it (a *modular* build would, since the dtor is
+  `COREUOBJECT_API`, but that is the minority case). More importantly it would key on the wrong
+  thing: with `UE_WITH_CONSTINIT_UOBJECT` enabled `FFieldClass` becomes abstract with per-type
+  `TFieldClass<T>` vftables — **Name is still `+0x08`**, but any vtable-shape test breaks. The DLL
+  instead probes the *value* (`DynOff::PickFFieldClassNameOffset`, two safe reads once per
+  process, accepts whichever offset yields a `*Property` name), which is version-, fork- and
+  constinit-agnostic.
+- **These two StackOBot Shipping PDBs carry public symbols + line info but only PARTIAL merged
+  type info.** `FFieldClass`, `UObjectBase` and `FUObjectItem` have **no TPI record at all**;
+  `FField`/`FProperty`/`UStruct` are forward-references only. Layout recovery here is public
+  symbols + capstone, never `LF_FIELDLIST`. Do not burn another session discovering this.
 - **NO version has a usable `NamePoolData` symbol, and the boundary is not where it looks.**
   Pre-4.23 has no `FNamePool` at all, so go straight to `FName::GetNames`. But **4.23 itself has
   NEITHER** — zero occurrences of `NamePoolData` *and* zero of `?GetNames@FName@@` in all three
@@ -219,6 +237,9 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | UE5.0-LightMaze | `Light_Maze` | 5.0.3 | ❌ none | truth by disassembly; **closes the 5.0 hole** (4.27 used to jump to 5.1) |
 | UE4.22-Satisfactory | `Satisfactory_UE422` | 4.22 | ✅ full PDB | **monolithic EXE with symbols** — the only pre-4.25 one |
 | UE4.23-Flying | `UE423_Flying-Win64_Shipping` | 4.23.1 | ✅ full PDB | **built by us** (Shipping, monolithic; note the UNDERSCORE in the project name). The only 4.23, and the FIRST version of BOTH FNamePool and sparse delegates. **Live-verified** — the packaged copy was run and all five resolved |
+| UE5.7.4-StackOBot | `StackOBot_Shipping_UE574` | 5.7.4 | ✅ full PDB | **built by us**, Shipping. The 5.7.4/5.8 pair is a controlled A/B — same game, same config, adjacent engines |
+| UE5.8-StackOBot | `StackOBot_Shipping_UE58` | 5.8.0 | ✅ full PDB | **built by us**, Shipping. **The only 5.8.** GObjects takes a SINGLE truth value (5.8 moved `ObjObjects` to +0x00). The oracle for the `virtual ~FFieldClass()` reflection break |
+| UE4.27-Hogwarts | `Hogwarts_Legacy` | 4.27 | ❌ none | noise probe — **⚠ DENUVO-PACKED, no `.text` at all** (`.udata` 105 MB + `.xpdata` 274 MB). Its hits are against encrypted data and it dilutes the §6 hits/MB denominator; see the sweep.sh comment |
 | UE4.24-DropIn | `DropIn_UE424` | 4.24.3 | ✅ full PDB | **closed the last checkable sparse-delegate gap** — see below |
 | UE4.25-Everspace2 | `ES2-UE425` | 4.25.2 | ✅ full PDB | the FField/FProperty transition band |
 | UE4.26-Satisfactory | `Satisfactory_UE426` | 4.26.2 | ✅ full PDB | modular, 4 DLLs — supersedes the unusable `Satfi426` |
