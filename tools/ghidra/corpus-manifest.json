@@ -1,8 +1,44 @@
 {
  "schema": "ue5cedumper.corpus-manifest/2",
- "generated_utc": "2026-07-29T00:35:59Z",
+ "generated_utc": "2026-07-29T13:13:11Z",
  "generator": "tools/ghidra/build_corpus_manifest.py",
  "entries": {
+  "UE4.10-Game": {
+   "ghidra_project": "UE410_Game_Shipping",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\4.10\\Shipping\\UE4Game-Win64-Shipping.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\4.10\\Shipping\\UE4Game-Win64-Shipping.pdb",
+   "pdb_size_bytes": 30010368,
+   "steam_buildid": null,
+   "binary_size_bytes": 38686664,
+   "binary_sha256": "67496a3180c07e0d3f80a1eb0f799018ae70b25f7dd881463920b93c12f8ee7e",
+   "binary_md5": "b1bed34e908406426fe10691db6b5635",
+   "duplicate_copies": [],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | SINGLE COPY — no byte-identical duplicate in any archive root, and no store can re-serve it. Losing this file loses the row."
+  },
+  "UE4.10-GameDev": {
+   "ghidra_project": "UE410_Game_Development",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\4.10\\Development\\UE4Game.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\4.10\\Development\\UE4Game.pdb",
+   "pdb_size_bytes": 83627008,
+   "steam_buildid": null,
+   "binary_size_bytes": 83131848,
+   "binary_sha256": "6be823a04d0efb92aa7e71c208aac53c2d826073b579c2cef2421af933c12966",
+   "binary_md5": "dcd73f1c12d1a7de12f0e9060278ffe1",
+   "duplicate_copies": [],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | SINGLE COPY — no byte-identical duplicate in any archive root, and no store can re-serve it. Losing this file loses the row."
+  },
   "UE4.15-Flying": {
    "ghidra_project": "UE415_Flyinh-Win64-Shipping",
    "source": "self-built",
@@ -23,6 +59,47 @@
    ],
    "provenance": "ghidra-metadata",
    "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\UE_Analyze_Data\\Varies Version builds\\4.15.3\\Shipping\\WindowsNoEditor\\UE415_Flyinh\\Binaries\\Win64\\UE415_Flyinh-Win64-Shipping.exe | D:\\Unreal Projects\\UE415_Flyinh\\Saved\\StagedBuilds\\WindowsNoEditor\\UE415_Flyinh\\Binaries\\Win64\\UE415_Flyinh-Win64-Shipping.exe"
+  },
+  "UE4.15-FlyingDev": {
+   "ghidra_project": "UE415_Flyinh_Development",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\4.15.3\\Development\\UE415_Flyinh.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\4.15.3\\Development\\UE415_Flyinh.pdb",
+   "pdb_size_bytes": 83816448,
+   "steam_buildid": null,
+   "binary_size_bytes": 93309952,
+   "binary_sha256": "074f6b1951cfdf4202ed6c202ef5d9e47496b3b26057c277a7e22e7a6b889cb7",
+   "binary_md5": "cb8a4a2f8767ca12a1582e941fa572e3",
+   "duplicate_copies": [
+    "X:\\UE_Analyze_Data\\Varies Version builds\\4.15.3\\Development\\UE415_Flyinh.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): X:\\UE_Analyze_Data\\Varies Version builds\\4.15.3\\Development\\UE415_Flyinh.exe"
+  },
+  "UE4.15-FlyingDbgGame": {
+   "ghidra_project": "UE415_Flyinh_DebugGame",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\4.15.3\\DebugGame\\UE415_Flyinh-Win64-DebugGame.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\4.15.3\\DebugGame\\UE415_Flyinh-Win64-DebugGame.pdb",
+   "pdb_size_bytes": 83791872,
+   "steam_buildid": null,
+   "binary_size_bytes": 93323776,
+   "binary_sha256": "08f75fce5c07c4576535572d3acff7e5790f0167252ceee26a89164dddf9c05f",
+   "binary_md5": "c3c4842132114e846d2b26988a6ca90a",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\UE415_Flyinh\\Binaries\\Win64\\UE415_Flyinh-Win64-DebugGame.exe",
+    "X:\\UE_Analyze_Data\\Varies Version builds\\4.15.3\\DebugGame\\UE415_Flyinh-Win64-DebugGame.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\UE415_Flyinh\\Binaries\\Win64\\UE415_Flyinh-Win64-DebugGame.exe | X:\\UE_Analyze_Data\\Varies Version builds\\4.15.3\\DebugGame\\UE415_Flyinh-Win64-DebugGame.exe"
   },
   "UE4.20-Everspace": {
    "ghidra_project": "ES1-420",
@@ -107,6 +184,28 @@
    ],
    "provenance": "ghidra-metadata",
    "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | VOLATILE LOCATION — this is a live Unreal project build-output dir, not an archive. A rebuild or Clean destroys THIS copy, and a repackage elsewhere yields a different PE (measured: 43f6b130 vs f61ec1be), so a same-named packaged build is not a substitute. A byte-identical copy does exist elsewhere — see duplicate_copies; this row is NOT single-copy. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\UE_Analyze_Data\\Varies Version builds\\4.23.1\\Binaries_Shipping\\Win64\\UE423_Flying-Win64-Shipping.exe | X:\\UE_Analyze_Data\\Varies Version builds\\4.23.1\\Binaries_Shipping\\Win64\\UE423_Flying-Win64-Shipping.exe"
+  },
+  "UE4.23-FlyingDbgGame": {
+   "ghidra_project": "UE423_Flying-Win64-DebugGame",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\Unreal Projects\\UE423_Flying\\Binaries\\Win64\\UE423_Flying-Win64-DebugGame.exe",
+   "needs_pdb": null,
+   "pdb_relpath": null,
+   "pdb_size_bytes": null,
+   "steam_buildid": null,
+   "binary_size_bytes": null,
+   "binary_sha256": null,
+   "binary_md5": "e63689ff80433145b9fec8baa4780259",
+   "duplicate_copies": [
+    "D:\\UE_Analyze_Data\\Varies Version builds\\4.23.1\\Binaries_DebugGame\\Win64\\UE423_Flying-Win64-DebugGame.exe",
+    "D:\\Unreal Projects\\UE423_Flying\\Binaries_DebugGame\\Win64\\UE423_Flying-Win64-DebugGame.exe",
+    "X:\\UE_Analyze_Data\\Varies Version builds\\4.23.1\\Binaries_DebugGame\\Win64\\UE423_Flying-Win64-DebugGame.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "BINARY GONE — title uninstalled; reinstall to re-import. | Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | VOLATILE LOCATION — this is a live Unreal project build-output dir, not an archive. A rebuild or Clean destroys THIS copy, and a repackage elsewhere yields a different PE (measured: 43f6b130 vs f61ec1be), so a same-named packaged build is not a substitute. A byte-identical copy does exist elsewhere — see duplicate_copies; this row is NOT single-copy. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\UE_Analyze_Data\\Varies Version builds\\4.23.1\\Binaries_DebugGame\\Win64\\UE423_Flying-Win64-DebugGame.exe | D:\\Unreal Projects\\UE423_Flying\\Binaries_DebugGame\\Win64\\UE423_Flying-Win64-DebugGame.exe | X:\\UE_Analyze_Data\\Varies Version builds\\4.23.1\\Binaries_DebugGame\\Win64\\UE423_Flying-Win64-DebugGame.exe"
   },
   "UE4.24-DropIn": {
    "ghidra_project": "DropIn_UE424",
@@ -235,6 +334,67 @@
    "provenance": "ghidra-metadata",
    "notes": "DUPLICATE COPIES (byte-identical, verified by md5): D:\\UE_Analyze_Data\\Game Binary backup\\Maelstrom\\MaelstromV2-Win64-Shipping.exe | X:\\UE_Analyze_Data\\Game Binary backup\\Maelstrom\\MaelstromV2-Win64-Shipping.exe"
   },
+  "UE4.27-FlyingDev": {
+   "ghidra_project": "UE427_Flying_Development",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\Development\\Win64\\UE427_Flying.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\Development\\Win64\\UE427_Flying.pdb",
+   "pdb_size_bytes": 188510208,
+   "steam_buildid": null,
+   "binary_size_bytes": 165405184,
+   "binary_sha256": "36353cb90ecbc4d703b7b92955765bb31483a27c8e07e25e2f886362808470a0",
+   "binary_md5": "7b5b1128513d9db23ce83b7b76b1c091",
+   "duplicate_copies": [
+    "X:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\Development\\Win64\\UE427_Flying.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): X:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\Development\\Win64\\UE427_Flying.exe"
+  },
+  "UE4.27-FlyingDbgGame": {
+   "ghidra_project": "UE427_Flying-Win64-DebugGame",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\DebugGame\\Win64\\UE427_Flying-Win64-DebugGame.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\DebugGame\\Win64\\UE427_Flying-Win64-DebugGame.pdb",
+   "pdb_size_bytes": 188518400,
+   "steam_buildid": null,
+   "binary_size_bytes": 165414912,
+   "binary_sha256": "8b82b0814bb5ea9b815ba3c4d4b3a5ac68f825dbf8238a722956ebeee0ba39e0",
+   "binary_md5": "01d316835ae389f6d514dd54f50f44c3",
+   "duplicate_copies": [
+    "X:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\DebugGame\\Win64\\UE427_Flying-Win64-DebugGame.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): X:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\DebugGame\\Win64\\UE427_Flying-Win64-DebugGame.exe"
+  },
+  "UE4.27-FlyingShipping": {
+   "ghidra_project": "UE427_Flying-Win64-Shipping",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\Shipping\\Win64\\UE427_Flying-Win64-Shipping.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\Shipping\\Win64\\UE427_Flying-Win64-Shipping.pdb",
+   "pdb_size_bytes": 115167232,
+   "steam_buildid": null,
+   "binary_size_bytes": 79304192,
+   "binary_sha256": "a6abb0eddf90920b658537f3080563e9fa3f57f8eece8eb016f665fc21b24f3c",
+   "binary_md5": "1be3260565f86311bb074966c9fcd3f9",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\UE427_Flying\\Binaries\\Win64\\UE427_Flying-Win64-Shipping.exe",
+    "X:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\Shipping\\Win64\\UE427_Flying-Win64-Shipping.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\UE427_Flying\\Binaries\\Win64\\UE427_Flying-Win64-Shipping.exe | X:\\UE_Analyze_Data\\Varies Version builds\\4.27.2\\Shipping\\Win64\\UE427_Flying-Win64-Shipping.exe"
+  },
   "UE5.2-Satisfactory": {
    "ghidra_project": "SF521_pdb",
    "source": "archive",
@@ -255,6 +415,131 @@
    ],
    "provenance": "ghidra-metadata",
    "notes": "3 programs in this project: FactoryGame-Core-Win64-Shipping.dll, FactoryGame-CoreUObject-Win64-Shipping.dll, FactoryGame-Engine-Win64-Shipping.dll; anchor = FactoryGame-CoreUObject-Win64-Shipping.dll | Not a live install — restored from a maintainer-held archive copy. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\UE_Analyze_Data\\Game archive\\Satisfactory\\UE5.2.1\\Engine\\Binaries\\Win64\\FactoryGame-CoreUObject-Win64-Shipping.dll | X:\\UE_Analyze_Data\\Game archive\\Satisfactory\\UE5.2.1\\Engine\\Binaries\\Win64\\FactoryGame-CoreUObject-Win64-Shipping.dll"
+  },
+  "UE5.3-ThirdPerson": {
+   "ghidra_project": "ThirdPerson53_Shipping",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\5.3\\Shipping\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-Shipping.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\5.3\\Shipping\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-Shipping.pdb",
+   "pdb_size_bytes": 174960640,
+   "steam_buildid": null,
+   "binary_size_bytes": 114712064,
+   "binary_sha256": "187c7f1b67a3b3909ffc1e060b1e8cf44657b6ede8cf30da70403f7bd408b3bd",
+   "binary_md5": "a78b9aaa7fad9945f023b019729d09db",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-Shipping.exe",
+    "X:\\UE_Analyze_Data\\Varies Version builds\\5.3\\Shipping\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-Shipping.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-Shipping.exe | X:\\UE_Analyze_Data\\Varies Version builds\\5.3\\Shipping\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-Shipping.exe"
+  },
+  "UE5.3-ThirdPersonDev": {
+   "ghidra_project": "ThirdPerson53_Development",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\5.3\\Development\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\5.3\\Development\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53.pdb",
+   "pdb_size_bytes": 289935360,
+   "steam_buildid": null,
+   "binary_size_bytes": 254668288,
+   "binary_sha256": "b3b1cda8d24216757e047886d855ef3288e399ba92d6e1b86c6aa31c3991a3f6",
+   "binary_md5": "8882e0328665c901b944608a78edbf3e",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53.exe",
+    "X:\\UE_Analyze_Data\\Varies Version builds\\5.3\\Development\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53.exe | X:\\UE_Analyze_Data\\Varies Version builds\\5.3\\Development\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53.exe"
+  },
+  "UE5.3-ThirdPersonDbgGame": {
+   "ghidra_project": "ThirdPerson53_DebugGame",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\5.3\\DebugGame\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-DebugGame.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\5.3\\DebugGame\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-DebugGame.pdb",
+   "pdb_size_bytes": 289968128,
+   "steam_buildid": null,
+   "binary_size_bytes": 254740480,
+   "binary_sha256": "d5e450efd1cfe2750d5281564a128ef3781e41243fcc9c11fc7f35c35f39386d",
+   "binary_md5": "5c101fc56c6e4dbb3a86f758d93ec46e",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-DebugGame.exe",
+    "D:\\Unreal Projects\\ThirdPerson53\\Saved\\StagedBuilds\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-DebugGame.exe",
+    "X:\\UE_Analyze_Data\\Varies Version builds\\5.3\\DebugGame\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-DebugGame.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-DebugGame.exe | D:\\Unreal Projects\\ThirdPerson53\\Saved\\StagedBuilds\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-DebugGame.exe | X:\\UE_Analyze_Data\\Varies Version builds\\5.3\\DebugGame\\Windows\\ThirdPerson53\\Binaries\\Win64\\ThirdPerson53-Win64-DebugGame.exe"
+  },
+  "UE5.4-ThirdPerson": {
+   "ghidra_project": "ThirdPerson54_Shipping",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\5.4\\Shipping\\Windows\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54-Win64-Shipping.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\5.4\\Shipping\\Windows\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54-Win64-Shipping.pdb",
+   "pdb_size_bytes": 190304256,
+   "steam_buildid": null,
+   "binary_size_bytes": 131782656,
+   "binary_sha256": "9a891b3f565a1c51bec21c0e8a6db908abda54c4e7688a21ff771a80d9568da6",
+   "binary_md5": "b84965793b25ff204d012e490a41cdd5",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54-Win64-Shipping.exe",
+    "D:\\Unreal Projects\\ThirdPerson54\\Saved\\StagedBuilds\\Windows\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54-Win64-Shipping.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54-Win64-Shipping.exe | D:\\Unreal Projects\\ThirdPerson54\\Saved\\StagedBuilds\\Windows\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54-Win64-Shipping.exe"
+  },
+  "UE5.4-ThirdPersonDev": {
+   "ghidra_project": "ThirdPerson54_Development",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\5.4\\Development\\Windows\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\5.4\\Development\\Windows\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54.pdb",
+   "pdb_size_bytes": 311676928,
+   "steam_buildid": null,
+   "binary_size_bytes": 277866496,
+   "binary_sha256": "100d5af9d485eeacb7893bcd4b59594734feaaafaf706e9e85fddc0147b0ddc5",
+   "binary_md5": "9f2258f6e85da3f48b52e732942ce4fa",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54.exe"
+  },
+  "UE5.4-ThirdPersonDbgGame": {
+   "ghidra_project": "ThirdPerson54_DebugGame",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\5.4\\DebugGame\\Windows\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54-Win64-DebugGame.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\5.4\\DebugGame\\Windows\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54-Win64-DebugGame.pdb",
+   "pdb_size_bytes": 311709696,
+   "steam_buildid": null,
+   "binary_size_bytes": 277931520,
+   "binary_sha256": "6bd58636a4f68c156ace946e2f9eab9e2bc5a38e851a29182c2f29092670200e",
+   "binary_md5": "91dc256878601f848e9898d9ea518ee4",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54-Win64-DebugGame.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\ThirdPerson54\\Binaries\\Win64\\ThirdPerson54-Win64-DebugGame.exe"
   },
   "UE5.5-Everspace2": {
    "ghidra_project": "ES2-0517",
@@ -392,12 +677,116 @@
    "binary_sha256": "9f26de2d2968549bb90bbcea0a04a3afa48547ff6abc132b4219c756c500a635",
    "binary_md5": "03a2c57f56f617d6bdaf508d56a740bf",
    "duplicate_copies": [
-    "D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Shipping\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe",
-    "D:\\Unreal Projects\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe",
-    "D:\\Unreal Projects\\StackOBot\\Saved\\StagedBuilds\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe"
+    "D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Shipping\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe"
    ],
    "provenance": "ghidra-metadata",
-   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Shipping\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe | D:\\Unreal Projects\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe | D:\\Unreal Projects\\StackOBot\\Saved\\StagedBuilds\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe"
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Shipping\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe"
+  },
+  "UE5.8.1-StackOBot": {
+   "ghidra_project": "StackOBot_Shipping_UE581",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Shipping_581\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Shipping_581\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.pdb",
+   "pdb_size_bytes": 183758848,
+   "steam_buildid": null,
+   "binary_size_bytes": 169197056,
+   "binary_sha256": "f833e88ceb4edd9837bd45e78ebae59255d8a01f89a046acf552aa15a4b33976",
+   "binary_md5": "a906f263eccb07543b0894ff9aea47f5",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe",
+    "D:\\Unreal Projects\\StackOBot\\Saved\\StagedBuilds\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe",
+    "X:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Shipping_581\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe | D:\\Unreal Projects\\StackOBot\\Saved\\StagedBuilds\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe | X:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Shipping_581\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-Shipping.exe"
+  },
+  "UE5.8.1-StackOBotDev": {
+   "ghidra_project": "StackOBot_Development_UE581",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Development\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Development\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot.pdb",
+   "pdb_size_bytes": 325406720,
+   "steam_buildid": null,
+   "binary_size_bytes": 335121408,
+   "binary_sha256": "72c3dc75d7c05e9627876512af060574946f57f6d70d2758a5373f5cdbe67db1",
+   "binary_md5": "5b131ac706d63fbeb233fbc1f46f4758",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\StackOBot\\Binaries\\Win64\\StackOBot.exe",
+    "X:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Development\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\StackOBot\\Binaries\\Win64\\StackOBot.exe | X:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\Development\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot.exe"
+  },
+  "UE5.7.4-StackOBotDbgGame": {
+   "ghidra_project": "StackOBot_DebugGame_UE574",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\5.7\\Stack_O_Bot\\DebugGame\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\5.7\\Stack_O_Bot\\DebugGame\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.pdb",
+   "pdb_size_bytes": 313487360,
+   "steam_buildid": null,
+   "binary_size_bytes": 312559104,
+   "binary_sha256": "ae1ac50ac90642204b424b11db932d9c1f1be433902d46c86c974355cfca4f68",
+   "binary_md5": "062eb252c6e81a6f1ea2779e996e0264",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\StackOBot57\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe",
+    "D:\\Unreal Projects\\StackOBot57\\Saved\\StagedBuilds\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe",
+    "X:\\UE_Analyze_Data\\Varies Version builds\\5.7\\Stack_O_Bot\\DebugGame\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\StackOBot57\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe | D:\\Unreal Projects\\StackOBot57\\Saved\\StagedBuilds\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe | X:\\UE_Analyze_Data\\Varies Version builds\\5.7\\Stack_O_Bot\\DebugGame\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe"
+  },
+  "UE5.8-StackOBotDbgGame": {
+   "ghidra_project": "StackOBot_DebugGame_UE58",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\DebugGame\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\DebugGame\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.pdb",
+   "pdb_size_bytes": 331599872,
+   "steam_buildid": null,
+   "binary_size_bytes": 343084544,
+   "binary_sha256": "c03ed29b78d922fab1f87cfdc01e6c65b5fcd24ff1ae39175cd23dd3d9fbb2ea",
+   "binary_md5": "50d93a1a3861f1a5a23c4bdf82c8bee7",
+   "duplicate_copies": [
+    "D:\\Unreal Projects\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe",
+    "X:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\DebugGame\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): D:\\Unreal Projects\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe | X:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Stack_O_Bot\\DebugGame\\Windows\\StackOBot\\Binaries\\Win64\\StackOBot-Win64-DebugGame.exe"
+  },
+  "UE5.8-TitanDbgGame": {
+   "ghidra_project": "Titan_DebugGame_UE58",
+   "source": "self-built",
+   "steam_app_id": null,
+   "steam_installdir": null,
+   "binary_relpath": null,
+   "binary_last_seen": "D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Binaries_DebugGame\\Win64\\Titan-Win64-DebugGame.exe",
+   "needs_pdb": true,
+   "pdb_relpath": "D:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Binaries_DebugGame\\Win64\\Titan-Win64-DebugGame.pdb",
+   "pdb_size_bytes": 414068736,
+   "steam_buildid": null,
+   "binary_size_bytes": 356181504,
+   "binary_sha256": "97c755df71185a96c52fc6ef6dfecb23f5f1bbe40b21027028a3aeb0e89f7d2e",
+   "binary_md5": "4d168828d77a545998f42b536989458e",
+   "duplicate_copies": [
+    "X:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Binaries_DebugGame\\Win64\\Titan-Win64-DebugGame.exe"
+   ],
+   "provenance": "ghidra-metadata",
+   "notes": "Built by the maintainer; recreating it needs that exact engine version installed plus a repackage. | DUPLICATE COPIES (byte-identical, verified by md5): X:\\UE_Analyze_Data\\Varies Version builds\\5.8\\Binaries_DebugGame\\Win64\\Titan-Win64-DebugGame.exe"
   },
   "UE4.18-FF7R": {
    "ghidra_project": "FF7R",
@@ -703,16 +1092,13 @@
    "needs_pdb": false,
    "pdb_relpath": "H:\\SteamLibrary\\steamapps\\common\\Palworld\\Pal\\Binaries\\Win64\\Palworld-Win64-Shipping.pdb",
    "pdb_size_bytes": null,
-   "steam_buildid": "24181527",
-   "binary_size_bytes": 161348096,
-   "binary_sha256": "2ff94a03bc777661be100249b4940242f70661d890c6b8f8aca4d6dce79ee5a5",
+   "steam_buildid": null,
+   "binary_size_bytes": null,
+   "binary_sha256": null,
    "binary_md5": "fb10d568f6a3ad2a74572ca46a73af20",
-   "duplicate_copies": [
-    "D:\\UE_Analyze_Data\\Game Binary backup\\Palworld\\Palworld-Win64-Shipping.exe",
-    "X:\\UE_Analyze_Data\\Game Binary backup\\Palworld\\Palworld-Win64-Shipping.exe"
-   ],
+   "duplicate_copies": [],
    "provenance": "ghidra-metadata",
-   "notes": "DUPLICATE COPIES (byte-identical, verified by md5): D:\\UE_Analyze_Data\\Game Binary backup\\Palworld\\Palworld-Win64-Shipping.exe | X:\\UE_Analyze_Data\\Game Binary backup\\Palworld\\Palworld-Win64-Shipping.exe"
+   "notes": "BINARY DRIFTED — the file at this path is NOT the build Ghidra imported. Steam serves only the current build, so a reinstall cannot restore it; the .rep is the last copy."
   },
   "UE5.3-Avowed": {
    "ghidra_project": "Avowed",

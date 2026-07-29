@@ -106,6 +106,37 @@ same-appid pair, and both are already preserved in `corpus-provenance.tsv` as ha
 `STEAMDB-MANIFEST` entries. Regenerating is safe; `--merge` is a nice-to-have because the nulling
 is *silent*, not because data is at risk.
 
+### Manifest regenerated — and `duplicate_copies` turned out to lie on drifted rows
+
+`build_corpus_manifest.py` re-run: **38 → 57 entries**, `preflight.py` **DRIFT → `GO (exit 0)`**,
+`pdb gaps 19 → 4`, `wrong build 1 → 0`, `unknown 16 → 0`. Cost was exactly the predicted one row —
+Palworld's `steam_buildid` / size / sha256 nulled, all three already in `corpus-provenance.tsv`.
+
+The before/after diff caught something the generator's own output cannot show, since it prints only
+`N tags -> path`: for Palworld it wrote **"the `.rep` is the last copy"** and `duplicate_copies: []`,
+when two byte-identical copies of the corpus build exist. `duplicate_copies` is computed against
+today's bytes at `binary_last_seen`, not against the retained `binary_md5` — so it is wrong exactly
+for the rows that need it, and unlike a nulled field it makes a **positive false claim**. Tracked in
+todo.md; fix is to match on `binary_md5`, which also subsumes the `--merge` idea.
+
+### `tools/pe/pdb_match.py` — "can I trust this PDB for this binary?"
+
+A matching filename proves nothing: a PDB from a different build of the same game loads without
+complaint and yields plausible-looking wrong addresses. The tool compares the PE's CodeView
+**GUID + Age** against the PDB's info stream (fresh GUID per link, so a rebuild cannot fake it),
+then checks the publics stream is not a stripped shell. `--scan` walks a backup tree.
+
+Self-tested both ways before use — a known-good pair passes, and the 5.4 Shipping exe against the
+5.4 Development PDB is correctly rejected. (The first run failed on a known-good pair and caught a
+real bug: `IMAGE_DEBUG_DIRECTORY.AddressOfRawData` @20 was being used as a file offset instead of
+`PointerToRawData` @24, which silently reads as "no CodeView record".)
+
+Applied to `Game Binary backup`: **9/9 pairs valid**, and 6 of the 7 that are corpus oracles
+reproduce their recorded `GS_TRUE` byte-for-byte. The 7th (Solarpunk) differs only cosmetically —
+`GObjects=A|B` is a set, not an ordered pair, and its GNames legitimately has no `pdb_globals`
+route. Recorded in tools/README.md: **the strongest PDB check is reproducing a row you already
+have**, not the pairing test.
+
 ### The full sweep — 65 programs / 52 oracles, UE 4.10-5.8 (70 / 55 after 5.4)
 
 54 rows, run end to end for the first time since the 5.3 / 4.15 / 4.27.2 additions. The 5.8.1

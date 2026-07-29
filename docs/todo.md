@@ -19,12 +19,12 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
-## ▶ Corpus state as of 2026-07-29 (build 2504) — the sweep is CURRENT
+## ▶ Corpus state as of 2026-07-29 (build 2505) — the sweep is CURRENT
 
-`sweep.sh` is at **54 rows**. A **full** sweep ran 2026-07-29 and `out/sweep/REPORT.md`,
-`Himmel.h`'s header counts (**65 programs / 52 oracles**, UE **4.10–5.8**) and this file all agree.
-Nothing in the corpus is stale or blocked. The 5.8.1 Development row that was waiting on a Ghidra
-lock has been swept; its lock is gone.
+`sweep.sh` is at **57 rows**. A full sweep ran 2026-07-29 (plus a filtered re-run for the three new
+5.4 rows) and `out/sweep/REPORT.md`, `Himmel.h`'s header counts (**70 programs / 55 oracles**, UE
+**4.10–5.8**) and this file all agree. `preflight.py` returns **`GO (exit 0)`** — the manifest was
+regenerated and covers exactly the 57 sweep tags. Nothing is stale or blocked.
 
 **One ❌ in the regression matrix, and it is deliberate: UE 4.10 GObjects on both rows. Leave it.**
 It measures the pre-4.11 support floor rather than asserting it — full reasoning in `Himmel.h`'s
@@ -45,47 +45,39 @@ packaging and no compiler** — copy, `pdb_globals.py`, import `-noanalysis`, ad
 
 -----
 
-## `preflight.py` reports DRIFT — regenerate the manifest (measured safe)
+## `build_corpus_manifest.py`: on a DRIFTED row, `duplicate_copies` states a FALSEHOOD
 
-*Parent: the 2026-07-29 corpus growth; [dev-log.md](dev-log.md) builds 2503/2505.*
-**Effort S · Risk low — measured, see below.**
+*Parent: the 2026-07-29 manifest regenerate; [dev-log.md](dev-log.md) build 2505.*
+**Effort S · Risk low.**
 
-`py tools/ghidra/preflight.py` → **`verdict: DRIFT (exit 3)`**. Not blocking — it also reports
-`rows selected 54 / sweep-ready 54 / BLOCKING 0`, and the sweep runs green. The 16 rows are every
-self-built or engine-shipped oracle added across the last two sessions (4.10 ×2, 4.15 ×2, 4.23
-DbgG, 4.27 ×3, 5.3 ×3, the 5.7.4/5.8 DebugGame trio, …).
+**The DRIFT itself is fixed** — the manifest was regenerated 2026-07-29, went 38 → 57 entries, and
+`preflight.py` now returns **`GO (exit 0)`** with `pdb gaps 19 → 4`, `wrong build 1 → 0`,
+`unknown 16 → 0`. The predicted cost was exactly one row: Palworld's `steam_buildid` /
+`binary_size_bytes` / `binary_sha256` were nulled, all three preserved in `corpus-provenance.tsv`.
+Nothing else changed (0 gained, 0 altered).
 
-`build_corpus_manifest.py` has no merge mode — it fully regenerates, and by design **NULLs
-`steam_buildid` / size / sha256 on any row whose on-disk bytes are no longer the corpus bytes**.
-Palworld has drifted, so a regenerate silently discards the buildid pointing at its `.rep`'s build.
+**But the diff exposed a worse sibling of the nulling, and this one is not benign.** For Palworld
+the regenerate wrote:
 
-### ✅ MEASURED 2026-07-29 — just regenerate. The earlier "add `--merge` first" advice was wrong.
+> `BINARY DRIFTED — ... the .rep is the last copy.`
 
-That advice came from counting **24 rows carry a `steam_buildid`** and treating all 24 as exposed.
-Wrong: losing a buildid only *matters* if the corpus bytes are also gone, and they are not.
-`D:\UE_Analyze_Data\Game Binary backup` (30 games / 11 GB) was hashed against the manifest's
-import-time `binary_md5` — **24 rows are byte-identical to the corpus build, Palworld included** —
-and `Game archive` / `Varies Version builds` cover the archive and self-built rows. Across the
-whole manifest:
+**That is false.** Two byte-identical copies of the corpus build exist (`Game Binary backup` on D:
+and its X: mirror), proven by md5 against the manifest's own retained `binary_md5`. `duplicate_copies`
+went `2 → 0` for that row.
 
-```
-0 byte-identical copies :  2 rows      <-- the entire exposure
-2 copies                : 33 rows
-3 copies                :  3 rows
-```
+Root cause is the same as the nulling — describing *today's file* rather than *the corpus build* —
+but the consequence is worse. A nulled field reads as **unknown**; `duplicate_copies: []` plus that
+note is a **positive claim** that drives the opposite decision ("never drop this `.rep`") from the
+truth ("the bytes are safe in two places"). It is wrong precisely for the rows that need it most,
+because only a drifted row can hit it.
 
-**`steam_buildid` is a last-resort recovery route, and 36 of 38 rows never need it.** The two that
-do are `UE5.5-Everspace2` and `UE5.5-Everspace2b` — the known same-appid pair where only one build
-can be installed at a time (`ES2-0517.rep` is flagged never-drop for exactly this). And **both are
-already preserved in `corpus-provenance.tsv`** as hand-resolved `STEAMDB-MANIFEST` entries with
-their reasoning: `4415922863161237626` and `735055807809773736`. `UE5.5-Everspace2` already carries
-`buildid=None`, so there is literally nothing left to lose there.
+Fix shape: match duplicates against the retained **`binary_md5`** (which the generator already
+holds and deliberately never nulls) instead of re-hashing whatever sits at `binary_last_seen`
+today. That also subsumes the `--merge` idea — carry a previously-verified identity forward, marked
+as carried-not-reverified, exactly as `binary_md5` is already treated.
 
-So: **regenerate.** It also picks up the 16 missing rows, the new 4.10/5.4 binaries, and refreshes
-`duplicate_copies`. `--merge` drops to a nice-to-have — worth doing eventually because the nulling
-is *silent* (the generator prints only `N tags -> path`), not because data is at risk today.
-Precondition, and it is cheap: confirm those two Everspace 2 rows are still in
-`corpus-provenance.tsv` before running.
+Until then: **on any row whose notes say DRIFTED, do not trust `duplicate_copies`** — check
+`corpus-provenance.tsv` and grep the archive roots for the `binary_md5`.
 
 -----
 
