@@ -97,7 +97,7 @@ and still take 22,000 hits on a real game, which is exactly how `GWLD_V3` and `G
 
 ## 4. Design — BUILT 2026-07-29 (step 5)
 
-> **SHIPPED.** `tools/ghidra/extract_blocks.py` produced **340 blocks / 195 KB** from
+> **SHIPPED.** `tools/ghidra/extract_blocks.py` produced **340 blocks / 146 KB** from
 > **22 self-built oracles**, and `tools/ghidra/blocktest.py` runs them in seconds with
 > no Ghidra and no corpus. Wired into `.github/workflows/ci.yml` — **the first and only
 > automated check on `Himmel.h`'s patterns.**
@@ -166,13 +166,28 @@ that §2 means you do not have to, so the cheapest resolution is to not take the
 > * **§6's index: no legal call needed.** It stores frequencies, not code. Settled.
 > * **§4's blocks: the THIRD-PARTY question is gone; §1's question is NOT.** `extract_blocks.py`
 >   enforces `source == self-built` in code, so no third-party game bytes ship — that was §2's
->   point and it holds. But the blocks still ship **26.6 KB of real compiled code** (340 × 80-byte
->   windows, ≈0.028% of one binary), and by §1's own reasoning that is *"MSVC's codegen from Epic's
+>   point and it holds. But the blocks still ship **10.4 KB of real compiled code** (340 × pattern-sized
+>   windows → shrunk to **10.4 KB**, ≈0.011% of one binary), and by §1's own reasoning that is
+>   *"MSVC's codegen from Epic's
 >   engine source … whose work it is needs a lawyer, not a heuristic."* Building it yourself does
 >   not make the bytes yours.
 >
+> **Context that reframes the scale, measured 2026-07-30.** `Himmel.h` has shipped **3,268 bytes of
+> byte patterns extracted from real binaries** for years — and their source tags are overwhelmingly
+> THIRD-PARTY shipped games (`DI427` DropIn, `ES2` Everspace 2, `SF`/`SAT*` Satisfactory, `SP57`
+> Solarpunk, `TQ` Titan Quest 2, `RE`/`FF7R` FF7 Remake, `AV53` Avowed, `PAL51` Palworld, `MEL55`
+> Meltopia, `OT` Octopath). The repo's core artifact already IS byte sequences from third-party
+> binaries. The blocks are **self-built only, i.e. strictly better provenance than what already
+> ships**, and after shrinking they are **3.3×** that existing footprint rather than 8.3×.
+>
+> ⚠ They are not identical in *character*, and that should not be glossed: `Himmel.h` patterns are
+> wildcarded and discontinuous, mined as identifiers (strongly functional); blocks are verbatim
+> contiguous windows (more excerpt-like). That difference is exactly why the windows were shrunk
+> from a fixed 80 bytes to pattern-sized — 61% less code for an identical test (negative controls
+> still fail 64 and 15 blocks respectively).
+>
 > So the position improved from "third-party studios' code, unknown quantity" to "Epic engine
-> codegen, 26.6 KB, self-built, de minimis, interoperability purpose" — much more defensible, and
+> codegen, 10.4 KB, self-built, de minimis, interoperability purpose" — much more defensible, and
 > still not *cleared*. An earlier draft of this box said "resolved by construction"; that
 > overstated it. If the remaining exposure is ever unwanted, the blocks are regenerable from
 > `extract_blocks.py` and could ship as hashes only, at the cost of the regression test.

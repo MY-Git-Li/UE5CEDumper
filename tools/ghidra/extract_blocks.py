@@ -35,7 +35,13 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SWEEP = os.path.join(REPO, "tools", "ghidra", "sweep.sh")
 MANIFEST = os.path.join(REPO, "tools", "ghidra", "corpus-manifest.json")
 OUTDIR = os.path.join(REPO, "tools", "ghidra", "blocks")
-PRE, POST = 24, 56                                          # window: bytes before / after the match
+# Window = MARGIN bytes before the match + the match itself + MARGIN after. Sized to the pattern,
+# not a fixed 80 bytes: a block only has to let `blocktest.py` re-find the match and read its
+# displacement, and every byte beyond that is engine code shipped for nothing. Fixed 24/56 cost
+# 26.6 KB; pattern-relative costs 10.6 KB for an identical test. The small leading margin is
+# deliberate — it keeps the match at a non-zero offset, so the test still exercises the SEARCH
+# rather than matching at position 0 by construction.
+MARGIN = 4
 
 
 def sweep_rows():
@@ -133,8 +139,9 @@ def main():
                     k = (tgt, cls)
                     if len(kept.get(k, [])) >= a.per_site:
                         continue
-                    start = max(0, p - PRE)
-                    win = buf[start:p + POST]
+                    plen = len(r["pattern"].split())
+                    start = max(0, p - MARGIN)
+                    win = buf[start:p + plen + MARGIN]
                     if len(win) < 16:
                         continue
                     h = hashlib.sha256(win).hexdigest()
@@ -167,7 +174,7 @@ def main():
                 "docs/aob-block-library-eval.md §1/§2. Each block is a small window around a site "
                 "a pattern matched, plus the VA that match RESOLVES to, so blocktest.py can assert "
                 "resolution and not merely 'bytes still match'.",
-        "window": {"pre": PRE, "post": POST},
+        "window": {"margin": MARGIN, "sizing": "match length + margin on each side"},
         "blocks": blocks,
     }
     outp = os.path.join(a.out, "blocks.json")
