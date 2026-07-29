@@ -6,8 +6,16 @@ so it neither proves anything nor shows up as missing. `preflight.py` cannot see
 `sweep.sh` outward to the files, so a binary no row mentions is outside its world entirely.
 
 Source of truth is `corpus-manifest.json`'s `binary_last_seen` (+ `duplicate_copies`), which records
-the exact path Ghidra imported. Do NOT re-derive this by parsing project `.prp` files — an earlier
-attempt did and matched 0 of 30, including rows imported the same day.
+the exact path Ghidra imported.
+
+⚠ Do NOT re-derive this by parsing project `.prp` files. An earlier attempt did and matched 0 of 30
+— including rows imported the same day — because **`.prp` holds the program NAME only; the
+executable path lives inside the packed `.db`**. `preflight.py:579` already documents exactly this
+("The original `executablePath` is NOT here — it lives inside the packed .db"), and
+`build_corpus_manifest.py` gets it the working way, by scanning the `.db` gbf files (`_scan_gbf`).
+Note the failure mode: a wrong reader here returns *plausible emptiness*, not an error — every row
+reads as "not swept", which looks like a finding. Cross-check any inventory that reports a suspicious
+100% against a second source before believing it.
 
     py tools/ghidra/inventory_builds.py            # table + the unswept list
     py tools/ghidra/inventory_builds.py --md       # markdown, for docs/reference-builds.md
