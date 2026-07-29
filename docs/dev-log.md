@@ -114,10 +114,29 @@ Palworld's `steam_buildid` / size / sha256 nulled, all three already in `corpus-
 
 The before/after diff caught something the generator's own output cannot show, since it prints only
 `N tags -> path`: for Palworld it wrote **"the `.rep` is the last copy"** and `duplicate_copies: []`,
-when two byte-identical copies of the corpus build exist. `duplicate_copies` is computed against
-today's bytes at `binary_last_seen`, not against the retained `binary_md5` — so it is wrong exactly
-for the rows that need it, and unlike a nulled field it makes a **positive false claim**. Tracked in
-todo.md; fix is to match on `binary_md5`, which also subsumes the `--merge` idea.
+when two byte-identical copies of the corpus build exist.
+
+**The first diagnosis of that was wrong, and the correction is the interesting part.** It was not
+"compares today's bytes instead of `binary_md5`" — the md5 test has always used Ghidra's
+import-time hash. The cause was a **size prefilter** sizing candidates against whatever sits at
+`binary_last_seen` *today*; on a drifted row that is the replacement build, so the surviving copy
+(old size) was skipped **before its md5 was computed**. A fast path whose guard assumed "the file
+on disk is the corpus build" — false precisely where the field matters. Fixed with
+`size_prefilter=(state == 'MATCH')`; Palworld goes **0 → 2** copies. Unlike a nulled field, which
+reads as *unknown*, `[]` plus that note was a positive false claim.
+
+### PE link timestamps: real below ~5.3, `/Brepro` content hashes above it
+
+Asked whether a build's own time could stand in for file mtime (which dates the copy, not the
+build). Measured: **4.10 / 4.15 / 4.23 / 4.27 / 5.1 carry REAL link times** (4.10.4 reads
+`2016-02-19`), while **5.3 / 5.4 / 5.7 / 5.8 are `/Brepro`** — the field holds a content hash.
+
+A plausible date proves nothing: ~1 in 5 hashes lands in a 2000-2030 window, and the corpus holds
+two traps — 5.7 StackOBot reads `2022-09-28` (before 5.7 existed) and 5.4 Development reads the
+very day it was checked. Discriminators that work: **cross-config spread** (configs of one build
+link minutes apart; 5.4 Shipping vs Development are 393,153,207 s apart) and sanity against the
+engine's release. Conclusion recorded in todo.md: corroborating signal on <=5.1 only, never alone,
+and for "is this the same build?" use `binary_md5` or a PDB's CodeView GUID instead.
 
 ### `tools/pe/pdb_match.py` — "can I trust this PDB for this binary?"
 

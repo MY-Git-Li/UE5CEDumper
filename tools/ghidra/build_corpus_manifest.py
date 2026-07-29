@@ -274,14 +274,26 @@ def _dupe_index(roots=None):
     return idx
 
 
-def find_duplicate_copies(target, want_md5, roots=None, name_hint=None):
+def find_duplicate_copies(target, want_md5, roots=None, name_hint=None, size_prefilter=True):
     """Other paths holding byte-identical bytes. Name-indexed, then md5-confirmed — a same-name
     same-size file is NOT proof (a repackage emits a fresh PE at identical size; measured on
     UE423_Flying, 43f6b130 vs f61ec1be).
 
     `name_hint` lets a GONE row still be searched: the filename comes from the Ghidra record
     rather than from a file that no longer exists. That case is the whole point — a row whose
-    binary is missing is exactly the one where a surviving copy matters most."""
+    binary is missing is exactly the one where a surviving copy matters most.
+
+    ⚠ `size_prefilter` MUST be False unless the file at `target` IS the corpus build. The md5 test
+    below has always compared against `want_md5` (Ghidra's import-time hash = the corpus build), so
+    the comparison was never the problem — but the prefilter sized candidates against the file
+    *currently* at `target`, which on a DRIFTED row is the build that REPLACED the corpus one. The
+    surviving corpus copy has the old size, so it was skipped before its md5 was ever computed.
+    Measured 2026-07-29: Palworld reported `duplicate_copies: []` and the note "the .rep is the
+    last copy" while TWO byte-identical copies sat in `Game Binary backup`. That is worse than a
+    nulled field — a null reads as *unknown*, this was a positive false claim, and it fired only on
+    drifted rows, i.e. exactly the rows the field exists to protect. Classic shape: an optimisation
+    correct only under an assumption ("the file on disk is the corpus build") that is precisely
+    false where it matters."""
     if not want_md5:
         return []
     base = os.path.basename(name_hint or target or '').lower()
@@ -289,20 +301,20 @@ def find_duplicate_copies(target, want_md5, roots=None, name_hint=None):
         return []
     out = []
     tnorm = os.path.normcase(os.path.abspath(target)) if target else None
-    size = os.path.getsize(target) if (target and os.path.isfile(target)) else None
+    size = (os.path.getsize(target)
+            if (size_prefilter and target and os.path.isfile(target)) else None)
     for cand in _dupe_index(roots).get(base, ()):
-            if True:
-                if tnorm and os.path.normcase(os.path.abspath(cand)) == tnorm:
-                    continue
-                try:
-                    # Size is only a cheap prefilter; md5 is the real test. A GONE row has no
-                    # live file to size against, so it goes straight to the hash.
-                    if size is not None and os.path.getsize(cand) != size:
-                        continue
-                    if hashes(cand)[0] == want_md5:
-                        out.append(cand)
-                except OSError:
-                    pass
+        if tnorm and os.path.normcase(os.path.abspath(cand)) == tnorm:
+            continue
+        try:
+            # Size is only a cheap prefilter; md5 is the real test. A GONE or DRIFTED row has no
+            # trustworthy live size, so it goes straight to the hash.
+            if size is not None and os.path.getsize(cand) != size:
+                continue
+            if hashes(cand)[0] == want_md5:
+                out.append(cand)
+        except OSError:
+            pass
     return sorted(out)
 
 
@@ -329,9 +341,16 @@ def write_json(entries, path):
                         + ', '.join(sorted(p['program'] for p in progs))
                         + f'; anchor = {a["program"]}')
         if a['state'] == 'DRIFTED':
+            # "the .rep is the last copy" is a claim about the WHOLE machine, so it may only be
+            # made when the duplicate search came back empty. It was previously unconditional and
+            # therefore printed next to a DUPLICATE COPIES line listing two surviving copies —
+            # self-contradictory, and the wrong half is the one that drives a keep/drop decision.
             note.append('BINARY DRIFTED — the file at this path is NOT the build Ghidra '
-                        'imported. Steam serves only the current build, so a reinstall '
-                        'cannot restore it; the .rep is the last copy.')
+                        'imported. Steam serves only the current build, so a reinstall cannot '
+                        'restore it'
+                        + ('; the .rep is the last copy.' if not a['dupes'] else
+                           ', but byte-identical copies of the corpus build survive elsewhere '
+                           '(see duplicate_copies) — this row is NOT single-copy.'))
         if a['state'] == 'GONE':
             note.append('BINARY GONE — title uninstalled; reinstall to re-import.')
         if a['acq'] == 'ARCHIVE':
@@ -479,8 +498,12 @@ def main():
             # matches the md5 Ghidra imported. And skipping GONE rows meant the search was
             # skipped precisely when a surviving copy matters most: all six GONE rows turned out
             # to have md5-identical twins under "D:\UE_Analyze_Data\Game Binary backup".
+            # size_prefilter ONLY when today's file IS the corpus build. On DRIFTED/GONE it would
+            # size candidates against the wrong build and hide the surviving copy — see the
+            # warning in find_duplicate_copies.
             dupes = ([] if a.no_hash
-                     else find_duplicate_copies(today, rec['exe_md5'], name_hint=gp))
+                     else find_duplicate_copies(today, rec['exe_md5'], name_hint=gp,
+                                                size_prefilter=(state == 'MATCH')))
             entries.setdefault(tag, []).append({
                 'tag': tag, 'role': role, 'project': proj, 'program': pname, 'selected': sel,
                 'acq': acq, 'appid': appid, 'installdir': installdir, 'lib': lib_today,

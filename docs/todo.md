@@ -45,39 +45,55 @@ packaging and no compiler** — copy, `pdb_globals.py`, import `-noanalysis`, ad
 
 -----
 
-## `build_corpus_manifest.py`: on a DRIFTED row, `duplicate_copies` states a FALSEHOOD
+## Build-identity signals: what `duplicate_copies` and PE link timestamps can and cannot tell you
 
 *Parent: the 2026-07-29 manifest regenerate; [dev-log.md](dev-log.md) build 2505.*
-**Effort S · Risk low.**
+**Effort S · Risk low. The `duplicate_copies` half is FIXED; the timestamp half is a rule to follow.**
 
-**The DRIFT itself is fixed** — the manifest was regenerated 2026-07-29, went 38 → 57 entries, and
-`preflight.py` now returns **`GO (exit 0)`** with `pdb gaps 19 → 4`, `wrong build 1 → 0`,
-`unknown 16 → 0`. The predicted cost was exactly one row: Palworld's `steam_buildid` /
-`binary_size_bytes` / `binary_sha256` were nulled, all three preserved in `corpus-provenance.tsv`.
-Nothing else changed (0 gained, 0 altered).
+### FIXED — `duplicate_copies` was silently empty on exactly the rows that need it
 
-**But the diff exposed a worse sibling of the nulling, and this one is not benign.** For Palworld
-the regenerate wrote:
+The regenerate wrote, for Palworld: `duplicate_copies: []` and *"the `.rep` is the last copy"* —
+while **two** byte-identical copies of the corpus build sat in `Game Binary backup`.
 
-> `BINARY DRIFTED — ... the .rep is the last copy.`
+⚠ **The first diagnosis of this was wrong and the correction matters.** It was NOT "compares
+against today's bytes instead of `binary_md5`" — line 302 has always compared against
+`rec['exe_md5']`, Ghidra's import-time hash, i.e. the corpus build. The real cause was a **cheap
+size prefilter** sizing candidates against whatever file sits at `binary_last_seen` *today*. On a
+DRIFTED row that is the build which REPLACED the corpus one, so the surviving copy — which has the
+old size — was skipped **before its md5 was ever computed**. An optimisation valid only under the
+assumption "the file on disk is the corpus build", which is precisely false where it matters.
 
-**That is false.** Two byte-identical copies of the corpus build exist (`Game Binary backup` on D:
-and its X: mirror), proven by md5 against the manifest's own retained `binary_md5`. `duplicate_copies`
-went `2 → 0` for that row.
+Fixed by passing `size_prefilter=(state == 'MATCH')`. Verified: Palworld `0 → 2` copies.
+**Generalise the shape, it is the reusable part:** when a fast path guards a correct check, ask
+what the guard assumes — a wrong guard makes the correct check unreachable and looks like a
+confident negative. Note also that a null reads as *unknown* while `[]` plus that note is a
+**positive false claim**, which is why this was worse than the `steam_buildid` nulling.
 
-Root cause is the same as the nulling — describing *today's file* rather than *the corpus build* —
-but the consequence is worse. A nulled field reads as **unknown**; `duplicate_copies: []` plus that
-note is a **positive claim** that drives the opposite decision ("never drop this `.rep`") from the
-truth ("the bytes are safe in two places"). It is wrong precisely for the rows that need it most,
-because only a drifted row can hit it.
+### RULE — never read a PE `TimeDateStamp` as a date without proving it is one
 
-Fix shape: match duplicates against the retained **`binary_md5`** (which the generator already
-holds and deliberately never nulls) instead of re-hashing whatever sits at `binary_last_seen`
-today. That also subsumes the `--merge` idea — carry a previously-verified identity forward, marked
-as carried-not-reverified, exactly as `binary_md5` is already treated.
+Worth knowing because file mtime dates the *copy*, not the build, and the COFF `TimeDateStamp`
+looks like the fix. Sometimes it is. **From UE ~5.3 on it is not** — builds are linked `/Brepro`
+(reproducible), which overwrites that field with a **content hash**. Measured across the corpus:
 
-Until then: **on any row whose notes say DRIFTED, do not trust `duplicate_copies`** — check
-`corpus-provenance.tsv` and grep the archive roots for the `binary_md5`.
+| | link timestamp |
+|---|---|
+| 4.10 / 4.15 / 4.23 / 4.27 / 5.1 | REAL — 4.10.4 reads `2016-02-19`, Everspace 4.20 `2019-09-27` |
+| 5.3 / 5.4 / 5.7 / 5.8 (+ Avowed, Meltopia, TQ2, Solarpunk) | **`/Brepro` hash — not a time** |
+
+**A plausible-looking date proves nothing.** Roughly a fifth of 32-bit hashes land inside a
+2000–2030 window, and the corpus contains two live traps: UE **5.7** StackOBot reads `2022-09-28`
+(before 5.7 existed) and **5.4 Development** reads `2026-07-29 20:42` — *the day it was checked*.
+
+Two discriminators that do work:
+1. **Cross-config spread.** Configs of one build link minutes apart. Measured on 5.4:
+   Shipping `2039-01-13` vs Development `2026-07-29` — **393,153,207 s apart**, impossible.
+2. **Sanity against the engine.** A timestamp predating the engine version's release is a hash.
+
+So: usable as a **corroborating** signal on ≤5.1, never alone, and never on 5.3+. When the question
+is "is this the same build?", **skip timestamps entirely** — `binary_md5` answers it exactly, and
+for a PDB the CodeView **GUID+Age** (`tools/pe/pdb_match.py`) is a true per-link identity. A
+`/Brepro` hash is still a deterministic per-link value, so it works as a weak identity — just
+never as a clock.
 
 -----
 
