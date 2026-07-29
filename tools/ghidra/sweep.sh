@@ -217,6 +217,42 @@ ROWS=(
 "UE5.3-ThirdPerson|ThirdPerson53_Shipping|-|GObjects=146859320|146859330,GNames=1467b2f80,GWorld=1469c6208,SparseDelegates=1465f1650,GEngine=1469c3418"
 "UE5.3-ThirdPersonDev|ThirdPerson53_Development|-|GObjects=14e7b1b90|14e7b1ba0,GNames=14e6d9640,GWorld=14e99c0a8,SparseDelegates=14e527700,GEngine=14e997078"
 "UE5.3-ThirdPersonDbgGame|ThirdPerson53_DebugGame|-|GObjects=14e7c4b90|14e7c4ba0,GNames=14e6ec640,GWorld=14e9af0a8,SparseDelegates=14e53a700,GEngine=14e9aa078"
+# ── UE 5.4.4 ThirdPerson, built by the maintainer in all three configs ────────────────────────
+# Epic stock: CL 35576357, `++UE5+Release-5.4`, IsLicenseeVersion=0, IsPromotedBuild=1.
+# It closes the LAST UE5 version with no symbolised oracle. Elliot was the corpus's only 5.4 and
+# its truth is disassembly-derived with no PDB, so every 5.4 claim rested on that single unproven
+# reading; now Elliot can be checked against a stock build of its own version.
+#
+# ⚠ THE PATCH VERSION IS THE POINT: 5.4.4 is EXACTLY MindsEye's engine version. docs/
+# mindseye-fork-notes.md is a full re-derivation playbook for a UE 5.4.4 LICENSEE FORK (reordered
+# FChunkedFixedUObjectArray, 32-byte FUObjectItem with UObject*@+0x10, XOR-obfuscated FNameEntry)
+# whose "this is what the fork CHANGED" claims were all measured against inference about stock 5.4.
+# These rows are that missing control — same version, same patch, Epic-stock. Anything MindsEye
+# does differently is now a measurable delta rather than an attribution.
+#
+# Truth is double-derived and the two agree on all five, all three configs: `pdb_globals.py` and a
+# full 151-pattern byte replay. Shipping consensus is strong across the board (GObjects n=5 on the
+# +0x10 alias, GNames n=13, GWorld n=15, Sparse n=3, GEngine n=5) — no thin single-voter cells
+# like the 4.10 rows have.
+# NOTE this is a PACKAGED ThirdPerson project, not the engine's prebuilt UnrealGame target. That
+# was deliberate: the prebuilt target is free but content-free, so it cannot serve the
+# gameplay-feature matrix (no ACharacter to possess). These binaries serve both jobs.
+"UE5.4-ThirdPerson|ThirdPerson54_Shipping|-|GObjects=1478245d0|1478245e0,GNames=14776d880,GWorld=1479a46f0,SparseDelegates=1475a52a0,GEngine=1479a1318"
+# ⚠ THE DEV/DEBUGGAME PAIR CLOSED THE non-Shipping GNames BISECTION, and the answer is 5.4.
+# Measured 2026-07-29 — the transition is between 5.3 and 5.4, one version, not the 5.4-5.6 band
+# this pair was expected only to narrow:
+#     5.3 Dev + DbgG : GNames 15/15 patterns correct, lands GNAM_ES53_1, 0 wasted
+#     5.4 Dev + DbgG : GNames  1/6  patterns correct, lands GNAM_V1, 2240 wasted   <-- the edge
+#     5.7.4 DbgG     : GNames  1/8  patterns correct, lands GNAM_V1, 2199 wasted
+# Both 5.4 configs are byte-for-byte identical in behaviour (same 2240), consistent with UE
+# building DebugGame's ENGINE modules optimized like Development. So 5.5/5.6 are NO LONGER NEEDED
+# for this question — anything they add is coverage, not bisection. If a fix pattern is ever mined,
+# THIS is the pair to mine it against: 5.3-vs-5.4 is the smallest interval containing the change.
+# Bonus corroboration: the Shipping row's profile tracks UE5.4-Elliot (GObjects 8/15 vs 9/15,
+# GNames 13/16 vs 13/17, GWorld 15/16 vs 13/14), which independently supports Elliot's
+# hand-derived, PDB-less truth — the first check that row has ever had.
+"UE5.4-ThirdPersonDev|ThirdPerson54_Development|-|GObjects=14fce7520|14fce7530,GNames=14fbfa7c0,GWorld=14feec7a0,SparseDelegates=14f9d21d0,GEngine=14fee7570"
+"UE5.4-ThirdPersonDbgGame|ThirdPerson54_DebugGame|-|GObjects=14fcf7520|14fcf7530,GNames=14fc0a7c0,GWorld=14fefc7a0,SparseDelegates=14f9e21d0,GEngine=14fef7570"
 "UE5.5-Everspace2|ES2-0517|-|GObjects=149aa7ef0|149aa7ee0,GNames=149c009c0,GWorld=149b37d18,SparseDelegates=149aa7e90,GEngine=149da5810"
 # Second UE 5.5 Everspace 2, two manifests newer (2025-06-17 vs the 05-17 snapshot). Same engine,
 # same studio, different compile — the ONLY same-game cross-build pair in the corpus, and so the

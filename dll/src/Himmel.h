@@ -45,7 +45,7 @@
 //      table above the arrays — not from how new it is or who contributed it.
 //   5. VERIFY IT AGAINST THE CORPUS before trusting it:
 //         bash tools/ghidra/sweep.sh && py tools/ghidra/aggregate_sweep.py out/sweep
-//      65 programs, 52 with ground truth, UE 4.10-5.8. The bar is: correct on the binary
+//      70 programs, 55 with ground truth, UE 4.10-5.8. The bar is: correct on the binary
 //      it was mined from, and zero hits *or* correct everywhere else. A pattern that looks
 //      clean on one binary routinely produces decoys on another engine version — that is the
 //      entire point of the multi-binary gauntlet. See tools/ghidra/GROUND-TRUTH.md.
@@ -111,10 +111,11 @@
 //             UE 4.18 fork and UE 5.5), and the SPARSE_X1/X2 pair mined on Grimhook 5.1 that
 //             closed the sparse "n=1" cluster.
 //
-// SWEEP CORPUS as of build 2504 — 65 programs, of which 52 carry ground truth, spanning
+// SWEEP CORPUS as of build 2505 — 70 programs, of which 55 carry ground truth, spanning
 // UE 4.10 through 5.8 and CONTIGUOUS from 4.20 up (the 4.23 hole closed 2026-07-28; the 5.3 rung
 // stopped being partial 2026-07-29 when a stock ThirdPerson build in all three configs replaced
-// Avowed's SparseDelegates-only truth). Those 52 are PROGRAMS not games: a modular Satisfactory
+// Avowed's SparseDelegates-only truth, and stock 5.4.4 landed the same day so EVERY UE5 version
+// now has a symbolised oracle). Those 55 are PROGRAMS not games: a modular Satisfactory
 // project contributes Core + CoreUObject + Engine separately, since each defines different
 // globals. Most come from full PDBs; a handful (4.11 Nekopara, 4.13 Fantasynth, 4.18 FF7 Remake,
 // 4.18 DQ XI S, 4.21 Freud Gate, 4.27 DQ7R, 5.0 Light Maze, 5.4 Elliot) were DERIVED BY

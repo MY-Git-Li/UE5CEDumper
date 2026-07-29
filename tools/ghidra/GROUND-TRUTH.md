@@ -74,7 +74,19 @@ govern. Read that block too before adding, moving or deleting anything. The shor
   a version number**, which is what covers licensee forks that no sample can.
 - **GNames all but collapses on a non-Shipping UE5 build.** It is **config**, not a version
   regression: every Shipping build tested resolves normally, so **no shipped game is affected**.
-  The boundary is between **4.27 and 5.7.4**, NOT at 5.8.
+  **The boundary is 5.3 → 5.4** — BISECTED 2026-07-29 with stock ThirdPerson builds either side:
+
+  | version | non-Shipping GNames | lands on | wasted |
+  |---|---|---|---|
+  | 5.3 Dev + DebugGame | **15/15 patterns correct** | `GNAM_ES53_1` | **0** |
+  | **5.4.4 Dev + DebugGame** | **1/6** | `GNAM_V1` | **2,240** |
+  | 5.7.4 DebugGame | 1/8 | `GNAM_V1` | 2,199 |
+
+  5.4 is already the full collapse, indistinguishable from 5.7.4/5.8.x, and both 5.4 configs report
+  the identical 2,240 (UE builds DebugGame's engine modules optimized like Development). Earlier
+  wordings of this line said "between 4.27 and 5.7.4" and then "somewhere in 5.4–5.6"; both are
+  superseded. **If a fix pattern is ever mined, mine it against 5.3-vs-5.4** — the smallest interval
+  containing the change, with a clean control on one side.
 
   ⚠ **THIS ENTRY WAS WRONG TWICE BEFORE THE SWEEP SETTLED IT — the sequence is the lesson.**
   First written as "a 5.8 thing" (5.7.4 disproved it). Then as "**all 37 patterns miss, n=0**" —
@@ -86,10 +98,12 @@ govern. Read that block too before adding, moving or deleting anything. The shor
   | oracle | GNames verdict |
   |---|---|
   | UE5.7.4-StackOBotDbgGame | ⚠️ `GNAM_V1` after **2,199** wasted validations |
+  | UE5.4-ThirdPersonDev / DbgGame | ⚠️ `GNAM_V1` after **2,240** (each) |
   | UE5.8-StackOBotDbgGame | ⚠️ `GNAM_V1` after **2,369** |
+  | UE5.8.1-StackOBotDev | ⚠️ `GNAM_V1` after **2,372** |
   | UE5.8-TitanDbgGame | ⚠️ `GNAM_V1` after **2,424** |
 
-  crossing `GNAM_CT3`, `G42_1`, `CT4`, `V5`, `V2` each time. **These are the three most expensive
+  crossing `GNAM_CT3`, `G42_1`, `CT4`, `V5`, `V2` each time. **These are the six most expensive
   fall-throughs in the entire corpus** — the next worst is 475 — so the cost is real even though
   the answer is right. `scan_patterns.java` on the real import shows why:
 

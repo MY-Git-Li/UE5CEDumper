@@ -45,32 +45,47 @@ packaging and no compiler** — copy, `pdb_globals.py`, import `-noanalysis`, ad
 
 -----
 
-## `preflight.py` reports DRIFT: 16 of 54 sweep rows have no manifest entry
+## `preflight.py` reports DRIFT — regenerate the manifest (measured safe)
 
-*Parent: the 2026-07-29 corpus growth; [dev-log.md](dev-log.md) builds 2503/2504.*
-**Effort S · Risk med (the fix is destructive).**
+*Parent: the 2026-07-29 corpus growth; [dev-log.md](dev-log.md) builds 2503/2505.*
+**Effort S · Risk low — measured, see below.**
 
 `py tools/ghidra/preflight.py` → **`verdict: DRIFT (exit 3)`**. Not blocking — it also reports
 `rows selected 54 / sweep-ready 54 / BLOCKING 0`, and the sweep runs green. The 16 rows are every
 self-built or engine-shipped oracle added across the last two sessions (4.10 ×2, 4.15 ×2, 4.23
 DbgG, 4.27 ×3, 5.3 ×3, the 5.7.4/5.8 DebugGame trio, …).
 
-**Do not just re-run `build_corpus_manifest.py` to clear it.** It has no merge/additive mode — it
-fully regenerates, and by design **NULLs `steam_buildid` / size / sha256 on any row whose on-disk
-bytes are no longer the corpus bytes**. Palworld has drifted, so a regenerate silently discards the
-buildid pointing at the build its `.rep` was made from. That is why `corpus-provenance.tsv` exists.
+`build_corpus_manifest.py` has no merge mode — it fully regenerates, and by design **NULLs
+`steam_buildid` / size / sha256 on any row whose on-disk bytes are no longer the corpus bytes**.
+Palworld has drifted, so a regenerate silently discards the buildid pointing at its `.rep`'s build.
 
-Three honest options:
-1. **Leave it** (default). The 16 missing rows are the ones with the *least* need for a manifest —
-   they are self-built or shipped inside an installable engine, so their recovery story is "install
-   the engine and copy the prebuilt target", which no hash helps with. The cost is that DRIFT
-   becomes the normal verdict, which erodes the signal.
-2. **Regenerate, accepting the Palworld loss** — defensible *now* but only because
-   `corpus-provenance.tsv` already preserves that buildid. Verify it is still there first, and
-   re-snapshot with `capture_provenance.py` before, not after.
-3. **Add `--merge` to the generator** so new tags are appended and existing rows keep their
-   recorded identity unless their bytes verify. The real fix, and it also removes the trap
-   permanently. Smallest of the three in code, largest in review.
+### ✅ MEASURED 2026-07-29 — just regenerate. The earlier "add `--merge` first" advice was wrong.
+
+That advice came from counting **24 rows carry a `steam_buildid`** and treating all 24 as exposed.
+Wrong: losing a buildid only *matters* if the corpus bytes are also gone, and they are not.
+`D:\UE_Analyze_Data\Game Binary backup` (30 games / 11 GB) was hashed against the manifest's
+import-time `binary_md5` — **24 rows are byte-identical to the corpus build, Palworld included** —
+and `Game archive` / `Varies Version builds` cover the archive and self-built rows. Across the
+whole manifest:
+
+```
+0 byte-identical copies :  2 rows      <-- the entire exposure
+2 copies                : 33 rows
+3 copies                :  3 rows
+```
+
+**`steam_buildid` is a last-resort recovery route, and 36 of 38 rows never need it.** The two that
+do are `UE5.5-Everspace2` and `UE5.5-Everspace2b` — the known same-appid pair where only one build
+can be installed at a time (`ES2-0517.rep` is flagged never-drop for exactly this). And **both are
+already preserved in `corpus-provenance.tsv`** as hand-resolved `STEAMDB-MANIFEST` entries with
+their reasoning: `4415922863161237626` and `735055807809773736`. `UE5.5-Everspace2` already carries
+`buildid=None`, so there is literally nothing left to lose there.
+
+So: **regenerate.** It also picks up the 16 missing rows, the new 4.10/5.4 binaries, and refreshes
+`duplicate_copies`. `--merge` drops to a nice-to-have — worth doing eventually because the nulling
+is *silent* (the generator prints only `N tags -> path`), not because data is at risk today.
+Precondition, and it is cheap: confirm those two Everspace 2 rows are still in
+`corpus-provenance.tsv` before running.
 
 -----
 
@@ -86,20 +101,27 @@ bytes) after **2,199 / 2,369 / 2,372 / 2,424** rejected candidates on 5.7.4-DbgG
 **config, not a version regression**; every Shipping build resolves normally, so **no shipped game
 is affected**:
 
-| | 4.10.4 | 4.15.3 | 4.23.1 | 4.27.2 | **5.3** | 5.7.4 | 5.8.0 | 5.8.1 |
-|---|---|---|---|---|---|---|---|---|
-| Shipping | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ n=11 | ✅ n=11 |
-| Development / DebugGame | ✅ | ✅ (1w) | ✅ n=16 | ✅ n=16 | ✅ **clean** | ❌ **n=0** | ❌ **n=0** | ❌ **n=0** |
+| | 4.10.4 | 4.15.3 | 4.23.1 | 4.27.2 | **5.3** | **5.4.4** | 5.7.4 | 5.8.0 | 5.8.1 |
+|---|---|---|---|---|---|---|---|---|---|
+| Shipping | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ n=11 | ✅ n=11 |
+| Development / DebugGame | ✅ | ✅ (1w) | ✅ n=16 | ✅ n=16 | ✅ **15/15, 0w** | ⚠️ **1/6, 2240w** | ⚠️ 1/8 | ⚠️ | ⚠️ |
 
 ⚠ **The boundary is NOT at 5.8** — the first pass called it a 5.8 thing and that was wrong; 5.7.4
 DebugGame behaves identically.
 
-**Bisected 2026-07-29 to 5.4 / 5.5 / 5.6.** The 5.3 Dev + DebugGame rows land on `GNAM_ES53_1`
-with **zero** wasted validations — not merely "resolves", but *clean*, better than 4.23/4.27. So
-the collapse begins somewhere in **5.4–5.6**, and that is exactly why the next self-built oracles
-are ordered **5.4 → 5.6 → 5.5** (below): 5.4 and 5.6 pin the interval to a single version, and
-whichever way they land 5.5 is then decided or trivially confirmed. 4.10 and 4.15 extend the
-healthy band downward, so this is a UE5-era regression with a sharp edge, not a slow drift.
+### ✅ BISECTION CLOSED 2026-07-29 — the edge is **5.3 → 5.4**
+
+Stock UE 5.4.4 ThirdPerson (all three configs) settled it in **one** install, not the two this item
+budgeted for. 5.3 Dev/DebugGame land `GNAM_ES53_1` with **15/15 patterns correct and zero** wasted
+validations; 5.4 Dev/DebugGame drop to **1/6 correct, landing `GNAM_V1` after 2,240** — already the
+full collapse, indistinguishable from 5.7.4/5.8.x. Both 5.4 configs report the identical 2,240,
+consistent with UE building DebugGame's engine modules optimized like Development.
+
+So **5.5 and 5.6 are no longer needed for this question.** Whatever they add is coverage, not
+bisection. And if a fix pattern is ever mined, **5.3-vs-5.4 is the pair to mine it against** — the
+smallest interval that contains the change, with a clean control on one side.
+
+4.10 and 4.15 extend the healthy band downward, so this is a sharp UE5-era edge, not a slow drift.
 
 **Not project-specific.** A second, unrelated 5.8.0 DebugGame project (Titan) matches StackOBot's
 coverage *down to the individual pattern IDs* — same GObjects quartet, same GWorld n=13, same
@@ -137,32 +159,42 @@ un-importable.
 
 -----
 
-## Next self-built oracles, in order: **5.4 → 5.6 → 5.5**
+## Next self-built oracles: **5.4 and 5.3 are DONE — 5.6 / 5.5 are now OPTIONAL**
 
-*Parent: the 5.3 build, 2026-07-29. Shipped in [dev-log.md](dev-log.md).* **Effort M each · Risk low.**
+*Parent: the 5.3 + 5.4 builds, 2026-07-29. Shipped in [dev-log.md](dev-log.md).*
+**Effort M each · Risk low.**
 
-**5.3 is DONE and it did its job.** Stock UE 5.3 ThirdPerson built in all three configs, imported
-`-noanalysis`, rows added to `sweep.sh`. It was chosen to bisect the non-Shipping GNames collapse
-and the Development row came back **healthy** — GNames lands `GNAM_ES53_1` UNIQUE-OK with no
-fall-through at all, sparse on `SPARSE_ES2_1`. So:
+**Both bisection steps are spent, and they answered the question early.** Stock 5.3 and stock
+5.4.4 ThirdPerson, each built in all three configs, imported `-noanalysis`, rows in `sweep.sh`:
 
-| | 4.10 | 4.15 | 4.23 | 4.27 | **5.3** | 5.4–5.6 | 5.7.4 | 5.8.x |
-|---|---|---|---|---|---|---|---|---|
-| non-Shipping GNames | ✅ | ✅ | ✅ | ✅ | ✅ | **?** | ⚠️ V1 only | ⚠️ V1 only |
+| | 4.10 | 4.15 | 4.23 | 4.27 | **5.3** | **5.4.4** | 5.5 | 5.6 | 5.7.4 | 5.8.x |
+|---|---|---|---|---|---|---|---|---|---|---|
+| non-Shipping GNames | ✅ | ✅ | ✅ | ✅ | ✅ 15/15 | ⚠️ **1/6** | – | – | ⚠️ 1/8 | ⚠️ |
 
-### FOR AOB TRUTH ALONE, 5.4 IS ALREADY FREE — no packaging, no compiler
+**The edge is 5.3 → 5.4.** That was budgeted at two installs (5.4 *and* 5.6) and cost one, because
+5.4 collapsed outright rather than landing mid-interval. **5.5 and 5.6 no longer carry a bisection
+argument** — judge them purely on coverage now:
 
-**UE_5.4 is installed and ships prebuilt `UnrealGame{,-Win64-Shipping,-Win64-DebugGame}.exe` with
-full PDBs** in `Engine/Binaries/Win64` (so do 4.23 / 4.27 / 5.7 / 5.8; 4.10 / 4.15 ship two of the
-three). Copy → `pdb_globals.py` → import `-noanalysis` → add rows. That is the whole 5.4 AOB
-oracle, at zero build cost — it is what made 4.10 possible when VS2015 was unavailable.
+- **5.6** — still the more interesting of the two: the `UEnum::Names` → `FNameData` change
+  (struct-of-arrays + tagged pointers, the `Neu` module) has no non-Shipping row, and 5.6's only
+  PDB oracle is `CrashReportClient`, which is not a game.
+- **5.5** — the weakest remaining case, and it was already last: three symbolised Shipping oracles
+  exist (Everspace 2 ×2, Meltopia). Worth doing only as part of a gameplay-matrix pass.
 
-⚠ **But that shortcut does NOT cover step 2 of this item.** `UnrealGame.exe` is the bare engine
-default with no content and no `ACharacter` to possess, so it can answer "where are the engine
-globals" and nothing else. **The gameplay-feature matrix still needs a packaged ThirdPerson
-project** (GodMode/Teleport/Laufen/Hemmung all need a real pawn to act on). Treat them as two
-separate deliverables that happen to share a version number: take the free AOB rows now, and
-package only when doing the gameplay pass.
+Neither is on the critical path for anything. **Do them when a reason appears, not on schedule.**
+
+### 5.4 was packaged, not taken from the prebuilt target — deliberately
+
+**UE_5.4 ships prebuilt `UnrealGame{,-Win64-Shipping,-Win64-DebugGame}.exe` with full PDBs** in
+`Engine/Binaries/Win64` (so do 4.23 / 4.27 / 5.7 / 5.8; 4.10 / 4.15 ship two of three), and for AOB
+truth alone that is free — copy → `pdb_globals.py` → import `-noanalysis`. It is what made 4.10
+possible when VS2015 was unavailable.
+
+⚠ **But it does NOT cover the gameplay-feature matrix.** `UnrealGame.exe` is the bare engine
+default with no content and no `ACharacter` to possess, so it answers "where are the engine
+globals" and nothing else — GodMode/Teleport/Laufen/Hemmung all need a real pawn. That is why 5.4
+was packaged as ThirdPerson anyway: **those binaries serve both jobs.** Use the prebuilt shortcut
+when you only want AOB rows; package when the version is also a gameplay target.
 
 ### THE ENGINE INSTALL IS TRANSIENT — that is what makes the packaged half affordable
 
@@ -179,20 +211,23 @@ Flying *and* ThirdPerson. Measurement supersedes that: at 4.27, Flying vs 3rdPer
 engine-global resolution at all. Use **ThirdPerson**, because it is also the Character-based target
 the gameplay-feature matrix needs (Flying's pawn has no `CharacterMovement`).
 
-### Why this order, and the honest counter-argument
+### What 5.4 delivered besides the bisection — and it was ordered first for these, not for that
 
-**Pure bisection would say 5.5** — the transition is at 5.4/5.5/5.6/5.7, so testing 5.5 always
-leaves exactly two and pins it in exactly 2 installs, where 5.4 costs 1 if it collapses there but 3
-if it does not. **That is not the order below, deliberately**, because the exact boundary version is
-worth less than it looks: we already know **shipped games are unaffected**, which is the part that
-matters, and pinning 5.4-vs-5.5-vs-5.6 only pays off if someone actually mines a fix pattern — which
-needs samples *either side* of the boundary anyway. So order by durable corpus value instead:
+The ordering argument said the exact boundary version was worth *less* than durable corpus value,
+so 5.4 went first on coverage grounds and the bisection was treated as a 1-in-4 bonus. Both paid:
 
-1. **5.4** — the **only UE5 version left with no symbolised oracle**. Elliot is 5.4 but its truth is
-   disassembly-derived with no PDB. It also gives **MindsEye (a UE 5.4.4 licensee fork) its first
-   stock-5.4 control** — `mindseye-fork-notes.md` is an entire re-derivation playbook currently
-   resting on inference about what stock 5.4 looks like, the same evidentiary shape as the
-   Avowed/DropIn gaps closed on 2026-07-29. Plus a 1-in-4 chance of pinning the boundary outright.
+1. **Every UE5 version now has a symbolised oracle.** 5.4 was the last one without. Elliot is 5.4
+   but PDB-less and disassembly-derived — and the new stock Shipping row **corroborates it**
+   (GObjects 8/15 vs 9/15, GNames 13/16 vs 13/17, GWorld 15/16 vs 13/14), the first independent
+   check that row has ever had.
+2. **MindsEye finally has a stock-5.4 control.** The engine is **5.4.4 — MindsEye's exact patch
+   version.** `mindseye-fork-notes.md` is a whole re-derivation playbook whose "the fork changed
+   X" claims all rested on inference about stock 5.4; each is now a measurable delta. Same
+   evidentiary shape as the Avowed/DropIn gaps closed the same week.
+3. The bonus landed too — it pinned the boundary outright.
+
+Remaining, judged on coverage alone:
+
 2. **5.6** — the `UEnum::Names` → `FNameData` change (struct-of-arrays + tagged pointers, the `Neu`
    module). 5.6 has a monolithic PDB oracle already (CrashReportClient) but no non-Shipping row.
 3. **5.5** — last, precisely because it is already the **best-covered** version: three symbolised

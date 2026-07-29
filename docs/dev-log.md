@@ -20,7 +20,7 @@ builds ≤696 in
 
 -----
 
-## 2026-07-29 - UE 4.10 joins the corpus BELOW the support floor; 58 -> 65 programs (build 2504)
+## 2026-07-29 - UE 4.10 + stock 5.4.4 join; 58 -> 70 programs; the GNames bisection closes at 5.4 (build 2505)
 
 Same-day follow-on to build 2503. Two things landed: the full sweep that 2503 could not run, and
 the corpus's oldest binary.
@@ -63,7 +63,50 @@ it. `pdb_globals.py` now prints that route as a hint when GObjects has no symbol
 is not rediscovered; both of its validation rows (4.23-Flying, 5.8-StackOBot) still reproduce
 byte-for-byte.
 
-### The full sweep — 65 programs / 52 oracles, UE 4.10-5.8
+### Stock UE 5.4.4 — the last UE5 version without a symbolised oracle, and it closed the bisection
+
+`ThirdPerson54_{Shipping,Development,DebugGame}`, Epic stock (CL 35576357, `++UE5+Release-5.4`,
+`IsLicenseeVersion=0`). Packaged rather than taken from the engine's prebuilt `UnrealGame` target,
+deliberately: the prebuilt one is free but content-free, so it cannot serve the gameplay-feature
+matrix. These binaries serve both jobs. All five targets double-derived on all three configs
+(`pdb_globals.py` + 151-pattern replay, exact agreement).
+
+**The non-Shipping GNames bisection is CLOSED — the edge is 5.3 → 5.4:**
+
+| version | non-Shipping GNames | lands on | wasted |
+|---|---|---|---|
+| 5.3 Dev + DebugGame | **15/15 patterns correct** | `GNAM_ES53_1` | **0** |
+| **5.4.4 Dev + DebugGame** | **1/6** | `GNAM_V1` | **2,240** |
+| 5.7.4 DebugGame | 1/8 | `GNAM_V1` | 2,199 |
+
+Budgeted at two installs (5.4 *and* 5.6); cost one, because 5.4 collapsed outright instead of
+landing mid-interval. 5.5/5.6 lose their bisection argument and are now coverage-only. If a fix
+pattern is ever mined, **5.3-vs-5.4 is the pair to mine it against**.
+
+Two more results it was actually ordered first for:
+
+* **Every UE5 version now has a symbolised oracle.** The new Shipping row also **corroborates
+  UE5.4-Elliot**, whose truth is disassembly-derived with no PDB — GObjects 8/15 vs 9/15, GNames
+  13/16 vs 13/17, GWorld 15/16 vs 13/14. First independent check that row has ever had.
+* **MindsEye has a stock control at last.** The engine is **5.4.4, MindsEye's exact patch
+  version**, so `mindseye-fork-notes.md`'s "the fork changed X" claims become measurable deltas
+  instead of inference.
+
+### The backup measurement that overturned the manifest plan
+
+`D:\UE_Analyze_Data\Game Binary backup` (30 games / 11 GB) hashed against the manifest's
+import-time `binary_md5`: **24 rows byte-identical to the corpus build, Palworld included.** With
+`Game archive` and `Varies Version builds` covering the archive and self-built rows, the manifest
+splits **33 rows with 2 copies / 3 with 3 / and just 2 with none.**
+
+That reverses the earlier recommendation to add `--merge` to `build_corpus_manifest.py` before
+regenerating. `steam_buildid` is a **last-resort** route, and 36 of 38 rows never need it — losing
+one only matters if the bytes are also gone. The two that qualify are the `UE5.5-Everspace2{,b}`
+same-appid pair, and both are already preserved in `corpus-provenance.tsv` as hand-resolved
+`STEAMDB-MANIFEST` entries. Regenerating is safe; `--merge` is a nice-to-have because the nulling
+is *silent*, not because data is at risk.
+
+### The full sweep — 65 programs / 52 oracles, UE 4.10-5.8 (70 / 55 after 5.4)
 
 54 rows, run end to end for the first time since the 5.3 / 4.15 / 4.27.2 additions. The 5.8.1
 Development row that build 2503 left blocked on a Ghidra lock is included.
