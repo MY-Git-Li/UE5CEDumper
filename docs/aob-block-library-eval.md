@@ -95,7 +95,28 @@ and still take 22,000 hits on a real game, which is exactly how `GWLD_V3` and `G
 
 -----
 
-## 4. Design, if it is built
+## 4. Design — BUILT 2026-07-29 (step 5)
+
+> **SHIPPED.** `tools/ghidra/extract_blocks.py` produced **340 blocks / 195 KB** from
+> **22 self-built oracles**, and `tools/ghidra/blocktest.py` runs them in seconds with
+> no Ghidra and no corpus. Wired into `.github/workflows/ci.yml` — **the first and only
+> automated check on `Himmel.h`'s patterns.**
+>
+> Blocks record the window, its base VA, and the VA the match **resolves to**, so the
+> test asserts the strong property. Negative controls confirm it bites: flipping one
+> literal byte in `GOBJ_ES53_1` fails 64 blocks, and — the case it exists for —
+> perturbing `GWLD_TQ_1`'s displacement `adj` by 8 still MATCHES but resolves wrong,
+> failing 15 blocks. A "bytes still match" test would have passed that silently; it is
+> the `GNAM_V7` out-of-bounds-resolve class.
+>
+> The self-built-only rule is enforced in code, not by convention: `extract_blocks.py`
+> reads `corpus-manifest.json` and skips any row whose `source` is not `self-built`.
+>
+> One result worth noticing — `UE5.8.1-StackOBotDev`, `UE5.8-StackOBotDbgGame` and
+> `UE5.8-TitanDbgGame` each yield **GNames/true: 1**, against 2 everywhere else. The
+> blocks independently reproduce the non-Shipping GNames collapse.
+
+The design as specified, for reference:
 
 Store structured records, not a byte blob:
 
@@ -139,6 +160,11 @@ testing gap. Third-party blocks: metadata + hash only.
 
 **Open for the maintainer, not for me:** whether to store third-party bytes at all. My input is only
 that §2 means you do not have to, so the cheapest resolution is to not take the risk.
+
+> **Resolved by construction, 2026-07-29.** Both halves shipped self-built-only and neither needed
+> a legal call: §6's index stores frequencies rather than code, and §4's blocks are gated on
+> `source == self-built` in `extract_blocks.py`. The third-party question was never answered — it
+> was made unnecessary, which was §2's whole point.
 
 > **Revised 2026-07-29 (late), after §6 was measured.** Build order should now be **§6 first, §4
 > second**, and the reason is not preference but risk: the n-gram index needs **no legal call at all**

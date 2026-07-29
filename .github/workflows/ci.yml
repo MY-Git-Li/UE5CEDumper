@@ -56,6 +56,17 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: AOB pattern regression (blocks)
+        shell: pwsh
+        # The ONLY automated check on Himmel.h's patterns. Everything else needs ~200 GB of Ghidra
+        # projects that exist on one machine, so before this an edit to a pattern was unverifiable
+        # in CI. Asserts each recorded site still RESOLVES to its recorded address — not merely
+        # that some bytes still match, which would pass a broken displacement.
+        # Pure stdlib, no Ghidra, no corpus, seconds. See docs/aob-block-library-eval.md §4.
+        run: |
+          python tools/ghidra/extract_patterns.py dll/src/Himmel.h out/sweep/patterns.tsv
+          python tools/ghidra/blocktest.py
+
       - name: Build + test + AOT publish (the gate)
         shell: pwsh
         # -Mode Publish -Target All == C++ DLL + Native-AOT UI + full test suite.

@@ -351,7 +351,16 @@ answers the question that actually blocks authoring:
    ≤15, takes 932 on FF7R). Cause is code coverage — stock templates contain no game code, and
    licensing means third-party code can never be indexed, so the limit is **structural**. Wording
    in the tool now says "quiet in stock engine code", never "certified".
-5. **NEXT: §4's shape blocks + `blocktest.py`.** Steps 1–4 are done and committed.
+5. ~~§4's shape blocks + `blocktest.py`~~ **DONE.** 340 blocks / 195 KB from 22 self-built
+   oracles; `blocktest.py` is stdlib-only, runs in seconds, and is **wired into CI** — the first
+   automated check `Himmel.h`'s patterns have ever had. Asserts *resolution*, not just matching:
+   perturbing one pattern's displacement `adj` by 8 still matches but fails 15 blocks.
+
+**All 5 steps are complete.** What remains is optional and should wait for a real need:
+* Re-extract blocks whenever a pattern is added/renamed — `blocktest.py` reports `skipped N` when a
+  recorded `found_by` no longer exists in `Himmel.h`, so drift is visible rather than silent.
+* Rebuild the n-gram index when new self-built Shipping oracles land (it only ever needs to grow).
+* Neither tool is an acceptance gate, and that must not erode: **rule 5 still means the sweep.**
 
 ⚠ **Neither half is an acceptance gate.** Neither can say a pattern hits the RIGHT address —
 `GNAM_XX_1` scores a clean bound of 57 and is `DECOY-ONLY`. `Himmel.h` rule 5 keeps meaning the
