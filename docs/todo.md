@@ -19,25 +19,55 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
-## Corpus: two 5.8.1 sweep rows still unrun (Ghidra had them locked)
+## ▶ RESUME HERE — exact state as of 2026-07-29 end of session
 
-*Parent: the 2026-07-29 corpus pass; shipped in [dev-log.md](dev-log.md) build 2502.*
+`sweep.sh` is at **52 rows**; every row's Ghidra project exists on disk. Each newly added row was
+verified individually by running `scan_patterns.java` against its derived truth right after import,
+**but a full sweep has NOT been re-run since**, so `out/sweep/REPORT.md` and the two corpus counts
+in `Himmel.h`'s header (**58 programs / 43 oracles**) are the *previous* measurement. They are
+deliberately left at the last MEASURED value — do not hand-raise them.
+
+Blocking one thing only: **`StackOBot_Development_UE581.lock`** is still held by an open Ghidra
+Auto Analyze (5+ hours, `.rep` grown 1.0 → 2.0 GB). **That analysis is pure waste** — the sweep
+reads raw bytes, that row's truth is already derived and in `sweep.sh`, and the corpus already
+contains projects saved mid-analysis (DQ7R, Elliot) which scan fine. Safe to cancel; delete a stale
+`.lock` if one is left behind.
+
+Then, in order:
+
+```bash
+bash tools/ghidra/sweep.sh && py tools/ghidra/aggregate_sweep.py out/sweep   # full, ~50 min
+```
+
+and afterwards update the two counts in `Himmel.h`'s header from `REPORT.md`.
+
+Tooling added this session, all no-Ghidra: `tools/pe/pdb_globals.py` (truth from a PDB),
+`tools/ghidra/replay_patterns.py` (corroborate by byte replay), `tools/pe/func_bytes.py` (is a
+function hollow?), `tools/ghidra/capture_provenance.py` (build-identity snapshot).
+
+-----
+
+## Corpus: the 5.8.1 Development sweep row still unrun (Ghidra holds its lock)
+
+*Parent: the 2026-07-29 corpus pass; shipped in [dev-log.md](dev-log.md) build 2503.*
 **Effort S · Risk low.**
 
 The 4.27.2 three-config import, the 4.23 DebugGame row, the three 5.7.4/5.8.0 DebugGame rows and
 the `GOBJ_DI427_1` 105 → 256 demotion all landed and swept green (58 programs / 43 oracles,
 "every target present in every oracle resolves to the correct address").
 
-**Remaining:** `UE5.8.1-StackOBot` and `UE5.8.1-StackOBotDev` did not run — an open Ghidra session
-held their `.rep` locks, which `preflight.py` flagged in advance as exactly those two BLOCKING rows.
-Their truth values are already in `sweep.sh` and double-derived. Once the lock clears:
+**Remaining: just `UE5.8.1-StackOBotDev`.** `UE5.8.1-StackOBot` (Shipping) was swept once its lock
+cleared — all five targets, matching the offline derivation exactly. The Development row's truth is
+already in `sweep.sh` and double-derived; it only needs its lock released. Once it is:
 
 ```bash
 bash tools/ghidra/sweep.sh UE5.8.1 && py tools/ghidra/aggregate_sweep.py out/sweep
 ```
 
-That takes the corpus to **60 programs / 45 oracles**; update the two counts in `Himmel.h`'s header
-(they are deliberately left at the last MEASURED value).
+⚠️ **Prefer the FULL sweep over that filter.** Five further rows (5.3 ×3, 4.15 ×2) were added after
+this item was written, so a `UE5.8.1`-filtered run would leave `REPORT.md` describing a corpus that
+no longer exists. See **RESUME HERE** at the top. The resulting program/oracle counts are not
+predicted here on purpose — read them off `REPORT.md` and copy them into `Himmel.h`'s header.
 -----
 
 ## UE5 non-Shipping: GNames reaches nothing — decide whether to mine a pattern
