@@ -19,95 +19,43 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
-## Land UE 4.23.1 into the corpus — all evidence gathered, only the sweep run remains
+## Import UE 4.27.2 Development into the corpus — replaces DropIn's sole-oracle role
 
-*Parent: the 4.23 hole that `GROUND-TRUTH.md` carried as "DELIBERATELY NOT CHASED". The maintainer
-built the 4.23.1 "Flying" template in three configs, so the escape clause ("unless a 4.23 binary
-falls into your lap") has fired.* **Effort S · Risk low.** Recorded 2026-07-28 because the analysis
-was complete but the session ran out of quota before landing it.
+*Parent: the corpus-preservation pass (2026-07-29). Full rationale in
+[corpus-preservation.md](corpus-preservation.md) §7.* **Effort S · Risk low.**
 
-Binaries, all with full PDBs, all against Epic's **installed** 4.23.1 Launcher engine
-(CL 9631420, IsPromotedBuild=1, IsLicenseeVersion=0 — engine objects are Epic stock, and a Shared
-build environment forbids overriding `bUseChecksInShipping` etc., so fork/override risk is nil):
+The maintainer built the 4.27.2 "Flying" template in all three configs:
+`D:\UE_Analyze_Data\Varies Version builds\4.27.2\{DebugGame,Development,Shipping}\Win64\`,
+each with EXE + PDB. **Import the DEVELOPMENT one.**
 
-| config | EXE | Ghidra project |
-|---|---|---|
-| Shipping | `X:/UE_Analyze_Data/Varies Version builds/4.23.1/Binaries_Shipping/Win64/` | `UE423_Flying-Win64_Shipping.rep` (**underscore**) |
-| DebugGame | `.../Binaries_DebugGame/Win64/` | `UE423_Flying-Win64-DebugGame.rep` |
-| Development | `D:/Unreal Projects/UE423_Flying/Binaries/Win64/UE423_Flying.exe` | not imported |
+`GOBJ_DI427_1/2/3` are the only patterns for which `UE4.27-DropIn` is the sole oracle, and what
+they encode is the **32-byte `FUObjectItem`** (`shl r,5`). Those 8 bytes are `TStatId`, gated at
+4.27 by `#if STATS || ENABLE_STATNAMEDEVENTS_UOBJECT` (`UObjectArray.h` @ `4.27.2-release`).
+`STATS` is 0 in Shipping, so a Shipping sample adds nothing — Breeders and Maelstrom already
+cover the stock 24-byte item.
 
-The packaged runnable copy is under `.../4.23.1/Shipping/WindowsNoEditor/`; live logs landed in
-`%LOCALAPPDATA%/UE5CEDumper/Logs/UE423_Flying-Win64-Shipping`.
+Steps: import (one project, `-noanalysis` is fine for the gate) → derive truth from the PDB in
+Python (`?GUObjectArray@@3VFUObjectArray@@A`, `?GWorld@@3VUWorldProxy@@A`,
+`?GEngine@@3PEAVUEngine@@EA`, the sparse mangled name; GNames via
+`FNameDebugVisualizer::GetBlocks` minus 0x10 — verify the 0x10 at 4.27) → add the `sweep.sh` row
+and the `GROUND-TRUTH.md` block → full sweep → confirm `GOBJ_DI427_*` now land on it too.
 
-### Ground truth — CERTAIN, three independent derivations each
+Payoff: converts a sole-oracle dependency on an external store — where a patch can silently
+replace the build, as happened to `ES2-0517` — into a locally rebuildable asset, and gives a
+second three-config control group after 4.23.
 
-```sh
-# UE 4.23 — the "Flying" template, Shipping. The ONLY 4.23 in the corpus, and the version that
-# introduced BOTH FNamePool and sparse delegates, so it is the earliest binary either target can
-# be checked against. GNames is NOT a symbol read: 4.23 has neither `NamePoolData` nor
-# `?GetNames@FName@@` (0 occurrences of both strings in all three PDBs), so BOTH documented
-# recipes in this file fail at 4.23. It came from FNameDebugVisualizer::GetBlocks @0x14062c010
-# (`48 8d 05 f9 83 82 02 c3` -> 0x142e54410) minus 0x10.
-# DECOYS present: GCoreObjectArrayForDebugVisualizers (PLAIN name, find_syms3 will surface it,
-# runtime value == the ObjObjects VA) and GNameBlocksDebug (holds pool+0x10).
-GS_TRUE="GObjects=142e6b968|142e6b978,GNames=142e54400,GWorld=142f6cf10,SparseDelegates=142c4d060,GEngine=142f6a8a0"
-```
+-----
 
-sweep.sh ROWS entry (insert between the 4.22 and 4.24 rows):
+## Verify the corpus after moving it to the HDD
 
-```
-"UE4.23-Flying-Shipping|UE423_Flying-Win64_Shipping|-|GObjects=142e6b968|142e6b978,GNames=142e54400,GWorld=142f6cf10,SparseDelegates=142c4d060,GEngine=142f6a8a0"
-```
+*Parent: same pass.* **Effort S · Risk low.**
 
-Each value rests on **three mutually independent** derivations: (1) PDB `S_PUB32`/`S_GDATA32`
-decode, (2) a full 150-pattern byte replay of `Himmel.h` against `.text` in pure Python, (3) the
-live run, which rebases all five off ONE shared ASLR base `0x7FF7ED7D0000` with **zero residual**.
-**Ghidra was never opened** — reusable pure-Python tooling (`pemod.py`, `pdbtypes.py`, `pdbfl.py`,
-`pdbpub.py`, `scan3.py`) is in the session scratchpad and is worth re-creating in `tools/pe/`.
+`preflight.py` reads `.rep` metadata only and never opens a program database, so a silently
+corrupted `.rep` — the realistic failure mode when moving ~120 GB onto a spinning disk — looks
+perfectly healthy to it. There is no cheap integrity check.
 
-### The live Shipping run is clean
-
-All five byte-exact; the `GCoreObjectArrayForDebugVisualizers` decoy was never even a candidate.
-39,213 objects, name sanity 10/10, DynOff `validated=yes`, full GWorld walk.
-
-### The controlled experiment — CONFIRMED
-
-`UField::Next` = **+0x28 Shipping vs +0x30 Development AND DebugGame**, measured directly from
-`LF_MEMBER` records in all three PDBs. Nothing *inside* `UObjectBase` moves — `StatID` is appended
-at +0x28 and `ObjectFlags/InternalIndex/ClassPrivate/NamePrivate/OuterPrivate` stay at
-+0x8/+0xC/+0x10/+0x18/+0x20 in both. Only `sizeof(UObject)` grows 0x28 -> 0x30, shifting every
-derived class by 8. **DynOff self-detects this correctly**, so it is harmless to users and matters
-only for pattern MINING.
-
-**Skeptic's correction, and it is the real result:** layout, array preset and the `GetBlocks`
-recipe are config-INVARIANT, but **which AOB shapes fire is strongly config-DEPENDENT** — the
-opposite of the intuition. Mine on Shipping; treat a Development/DebugGame binary as an oracle only.
-
-### Prediction scorecard: 5 RIGHT / 1 WRONG
-
-RIGHT: `GOBJ_ES53_1` (and the "~5 wasted" estimate — exactly 5 rejected before the 6th validated),
-`GWLD_TQ_1`, `SPARSE_DI427_1`, `GENG_X1`, "zero new patterns needed".
-**WRONG: GNames**, and not charitably — `GNAM_V8` takes **zero hits** on this binary, so the
-prediction was wrong about the byte-pattern winner too, not merely blind to a CallFollow
-pre-empting it. Absent `GNAM_V7`, the byte winner would have been `GNAM_DI427_2` (pri 105, 1 hit).
-
-### Open, and worth doing first
-
-- **Run the sweep.** `py tools/ghidra/extract_patterns.py` FIRST (the tsv goes stale), then
-  `bash tools/ghidra/sweep.sh UE4.23`, then the full sweep + `aggregate_sweep.py`.
-- **DebugGame row is ~free** (its project is already analysed). **Development is not** — needs a
-  fresh import, and its values currently rest on the PDB alone, i.e. one derivation not three.
-- **Doc claims to correct**: the "DELIBERATELY NOT CHASED" 4.23 item, "only 4.23 itself is now
-  unverified", the `NamePoolData` / `FName::GetNames` recipe boundary (neither works at 4.23), the
-  corpus counts, and the version-range claim. Narrow the sparse-key claim to PDB-verified versions
-  (4.23, 4.24, 4.25, 4.27, 5.1, 5.2, 5.5, 5.6, 5.7; 5.0/5.3/5.4 rest on disassembly only).
-- **My "byte-identical" premise was wrong** and should not be repeated: the `_Shipping` Ghidra
-  project holds a DIFFERENT LINK (md5 `F61EC1BE…`) from the run binary (`43F6B130…`). 27 bytes
-  differ across 6 runs — PE timestamp, checksum, three debug-directory timestamps, the 16-byte PDB
-  GUID. **Every code and data byte is identical**, so the conclusion (offline truth covers the live
-  run) holds, but the premise did not.
-- **Do NOT touch `sweep.sh:26`** — `SWEEP_XMX=14G` already works as intended; a reported flakiness
-  under 2G never happened.
+After the move: run one full `sweep.sh` + `aggregate_sweep.py` and diff `out/sweep/REPORT.md`
+against the previous one. **An unchanged regression matrix is the only real acceptance test.**
 
 -----
 
@@ -1179,9 +1127,14 @@ Pick up when the active plan finishes or when blocked.
   exactly as on UE5, and `FObjectKey` is **8** bytes, not 16. No new stride, no key
   reconstruction: deleting the `UEVersion < 500` gate was the entire fix, and `SPARSE_ES2_1`
   already resolved correctly on 4.27 (2 extra 4.27-verified patterns added anyway).
-  **Remaining**: 4.23-4.26 have no symbolised sample, so they are covered only by the
-  walker's runtime key-shape probe (fails safe). Closing that needs a 4.23-4.26 game with a
-  PDB — cheap to check with `tools/ghidra/probe.java` if one ever turns up.
+  **Remaining — narrowed 2026-07-29.** 4.23 is no longer unsampled: the self-built
+  `UE4.23-Flying` oracle PDB-confirms the outer key is a raw `UObjectBase const*` at the very
+  version sparse delegates were INTRODUCED, character-identical to 4.24, and `SPARSE_DI427_1`
+  resolves it live. Combined with 4.24/4.25/4.27 that leaves **only 4.26** without a symbolised
+  monolithic sample of its own (the 4.26 Satisfactory rows are modular DLLs and do carry the
+  symbol). The key shape is now measured at every version the feature has ever had, so this is
+  redundancy rather than a gap; the walker's runtime key-shape probe remains the real mitigation
+  and is what covers licensee forks no sample can.
 
 - **Find Refs v4 — TMap / TSet weak-like inner sides** — Effort: **M** · Risk: **low**.
   Currently Object/Class only; weak/soft pointer collections (`TMap<UObject*,

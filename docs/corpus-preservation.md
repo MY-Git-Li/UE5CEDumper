@@ -209,7 +209,17 @@ UE_4.23 (45.33), UE_4.27 (54.19), UE_5.7 (74.13), UE_5.8 (84.70)** = 280.89 GB. 
 registered with the Epic Launcher (`LauncherInstalled.dat` → `"InstallationList": []`), so a
 delete is likely not re-downloadable in place — verify before removing.
 
-### 3d. Not installed
+### 3d. Not installed on Steam — but the BINARY is not lost
+
+**Superseded 2026-07-29.** Six rows this document and the manifest called "binary GONE" —
+`UE4.18-FF7R`, `FF7Re`, `Hogwarts_Legacy`, `Manor Lords`, `Octopath`, `DQ_I_II_HD2D` — all have
+**md5-identical copies** under `D:\UE_Analyze_Data\Game Binary backup`, verified against the MD5
+Ghidra recorded at import. Nothing was ever missing: `build_corpus_manifest.py` did not search
+that root, and `find_duplicate_copies` additionally skipped the search for STEAM rows *and* for
+GONE rows — exactly the two cases where a surviving copy matters most. Both guards are removed
+and `D:\UE_Analyze_Data` is now first in `DUPE_ROOTS`. **36 of 38 rows now carry at least one
+verified duplicate.** These titles therefore need a reinstall only to recover a **PDB**, never
+the binary.
 
 **`UE4.18-FF7R` — app 1462040, Steam title "FINAL FANTASY VII REMAKE INTERGRADE"** (the manifest's
 `FINAL FANTASY VII REMAKE` is the *installdir*, not the store name — search the store for
@@ -360,3 +370,48 @@ hour of first generation (a title reinstalled and it still read `BINARY GONE`).
   reproducible (it returns ≤ 0 h for six projects whose timestamps were reset by a copy, and
   924 h for Avowed), so any "GB reclaimed per re-analysis hour" ranking is unsupported. Time a
   real re-import before relying on one.
+
+
+-----
+
+## 6. `D:` is the working copy, `X:` is the backup
+
+`D:\UE_Analyze_Data` holds three trees and is the one to keep fast and current:
+
+| tree | size | contents |
+|---|---|---|
+| `Game Binary backup` | 11 GB | per-title EXE (+PDB where one exists), already consolidated |
+| `Game archive` | 21 GB | DropIn / ES2 / Satisfactory full installs |
+| `Varies Version builds` | 8.2 GB | the self-built engine samples, per config |
+
+`X:\UE_Analyze_Data` mirrors this onto a spinning disk with 800k+ files. **Do not walk it in a
+tool.** `build_corpus_manifest.py` now builds a single lazy basename index over all dupe roots
+instead of walking per row — without that, adding `X:` to the search would have walked it 38
+times. Full regeneration is 75 s.
+
+Everything a sweep needs is derivable from EXE+PDB, so the preservation target is **12.17 GB**
+(37 distinct EXEs 4.06 GB + 36 distinct PDBs 8.11 GB), not the ~123 GB of `.rep`.
+
+## 7. UE 4.27.2 — built, not yet in the corpus
+
+`D:\UE_Analyze_Data\Varies Version builds\4.27.2\{DebugGame,Development,Shipping}\Win64\`, each
+with EXE + PDB. **Import the Development one and it replaces `UE4.27-DropIn`'s sole-oracle role.**
+
+Why Development specifically: `GOBJ_DI427_1/2/3` are the only patterns for which DropIn is the
+sole oracle, and what they encode is the **32-byte `FUObjectItem`** (`shl r,5`). Those 8 bytes are
+`TStatId`, gated at 4.27 by `#if STATS || ENABLE_STATNAMEDEVENTS_UOBJECT` (`UObjectArray.h`
+@ `4.27.2-release`). `STATS` is 0 in Shipping, so a **Shipping 4.27 sample adds nothing** —
+Breeders and Maelstrom already cover the stock 24-byte item, which is how GROUND-TRUTH.md proved
+the 32-byte item is a config artifact rather than a 4.27 trait.
+
+This converts a sole-oracle dependency on an external store — where a patch can silently replace
+the build, as happened to ES2-0517 — into a locally rebuildable asset. It also gives a second
+three-config control group after 4.23, which can re-test the config-axis conclusions.
+
+## 8. Moving the corpus to a spinning disk: verify with a sweep, not with preflight
+
+`preflight.py` reads `.rep` metadata (`idata/**/*.prp`) and **never opens a program database**.
+A silently corrupted `.rep` — the realistic failure mode when moving ~120 GB onto an HDD — looks
+perfectly healthy to it. There is no cheap integrity check. **After the move, run one full sweep
+and diff `out/sweep/REPORT.md` against the previous one; an unchanged regression matrix is the
+only real acceptance test.**
