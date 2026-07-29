@@ -41,7 +41,7 @@ The `build.ps1` script handles VS DevShell setup, CMake, dotnet, and test execut
 # Build everything (DLL + UI + Tests) — Release
 powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Github\UE5CEDumper\build.ps1"
 
-# Build DLL + all 3 proxy DLLs (version/dinput8/dxgi — the injected artifacts)
+# Build DLL + all 4 proxy DLLs (version/dinput8/dxgi/winmm — the injected artifacts)
 powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Github\UE5CEDumper\build.ps1" -Target DLL
 
 # Build UI only

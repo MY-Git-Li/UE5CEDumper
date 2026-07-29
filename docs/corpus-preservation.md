@@ -268,6 +268,123 @@ Free space at 00:18: C 980.3 · D 2362.1 · E 258.2 · F 801.2 · G 931.3 · H 6
 tightest at 28.6% and holds two corpus titles — it is the drive most likely to force a decision
 first, and it is *not* the Ghidra target.
 
+### Recovering a binary you no longer have — `corpus-provenance.tsv`
+
+`tools/ghidra/corpus-provenance.tsv` is a **snapshot** (2026-07-29) of every row's build identity.
+It exists because `build_corpus_manifest.py` **nulls `steam_buildid`/`size`/`sha256` the moment a
+row drifts** — correctly, since it must never assert the wrong build, but that destroys the pointer
+to the build a `.rep` was made from. Palworld drifted that same day. **Re-snapshot before games
+update, not after.** Four routes, strongest first:
+
+| route | rows | what it gives you |
+|---|---|---|
+| `STEAMDB-BUILDID` | 22 | exact: SteamDB app → Builds → buildid → manifest |
+| `STEAMLOG-MANIFEST` | **6** | Steam's own `console_log.txt` logs every depot fetch with app, depot, **exact manifest** and a timestamp. An archived file's mtime falls inside its download, so mtime → log line → manifest. A strong **candidate**, confirmed by md5. |
+| `STEAM-BACKUP-MANIFEST` | **4** | the **exact depot manifest id** out of a `sku.sis` in `X:\SteamLibrary backup` — `steamcmd +download_depot <app> <depot> <manifest>`. Survives uninstall *and* delisting. |
+| `REBUILD` | 4 | self-built; recompile from the installed engine |
+| `STEAMDB-MANIFEST` | **2** | manifest id resolved by hand off SteamDB's depot history, tie broken by an independent repo record (see below) |
+| `NONE-HASH-ONLY` | **0** | — |
+
+**Nothing in the corpus is now without a recovery route.**
+
+Two things that were wrong on the first pass and are worth not repeating:
+
+* **Use `file_modified`, never `file_created`.** A copy RESETS ctime but PRESERVES mtime, so an
+  *install → copy → uninstall* workflow keeps the original Steam write time. Measured: Hogwarts
+  ctime `2026-07-29` but mtime `2025-12-04`; Octopath mtime `2025-05-12`; Palworld mtime
+  `2026-07-15` = the pre-patch corpus build. Reading ctime made the dates look destroyed by the
+  corpus move when they were not.
+* **`sku.sis` beats every date.** The Steam backup descriptor records appid, depots and the exact
+  manifest id. Harvesting `X:\SteamLibrary backup` moved **FF7 Remake, FF7 Rebirth, Hogwarts
+  Legacy and DQ I&II** out of "md5 only" and into "exactly reproducible" — the three biggest
+  uninstall candidates in the drop list below.
+
+⚠ **`console_log.txt` ROTATES — it is the most perishable source here.** It was snapshotted on
+2026-07-29 holding only ten download records, and those ten happen to cover every archive row.
+Re-snapshot after any depot fetch you care about; once rotated, those manifest ids are gone and
+the archive rows fall back to md5-only. The full capture, preserved because the log will not keep it:
+
+```
+2026-07-25 22:55:40  app=1128920 depot=1128921 manifest=1228092871900976040
+2026-07-25 23:04:13  app=1128920 depot=1128921 manifest=1228092871900976040
+2026-07-25 23:16:20  app=526870  depot=526871  manifest=5235170890177666837
+2026-07-25 23:22:05  app=526870  depot=526871  manifest=4713640358549407449
+2026-07-25 23:24:28  app=526870  depot=526871  manifest=3007809920758804289
+2026-07-25 23:53:12  app=526870  depot=526871  manifest=5072022484048628830
+2026-07-26 00:22:12  app=526870  depot=526871  manifest=4631200912822720421
+2026-07-26 00:25:02  app=526870  depot=526871  manifest=5971929977835941106
+2026-07-26 13:19:00  app=1144800 depot=1144801 manifest=5221052602514244898
+2026-07-26 14:21:59  app=1144800 depot=1144801 manifest=8071507168854653981
+```
+
+**`UE4.22-Satisfactory` is the row that matters most** — it is the sole oracle for
+`GNAM_SAT422_1` (priority 715, the UE 4.22 GNames lander), so losing it leaves that pattern with
+no proof it works. It is **not** unrecoverable, only inconvenient: its best candidate is
+`526870:526871:5235170890177666837`, reached two independent ways — the maintainer's own reading of
+the Steam log (SteamDB dates it 2020-06-08, the right era for Satisfactory on UE 4.22), and the
+mtime correlation above picking the same manifest as the download closest after `2026-07-25 23:13`.
+Download it and confirm `md5 == a1df9f191f8978e6c05d7919237be565` before trusting it. It is also
+mirrored twice already (67 MB on `D:\tmp\Game archive` + `X:\UE_Analyze_Data\Game archive`).
+
+Two manifests in the log — `4631200912822720421` (2020-09-25) and `5971929977835941106`
+(2021-01-11) — correlate to no archive row. They are later Satisfactory builds that may or may not
+share a UE version with one already held; treat them as leads, not as identified rows.
+
+**`UE5.5-Everspace2` (ES2-0517) is RESOLVED — `1128920:1128921:4415922863161237626`**, and the way
+it was pinned is worth copying. SteamDB's depot history for 1128921 lists manifests published
+2024-11-14, 2025-05-12, 2025-05-16, 2025-05-28 and 2025-06-17. A snapshot taken on **2025-05-17**
+must have been running the **2025-05-16** one. The 2025-05-12 fallback is then *excluded* by an
+independent record already in this repo: `sweep.sh`'s own note calls `Everspace2b` **"two manifests
+newer (2025-06-17 vs the 05-17 snapshot)"** — newer than 2025-05-16 there are exactly two
+(2025-05-28, 2025-06-17), whereas newer than 2025-05-12 there would be three. `Everspace2b` is
+therefore the 2025-06-17 manifest `735055807809773736`, which is also the one currently installed.
+Confirm on download with `md5 == 1a1b0ede76b80a173969343683579129`.
+
+**Method worth reusing: date the snapshot, then let an existing repo note break the tie.** Neither
+the SteamDB list nor the project name alone was decisive; a sentence written months earlier for an
+unrelated reason was.
+
+### Do this BEFORE any of the drop steps: re-import without analysis
+
+**~88% of a `.rep` is Auto Analyze output, and the sweep does not read any of it.** This is the
+only lever here that frees space at **zero** capability cost — every step in the table below
+trades something away. Measured 2026-07-29, and verified rather than assumed:
+
+| | `UE423_Flying-Win64-Shipping` (49 MB EXE) |
+|---|---|
+| `-noanalysis` import | **169 MB, 46 seconds** |
+| fully analysed | **1,369 MB** |
+| | **8.1×  —  analysis is 88% of the `.rep`** |
+
+**Verified equivalent, not merely assumed:** `scan_patterns.java` run against the raw import
+returns the *identical* five verdicts to the recorded `UE4.23-Flying` row in `REPORT.md` —
+`GOBJ_ES53_1` OK-BEHIND, `GNAM_DI427_2` / `GWLD_TQ_1` / `SPARSE_DI427_1` / `GENG_X1` all
+UNIQUE-OK. It works because the scanner touches only `getMemory()` / `getBytes()` /
+`getImageBase()`; the imported program keeps the file's bytes, which is all it reads.
+Corroborating the ratio at scale: the two mid-analysis `*_UE581` projects sit at ~3× their EXE
+size while every finished project sits at 26–30×.
+
+```bash
+analyzeHeadless D:/Tools/GHIDRA_Projs <Name> -import "<path>\<file>.exe" -noanalysis
+```
+
+**Three caveats, all load-bearing:**
+1. **Needs the original binary.** Re-importing is only possible where the file still exists — so
+   this does NOT apply to `ES2-0517` and the others in §"Never drop" whose source is gone. For
+   those, Ghidra's *File → Export → Original File* should recover the bytes to re-import from,
+   but **that path is untested here** — do not bet an irreplaceable `.rep` on it.
+2. **Ten scripts genuinely need analysis** — `dump_func`, `decompile_functions`, `find_callers`,
+   `dump_xrefs2`, `dump_global_xref_aob`, `find_gobjects`, `dump_vtables`, `dump_types`,
+   `pe_probe`, `probe`. Those are for *reading code* when mining a new pattern or cracking a
+   symbol-less binary — an occasional, per-investigation need. Analyse into a throwaway project
+   then delete it, rather than storing analysis for all 43 permanently.
+3. **`find_syms3.java` needs the PDB applied**, which `-noanalysis` skips. For the five sweep
+   globals this no longer matters: `tools/pe/pdb_globals.py` reads them straight from the PDB
+   with no Ghidra at all.
+
+Applied across the 120.94 GB in `D:\Tools\GHIDRA_Projs` this is far and away the largest
+zero-loss saving available; do it before considering a single deletion below.
+
 ### Drop order under pressure
 
 Take these strictly in order. Re-run `preflight.py --sizes` between steps.

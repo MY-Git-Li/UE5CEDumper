@@ -85,6 +85,11 @@ ROWS=(
 #   and its RUNTIME value equals the ObjObjects VA; GNameBlocksDebug holds NamePoolData+0x10.
 # NOTE the project name uses an UNDERSCORE before "Shipping", unlike every other row.
 "UE4.23-Flying|UE423_Flying-Win64_Shipping|-|GObjects=142e6b968|142e6b978,GNames=142e54400,GWorld=142f6cf10,SparseDelegates=142c4d060,GEngine=142f6a8a0"
+# 4.23.1 DebugGame — the same project's non-Shipping twin, and the LOWER BRACKET on the
+# GNames-on-non-Shipping-5.8 gap: everything resolves here (GNames n=16), so that gap is NOT a
+# property of non-Shipping builds in general. Double-derived like the rest (pdb_globals.py +
+# 151-pattern replay); all five agree, zero contradicting candidates.
+"UE4.23-FlyingDbgGame|UE423_Flying-Win64-DebugGame|-|GObjects=1462508f0|146250900,GNames=146231c00,GWorld=14636ffd8,SparseDelegates=145fc79c0,GEngine=14636d3e0"
 "UE4.24-DropIn|DropIn_UE424|-|GObjects=1471db720|1471db730,GNames=1471bca00,GWorld=1472ea620,SparseDelegates=146da38d0,GEngine=1472e74a0"
 "UE4.25-Everspace2|ES2-UE425|-|GObjects=1444b0520|1444b0510,GNames=144497d00,GWorld=1445f1160,SparseDelegates=1440070c0,GEngine=1445edad8"
 "UE4.26-Satisfactory|Satisfactory_UE426|-|-CoreUObject-:GObjects=1803f9210|1803f9220,-CoreUObject-:SparseDelegates=1803f37d0,-Core-Win64:GNames=180659380,-Engine-:GWorld=18182a0b8,-Engine-:GEngine=181826658"
@@ -93,6 +98,45 @@ ROWS=(
 # SOURCE tree rather than a launcher binary — which is consistent with them shipping PDBs at all.
 "UE4.27-Breeders|Breeders_of_the_Nephelym|-|GObjects=1445f32d0|1445f32e0,GNames=1445b7000,GWorld=14473a7f8,SparseDelegates=1441a88b0,GEngine=144736ee8"
 "UE4.27-Maelstrom|Maelstrom|-|GObjects=145b90c10|145b90c20,GNames=145b54940,GWorld=145cd4ee8,SparseDelegates=145839d00,GEngine=145cd15c8"
+# ── UE 4.27.2 "Flying" template, built by the maintainer in ALL THREE CONFIGS ──────────────────
+# One project, one engine, one day; the BUILD CONFIG is the only variable. That is what makes this
+# a control group rather than three more games, and it settles a question the corpus could not
+# answer before: whether the GOBJ_DI427_* patterns encode "UE 4.27" or "a Development build".
+# They encode the config — see the three-config table in Himmel.h's DI427 block. UE4.27-DropIn,
+# their previous sole oracle, is itself a Development build, which is why it looked version-shaped.
+#
+# All five values on all three rows are DOUBLE-derived and the two agree exactly:
+#   (1) `py tools/pe/pdb_globals.py <pdb>` — an MSF/S_PUB32 decode, validated by reproducing the
+#       UE4.23-Flying and UE5.8-StackOBot rows below/above byte-for-byte before being trusted here;
+#   (2) a full 151-pattern byte replay of Himmel.h against .text, which converges on the same VA
+#       for every target with ZERO contradicting candidates (GObjects n=6, GNames n=16, GWorld
+#       n=17, Sparse n=4, GEngine n=5 on Development; same on the other two).
+# Ghidra was never opened. Not live-verified — these are template projects, not games.
+#
+# GNames: no `NamePoolData` and no `?GetNames@FName@@` symbol here either (the standing rule holds
+#   at 4.27), so it comes from FNameDebugVisualizer::GetBlocks, minus 0x10 — Development
+#   @0x141f29e70 = `48 8d 05 d9 da 7c 07 c3` -> 0x1496f7950.
+# GObjects: the `|base+0x10` alias is CORRECT here (pre-5.8 layout) and is confirmed rather than
+#   assumed — the DI427 trio resolves to base+0x10 while ES53_1/G42_2/GH_4/PS2/PS3/SAT426_1
+#   resolve to the base. The 32-byte FUObjectItem does NOT move ObjObjects.
+# DECOYS, all present with PLAIN aliases that find_syms3.java WILL hand you (Development VAs):
+#   GCoreObjectArrayForDebugVisualizers @1496c6890 (a pointer; its runtime VALUE is the ObjObjects
+#   VA), GObjectArrayForDebugVisualizers @14925f358 (a reference to that — two indirections off),
+#   GNameBlocksDebug @14961a1e0 (holds NamePoolData + 0x10).
+#
+# THE DEVELOPMENT ROW IS THE ONE THAT EARNS ITS SCAN. It takes over DropIn's sole-oracle role for
+# GOBJ_DI427_1/2/3, converting a dependency on an external store into a locally rebuildable asset.
+"UE4.27-FlyingDev|UE427_Flying_Development|-|GObjects=14973e660|14973e670,GNames=1496f7940,GWorld=1498c0e18,SparseDelegates=149272bd0,GEngine=1498bc7d0"
+# DebugGame is NEAR-REDUNDANT for engine globals and it is honest to say so: UE builds DebugGame's
+# ENGINE modules optimized like Development, so the codegen these patterns see is the same — the
+# DI427 hit counts are IDENTICAL (832/1415/246) at different addresses. Keep it as the control that
+# proves that claim, or comment it out to save a headless run; it is not coverage.
+"UE4.27-FlyingDbgGame|UE427_Flying-Win64-DebugGame|-|GObjects=1497416a0|1497416b0,GNames=1496fa980,GWorld=1498c3e58,SparseDelegates=149275bb0,GEngine=1498bf810"
+# Shipping is the NEGATIVE control, and it is the most informative of the three: all three
+# GOBJ_DI427_* score ZERO here on the same source, while GNames/GWorld/Sparse/GEngine all still
+# resolve. It is also the corpus's first 4.27 Shipping oracle from an engine we know is Epic-stock
+# (Breeders/Maelstrom/DQ7R are third-party builds).
+"UE4.27-FlyingShipping|UE427_Flying-Win64-Shipping|-|GObjects=1448a9500|1448a9510,GNames=14486d1c0,GWorld=1449f18b0,SparseDelegates=144457b60,GEngine=1449edf98"
 "UE5.2-Satisfactory|SF521_pdb|-|@SF521@"
 "UE5.5-Everspace2|ES2-0517|-|GObjects=149aa7ef0|149aa7ee0,GNames=149c009c0,GWorld=149b37d18,SparseDelegates=149aa7e90,GEngine=149da5810"
 # Second UE 5.5 Everspace 2, two manifests newer (2025-06-17 vs the 05-17 snapshot). Same engine,
@@ -123,6 +167,42 @@ ROWS=(
 # NamePoolData from GetBlocks @0x1415ABEB0 minus 0x10. All five rebase onto the live run with zero
 # residual, confirmed twice at two different ASLR bases.
 "UE5.8-StackOBot|StackOBot_Shipping_UE58|-|GObjects=149f88940,GNames=149eba940,GWorld=14a00b530,SparseDelegates=149c92700,GEngine=14a00e248"
+# ── UE 5.8.1 StackOBot, Shipping + Development ────────────────────────────────────────────────
+# ⚠ BOTH PROJECTS WERE STILL BEING ANALYSED IN GHIDRA when these rows were written (2026-07-29) —
+# their .rep carried a live .lock. Confirm the lock is gone before sweeping, and note the rows do
+# NOT depend on that analysis: every value came from the PDB + a raw byte replay, not from Ghidra.
+# NO `|base+0x10` alias on either — 5.8 rule, same as the 5.8.0 row above.
+#
+# Derivation is the same double-derived flow as the 4.27 Flying rows: `pdb_globals.py` (validated
+# against the 4.23 and 5.8.0 rows) + a 151-pattern byte replay. The Shipping row agrees on all
+# five. The DEVELOPMENT row agrees on four — GNames is PDB-only, and that is a REAL FINDING, not a
+# derivation failure; see the GNames-on-non-Shipping-5.8 note in GROUND-TRUTH.md. Expect the
+# regression matrix to show ❌ for UE5.8.1-StackOBotDev / GNames, and leave it showing that.
+"UE5.8.1-StackOBot|StackOBot_Shipping_UE581|-|GObjects=1499c8940,GNames=1498fa940,GWorld=149a4b530,SparseDelegates=1496d7700,GEngine=149a4e248"
+# The Development row is the corpus's FIRST non-Shipping UE5 oracle, and it is worth its scan for
+# exactly that reason: it is the only row that can regress-test the two config-only gaps below.
+"UE5.8.1-StackOBotDev|StackOBot_Development_UE581|-|GObjects=153108e40,GNames=153000540,GWorld=1531e9cb8,SparseDelegates=152d67c30,GEngine=1531ee050"
+# ── Three non-Shipping oracles, imported 2026-07-29 with `-import ... -noanalysis` ─────────────
+# ALL THREE PROJECTS ARE RAW IMPORTS — no Auto Analyze, deliberately. The sweep reads raw bytes
+# (scan_patterns.java touches only getMemory/getBytes/getImageBase), analysis is ~88% of a .rep,
+# and a 300 MB non-Shipping EXE takes 3-4 h to analyze for zero benefit here. Do NOT "fix" these
+# by analysing them. Each was verified post-import by running scan_patterns.java against the
+# truth below; all five targets behave exactly as the offline derivation predicted.
+#
+# WHAT THEY ARE FOR: they are the only rows that exercise a NON-SHIPPING config, where two
+# targets nearly collapse. Their GNames cells are SUPPOSED to be ugly — see the
+# GNames-on-non-Shipping-UE5 entry in GROUND-TRUTH.md. Measured on the real imports:
+#   5.7.4 DbgG : GNames -> GNAM_V1 ok=2/192 (pri 870)   Sparse -> SPARSE_MEL55_1 ALONE
+#   5.8.0 DbgG : GNames -> GNAM_V1 ok=1/198 (pri 870)   Sparse -> SPARSE_X1/X2 only
+#   5.8.0 Titan: GNames -> GNAM_V1 ok=1/199 (pri 870)   Sparse -> SPARSE_X1/X2 only
+# In every case the priority walk LANDS on GNAM_CT3 (700) with a decoy, so GNames here depends
+# entirely on ValidateGNames rejecting ~2,300 decoys before reaching V1 in the last-resort band.
+"UE5.7.4-StackOBotDbgGame|StackOBot_DebugGame_UE574|-|GObjects=151c85900|151c85910,GNames=151b80980,GWorld=151eba9f0,SparseDelegates=151905f70,GEngine=151ebf250"
+# 5.8.0 DebugGame, same project as the UE5.8-StackOBot Shipping row above -> a config-only A/B.
+"UE5.8-StackOBotDbgGame|StackOBot_DebugGame_UE58|-|GObjects=153863480,GNames=15375a800,GWorld=153944338,SparseDelegates=1534bcc30,GEngine=1539486e0"
+# 5.8.0 DebugGame from a DIFFERENT project ("Titan"), which is what RULES OUT the gap being
+# project-specific: its coverage matches the StackOBot DebugGame row down to the pattern IDs.
+"UE5.8-TitanDbgGame|Titan_DebugGame_UE58|-|GObjects=154422a80,GNames=154319e00,GWorld=154503938,SparseDelegates=154056c30,GEngine=154507ce0"
 # ---- partially-symbolised: truth DERIVED BY DISASSEMBLY, not from a PDB ----
 # FF7 Remake has no PDB. These two VAs were recovered by hand and are as solid as a symbol:
 # FUN_140FD1490 is `GEngine->GetWorldFromContextObject(Obj)` — 0x145879EE8 is loaded into RCX as

@@ -20,6 +20,140 @@ builds ≤696 in
 
 -----
 
+## 2026-07-29 - Ground truth without Ghidra; corpus 51 -> 58 programs; three documented beliefs corrected (build 2503)
+
+A corpus/tooling pass, not a feature one. The through-line: **almost everything this project uses
+Ghidra for does not need it**, and once that was measured the corpus grew, three long-standing
+claims turned out to be wrong, and the sweep came back green.
+
+### `tools/pe/pdb_globals.py` — the five globals straight out of a PDB
+
+Standalone MSF 7.00 reader (stdlib only, same house style as `pe_imports_exports.py`). Walks the
+publics stream, maps `(segment, offset)` through the PDB's own section headers, and prints a
+paste-ready `GS_TRUE=` line. GNames has no usable symbol at any version, so it is recovered by
+disassembling `FNameDebugVisualizer::GetBlocks` (`lea rax,[&Blocks]; ret`) and subtracting `0x10` —
+printing the bytes it read, so the `-0x10` stays checkable.
+
+**Validated before being trusted**: it reproduces the `UE4.23-Flying` and `UE5.8-StackOBot` rows
+byte-for-byte, including the `GetBlocks @0x14062c010` / `48 8d 05 f9 83 82 02 c3` detail already
+recorded in `sweep.sh`. Re-run those two after touching it.
+
+The 5.8 GObjects `base|base+0x10` alias — the one manual judgement call — is now **auto-detected**
+from `??1FFieldClass@@UEAA@XZ` (`U` = virtual dtor = 5.8+), the one-second test GROUND-TRUTH.md
+already documented. Verified across five eras. Also made the module importable (`if __name__ ==
+"__main__"`), which is what enabled the offline function-body check below.
+
+This replaces step 2 of the "Deriving truth for a new game" recipe — a ~10-minute headless run per
+binary — with about two seconds.
+
+### AUTO ANALYZE IS NOT NEEDED FOR THE SWEEP, and it is ~88% of a `.rep`
+
+`scan_patterns.java` touches only `getMemory()` / `getBytes()` / `getImageBase()` — no
+`FunctionManager`, no `Listing`, no `SymbolTable` — which is why `sweep.sh` already passes
+`-noanalysis -readOnly`. Measured on one 49 MB binary:
+
+| | `.rep` size |
+|---|---|
+| `-noanalysis` import | **169 MB, 46 s** |
+| fully analysed | **1,369 MB** |
+
+**8.1x — analysis is 88% of the artifact the sweep never reads**, and `scan_patterns.java` returns
+the *identical five verdicts* from the raw import. Of the 15 Ghidra scripts, 5 need no analysis; the
+other 10 are all *read-the-code* pattern-mining tools — analyse into a throwaway project and delete
+it. A 5.8 DebugGame project had previously been deleted because auto-analyze would not finish, when
+the import never needed it. Written up in [corpus-preservation.md](corpus-preservation.md).
+
+### Corpus 51 -> 58 programs / 36 -> 43 oracles, and the sweep is green
+
+Imported with `-noanalysis` and each verified post-import: 4.23 DebugGame, 4.27.2 x3 configs
+(Development / DebugGame / Shipping), 5.7.4 DebugGame, 5.8.0 DebugGame, 5.8.0 Titan DebugGame,
+plus rows for 5.8.1 Shipping + Development. Every value double-derived (`pdb_globals.py` + a
+151-pattern byte replay) with zero contradicting candidates.
+
+**`Every target present in every oracle resolves to the correct address.`** The `GOBJ_DI427_1`
+demotion (105 -> 256, below) is verified neutral: no lander moved, the band audit came back empty.
+Two rows did not run — `UE5.8.1-StackOBot{,Dev}` were LOCKED by an open Ghidra session, which
+`preflight.py` flagged in advance as exactly those two.
+
+This also **closes the "verify the corpus after moving it to the HDD" item** — a full sweep is the
+only real integrity check for a silently corrupted `.rep`, and every pre-existing oracle still
+resolves on the same landing pattern. Scope it honestly though: `aggregate_sweep.py` overwrites
+`REPORT.md`, so this was a comparison against the rows read earlier in the session, not a literal
+file diff against the pre-move report.
+
+### `GOBJ_DI427_1` demoted 105 -> 256: it is a build-config fingerprint, not a UE 4.27 one
+
+Proven by a controlled A/B the corpus could not do before — one project, three configs, one engine:
+
+|  | `DI427_1` | `DI427_2` | `DI427_3` |
+|---|---|---|---|
+| 4.27.2 Development | 832 | 1415 | 246 |
+| 4.27.2 DebugGame | 832 | 1415 | 246 |
+| **4.27.2 Shipping** | **0** | **0** | **0** |
+
+`_1`/`_2` anchor on the `E8 <check-fail>; nop; int3` that `check()` emits; `_1` additionally needs
+the 32-byte `TStatId` `FUObjectItem` (`STATS` is 0 in Shipping). `_1` fires on **1 of 51** programs
+and is never selected, so it should not hold a batch-1 slot every shipped game pays to scan. `_2`
+(5 programs) and `_3` (4) do reach real Shipping builds — Satisfactory ships with checks on — and
+keep their bands.
+
+### THREE CORRECTIONS, all to things this repo asserted confidently
+
+1. **`UCheatManager::God`/`Fly`/`Ghost` are NOT body-stripped in Shipping.** Read the bytes at
+   `?God@UCheatManager@@UEAAXXZ` out of a stock 4.27.2 *Shipping* EXE: a full body, not a `ret`.
+   `CheatManager.cpp` @ 4.27 has exactly one `#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)` block and
+   it wraps `TickCollisionDebug`, not the cheat commands. **The real gate is that no
+   `UCheatManager` INSTANCE exists** — `AddCheats` spawns one only when `AGameModeBase::AllowCheats`
+   (`NM_Standalone || GIsEditor`) permits, so the invoke lands on the CDO and `GetPawn()` yields
+   nothing. Same symptom, different cause; and the fix is not "give up" but "you need an instance",
+   or do what `Solitar` already does and set `bCanBeDamaged` by reflection — which is literally what
+   `God()` itself does.
+2. **GNames on a non-Shipping UE5 build.** Called "a 5.8 thing" (5.7.4 disproved it), then "all 37
+   patterns miss, n=0" (a byte-replay display showing only the top 4 candidates; the true VA had one
+   voter, ranked off the bottom), then "unreachable". The sweep settled it: it **resolves**, on
+   `GNAM_V1` (pri 870, 4 literal bytes) after **2,199 / 2,369 / 2,424** rejected candidates — the
+   three most expensive fall-throughs in the corpus, next worst 475. Config-gated, not a version
+   regression; boundary is between 4.27 and 5.7.4, and **5.0-5.6 non-Shipping is untested**.
+3. **Rule 5 paid out, twice.** `SPARSE_MEL55_1` and `SPARSE_X1` are now in REPORT.md's Load-bearing
+   table: `MEL55_1` is the *only* pattern reaching sparse on 5.7.4 DebugGame. All three of
+   `X1`/`X2`/`MEL55_1` were added as pure redundancy against binaries that already resolved. Had any
+   been pruned as dead weight, a whole build configuration would silently have lost sparse support.
+
+### `tools/ghidra/corpus-provenance.tsv` — nothing in the corpus is unrecoverable any more
+
+`build_corpus_manifest.py` **nulls** `steam_buildid`/`size`/`sha256` on a drifted row (correctly — it
+must never assert the wrong build), which destroys the pointer to the build a `.rep` was made from
+the first time a game patches. Palworld drifted that same day. This snapshot preserves it, with four
+recovery routes: 22 `STEAMDB-BUILDID`, 6 `STEAMLOG-MANIFEST` (Steam's `console_log.txt` records every
+depot fetch with its exact manifest; an archived file's mtime falls inside its download), 4
+`STEAM-BACKUP-MANIFEST` (`sku.sis` in a Steam backup — exact, and survives delisting), 4 `REBUILD`,
+2 `STEAMDB-MANIFEST`. **`NONE-HASH-ONLY`: 0.**
+
+Two traps recorded: **use `file_modified`, never `file_created`** (a copy resets ctime but preserves
+mtime, so install->copy->uninstall keeps the original Steam write time — reading ctime made the dates
+look destroyed by the corpus move when they were not); and `console_log.txt` **rotates**, so its ten
+surviving records were transcribed into the doc.
+
+### Also
+
+* **Palworld patched mid-session** and it answered "does a pattern survive a game update?" better
+  than the ES2 cross-build pair could: every global moved (+0x3300, sparse +0x3180) and **not one
+  pattern broke** — all six voter sets came back character-identical.
+* Himmel.h header regenerated (158 entries, 151 AOB, 31 source tags — it was four short), corpus
+  paragraph refreshed, and a **UE 5.8 layout note** added: 5.8 moved `ObjObjects` +0x10 -> +0x00, so
+  the version-fixed `adjustment` patterns encode pre-5.8 arithmetic. `New patterns:` headers lost the
+  meaningless `New`.
+* The 4.23 sparse-delegate comment said "only 4.23 itself is unverified, and no 4.23 binary is in the
+  corpus" — stale since 2026-07-28. Also recorded **why there is no `SPARSE_EXP`**: the symbol exists
+  in modular builds but its mangled name embeds the whole template argument list and differs on all
+  three engine versions measured, so an exact-name `GetProcAddress` cannot work.
+* README UE badge `4.18-5.8` -> **`4.11-5.8`**; `winmm.dll` documented as the spare proxy slot for
+  when `dxgi`/`version` is taken; CLAUDE.md "3 proxy DLLs" -> 4.
+* [aob-block-library-eval.md](aob-block-library-eval.md) — evaluated, not built. The copyright
+  question is sidesteppable because every finding this session came from the **self-built** tier.
+
+-----
+
 ## 2026-07-27 - GWLD_FD_1: the GWorld fall-through list is now empty (build 2478)
 
 Landed the `UWorld::FinishDestroy` GWorld pattern mined at the end of the 4.11/4.13 support pass.

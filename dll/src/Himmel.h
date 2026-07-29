@@ -5,13 +5,13 @@
 
 // ============================================================
 // Himmel — 欣梅爾 (勇者 — The Hero, Remembered Forever)
-// Signatures: the AOB pattern database — 157 entries over FIVE targets
+// Signatures: the AOB pattern database — 158 entries over FIVE targets
 //
 // Every byte-pattern signature the scanner uses lives in this file, for all five
 // AobTarget values:
 //
 //   GObjects         FUObjectArray / GUObjectArray            55 AOB + 1 symbol export
-//   GNames           FNamePool (4.23+) or TNameEntryArray      28 AOB + 1 CallFollow
+//   GNames           FNamePool (4.23+) or TNameEntryArray      29 AOB + 1 CallFollow
 //                                                              + 3 symbol exports
 //                                                              (CT2 removed b2407 — see note)
 //   GWorld           UWorldProxy                               50 AOB + 1 symbol export
@@ -24,7 +24,7 @@
 //                                                                because its validator needs
 //                                                                reflection (see that section)
 //
-//   = 150 AOB + 1 CallFollow + 6 symbol exports = 157 entries, over 30 distinct `source` tags
+//   = 151 AOB + 1 CallFollow + 6 symbol exports = 158 entries, over 31 distinct `source` tags
 //     (counting the combined ones like DI427+SP57, which record every binary that vouches).
 //
 // THESE COUNTS GO STALE SILENTLY — regenerate them, do not hand-edit:
@@ -45,7 +45,7 @@
 //      table above the arrays — not from how new it is or who contributed it.
 //   5. VERIFY IT AGAINST THE CORPUS before trusting it:
 //         bash tools/ghidra/sweep.sh && py tools/ghidra/aggregate_sweep.py out/sweep
-//      46 programs, 32 with ground truth, UE 4.11-5.7. The bar is: correct on the binary
+//      58 programs, 43 with ground truth, UE 4.11-5.8. The bar is: correct on the binary
 //      it was mined from, and zero hits *or* correct everywhere else. A pattern that looks
 //      clean on one binary routinely produces decoys on another engine version — that is the
 //      entire point of the multi-binary gauntlet. See tools/ghidra/GROUND-TRUTH.md.
@@ -111,20 +111,41 @@
 //             UE 4.18 fork and UE 5.5), and the SPARSE_X1/X2 pair mined on Grimhook 5.1 that
 //             closed the sparse "n=1" cluster.
 //
-// SWEEP CORPUS as of build 2478 — 46 programs, of which 32 carry ground truth, spanning
-// UE 4.11 through 5.7 and CONTIGUOUS from 4.24 up. Those 32 are PROGRAMS not games: a modular
-// Satisfactory project contributes Core + CoreUObject + Engine separately, since each defines
-// different globals. Most come from full PDBs; a handful (4.11 Nekopara, 4.13 Fantasynth,
+// SWEEP CORPUS as of build 2499 — 58 programs, of which 43 carry ground truth, spanning
+// UE 4.11 through 5.8 and CONTIGUOUS from 4.20 up (the 4.23 hole closed 2026-07-28; 5.3 is the
+// one partial rung, carrying SparseDelegates truth alone). Those 36 are PROGRAMS not games: a
+// modular Satisfactory project contributes Core + CoreUObject + Engine separately, since each
+// defines different globals. Most come from full PDBs; a handful (4.11 Nekopara, 4.13 Fantasynth,
 // 4.18 FF7 Remake, 4.18 DQ XI S, 4.21 Freud Gate, 4.27 DQ7R, 5.0 Light Maze, 5.4 Elliot) were
 // DERIVED BY DISASSEMBLY instead, which is why the per-game reasoning lives in GROUND-TRUTH.md
 // rather than here — that file is the authoritative corpus table and this paragraph is a summary
 // of it. Below 4.11 is gated as UNSUPPORTED (Genau checks MIN_SUPPORTED_UE_VERSION): 4.10 has no
 // FUObjectItem at all and ArrayLayout structurally cannot express its inline chunk table.
-// The remaining 14 are symbol-less MONOLITHIC titles (Palworld 5.1, Avowed 5.3, TQ2, Octopath,
-// FF7 Rebirth, Manor Lords, DQ I&II HD-2D, The Artisan of Glimmith, ...) used as noise probes.
-// They cannot say "right", only "did anything hit that should not have" — and that question
-// needs monolithic EXEs, because a 4-30 MB Satisfactory engine DLL understates the collision
-// rate of a 100-200 MB shipped game by several-fold.
+// The remaining 15 are symbol-less MONOLITHIC titles (Palworld 5.1, TQ2, Octopath, FF7 Rebirth,
+// Manor Lords, DQ I&II HD-2D, The Artisan of Glimmith, Hogwarts Legacy, ...) used as noise
+// probes. They cannot say "right", only "did anything hit that should not have" — and that
+// question needs monolithic EXEs, because a 4-30 MB Satisfactory engine DLL understates the
+// collision rate of a 100-200 MB shipped game by several-fold.
+//
+// BOTH ENDS OF THE RANGE ARE SELF-BUILT, which is what makes them trustworthy: UE4.23-Flying
+// (Shipping, Epic's installed 4.23.1 Launcher engine) and the StackOBot 5.7.4 / 5.8 PAIR
+// (Shipping, unmodified engine source). So 4.23 — the version that introduced BOTH FNamePool and
+// sparse delegates — and 5.8 are measured rather than interpolated, and 5.7.4-vs-5.8 is a
+// controlled A/B where the engine is the only variable.
+//
+// UE 5.8 — THE ONE LAYOUT CHANGE THAT REACHES THIS FILE. 5.8 moved `FUObjectArray::ObjObjects`
+// from +0x10 to +0x00 (cache-locality reorder; `PreAllocatedObjects` went to the end), so on 5.8
+// the FUObjectArray BASE and ObjObjects are the SAME address. Consequence for pattern authoring,
+// and only this: the GObjects patterns that carry a version-fixed adjustment to turn an
+// ObjObjects/NumElements anchor back into a base anchor — `-0x10` on V10/AV1/AV2/RE2/V12, `-0x14`
+// on DI427_3/G427_2, `+0x0C` on G427_4 — encode PRE-5.8 arithmetic and overshoot on 5.8. That is
+// a MISS, not a wrong answer (ValidateGObjects finds no sane Num/Max at base-0x10), but it means
+// a pattern mined ON 5.8 should anchor the BASE — which is what the 5.8 oracle actually lands on
+// (GOBJ_ES53_1, adjustment 0). Same reason `sweep.sh`'s 5.8 row carries ONE truth value instead
+// of the usual `base | base+0x10` pair: the alias would score a hit on ObjObjects.NumChunks as
+// correct. Everything else 5.8 changed is NOT this file's business — the FUObjectArray field
+// order lives in the `"UE5.8"` ArrayLayout preset (Genau.cpp / Aura.cpp) and the
+// `virtual ~FFieldClass()` reflection break in DynOff — because Himmel holds byte patterns only.
 //
 // TWO THINGS THE ENLARGED CORPUS SETTLED, both worth remembering before pruning a pattern:
 //   * GWLD_V7 went from "0 correct, looks like dead weight" to UNIQUE-OK the moment Meltopia
@@ -551,7 +572,7 @@ constexpr const char* EXPORT_GENGINE          = "?GEngine@@3PEAVUEngine@@EA";
 
 
 // ============================================================
-// New patterns: Everspace 2 (UE 5.5)
+// Patterns: Everspace 2 (UE 5.5)
 // ============================================================
 
 // --- GWorld (ES2) ---
@@ -579,7 +600,7 @@ constexpr const char* AOB_GOBJECTS_ES2_1 = "48 8D 0D ?? ?? ?? ?? 41 8B F1 41 8B 
 
 
 // ============================================================
-// New patterns: SatisfFactory (UE 5.3, modular build — in DLLs)
+// Patterns: SatisfFactory (UE 5.3, modular build — in DLLs)
 // ============================================================
 
 // --- GWorld (SF, in Game-Engine-Win64-Shipping.DLL) ---
@@ -612,7 +633,7 @@ constexpr const char* AOB_GOBJECTS_SF_1 = "48 8B 05 ?? ?? ?? ?? 40 38 70 0C 74 2
 
 
 // ============================================================
-// New patterns: TQ2
+// Patterns: TQ2
 // ============================================================
 
 // --- GWorld (TQ2) ---
@@ -730,7 +751,7 @@ constexpr const char* AOB_GWORLD_GH_4 = "0F 57 C9 0F 2E C1 74 ?? 48 8B 1D ?? ?? 
 
 
 // ============================================================
-// New patterns: Solarpunk (UE 5.7, rokaplay — full PDB)
+// Patterns: Solarpunk (UE 5.7, rokaplay — full PDB)
 // ============================================================
 // UE 5.7's MSVC codegen inserts an extra load / picks different registers around
 // the GWorld access, so ALL of the Tier-1 (100–290) UE5 GWorld patterns (ES2_1-6,
@@ -765,19 +786,51 @@ constexpr const char* AOB_GWORLD_SP57_4 = "48 8B 05 ?? ?? ?? ?? 48 8B B8 98 02 0
 // list lives in this global. Resolving its address lets the walker enumerate
 // per-(owner, propertyName) FScriptDelegate bindings.
 //
-// Cross-version availability: UE 4.23 introduced sparse delegates. The outer TMap is keyed by a
-// raw `UObjectBase const*` at EVERY version we can check — PDB-verified from the mangled symbol
-// on 4.24 (DropIn_UE424), 4.25 (Everspace 2 depot), 4.26 (Satisfactory), 4.27 (DropIn) and
-// across 5.x, and vendor/UnrealEngine 5.8 declares it identically. The 4.24 symbol demangles to
+// Cross-version availability: UE 4.23 introduced sparse delegates, and **4.23 IS IN THE CORPUS**
+// — the maintainer built the 4.23.1 "Flying" template himself (UE4.23-Flying, full PDB, added
+// 2026-07-28), so the earliest version the feature has ever had is MEASURED, not interpolated.
+// The outer TMap is keyed by a raw `UObjectBase const*` at every version we can check —
+// PDB-verified from the mangled symbol on 4.23 (Flying), 4.24 (DropIn_UE424), 4.25 (Everspace 2
+// depot), 4.26 (Satisfactory), 4.27 (DropIn) and across 5.x, and vendor/UnrealEngine 5.8 declares
+// it identically. The 4.23 symbol is character-identical to the 4.24 one, which demangles to
 //   TMap<UObjectBase const*, TMap<FName, TSharedPtr<TMulticastScriptDelegate<FWeakObjectPtr>>>>
-// i.e. the shape is unchanged from the version that introduced it. **Only 4.23 itself is now
-// unverified**, and no 4.23 binary is in the corpus.
+// i.e. the shape is unchanged from the version that introduced it, and NO version is left
+// unverified. SPARSE_DI427_1 is what resolves it live on the 4.23 build.
 //
 // The older note here ("UE 4.23-4.27 used FObjectKey, 16 bytes") was wrong on both counts:
 // FObjectKey is 8 bytes ({int32 ObjectIndex; int32 ObjectSerialNumber}) and is not used as this
 // key at any verified version. Aura's walker still probes the live key shape rather than gating
-// on a version number — keep it that way. That is what makes 4.23 (and any licensee fork) safe
-// without a binary to test against, and it costs one pointer-shape check.
+// on a version number — keep it that way. That is what covers any licensee fork no sample can,
+// and it costs one pointer-shape check.
+//
+// ── WHY THERE IS NO `SPARSE_EXP` SYMBOL-EXPORT ENTRY, although the symbol does exist ─────────
+// `FSparseDelegateStorage::SparseDelegates` is COREUOBJECT_API, so a MODULAR build really does
+// export it — right beside the `?GUObjectArray@@3VFUObjectArray@@A` we already use. Measured with
+// tools/pe/pe_imports_exports.py over the three modular oracles, the exported name is:
+//   4.26 Sat  ?SparseDelegates@FSparseDelegateStorage@@0V?$TMap@PEBVUObjectBase@@V?$TMap@VFName@@
+//             V?$TSharedPtr@V?$TMulticastScriptDelegate@UFWeakObjectPtr@@@@$0A@ ...
+//   5.2  Sat  ... identical EXCEPT the TSharedPtr mode argument is `$00`, not `$0A@`
+//   5.6  Sat  ... and the delegate parameter is `UFNotThreadSafeDelegateMode`, not `UFWeakObjectPtr`
+// THREE DIFFERENT MANGLED NAMES ON THREE ENGINE VERSIONS. That is the blocker: the mangling
+// embeds the entire template argument list, so unlike GUObjectArray/GWorld/GEngine (plain class
+// names, stable since UE4) there is no single string to hand GetProcAddress — and
+// AobResolve::SymbolExport is exactly `GetProcAddress(module, sig.pattern)` over every loaded
+// module (Genau::TrySymbolExport), an EXACT-name lookup with no prefix matching.
+//
+// IF SOMEONE WANTS IT ANYWAY, here is the route that actually works, so it does not have to be
+// re-derived. The SIBLING static declared immediately after it —
+//   ?SparseDelegateObjectOffsets@FSparseDelegateStorage@@0V?$TMap@U?$TTuple@VFName@@V1@@@_K
+//   VFDefaultSetAllocator@@U?$TDefaultMapHashableKeyFuncs@U?$TTuple@VFName@@V1@@@_K$0A@@@@@A
+// — is BYTE-IDENTICAL on all three (its `TMap<TPair<FName,FName>, size_t>` carries no
+// delegate-mode parameter), and on all three it sits exactly **0x50 above** SparseDelegates
+// (sizeof(TMap), and they are adjacent in SparseDelegate.h). So `symbol - 0x50` reaches the
+// target. It needs two things this file cannot supply: `ResolveSymbolExport` currently IGNORES
+// `sig.adjustment`, and 0x50 is 3 samples on 3 engine versions, not a proof.
+// NOT DONE, because the payoff is close to nil: monolithic shipping games export nothing at all,
+// and every modular oracle already resolves sparse through SPARSE_ES2_1 / X1 / X2.
+// (`SparseDelegateObjectListener` is also stably mangled but is NOT usable — its delta to
+// SparseDelegates is 0x10 on 4.26/5.2 and 0x08 on 5.6, because FObjectListener changed size.
+// `SparseDelegateMapCritical`'s own mangling is unstable: FWindowsCriticalSection -> UE::FWindowsRecursiveMutex.)
 
 // ES2_1: NotifyUObjectDeleted middle — lea rcx,[crit]; call [EnterCriticalSection];
 //        mov rdx,r??; lea rcx,[SparseDelegates]; call TSet::Remove; mov eax,[SparseDelegates+8]
@@ -991,24 +1044,67 @@ constexpr const char* AOB_SPARSE_X2 =
 // ============================================================
 // GObjects — DI427 (UE 4.27, 32-byte FUObjectItem)
 // ============================================================
-// WHY these exist: on DropIn every one of the 52 pre-existing GObjects patterns MISSES or
-// resolves only to decoys. Root cause, measured over all 400 xrefs to ObjObjects.Objects:
-// the destination register of the chunk load is rdi(156) / rsi(92) / r14(63) / rbx(40) /
-// r15(19) / r12(15) / rbp(7) / rax(6) / r13(2) — and NEVER rcx, because rcx is the *index*
-// register at every one of these sites. GOBJ_V1 hardcodes `48 8B 0C C8` (dest = rcx), so
-// the whole V-series is structurally unable to fire here. Nibble-masking the REX + modrm
-// is the fix.
+// WHY these exist: on DropIn the pre-existing GObjects patterns had no DECOY-FREE anchor. Root
+// cause, measured over all 400 xrefs to ObjObjects.Objects: the destination register of the
+// chunk load is rdi(156) / rsi(92) / r14(63) / rbx(40) / r15(19) / r12(15) / rbp(7) / rax(6) /
+// r13(2) — and NEVER rcx, because rcx is the *index* register at every one of these sites.
+// GOBJ_V1 hardcodes `48 8B 0C C8` (dest = rcx), so the whole V-series is structurally unable to
+// fire here. Nibble-masking the REX + modrm is the fix.
+//   SCOPED CORRECTLY b2499. The original wording — "every one of the 52 pre-existing GObjects
+//   patterns MISSES or resolves only to decoys" — overstates it, and the sweep says so: on
+//   UE4.27-DropIn, GOBJ_ES53_1 reaches truth (1 correct behind 34 decoys, OK-BEHIND) and is
+//   still the SELECTED lander there, while G42_2 / GH_4 / PS3 are UNIQUE-OK and SAT426_1 is
+//   OK-FIRST. "No decoy-free anchor" is the claim the data supports; "nothing worked" is not.
 //
 // SECOND TRAP: do NOT shorten these. The 14-byte core
 // `48 8B 05 ?? ?? ?? ?? 4? 8B ?? C8 4? 85 ??` is decoy-free on DropIn but produces 1 decoy
 // on Solarpunk and 9 on Avowed. The `75 ?? E8` (jnz over the noreturn check-fail call)
 // tail is what takes all three to zero.
+//
+// THIRD, AND IT DECIDES THEIR BANDS — THESE ARE BUILD-CONFIG SHAPES, NOT "UE 4.27" SHAPES.
+// Proven by a controlled A/B rather than inferred: the maintainer's own UE 4.27.2 "Flying"
+// template, one project compiled three ways on one engine, with the config as the only variable
+// (`D:\UE_Analyze_Data\Varies Version builds\4.27.2\{Development,DebugGame,Shipping}\Win64`):
+//
+//            DI427_1   DI427_2   DI427_3        (raw .text hit counts, offline scan)
+//   Development   832      1415       246
+//   DebugGame     832      1415       246       identical counts, different addresses
+//   Shipping        0         0         0       <-- ALL THREE VANISH
+//   (DropIn 4.27   925      1524       282  — a Development build, hence the match)
+//
+// The reason is in what a Shipping build strips. `_1` and `_2` both anchor on the
+// `E8 <check-fail>; nop; int3` that `check()` emits; `_3` anchors on IndexToObject's
+// `cmp <idx>,[NumElements]; jge` guard, which is the same check-shaped construct; and `_1`
+// additionally needs the 32-byte `FUObjectItem` — those 8 bytes are `TStatId`, gated at 4.27 by
+// `#if STATS || ENABLE_STATNAMEDEVENTS_UOBJECT` (`UObjectArray.h` @ 4.27.2-release), and `STATS`
+// is 0 in Shipping. Two independently symbolised 4.27 SHIPPING binaries (Breeders, Maelstrom)
+// carry the stock 24-byte item, so the 32-byte item was never a 4.27 trait.
+//
+// What that means per pattern, over the 51-program sweep:
+//   * GOBJ_DI427_1 fires on exactly ONE binary — UE4.27-DropIn (925 hits, 0 decoys) — and is
+//     never the selected pattern even there. It is the ONLY entry in this file that is both
+//     config-gated AND item-size-gated, so it is DEMOTED 105 -> 256: a Development-only
+//     fingerprint should not hold a GObjects batch-1 slot that every shipped game pays to scan.
+//     Band by SEMANTICS, not by its 13 literal bytes — the same judgement the GOBJ_ES53_1
+//     counter-example in the band block above makes in the opposite direction.
+//     **DEMOTION VERIFIED by the full 58-program sweep (2026-07-29):** not one lander moved on
+//     any oracle, REPORT.md's band audit came back EMPTY ("all patterns sit in a band consistent
+//     with their specificity"), and DI427_1 now appears only in the §6 noise table. Neutral, as
+//     predicted — the point was ordering hygiene, not a measurable win.
+//   * GOBJ_DI427_2 (5 binaries) and _3 (4 binaries) DO reach genuine SHIPPING builds — 4.22 and
+//     4.26/5.2 Satisfactory, which evidently ship with checks ENABLED, and that is not an
+//     assumption: `_2`'s whole anchor IS the check-fail tail, so its 1,801 hits on the 4.22
+//     Shipping EXE are the proof. Not config-gated in practice; they keep their bands.
+// Do NOT read the demotion as "prune it": it is UNIQUE-OK wherever it fires, and rule 5 of
+// GROUND-TRUTH.md (never prune on absence of proof) applies. It is insurance for the next
+// Development/DebugGame build that walks in.
 
 // DI427_1: inlined FChunkedFixedUObjectArray::GetObjectPtr + the 32-byte-item shift.
 //   mov rax,[ObjObjects.Objects]; mov <r>,[rax+rcx*8]; test <r>,<r>; jnz; call check-fail;
 //   nop; int3; mov <r2>,<withinIdx>; shl <r2>,5
 //   The trailing `4? C1 E? 05` (shl r,5) is the 32-byte-FUObjectItem fingerprint — no other
-//   pattern in this file encodes a 32-byte stride (they assume 16/20/24).
+//   pattern in this file encodes a 32-byte stride (they assume 16/20/24). Which is exactly why
+//   it only ever matches a STATS-enabled (Development/DebugGame) build — see the block above.
 constexpr const char* AOB_GOBJECTS_DI427_1 =
     "48 8B 05 ?? ?? ?? ?? 4? 8B ?? C8 4? 85 ?? 75 ?? E8 ?? ?? ?? ?? 90 CC 4? 8B ?? 4? C1 E? 05";
 // DI427_2: item-size-AGNOSTIC core of _1 (stops before the shift), so it also covers the
@@ -1361,8 +1457,11 @@ constexpr AobSignature GOBJECTS_PATTERNS[] = {
 
     // 100–290: Tier 1 — long, specific patterns
     SIG_RIP("GOBJ_ES53_1", AOB_GOBJECTS_ES53_1, AobTarget::GObjects, 4, 3, 7, 0, 100, "ES53", "ES2 UE5.3 FUObjectArray ctor+atexit"),
-    SIG_RIP("GOBJ_DI427_1", AOB_GOBJECTS_DI427_1, AobTarget::GObjects, 0, 3, 7, 0, 105, "DI427",
-            "UE4.27 GetObjectPtr + 32-byte-item shl 5 (nibble-masked dest reg)"),
+    // 105 was GOBJ_DI427_1 — DEMOTED to 256 in build 2499. It is the file's only pattern that is
+    // both build-config-gated (needs `check()`) and item-size-gated (needs the 32-byte STATS
+    // FUObjectItem), so it can only ever match a Development/DebugGame build: measured 0 hits on
+    // the Shipping config of the very same 4.27.2 project that gives it 832. See the three-config
+    // A/B table in its comment above.
     { "GOBJ_V10", AOB_GOBJECTS_V10, AobTarget::GObjects, AobResolve::RipBoth,
       0, 3, 7, -0x10, 110, 0, false, "V", "Split Fiction UE5.5+ lea+call+call" },
     SIG_RIP("GOBJ_DI427_3", AOB_GOBJECTS_DI427_3, AobTarget::GObjects, 0, 2, 6, -0x14, 115, "DI427",
@@ -1387,6 +1486,8 @@ constexpr AobSignature GOBJECTS_PATTERNS[] = {
     SIG_RIP("GOBJ_SF_1", AOB_GOBJECTS_SF_1, AobTarget::GObjects, 0, 3, 7, 0, 250, "SF", "SatisfFactory via _imp_ (in EXE)"),
     SIG_RIP("GOBJ_DI427_2", AOB_GOBJECTS_DI427_2, AobTarget::GObjects, 0, 3, 7, 0, 255, "DI427",
             "UE4.27 GetObjectPtr core, item-size agnostic (broadest — last in Tier 1)"),
+    SIG_RIP("GOBJ_DI427_1", AOB_GOBJECTS_DI427_1, AobTarget::GObjects, 0, 3, 7, 0, 256, "DI427",
+            "UE4.27 GetObjectPtr + 32-byte-item shl 5 — DEVELOPMENT/DEBUGGAME ONLY (was 105)"),
 
     // 300–490: Tier 2 — medium patterns
     SIG_RIP("GOBJ_G42_2", AOB_GOBJECTS_G42_2, AobTarget::GObjects, 0, 3, 7, 0, 260, "G42", "UE4.2 RemoveUObjectDeleteListener"),

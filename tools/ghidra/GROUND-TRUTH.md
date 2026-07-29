@@ -72,6 +72,107 @@ govern. Read that block too before adding, moving or deleting anything. The shor
   measurement rather than interpolation. `SPARSE_DI427_1` resolves it live. The structural
   mitigation still stands and should stay: **`Aura` probes the live key shape instead of gating on
   a version number**, which is what covers licensee forks that no sample can.
+- **GNames all but collapses on a non-Shipping UE5 build.** It is **config**, not a version
+  regression: every Shipping build tested resolves normally, so **no shipped game is affected**.
+  The boundary is between **4.27 and 5.7.4**, NOT at 5.8.
+
+  ⚠ **THIS ENTRY WAS WRONG TWICE BEFORE THE SWEEP SETTLED IT — the sequence is the lesson.**
+  First written as "a 5.8 thing" (5.7.4 disproved it). Then as "**all 37 patterns miss, n=0**" —
+  also wrong: the n=0 came from a byte-replay harness printing only the **top 4 candidates by
+  voter count**, and the true VA had exactly ONE voter, ranked off the bottom. Then as
+  "unreachable" — wrong a third time, because the full sweep replays the *validator walk* and
+  shows it **RESOLVES CORRECTLY**. Final, sweep-verified position:
+
+  | oracle | GNames verdict |
+  |---|---|
+  | UE5.7.4-StackOBotDbgGame | ⚠️ `GNAM_V1` after **2,199** wasted validations |
+  | UE5.8-StackOBotDbgGame | ⚠️ `GNAM_V1` after **2,369** |
+  | UE5.8-TitanDbgGame | ⚠️ `GNAM_V1` after **2,424** |
+
+  crossing `GNAM_CT3`, `G42_1`, `CT4`, `V5`, `V2` each time. **These are the three most expensive
+  fall-throughs in the entire corpus** — the next worst is 475 — so the cost is real even though
+  the answer is right. `scan_patterns.java` on the real import shows why:
+
+  | pri | pattern | hits | ok | decoy | verdict |
+  |---|---|---|---|---|---|
+  | 700 | `GNAM_CT3` | 1 | 0 | 1 | DECOY-ONLY **← the walk lands here** |
+  | 710 / 720 | `GNAM_G42_1` / `GNAM_CT4` | 1 | 0 | 1 | DECOY-ONLY |
+  | 850 / 860 | `GNAM_V5` / `GNAM_V2` | 1161 / 1199 | 0 | all | DECOY-ONLY |
+  | **870** | **`GNAM_V1`** | **198** | **1** | 197 | **OK-BEHIND** |
+  | 880 / 890 | `GNAM_V3` / `GNAM_V4` | 768 / 1040 | 0 | all | DECOY-ONLY |
+
+  So the honest statement is: **exactly one pattern reaches truth — `GNAM_V1`, the 4-literal-byte
+  `lea rsi,[rip]; jmp` at priority 870 — behind 197 of its own decoys, and only after
+  `ValidateGNames` has rejected ~2,300 others.** Not "unreachable"; *one degenerate pattern deep
+  in the last-resort band, reached expensively.* It is an independent vindication of not pruning
+  `GNAM_V1` (kept in build 2405 as "correct yet redundant" — here it is neither redundant nor
+  spare capacity).
+
+  ⚠ **`GNAM_V1` does NOT appear in REPORT.md §5 "Load-bearing"**, because that table counts only
+  ✅ SELECTED-and-correct landers and these three are ⚠️ fall-throughs. So §5 alone would let you
+  prune a pattern that is the sole correct answer on three oracles. **Read §1 and the fall-through
+  list too before pruning anything.**
+
+  **Two harness lessons, worth more than the finding itself:** never read "not in the top N" as
+  "absent"; and a byte-replay says what *hits*, only the sweep says what the *validator walk
+  lands on*. Three successive wrong framings here all came from substituting the former for the
+  latter.
+
+  Nine builds:
+
+  | engine | project / config | GNames | SparseDelegates |
+  |---|---|---|---|
+  | 4.23.1 | Flying, DebugGame | ✅ n=16 | ✅ n=4 |
+  | 4.27.2 | Flying, Development | ✅ n=16 | ✅ n=4 |
+  | 4.27.2 | Flying, DebugGame | ✅ n=16 | ✅ n=4 |
+  | **5.7.4** | **StackOBot, DebugGame** | ⚠ **`GNAM_V1` only** | ⚠ **n=1 — `MEL55_1` ALONE** |
+  | **5.8.0** | **StackOBot, DebugGame** | ⚠ **`GNAM_V1` only, OK-BEHIND ×197** | ⚠ n=2 (`X1`+`X2`) |
+  | **5.8.0** | **Titan, DebugGame** | ⚠ **`GNAM_V1` only** | ⚠ n=2 (`X1`+`X2`) |
+  | **5.8.1** | **StackOBot, Development** | ⚠ **`GNAM_V1` only** | ⚠ n=2 (`X1`+`X2`) |
+  | 5.7.4 / 5.8.0 / 5.8.1 | Shipping | ✅ n=11 | ✅ n=3 |
+
+  The 5.8.0-DebugGame row is confirmed by `scan_patterns.java` on the real import; the other three
+  come from the byte replay and inherit its top-N blind spot, so read them as "the 16-strong
+  Shipping voter set collapses to essentially nothing", not as an exact count.
+
+  **Not project-specific either.** Titan and StackOBot are unrelated projects built at the same
+  engine version and config, and their coverage is identical *down to the individual pattern IDs*
+  — GObjects `{ES53_1, GH_4, PS3, SAT426_1}`, GWorld n=13, GEngine `{DI427_1, X1, X3, X4}`, and
+  the same `{CT3, CT4, G42_1}` GNames decoy cluster. That was the last alternative explanation;
+  it is the build configuration and nothing else.
+
+  **The 5.0–5.6 non-Shipping band is untested** — the boundary could be anywhere in it. Do not
+  write it up as "a 5.7+ thing" without measuring one.
+
+  Not a scan artifact: the same harness reproduces the 5.8.0-Shipping consensus (`149eba940`,
+  n=11) exactly, `GNAM_V7` (CallFollow) takes 0 hits, and the Development EXE's 227 exports
+  contain no `FName` symbol, so `GNAM_EXP_*` has nothing to work with either.
+  **Root cause is a hardcoded destination register — the `GOBJ_V1`-on-DropIn failure mode, one
+  target over.** There are 46 rip-relative xrefs to `NamePoolData`; the dominant shape is the
+  twin-LEA lazy init the family already targets:
+  ```
+  74 09              jz  +9
+  48 8d 1d <d32>     lea rbx,[NamePoolData]     <- initialized path   (also 4c 8d 3d = r15)
+  eb 2f              jmp +0x2f
+  48 8d 0d <d32>     lea rcx,[NamePoolData]     <- lazy-init path
+  e8  <rel32>        call FNamePool::FNamePool
+  ```
+  Every GNames pattern pins that FIRST lea to `48 8d 05` (rax) / `4c 8d 05` (r8) / `48 8d 15`
+  (rdx) / `48 8d 35` (rsi) / `48 8d 2d` (rbp). **None admits rbx or r15.** A nibble-masked
+  `4? 8d ?? <d32> eb ?? 48 8d 0d <d32> e8` covers it — but `48 8d ??` is only 2 literal bytes at
+  the head, so it must clear the full 51-binary gauntlet before it goes anywhere near the table
+  (rule 1 + the `GWLD_G42_4` counter-example). **NOT mined — deliberately.**
+  Priority is genuinely low: nobody attaches the dumper to a Development build of a template
+  project. The value is that it names a real blind spot in the GNames family, and it is the
+  reason the `UE5.8.1-StackOBotDev` row exists.
+- **The "redundant" sparse patterns earned their keep — and the sweep now says so formally.**
+  `SPARSE_MEL55_1` and `SPARSE_X1` are listed in REPORT.md §5 **Load-bearing** as of 2026-07-29:
+  `MEL55_1` is the selected-and-correct pattern on `UE5.7.4-StackOBotDbgGame` and **nothing else
+  reaches sparse there at all**; `X1` holds both 5.8 DebugGame rows. All three (`X1`/`X2`/`MEL55_1`)
+  were added as pure redundancy against Shipping binaries that already resolved — rule 5 was the
+  only argument for keeping them, and they looked like dead weight at the time. **Had any one been
+  pruned, a whole build configuration would silently have lost sparse-delegate support.** This is
+  the strongest evidence in the file for that rule.
 - **FF7 Rebirth's SparseDelegates** exists (proved from `.rdata`: `SparseDelegateFunction`,
   `MulticastSparseDelegateProperty`, the `SparseDelegateReport` console command) but no pattern
   finds it. Lead for whoever picks it up: find the `SparseDelegateReport` string xref and follow
@@ -118,6 +219,45 @@ Each cost at least one headless run to establish. Recorded so nobody spends anot
 
 - **`out/sweep/patterns.tsv` goes stale.** Always re-run `extract_patterns.py` before scanning;
   a cached tsv from a previous sweep put three of five analysts a commit behind on a priority.
+- **THE SWEEP DOES NOT NEED AUTO ANALYZE. Never wait for it, and never delete a project over it.**
+  `scan_patterns.java` touches only `currentProgram.getMemory()`, `mem.getBytes()` and
+  `getImageBase()` — no `FunctionManager`, no `Listing`, no `SymbolTable`. It scans raw bytes and
+  computes RIP targets arithmetically, which is why `sweep.sh` already passes `-noanalysis
+  -readOnly`. A *huge* non-Shipping build (a 300 MB Development EXE with a `.uedbg` section) can
+  take hours to auto-analyze and it buys the sweep **nothing**. Import with analysis off:
+  ```bash
+  analyzeHeadless D:/Tools/GHIDRA_Projs <ProjectName> -import "<path>\<file>.exe" -noanalysis
+  ```
+  One at a time — a Ghidra project takes an exclusive lock, so concurrent imports into the same
+  project fail with `LockException` and only the first gets in.
+  **MEASURED, and it is the corpus's biggest disk lever:** the same 49 MB binary imports to
+  **169 MB in 46 s** with `-noanalysis` versus **1,369 MB** fully analysed — **8.1×, i.e. 88% of a
+  `.rep` is analysis output the sweep never reads** — and `scan_patterns.java` returns the
+  *identical five verdicts* from the raw import. Full write-up + caveats in
+  [corpus-preservation.md](../../docs/corpus-preservation.md) §"re-import without analysis".
+  Analysis is only worth its time when you are going to *read* the program — the ten scripts that
+  need it (`dump_func`, `decompile_functions`, `find_callers`, `dump_xrefs2`,
+  `dump_global_xref_aob`, `find_gobjects`, `dump_vtables`, `dump_types`, `pe_probe`, `probe`) are
+  all pattern-mining tools. Analyse into a throwaway project and delete it afterwards. The five
+  that need nothing are `scan_patterns`, `find_syms3`, `dump_dataat`, `scan_strings`, `verify_aob`
+  — though `find_syms3` does need the PDB *applied*, which `-noanalysis` skips.
+  For ground truth on a binary that ships a PDB you no longer need Ghidra at all — see step 0 of
+  the derivation recipe.
+  *(This was learned the expensive way: a 5.8 DebugGame project was deleted because auto-analyze
+  would not finish, when the import never needed it.)*
+- **A real game patch moves every global and breaks NOTHING.** Measured 2026-07-29 on Palworld
+  across a live Steam update (2026-07-15 → 07-29, md5 `fb10d568…` → `a2dadf69…`, +11,776 bytes):
+  every target shifted — GObjects/GNames/GWorld/GEngine by exactly **+0x3300**, SparseDelegates by
+  **+0x3180** (two `.data` growth groups) — while the **voter sets came back character-identical**
+  (GObjects n=6 + n=6 on the `+0x10` alias, GNames n=12, GWorld n=14, Sparse n=4, GEngine n=4),
+  `SPARSE_PAL51_1` included. This is the second answer to "does a pattern survive a game update?"
+  after the ES2 5.5 cross-build pair, and the stronger one, because it is a real patch to a
+  shipped title rather than two builds of the same version. **Do not re-measure this per patch.**
+  Corollary worth knowing: the archived binary is the corpus build (its SparseDelegates consensus
+  is `148fb66b0`, the exact address hardcoded in `Himmel.h`'s `SPARSE_PAL51_1` note), so the
+  `.rep` and the manifest stay valid — but `preflight.py --verify-hash` now reports Palworld as
+  `id=MISMATCH` against the **live** Steam install, correctly. Re-point it at the backup by
+  re-running `build_corpus_manifest.py`; do not hand-edit the generated manifest.
 - **DropIn's 32-byte `FUObjectItem` is a CONFIG artifact, not a 4.27 trait.** Proven by two
   independent symbolised 4.27 binaries (Breeders, Maelstrom) carrying the stock 24-byte item.
 - **A small `.msvcjmc` section does NOT mean a Development build.** Breeders and Maelstrom have
@@ -260,13 +400,19 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 | UE5.0-LightMaze | `Light_Maze` | 5.0.3 | ❌ none | truth by disassembly; **closes the 5.0 hole** (4.27 used to jump to 5.1) |
 | UE4.22-Satisfactory | `Satisfactory_UE422` | 4.22 | ✅ full PDB | **monolithic EXE with symbols** — the only pre-4.25 one |
 | UE4.23-Flying | `UE423_Flying-Win64_Shipping` | 4.23.1 | ✅ full PDB | **built by us** (Shipping, monolithic; note the UNDERSCORE in the project name). The only 4.23, and the FIRST version of BOTH FNamePool and sparse delegates. **Live-verified** — the packaged copy was run and all five resolved |
+| UE4.23-FlyingDbgGame | `UE423_Flying-Win64-DebugGame` | 4.23.1 | ✅ full PDB | **built by us**, DebugGame. The **lower bracket** on the non-Shipping GNames gap: everything resolves here (GNames n=16), so that gap is not a property of non-Shipping builds in general |
 | UE5.7.4-StackOBot | `StackOBot_Shipping_UE574` | 5.7.4 | ✅ full PDB | **built by us**, Shipping. The 5.7.4/5.8 pair is a controlled A/B — same game, same config, adjacent engines |
-| UE5.8-StackOBot | `StackOBot_Shipping_UE58` | 5.8.0 | ✅ full PDB | **built by us**, Shipping. **The only 5.8.** GObjects takes a SINGLE truth value (5.8 moved `ObjObjects` to +0x00). The oracle for the `virtual ~FFieldClass()` reflection break |
+| UE5.8-StackOBot | `StackOBot_Shipping_UE58` | 5.8.0 | ✅ full PDB | **built by us**, Shipping. GObjects takes a SINGLE truth value (5.8 moved `ObjObjects` to +0x00). The oracle for the `virtual ~FFieldClass()` reflection break |
+| UE5.8.1-StackOBot | `StackOBot_Shipping_UE581` | 5.8.1 | ✅ full PDB | **built by us**, Shipping. With 5.8.0 it forms a **patch-level** A/B — the finest-grained pair in the corpus. Identical pattern coverage on all five targets, so 5.8.0→5.8.1 moved nothing we depend on |
+| UE5.8.1-StackOBotDev | `StackOBot_Development_UE581` | 5.8.1 | ✅ full PDB | **built by us**, Development — the corpus's **first non-Shipping UE5 oracle**. Exists to regress-test two config-only gaps: **GNames reaches nothing here** (all 37 patterns miss — see above) and `SPARSE_ES2_1` misses, leaving `X1`/`X2` alone. Expect ❌ GNames in the matrix; that is the point |
 | UE4.27-Hogwarts | `Hogwarts_Legacy` | 4.27 | ❌ none | noise probe — **⚠ DENUVO-PACKED, no `.text` at all** (`.udata` 105 MB + `.xpdata` 274 MB). Its hits are against encrypted data and it dilutes the §6 hits/MB denominator; see the sweep.sh comment |
 | UE4.24-DropIn | `DropIn_UE424` | 4.24.3 | ✅ full PDB | **closed the last checkable sparse-delegate gap** — see below |
 | UE4.25-Everspace2 | `ES2-UE425` | 4.25.2 | ✅ full PDB | the FField/FProperty transition band |
 | UE4.26-Satisfactory | `Satisfactory_UE426` | 4.26.2 | ✅ full PDB | modular, 4 DLLs — supersedes the unusable `Satfi426` |
 | UE4.27-DropIn | `DropIn` | 4.27.2 | ✅ full PDB | Development build (32-byte `FUObjectItem`) |
+| UE4.27-FlyingDev | `UE427_Flying_Development` | 4.27.2 | ✅ full PDB | **built by us**, Development. **Takes over DropIn's sole-oracle role for `GOBJ_DI427_1/2/3`** — reproduces its 32-byte `FUObjectItem` codegen exactly. Note the project name uses an UNDERSCORE and no `-Win64` |
+| UE4.27-FlyingDbgGame | `UE427_Flying-Win64-DebugGame` | 4.27.2 | ✅ full PDB | **built by us**, DebugGame. The control, not coverage: UE builds DebugGame's *engine* modules optimized like Development, so its `DI427` hit counts are **identical** (832/1415/246). Safe to comment out of `sweep.sh` |
+| UE4.27-FlyingShipping | `UE427_Flying-Win64-Shipping` | 4.27.2 | ✅ full PDB | **built by us**, Shipping. The NEGATIVE control that proves `DI427` is config-gated: all three score **0** here on the same source. Also the first 4.27 Shipping oracle from a known Epic-stock engine |
 | UE4.27-Artisan | `The_Artisan_of_Glimmith` | 4.27 | ❌ none | monolithic noise probe |
 | UE4.18-Octopath | `Octopath` | 4.18 | ❌ none | monolithic noise probe; version recovered from the `++UE4+Release-4.18` build tag + a fingerprint identical to DQ XI S |
 | UE4.x-FF7Rebirth | `FF7Re` | 4.26 fork | ❌ none | the only binary that exercises `GOBJ_RE1` / `GNAM_V7` |
@@ -366,6 +512,21 @@ invisible and a modular build looks empty.
 
 ## Deriving truth for a new game
 
+0. **If the binary ships a PDB, skip Ghidra entirely** — `py tools/pe/pdb_globals.py <file.pdb>`
+   prints all five globals and a paste-ready `GS_TRUE=` line in about two seconds. It decodes the
+   MSF publics stream itself (no deps), maps `(segment, offset)` through the PDB's own section
+   headers, emits the `base|base+0x10` GObjects pair, and recovers GNames by disassembling
+   `FNameDebugVisualizer::GetBlocks` and printing the bytes it read so the `-0x10` stays
+   checkable. Two flags matter: `--no-gobjects-alias` on **UE 5.8+** (5.8 moved `ObjObjects` to
+   `+0x00`, so `base+0x10` is `NumChunks` and the alias would score an int32 as correct), and
+   `--grep <str>` to hunt decoys or confirm a symbol is absent.
+   **It is validated by reproducing two rows in this table byte-for-byte** — UE4.23-Flying and
+   UE5.8-StackOBot, including the `GetBlocks @0x14062c010` / `48 8d 05 f9 83 82 02 c3` detail
+   recorded in `sweep.sh`. Re-run those two after touching it; a decoder that drifts silently is
+   exactly the failure this file exists to prevent.
+   Then CORROBORATE independently before writing the row down — replay Himmel.h's patterns against
+   `.text` and check the consensus lands on the same VA (rule 4). Values derived both ways and
+   agreeing are what "double-derived" means in the `sweep.sh` comments.
 1. **`probe.java` first** — confirms the project opened and whether symbols exist at all.
 2. **If symbols:** read the globals straight off it. Three catches:
    - `NamePoolData` often has no symbol. Disassemble `FNameDebugVisualizer::GetBlocks` — it is

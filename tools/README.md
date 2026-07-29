@@ -100,13 +100,26 @@ GS_TSV=$PWD/out/cands.tsv GS_TRUE="GWorld=<va>" analyzeHeadless ... -postScript 
 |--------|--------------|
 | `disasm_function.py` | Offline x64 disassembler for function VA(s) in a PE; annotates RIP-relative writable-`.data` targets and flags the zero-init **BSS** ones (where runtime-filled globals like `GUObjectArray` live). `py -m pip install capstone pefile` first. |
 | `ue_version.py` | Read a game's UE version out of its `++UE5+Release-X.Y` build tag, to decide whether it is worth a Ghidra import at all. Stdlib only. **~half of shipped games have the tag stripped**, so `UNKNOWN` means unknown, not uninteresting — it is a filter, not a gate. |
+| `pdb_globals.py` | **Sweep ground truth out of a PDB, without opening Ghidra.** Prints GObjects / GNames / GWorld / SparseDelegates / GEngine and a paste-ready `GS_TRUE=` line for `tools/ghidra/sweep.sh`. Stdlib only — it reads the MSF publics stream directly. Replaces step 2 of GROUND-TRUTH.md's "Deriving truth for a new game" (a ~10-min headless run) with ~2 seconds, for any binary that ships symbols. |
 
 ```sh
 py tools/pe/disasm_function.py "<game>.exe" 0x147A604E0 0x14814D2F0
 
 # Triage a whole Steam library before importing anything
 py tools/pe/ue_version.py "D:/SteamLibrary/steamapps/common"/*/*/Binaries/Win64/*-Shipping.exe
+
+# Ground truth for a new oracle. The GObjects base|base+0x10 alias is decided AUTOMATICALLY from
+# the PDB (5.8 made ~FFieldClass virtual, so `??1FFieldClass@@UEAA@XZ` = 5.8+ = no alias); the
+# tool prints which way it went and why. Override with --gobjects-alias / --no-gobjects-alias.
+py tools/pe/pdb_globals.py "<game>-Win64-Shipping.pdb"
+py tools/pe/pdb_globals.py "<game>.pdb" --grep FSparseDelegateStorage   # hunt decoys / prove absence
 ```
+
+> **Validate it before trusting a new row**: re-run it on `UE423_Flying-Win64-Shipping.pdb` and
+> `StackOBot-Win64-Shipping.pdb` (5.8) and confirm it still reproduces those two `sweep.sh` rows
+> byte-for-byte. Then corroborate the new values independently — pattern-replay consensus, per
+> GROUND-TRUTH.md rule 4. A silently-drifting decoder is precisely the failure mode that file
+> exists to prevent (a single wrong VA has already corrupted a whole sweep once).
 
 > The authoritative version source stays the DLL's runtime detection (the
 > `UE5_Init: Complete (UEnnn, …)` line in the game's `init-0.log`), which reconciles the PE data
