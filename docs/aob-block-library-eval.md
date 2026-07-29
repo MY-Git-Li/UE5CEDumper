@@ -161,10 +161,21 @@ testing gap. Third-party blocks: metadata + hash only.
 **Open for the maintainer, not for me:** whether to store third-party bytes at all. My input is only
 that §2 means you do not have to, so the cheapest resolution is to not take the risk.
 
-> **Resolved by construction, 2026-07-29.** Both halves shipped self-built-only and neither needed
-> a legal call: §6's index stores frequencies rather than code, and §4's blocks are gated on
-> `source == self-built` in `extract_blocks.py`. The third-party question was never answered — it
-> was made unnecessary, which was §2's whole point.
+> **Partly resolved, 2026-07-29 — and the remaining part must not be glossed.**
+>
+> * **§6's index: no legal call needed.** It stores frequencies, not code. Settled.
+> * **§4's blocks: the THIRD-PARTY question is gone; §1's question is NOT.** `extract_blocks.py`
+>   enforces `source == self-built` in code, so no third-party game bytes ship — that was §2's
+>   point and it holds. But the blocks still ship **26.6 KB of real compiled code** (340 × 80-byte
+>   windows, ≈0.028% of one binary), and by §1's own reasoning that is *"MSVC's codegen from Epic's
+>   engine source … whose work it is needs a lawyer, not a heuristic."* Building it yourself does
+>   not make the bytes yours.
+>
+> So the position improved from "third-party studios' code, unknown quantity" to "Epic engine
+> codegen, 26.6 KB, self-built, de minimis, interoperability purpose" — much more defensible, and
+> still not *cleared*. An earlier draft of this box said "resolved by construction"; that
+> overstated it. If the remaining exposure is ever unwanted, the blocks are regenerable from
+> `extract_blocks.py` and could ship as hashes only, at the cost of the regression test.
 
 > **Revised 2026-07-29 (late), after §6 was measured.** Build order should now be **§6 first, §4
 > second**, and the reason is not preference but risk: the n-gram index needs **no legal call at all**
@@ -191,10 +202,29 @@ This artifact does not need that escape, because **it never ships code at all** 
 byte-sequence frequencies:
 
 * it is **aggregate measurement**, not the excerpt;
-* a bag of n-grams carries **no ordering**, so nothing can be reconstructed from it;
-* and it **keeps only the COMMON sequences, discarding the rare ones** — the exact inverse of what
-  reconstruction would need. What survives is generic MSVC codegen (prologues, call sequences,
-  register saves), which §1 already noted is the least expressive part.
+* it **keeps only the COMMON sequences, discarding the rare ones** — the inverse of what
+  reconstruction would need. What survives is generic MSVC codegen, which §1 already noted is the
+  least expressive part.
+
+⚠ **"Nothing can be reconstructed" was too strong, and measuring it proved so.** Over a 97 MB
+source `.text`: **53.2% of 6-grams are absent** (those regions are gone outright), but **46.8%
+survive**, and the longest run of *consecutive* surviving 6-grams is **681 → 686 contiguous bytes**
+— and that region is real AVX code (`vmovd` / `vpextrd`), not padding. So k-mer coverage alone does
+not rule assembly out.
+
+What actually blocks it is narrower and worth stating precisely, because it is what the format
+guarantees rather than what sounds good:
+
+1. **The multiplicities Eulerian assembly needs are not shipped.** Counts are stored as **log2
+   buckets** (2× granularity) of the **max across 12 different binaries**. A de Bruijn multigraph
+   cannot be built from that — the edge counts are neither exact nor from one source.
+2. **No positions, no ordering, no source attribution.** Nodes are 5-byte prefixes with heavy
+   branching, so the candidate path count is astronomical with no signal to pick the true one.
+3. **The majority is simply missing** — 53.2% — and what remains is by construction the *repeated*
+   material, i.e. the least distinctive.
+
+Honest summary: thresholding is a **strong barrier, not a proof of impossibility**. Do not lower
+the threshold, and do not repeat the "nothing can be reconstructed" phrasing.
 
 Build it from the self-built tier anyway (§2): it costs nothing and keeps provenance clean.
 

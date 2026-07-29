@@ -9,10 +9,14 @@ WHY IT CAN BE COMMITTED. Two properties, and the SECOND is the load-bearing one:
   1. A bag of n-grams has no positions.
   2. **Only sequences at or above `--threshold` are kept.** This is NOT merely a size optimisation.
      A COMPLETE overlapping n-gram table IS assemblable — de Bruijn / Eulerian path, exactly how DNA
-     sequencing reconstructs a genome. Thresholding destroys that: the rare, distinctive sequences
-     that carry the identity of the code are dropped BY CONSTRUCTION, and what survives is the
-     generic MSVC codegen every UE binary shares. Never lower the threshold to 1 "for accuracy" —
-     that is the property, not a knob.
+     sequencing reconstructs a genome. Thresholding is what stands in the way, so never lower it to
+     1 "for accuracy" — that is the property, not a knob.
+     ⚠ MEASURED, and it is a BARRIER rather than a proof: on a 97 MB source .text, 53.2% of 6-grams
+     are absent, but 46.8% survive and the longest fully-covered run is 686 contiguous bytes of real
+     AVX code. What actually prevents assembly is that the multiplicities it needs are NOT shipped —
+     counts are log2 buckets of the MAX across several binaries, so the de Bruijn multigraph cannot
+     be built — plus no positions, no ordering, and no source attribution. Do not claim "nothing can
+     be reconstructed"; claim the three specific things above.
 
 WHAT IT ANSWERS. Given a candidate AOB, the frequency of its rarest literal window is a hard UPPER
 BOUND on how many times the whole pattern can match: every occurrence of the pattern must contain
