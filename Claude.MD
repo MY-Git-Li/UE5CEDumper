@@ -41,7 +41,7 @@ The `build.ps1` script handles VS DevShell setup, CMake, dotnet, and test execut
 # Build everything (DLL + UI + Tests) — Release
 powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Github\UE5CEDumper\build.ps1"
 
-# Build DLL + all 3 proxy DLLs (version/dinput8/dxgi — the injected artifacts)
+# Build DLL + all 4 proxy DLLs (version/dinput8/dxgi/winmm — the injected artifacts)
 powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Github\UE5CEDumper\build.ps1" -Target DLL
 
 # Build UI only
@@ -196,6 +196,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 | [docs/export-formats.md](docs/export-formats.md) | CE XML, CSX, SDK Header, USMAP export rules, pointer chain model, type mappings |
 | [docs/technical-notes.md](docs/technical-notes.md) | UE version differences, FField vs UProperty, FNamePool, DynOff, Property Type Layouts (Phases B-K), Address Finder layered lookup |
 | [docs/lessons-learned.md](docs/lessons-learned.md) | Hard-won lessons from cross-game debugging (20+ games) |
+| [docs/reference-builds.md](docs/reference-builds.md) | **The engine samples we build ourselves** — 8 UE versions x up to 3 configs, packaged from stock engines as PDB-bearing AOB oracles. Inventory (regenerate with `tools/ghidra/inventory_builds.py`), why each exists, which are deliberately NOT swept and why, and the recipe for making another. Distinct from test-games.md: that asks "what does this GAME do differently", this asks "what does the ENGINE do at version X". |
 | [docs/test-games.md](docs/test-games.md) | 30+ test games with UE versions, GWorld status, stride info |
 | [docs/naming-convention.md](docs/naming-convention.md) | Frieren-themed C++ file / namespace mapping (Macht/Genau/Aura/Serie/Ubel/Frieren/Fern/...) |
 | [docs/aobmaker-integration.md](docs/aobmaker-integration.md) | AOBMaker CE Plugin pipe bridge (HEX / ASM / SYM / CreateAAScript) |

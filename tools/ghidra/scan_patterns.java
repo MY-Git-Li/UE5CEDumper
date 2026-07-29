@@ -203,7 +203,18 @@ public class scan_patterns extends GhidraScript {
         // import of Core/CoreUObject/Engine under identical names (image base disambiguates).
         // Getting this wrong silently substitutes one engine version's results for another's —
         // exactly the class of error the sweep exists to catch.
-        String stem = sanitize(tag) + "__" + sanitize(prog) + "@" + currentProgram.getImageBase();
+        // SANITIZE THE IMAGE BASE TOO. A segmented address stringifies as "0000:0000", and on
+        // NTFS everything after a ':' in a path is an ALTERNATE DATA STREAM name — so
+        // "...@0000:0000.txt" silently created a 0-byte file "...@0000" carrying the real
+        // content in a hidden stream named "0000.txt". Measured on the Maelstrom and
+        // Satisfactory v1.2.3.1 stub re-imports: 0000.tsv = 16,769 bytes, 0000.txt = 14,167
+        // bytes, both invisible to a directory listing and to aggregate_sweep.py's glob.
+        // Harmless there because those programs map only a 1,104-byte DOS stub and score zero
+        // hits — but it is silent DATA LOSS for any real segmented program, and the whole point
+        // of keying on the image base (see above) is to stop one binary's results being
+        // substituted for another's.
+        String stem = sanitize(tag) + "__" + sanitize(prog) + "@"
+                    + sanitize(currentProgram.getImageBase().toString());
         String base = outDir + "/scan_" + stem;
         PrintWriter w  = new PrintWriter(new BufferedWriter(new FileWriter(base + ".txt"), 1 << 20));
         PrintWriter t2 = new PrintWriter(new BufferedWriter(new FileWriter(base + ".tsv"), 1 << 18));

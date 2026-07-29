@@ -19,95 +19,377 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
-## Land UE 4.23.1 into the corpus — all evidence gathered, only the sweep run remains
+## ▶ Corpus state as of 2026-07-29 (build 2505) — the sweep is CURRENT
 
-*Parent: the 4.23 hole that `GROUND-TRUTH.md` carried as "DELIBERATELY NOT CHASED". The maintainer
-built the 4.23.1 "Flying" template in three configs, so the escape clause ("unless a 4.23 binary
-falls into your lap") has fired.* **Effort S · Risk low.** Recorded 2026-07-28 because the analysis
-was complete but the session ran out of quota before landing it.
+`sweep.sh` is at **57 rows**. A full sweep ran 2026-07-29 and `out/sweep/REPORT.md`, `Himmel.h`'s
+header counts (**70 programs / 55 oracles**, UE **4.10–5.8**) and this file all agree.
+`preflight.py` returns **`GO (exit 0)`** — the manifest was regenerated and covers exactly the 57
+sweep tags. Nothing is stale or blocked. Matrix: **162 ✅ / 59 ⚠️ / 2 ❌**.
 
-Binaries, all with full PDBs, all against Epic's **installed** 4.23.1 Launcher engine
-(CL 9631420, IsPromotedBuild=1, IsLicenseeVersion=0 — engine objects are Epic stock, and a Shared
-build environment forbids overriding `bUseChecksInShipping` etc., so fork/override risk is nil):
+⏱ **The full sweep costs ~4m40s, not the ~30–50 min the docs claimed for months.** Measured: 4m38s
+for 57 rows vs 4m34s for 54. Those old figures were never taken — they date from the pre-script era
+of hand-running each project *with* Auto Analyze, and one was even "updated" by scaling the wrong
+number with the row count. **So never reach for a tag filter to save time**; use one only to
+isolate a row while debugging. The correctness argument for always running the full sweep (a
+filtered run leaves `REPORT.md` describing a corpus that no longer exists) now costs nothing.
 
-| config | EXE | Ghidra project |
+**One ❌ in the regression matrix, and it is deliberate: UE 4.10 GObjects on both rows. Leave it.**
+It measures the pre-4.11 support floor rather than asserting it — full reasoning in `Himmel.h`'s
+corpus block and GROUND-TRUTH.md §"Settled facts". Do not mine a `GetUObjectArray` pattern to
+"fix" it; 4.10 has no `FUObjectItem` at all, so finding the address would not make it readable.
+
+Tooling, all no-Ghidra: `tools/pe/pdb_globals.py` (truth from a PDB — now also points at the
+pre-4.11 magic-static route when GObjects has no symbol), `tools/ghidra/replay_patterns.py`
+(corroborate by byte replay), `tools/pe/func_bytes.py` (is a function hollow?),
+`tools/ghidra/capture_provenance.py` (build-identity snapshot).
+
+⚡ **Adding a new engine VERSION is now nearly free — check for prebuilt targets first.** A
+launcher-installed engine ships monolithic `UE4Game*.exe` / `UnrealGame*.exe` **with full PDBs** in
+`Engine/Binaries/Win64`. Surveyed on this machine: 4.23 / 4.27 / **5.4** / 5.7 / 5.8 have all three
+configs; 4.10 and 4.15 have Shipping + Development. That is what made 4.10 possible at all (it
+needs VS2015, which is not installed). **UE 5.4 is installed and ready to harvest with no
+packaging and no compiler** — copy, `pdb_globals.py`, import `-noanalysis`, add rows.
+
+-----
+
+## Build-identity signals: what `duplicate_copies` and PE link timestamps can and cannot tell you
+
+*Parent: the 2026-07-29 manifest regenerate; [dev-log.md](dev-log.md) build 2505.*
+**Effort S · Risk low. The `duplicate_copies` half is FIXED; the timestamp half is a rule to follow.**
+
+### FIXED — `duplicate_copies` was silently empty on exactly the rows that need it
+
+The regenerate wrote, for Palworld: `duplicate_copies: []` and *"the `.rep` is the last copy"* —
+while **two** byte-identical copies of the corpus build sat in `Game Binary backup`.
+
+⚠ **The first diagnosis of this was wrong and the correction matters.** It was NOT "compares
+against today's bytes instead of `binary_md5`" — line 302 has always compared against
+`rec['exe_md5']`, Ghidra's import-time hash, i.e. the corpus build. The real cause was a **cheap
+size prefilter** sizing candidates against whatever file sits at `binary_last_seen` *today*. On a
+DRIFTED row that is the build which REPLACED the corpus one, so the surviving copy — which has the
+old size — was skipped **before its md5 was ever computed**. An optimisation valid only under the
+assumption "the file on disk is the corpus build", which is precisely false where it matters.
+
+Fixed by passing `size_prefilter=(state == 'MATCH')`. Verified: Palworld `0 → 2` copies.
+**Generalise the shape, it is the reusable part:** when a fast path guards a correct check, ask
+what the guard assumes — a wrong guard makes the correct check unreachable and looks like a
+confident negative. Note also that a null reads as *unknown* while `[]` plus that note is a
+**positive false claim**, which is why this was worse than the `steam_buildid` nulling.
+
+### RULE — a PE `TimeDateStamp` is a date ONLY if `IMAGE_DEBUG_TYPE_REPRO` is absent
+
+Worth knowing because file mtime dates the *copy*, not the build, and the COFF `TimeDateStamp`
+looks like the fix. Sometimes it is. **There is an authoritative test, so never guess:** with
+`/Brepro` (reproducible builds) the linker overwrites that field with a **content hash** and emits
+a debug-directory entry of **type 16 (`IMAGE_DEBUG_TYPE_REPRO`)**. That entry IS the answer.
+`tools/pe/pdb_match.py` now reports it on every check.
+
+⚠ **Plausibility is worthless, and an earlier pass of this entry got it wrong by relying on it.**
+It classified by "does the value fall in a 2000–2030 window", which is true of roughly a fifth of
+32-bit hashes. Two corpus rows are hashes reading as perfectly ordinary dates:
+
+| binary | reads as | actually |
 |---|---|---|
-| Shipping | `X:/UE_Analyze_Data/Varies Version builds/4.23.1/Binaries_Shipping/Win64/` | `UE423_Flying-Win64_Shipping.rep` (**underscore**) |
-| DebugGame | `.../Binaries_DebugGame/Win64/` | `UE423_Flying-Win64-DebugGame.rep` |
-| Development | `D:/Unreal Projects/UE423_Flying/Binaries/Win64/UE423_Flying.exe` | not imported |
+| **Hogwarts Legacy** (4.27) | `2025-11-12` | **`/Brepro` hash** — and the earlier pass called it REAL |
+| **The Adventures of Elliot** (5.4) | `2026-07-15` | **`/Brepro` hash** |
+| UE 5.7 StackOBot | `2022-09-28` | hash (before 5.7 existed) |
+| UE 5.4 Shipping | `2039-01-13` | hash (the value that prompted the recheck) |
 
-The packaged runnable copy is under `.../4.23.1/Shipping/WindowsNoEditor/`; live logs landed in
-`%LOCALAPPDATA%/UE5CEDumper/Logs/UE423_Flying-Win64-Shipping`.
+**It is per-CONFIG, not per-version** — the other thing the earlier pass got wrong. Measured across
+the self-built oracles, where the builder and toolchain are controlled:
 
-### Ground truth — CERTAIN, three independent derivations each
+| | Shipping | Development | DebugGame |
+|---|---|---|---|
+| 4.15 / 4.23 / 4.27 | real | real | real |
+| 5.3 / 5.4 / 5.7 | **`/Brepro`** | real | real |
+| 5.8 | **`/Brepro`** | `TimeDateStamp = 0` | `TimeDateStamp = 0` |
 
-```sh
-# UE 4.23 — the "Flying" template, Shipping. The ONLY 4.23 in the corpus, and the version that
-# introduced BOTH FNamePool and sparse delegates, so it is the earliest binary either target can
-# be checked against. GNames is NOT a symbol read: 4.23 has neither `NamePoolData` nor
-# `?GetNames@FName@@` (0 occurrences of both strings in all three PDBs), so BOTH documented
-# recipes in this file fail at 4.23. It came from FNameDebugVisualizer::GetBlocks @0x14062c010
-# (`48 8d 05 f9 83 82 02 c3` -> 0x142e54410) minus 0x10.
-# DECOYS present: GCoreObjectArrayForDebugVisualizers (PLAIN name, find_syms3 will surface it,
-# runtime value == the ObjObjects VA) and GNameBlocksDebug (holds pool+0x10).
-GS_TRUE="GObjects=142e6b968|142e6b978,GNames=142e54400,GWorld=142f6cf10,SparseDelegates=142c4d060,GEngine=142f6a8a0"
-```
+So Epic's UBT enables `/Brepro` on **Shipping only**, from ~5.3, and 5.8 non-Shipping zeroes the
+field outright — a third state that is neither a time nor a hash. This also kills the "cross-config
+spread" discriminator a previous pass proposed: the 5.4 spread was huge because it compared a hash
+against a *real* time, not because both were hashes. Right conclusion, wrong reasoning, and it
+would fail whenever both sides are hashed.
 
-sweep.sh ROWS entry (insert between the 4.22 and 4.24 rows):
+**Third-party studios choose for themselves.** Hogwarts is `/Brepro` at **4.27** while DQ7R, the
+same engine version, is not. So for a shipped game the UE version predicts nothing — test the flag.
+And since every shipped game is a Shipping build, the useful-signal case is the *rare* one.
 
-```
-"UE4.23-Flying-Shipping|UE423_Flying-Win64_Shipping|-|GObjects=142e6b968|142e6b978,GNames=142e54400,GWorld=142f6cf10,SparseDelegates=142c4d060,GEngine=142f6a8a0"
-```
+Bottom line: usable as a corroborating signal only when type 16 is absent, and never as the primary
+answer. When the question is "is this the same build?", skip timestamps entirely — `binary_md5`
+answers it exactly, and for a PDB the CodeView **GUID+Age** is a true per-link identity. A
+`/Brepro` hash is still deterministic per link, so it works as a weak identity — just never as a
+clock.
 
-Each value rests on **three mutually independent** derivations: (1) PDB `S_PUB32`/`S_GDATA32`
-decode, (2) a full 150-pattern byte replay of `Himmel.h` against `.text` in pure Python, (3) the
-live run, which rebases all five off ONE shared ASLR base `0x7FF7ED7D0000` with **zero residual**.
-**Ghidra was never opened** — reusable pure-Python tooling (`pemod.py`, `pdbtypes.py`, `pdbfl.py`,
-`pdbpub.py`, `scan3.py`) is in the session scratchpad and is worth re-creating in `tools/pe/`.
+-----
 
-### The live Shipping run is clean
+## UE5 non-Shipping: GNames reaches nothing — decide whether to mine a pattern
 
-All five byte-exact; the `GCoreObjectArrayForDebugVisualizers` decoy was never even a candidate.
-39,213 objects, name sanity 10/10, DynOff `validated=yes`, full GWorld walk.
+*Parent: the 2026-07-29 PDB+replay pass. Full evidence in
+[GROUND-TRUTH.md](../tools/ghidra/GROUND-TRUTH.md) §Still open.* **Effort S–M · Risk med.**
 
-### The controlled experiment — CONFIRMED
+**On a non-Shipping UE5 build, GNames survives on ONE pattern and costs ~2,300 wasted validations
+to get there.** Sweep-verified 2026-07-29: it lands on **`GNAM_V1`** (priority 870, 4 literal
+bytes) after **2,199 / 2,369 / 2,372 / 2,424** rejected candidates on 5.7.4-DbgG / 5.8.0-DbgG /
+5.8.1-Dev / Titan — **the four most expensive fall-throughs in the corpus**, next worst 475. It is
+**config, not a version regression**; every Shipping build resolves normally, so **no shipped game
+is affected**:
 
-`UField::Next` = **+0x28 Shipping vs +0x30 Development AND DebugGame**, measured directly from
-`LF_MEMBER` records in all three PDBs. Nothing *inside* `UObjectBase` moves — `StatID` is appended
-at +0x28 and `ObjectFlags/InternalIndex/ClassPrivate/NamePrivate/OuterPrivate` stay at
-+0x8/+0xC/+0x10/+0x18/+0x20 in both. Only `sizeof(UObject)` grows 0x28 -> 0x30, shifting every
-derived class by 8. **DynOff self-detects this correctly**, so it is harmless to users and matters
-only for pattern MINING.
+| | 4.10.4 | 4.15.3 | 4.23.1 | 4.27.2 | **5.3** | **5.4.4** | 5.7.4 | 5.8.0 | 5.8.1 |
+|---|---|---|---|---|---|---|---|---|---|
+| Shipping | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ n=11 | ✅ n=11 |
+| Development / DebugGame | ✅ | ✅ (1w) | ✅ n=16 | ✅ n=16 | ✅ **15/15, 0w** | ⚠️ **1/6, 2240w** | ⚠️ 1/8 | ⚠️ | ⚠️ |
 
-**Skeptic's correction, and it is the real result:** layout, array preset and the `GetBlocks`
-recipe are config-INVARIANT, but **which AOB shapes fire is strongly config-DEPENDENT** — the
-opposite of the intuition. Mine on Shipping; treat a Development/DebugGame binary as an oracle only.
+⚠ **The boundary is NOT at 5.8** — the first pass called it a 5.8 thing and that was wrong; 5.7.4
+DebugGame behaves identically.
 
-### Prediction scorecard: 5 RIGHT / 1 WRONG
+### ✅ BISECTION CLOSED 2026-07-29 — the edge is **5.3 → 5.4**
 
-RIGHT: `GOBJ_ES53_1` (and the "~5 wasted" estimate — exactly 5 rejected before the 6th validated),
-`GWLD_TQ_1`, `SPARSE_DI427_1`, `GENG_X1`, "zero new patterns needed".
-**WRONG: GNames**, and not charitably — `GNAM_V8` takes **zero hits** on this binary, so the
-prediction was wrong about the byte-pattern winner too, not merely blind to a CallFollow
-pre-empting it. Absent `GNAM_V7`, the byte winner would have been `GNAM_DI427_2` (pri 105, 1 hit).
+Stock UE 5.4.4 ThirdPerson (all three configs) settled it in **one** install, not the two this item
+budgeted for. 5.3 Dev/DebugGame land `GNAM_ES53_1` with **15/15 patterns correct and zero** wasted
+validations; 5.4 Dev/DebugGame drop to **1/6 correct, landing `GNAM_V1` after 2,240** — already the
+full collapse, indistinguishable from 5.7.4/5.8.x. Both 5.4 configs report the identical 2,240,
+consistent with UE building DebugGame's engine modules optimized like Development.
 
-### Open, and worth doing first
+So **5.5 and 5.6 are no longer needed for this question.** Whatever they add is coverage, not
+bisection. And if a fix pattern is ever mined, **5.3-vs-5.4 is the pair to mine it against** — the
+smallest interval that contains the change, with a clean control on one side.
 
-- **Run the sweep.** `py tools/ghidra/extract_patterns.py` FIRST (the tsv goes stale), then
-  `bash tools/ghidra/sweep.sh UE4.23`, then the full sweep + `aggregate_sweep.py`.
-- **DebugGame row is ~free** (its project is already analysed). **Development is not** — needs a
-  fresh import, and its values currently rest on the PDB alone, i.e. one derivation not three.
-- **Doc claims to correct**: the "DELIBERATELY NOT CHASED" 4.23 item, "only 4.23 itself is now
-  unverified", the `NamePoolData` / `FName::GetNames` recipe boundary (neither works at 4.23), the
-  corpus counts, and the version-range claim. Narrow the sparse-key claim to PDB-verified versions
-  (4.23, 4.24, 4.25, 4.27, 5.1, 5.2, 5.5, 5.6, 5.7; 5.0/5.3/5.4 rest on disassembly only).
-- **My "byte-identical" premise was wrong** and should not be repeated: the `_Shipping` Ghidra
-  project holds a DIFFERENT LINK (md5 `F61EC1BE…`) from the run binary (`43F6B130…`). 27 bytes
-  differ across 6 runs — PE timestamp, checksum, three debug-directory timestamps, the 16-byte PDB
-  GUID. **Every code and data byte is identical**, so the conclusion (offline truth covers the live
-  run) holds, but the premise did not.
-- **Do NOT touch `sweep.sh:26`** — `SWEEP_XMX=14G` already works as intended; a reported flakiness
-  under 2G never happened.
+4.10 and 4.15 extend the healthy band downward, so this is a sharp UE5-era edge, not a slow drift.
+
+**Not project-specific.** A second, unrelated 5.8.0 DebugGame project (Titan) matches StackOBot's
+coverage *down to the individual pattern IDs* — same GObjects quartet, same GWorld n=13, same
+GEngine quartet, GNames 0 with the same `{CT3, CT4, G42_1}` decoy. Build configuration is the only
+remaining variable.
+
+Root cause is a hardcoded destination register — the `GOBJ_V1`-on-DropIn failure mode one target
+over. The twin-LEA lazy init is there (46 xrefs to `NamePoolData`), but the first LEA targets
+**rbx (`48 8d 1d`) / r15 (`4c 8d 3d`)** and every GNames pattern pins rax/r8/rdx/rsi/rbp.
+
+Decision needed, because it is genuinely marginal:
+- **Do nothing** (default). Nobody attaches to a Development build of a template project, and the
+  candidate fix `4? 8d ?? <d32> eb ?? 48 8d 0d <d32> e8` has only ~2 literal bytes at its head —
+  in the band where `GWLD_G42_4` proves wildcarding backfires.
+- **Or mine it**, and put it through the full 65-program gauntlet before it goes anywhere near the
+  table. If it survives decoy-free it is also insurance for a shipped game whose register pressure
+  happens to land the same way.
+
+All four affected rows are in `sweep.sh` and swept, so the cost is visible as a ⚠️ with its wasted
+count in the regression matrix instead of being invisible. **Leave them showing that** until fixed
+— note they are ⚠️ (lands correct, expensively), not ❌; the only ❌ in the corpus is 4.10 GObjects.
+
+**Second result from the same pass, and arguably the more important one — rule 5 just paid out.**
+The sparse-delegate patterns that were kept purely as redundancy are the *only* thing holding that
+target up on non-Shipping builds: on 5.8 `SPARSE_ES2_1` misses and **`X1`/`X2` alone** reach it,
+and on **5.7.4 DebugGame those miss too and `SPARSE_MEL55_1` is the sole survivor (n=1)** — the
+thinnest coverage anywhere in the corpus. Every one of the three was added against a Shipping
+binary that already resolved, i.e. they looked like dead weight at the time. Had any been pruned,
+a whole build configuration would have silently lost sparse-delegate support.
+
+All three of the non-Shipping oracles this item was written against (5.7.4 DebugGame, 5.8.0
+DebugGame, 5.8.0 Titan DebugGame) are imported `-noanalysis` and swept — the sweep reads raw bytes
+and never needs auto-analyze, which is what had made a 300 MB Development project look
+un-importable.
+
+-----
+
+## Next self-built oracles: **5.4 and 5.3 are DONE — 5.6 / 5.5 are now OPTIONAL**
+
+*Parent: the 5.3 + 5.4 builds, 2026-07-29. Shipped in [dev-log.md](dev-log.md).*
+**Effort M each · Risk low.**
+
+**Both bisection steps are spent, and they answered the question early.** Stock 5.3 and stock
+5.4.4 ThirdPerson, each built in all three configs, imported `-noanalysis`, rows in `sweep.sh`:
+
+| | 4.10 | 4.15 | 4.23 | 4.27 | **5.3** | **5.4.4** | 5.5 | 5.6 | 5.7.4 | 5.8.x |
+|---|---|---|---|---|---|---|---|---|---|---|
+| non-Shipping GNames | ✅ | ✅ | ✅ | ✅ | ✅ 15/15 | ⚠️ **1/6** | – | – | ⚠️ 1/8 | ⚠️ |
+
+**The edge is 5.3 → 5.4.** That was budgeted at two installs (5.4 *and* 5.6) and cost one, because
+5.4 collapsed outright rather than landing mid-interval. **5.5 and 5.6 no longer carry a bisection
+argument** — judge them purely on coverage now:
+
+- **5.6** — still the more interesting of the two: the `UEnum::Names` → `FNameData` change
+  (struct-of-arrays + tagged pointers, the `Neu` module) has no non-Shipping row, and 5.6's only
+  PDB oracle is `CrashReportClient`, which is not a game.
+- **5.5** — the weakest remaining case, and it was already last: three symbolised Shipping oracles
+  exist (Everspace 2 ×2, Meltopia). Worth doing only as part of a gameplay-matrix pass.
+
+Neither is on the critical path for anything. **Do them when a reason appears, not on schedule.**
+
+### 5.4 was packaged, not taken from the prebuilt target — deliberately
+
+**UE_5.4 ships prebuilt `UnrealGame{,-Win64-Shipping,-Win64-DebugGame}.exe` with full PDBs** in
+`Engine/Binaries/Win64` (so do 4.23 / 4.27 / 5.7 / 5.8; 4.10 / 4.15 ship two of three), and for AOB
+truth alone that is free — copy → `pdb_globals.py` → import `-noanalysis`. It is what made 4.10
+possible when VS2015 was unavailable.
+
+⚠ **But it does NOT cover the gameplay-feature matrix.** `UnrealGame.exe` is the bare engine
+default with no content and no `ACharacter` to possess, so it answers "where are the engine
+globals" and nothing else — GodMode/Teleport/Laufen/Hemmung all need a real pawn. That is why 5.4
+was packaged as ThirdPerson anyway: **those binaries serve both jobs.** Use the prebuilt shortcut
+when you only want AOB rows; package when the version is also a gameplay target.
+
+### THE ENGINE INSTALL IS TRANSIENT — that is what makes the packaged half affordable
+
+5.3 established the pattern: **install → package 3 configs → `-noanalysis` import → DELETE the
+engine.** What stays is ~3.2 GB of packages + PDBs (mirror it to `X:` like the rest); the ~114 GB
+engine is temporary. Verified on 5.3 before deleting it: the `.rep`s are self-contained, the
+packages are runnable standalone (pak + launcher exe), and both D: and X: hold byte-identical
+copies. So this is not "which one can I afford" — it is a sequence, each step costing ~3 GB
+permanently.
+
+**One template is enough — do NOT package two.** An earlier version of this item said to build
+Flying *and* ThirdPerson. Measurement supersedes that: at 4.27, Flying vs 3rdPerson gave
+**identical voter sets down to the individual pattern IDs**, so the template does not affect
+engine-global resolution at all. Use **ThirdPerson**, because it is also the Character-based target
+the gameplay-feature matrix needs (Flying's pawn has no `CharacterMovement`).
+
+### What 5.4 delivered besides the bisection — and it was ordered first for these, not for that
+
+The ordering argument said the exact boundary version was worth *less* than durable corpus value,
+so 5.4 went first on coverage grounds and the bisection was treated as a 1-in-4 bonus. Both paid:
+
+1. **Every UE5 version now has a symbolised oracle.** 5.4 was the last one without. Elliot is 5.4
+   but PDB-less and disassembly-derived — and the new stock Shipping row **corroborates it**
+   (GObjects 8/15 vs 9/15, GNames 13/16 vs 13/17, GWorld 15/16 vs 13/14), the first independent
+   check that row has ever had.
+2. **MindsEye finally has a stock-5.4 control.** The engine is **5.4.4 — MindsEye's exact patch
+   version.** `mindseye-fork-notes.md` is a whole re-derivation playbook whose "the fork changed
+   X" claims all rested on inference about stock 5.4; each is now a measurable delta. Same
+   evidentiary shape as the Avowed/DropIn gaps closed the same week.
+3. The bonus landed too — it pinned the boundary outright.
+
+Remaining, judged on coverage alone:
+
+2. **5.6** — the `UEnum::Names` → `FNameData` change (struct-of-arrays + tagged pointers, the `Neu`
+   module). 5.6 has a monolithic PDB oracle already (CrashReportClient) but no non-Shipping row.
+3. **5.5** — last, precisely because it is already the **best-covered** version: three symbolised
+   Shipping oracles (Everspace 2 ×2, Meltopia). Its non-Shipping row pairs against real data, which
+   is nice but is the smallest marginal gain of the three.
+
+### No C++ project needed — the 5.3 lesson, and it generalises
+
+A C++ project on a launcher engine can fail in UBT (*"must be compiled with Visual Studio 2022 17.4
+(MSVC 14.34.x) or later … detected 14.29.30159"*). The message blames the VS version and a forced
+`VisualStudio2019` setting; **both are wrong**. It is toolset *ranking*: UE ranks families it does
+not know as `FamilyRank=4`, so a recognised-but-too-old **14.29 (from VS2026's v142 component)**
+ranks 3, outranks a perfectly usable 14.44, and then fails the `>= 14.34` gate. **Nothing needs
+fixing** — the launcher ships `UnrealGame{,-Win64-DebugGame,-Win64-Shipping}.exe` **with PDBs**, so
+a Blueprint-only project packages all three configs with nothing compiled.
+
+Also extended BACKWARDS: **4.15.3 Development + DebugGame** rows added (the oldest config group in
+the corpus). `pdb_globals.py` gained a pre-4.23 GNames route for them — `FName::GetNames`'s load at
++4, **no** `-0x10` — validated by reproducing the 4.15 Shipping row's recorded `GNames=142c92508`.
+
+**5.3's engine can be deleted** (~114 GB) — checked before saying so: its three `.rep`s are
+imported and self-contained, its packages run standalone, and D: and X: hold byte-identical copies
+(3168 MB / 100 files / 3 PDBs each). The only thing lost is the ability to rebuild a *different*
+5.3 sample, and per the note above a second template would add nothing anyway.
+
+-----
+
+## Gameplay-feature regression matrix on the self-built samples (Teleport tab et al.)
+
+*Parent: "can the PDB corpus improve Teleport/GodMode accuracy?", 2026-07-29.* **Effort M · Risk low.**
+
+**Not via offsets — that question resolves to "no", and by design.** `Solitar`, `Laufen`, `Hemmung`
+and `Wirbel` contain **zero hardcoded struct offsets** (verified by grep); everything binds through
+UE reflection by NAME (`CanBeDamaged`, `CustomTimeDilation`, `CharacterMovement`, `MaxWalkSpeed`,
+`GetHitResultUnderCursorByChannel`, …), per the CLAUDE.md rule. Runtime reflection is *more*
+authoritative than a PDB — it is the data the game itself uses, so it tracks licensee forks a PDB
+cannot. Using a PDB to "correct" an offset would be a step down, not up.
+
+**The real win is a reproducible live test target.** Today every one of these features is verified
+ad hoc on a commercial title — *"LIVE-VERIFIED P3R"*, *"VERIFIED Tower of Mask + DQ7R"*, *"NO-OP on
+FF7R"* — one-shot, unrepeatable, and gated on owning and launching that game. The self-built samples
+are runnable, free, symbol-carrying, and exist at six engine versions **with source**. That converts
+"someone tested GodMode once" into a matrix, and it is the direct answer to the pile of
+*"needs in-game verify"* / *"⏳ in-game verify"* / *"UNVERIFIED"* items in this file.
+
+**Highest-value first cell: reflected-UFunction survival, Shipping vs Development, same project.**
+The repo already knows the failure mode ([lessons-learned.md](lessons-learned.md) §UCheatManager):
+`UCheatManager::Fly/Ghost/God/Slomo` **invoke successfully and do nothing** in cooked Shipping —
+the bodies are `#if !UE_BUILD_SHIPPING`, but the `UFUNCTION(exec)` metadata is generated pre-cook and
+survives. A same-project Shipping/Development pair *measures* which reflected functions get hollowed
+out instead of discovering it per-game. **This is the DI427 `check()`-gating story one layer up** —
+same source, same engine, config the only variable.
+
+**What a PDB genuinely could add, with a caveat that narrows it.** `Schlacht`'s `FHitResult` is the
+one non-reflected struct (UE4 `.Actor` weak-ptr vs UE5 `HitObjectHandle`); it currently locates the
+field by sub-field NAME and dumps the layout when it fails, which is already fairly robust. PDB type
+info could pin the layout per version — except GROUND-TRUTH records that these StackOBot PDBs carry
+**only partial merged type info** (`FFieldClass`/`UObjectBase`/`FUObjectItem` have no TPI record at
+all). For layout and API-name questions the **installed engine source** is the better oracle.
+
+-----
+
+## AOB code-block library — EVALUATED 2026-07-29, decision pending
+
+*Full evaluation in [aob-block-library-eval.md](aob-block-library-eval.md).* **Effort M · Risk low.**
+
+Commit the `.text` regions the patterns land on (hotspot / true-site / decoy) plus a millisecond
+pre-test, so pattern shapes can be regression-tested **without Ghidra and without the 120.94 GB
+corpus**. The real driver is portability: the maintainer's **second machine has no corpus, no
+Ghidra projects, and 1–2 UE games**, and Auto Analyze is 3–4 h per project there — so the sweep
+simply does not exist on it.
+
+Two conclusions from the evaluation:
+1. **The copyright question does not have to be answered.** Every finding of the 2026-07-29 session
+   came from the **self-built** oracles (4.15 / 4.23.1 / 4.27.2 / 5.7.4 / 5.8.0 / 5.8.1 / Titan —
+   6 engine versions × up to 3 configs), which are the maintainer's own build output. Store bytes
+   from those only; third-party sites get metadata + a `sha256` so anyone owning the game can
+   regenerate locally. Note that **anonymising blocks does not change the copyright position** — it
+   removes attribution, not status.
+2. ⚠ **It is a TRIAGE tool, never an acceptance gate.** It answers shape questions (both failures
+   found this session were shape/register-allocation bugs) but *structurally cannot* answer noise
+   density — REPORT.md §6 hits/MB needs whole images. `Himmel.h` step 5 must keep meaning the sweep;
+   a pattern can pass every block and still take 22,000 hits on a real game.
+
+Side benefit that may exceed the primary one: the repo has **no pattern regression test** between
+`extract_patterns.py`'s dead-constant check and the 40-minute sweep. This would fill that gap and
+run in CI.
+
+-----
+
+## Palworld: re-point the corpus manifest at the D: archive (the live install has patched)
+
+*Parent: same pass.* **Effort S · Risk low.**
+
+Palworld updated 2026-07-29 (md5 `fb10d568…` → `a2dadf69…`, +11,776 bytes), so
+`py tools/ghidra/preflight.py Palworld --verify-hash` now correctly reports `id=MISMATCH`
+against `H:\SteamLibrary\...`. Nothing is broken — the `.rep` is the artifact of record and
+`D:\UE_Analyze_Data\Game Binary backup\Palworld` holds the exact corpus build (verified: its
+`SparseDelegates` consensus is `148fb66b0`, the address hardcoded in `Himmel.h`'s `SPARSE_PAL51_1`
+note). The backup was taken the day before the patch.
+
+⚠ **DO NOT just re-run `build_corpus_manifest.py` — an earlier version of this item said to, and
+that was wrong.** The generator NULLS `steam_buildid`/`size`/`sha256` on a drifted row (correctly:
+it must never assert the wrong build), so regenerating would ERASE Palworld's `24181527`, which is
+the only pointer to the SteamDB build the `.rep` was made from. **That value is now preserved in
+[`tools/ghidra/corpus-provenance.tsv`](../tools/ghidra/corpus-provenance.tsv)** — a hand-made
+snapshot that the generator must not overwrite. Regenerate the manifest only after confirming the
+provenance snapshot is committed. `corpus-manifest.tsv/json` themselves stay generated — do not
+hand-edit those.
+
+The patch itself is now a **settled fact, recorded in GROUND-TRUTH.md**: every global moved
+(+0x3300, Sparse +0x3180) and **not one pattern broke** — all six voter sets came back
+character-identical. Do not re-measure this per patch.
+
+`GOBJ_DI427_1/2/3` are the only patterns for which `UE4.27-DropIn` is the sole oracle, and what
+they encode is the **32-byte `FUObjectItem`** (`shl r,5`). Those 8 bytes are `TStatId`, gated at
+4.27 by `#if STATS || ENABLE_STATNAMEDEVENTS_UOBJECT` (`UObjectArray.h` @ `4.27.2-release`).
+`STATS` is 0 in Shipping, so a Shipping sample adds nothing — Breeders and Maelstrom already
+cover the stock 24-byte item.
+
+Steps: import (one project, `-noanalysis` is fine for the gate) → derive truth from the PDB in
+Python (`?GUObjectArray@@3VFUObjectArray@@A`, `?GWorld@@3VUWorldProxy@@A`,
+`?GEngine@@3PEAVUEngine@@EA`, the sparse mangled name; GNames via
+`FNameDebugVisualizer::GetBlocks` minus 0x10 — verify the 0x10 at 4.27) → add the `sweep.sh` row
+and the `GROUND-TRUTH.md` block → full sweep → confirm `GOBJ_DI427_*` now land on it too.
+
+Payoff: converts a sole-oracle dependency on an external store — where a patch can silently
+replace the build, as happened to `ES2-0517` — into a locally rebuildable asset, and gives a
+second three-config control group after 4.23.
 
 -----
 
@@ -1179,9 +1461,14 @@ Pick up when the active plan finishes or when blocked.
   exactly as on UE5, and `FObjectKey` is **8** bytes, not 16. No new stride, no key
   reconstruction: deleting the `UEVersion < 500` gate was the entire fix, and `SPARSE_ES2_1`
   already resolved correctly on 4.27 (2 extra 4.27-verified patterns added anyway).
-  **Remaining**: 4.23-4.26 have no symbolised sample, so they are covered only by the
-  walker's runtime key-shape probe (fails safe). Closing that needs a 4.23-4.26 game with a
-  PDB — cheap to check with `tools/ghidra/probe.java` if one ever turns up.
+  **Remaining — narrowed 2026-07-29.** 4.23 is no longer unsampled: the self-built
+  `UE4.23-Flying` oracle PDB-confirms the outer key is a raw `UObjectBase const*` at the very
+  version sparse delegates were INTRODUCED, character-identical to 4.24, and `SPARSE_DI427_1`
+  resolves it live. Combined with 4.24/4.25/4.27 that leaves **only 4.26** without a symbolised
+  monolithic sample of its own (the 4.26 Satisfactory rows are modular DLLs and do carry the
+  symbol). The key shape is now measured at every version the feature has ever had, so this is
+  redundancy rather than a gap; the walker's runtime key-shape probe remains the real mitigation
+  and is what covers licensee forks no sample can.
 
 - **Find Refs v4 — TMap / TSet weak-like inner sides** — Effort: **M** · Risk: **low**.
   Currently Object/Class only; weak/soft pointer collections (`TMap<UObject*,

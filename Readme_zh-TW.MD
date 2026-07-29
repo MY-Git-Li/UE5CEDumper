@@ -17,7 +17,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
 ---
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D4)](https://www.microsoft.com/windows)
-[![UE Version](https://img.shields.io/badge/UE-4.18--5.8-orange)](https://www.unrealengine.com/)
+[![UE Version](https://img.shields.io/badge/UE-4.11--5.8-orange)](https://www.unrealengine.com/)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 [![C++](https://img.shields.io/badge/C++-23-00599C)](https://isocpp.org/)
 [![Avalonia](https://img.shields.io/badge/Avalonia-UI-8B5CF6)](https://avaloniaui.net/)
@@ -156,6 +156,7 @@ table，因此會直接顯示為不支援，而不是讓它以難以理解的方
 * **GWorld 連通性**: 截至 2026-07-27，`GWorld` 遍歷在 **100% 實測遊戲中正常運作（40 / 40）**，已涵蓋 *NEKOPALIVE*（UE 4.11 — 目前支援的最舊引擎，透過 `GWLD_FD_1` 直接解析）、Satisfactory（modular UE，獨立 `CoreUObject-Win64-Shipping.dll`）、《STAR WARS 絕地：組織殞落》(UE 4.21，EA 啟動器 / Steam)、*Avowed*（其 `GWorld` AOB 落在誘餌位址，改以掃描 `.data` 尋找指向作用中遊戲世界的指標來回復 — 取 `OwningGameInstance` 非空的那個，並略過 World-Partition 的 `_Generated_` cell）、劍星 (Stellar Blade)、女神異聞錄３ Reload，Pionero Capital Demo，MindsEye（UE 5.4.4 licensee fork，遊戲版本 7.3.1），以及《Star Trek Voyager – Across the Unknown》（原生 UE 5.6）。如遇尚未驗證的遊戲，請改用 **Object Tree** 或 **Instance Finder** 作為主要進入點。
 * **EA 啟動器遊戲的 Proxy DLL 限制**: 《STAR WARS 絕地：組織殞落》透過 EA 啟動器啟動，`version.dll` 或 `dinput8.dll` proxy 皆無法被遊戲行程載入（EA 啟動器會限制 DLL 搜尋路徑）。需待遊戲啟動後改以 CE Dll Injection 注入。掃描端本身無問題 — DLL 進入行程後 GObjects / GNames / GWorld 均能正常解析。其他 EA 啟動器標題可能也有相同情況；若遇到請開 issue 回報。
 * **針對既不匯入 `version.dll` 也不匯入 `dinput8.dll` 的遊戲使用 `dxgi.dll` proxy**: 少數遊戲（例如 *The Adventures of Elliot*，一款 SQUARE ENIX D3D12 遊戲 — 其 PE 版本字串被移除而被偵測為 UE4.27，但執行期已校正為 UE5.4；*Echoes of Aincrad Demo*，一款 Bandai Namco UE5.4 D3D12 遊戲）的 EXE 根本不匯入 `version.dll` 或 `dinput8.dll`，因此 Windows 永遠不會載入那些 proxy — 與 EA 的情況不同，這是遊戲自身的 import table，而非啟動器限制。請改用 **`dxgi.dll`** proxy（`build.ps1 -Target ProxyDxgi`，或在 Proxy Deploy 分頁選 *dxgi.dll*）：每款 D3D11/D3D12 UE 遊戲都會匯入 `dxgi`，因此能可靠載入。已在 Elliot、Echoes of Aincrad Demo，以及 *Pionero Capital Demo*（一款 stock UE5.7 遊戲 — 第一款透過此 proxy 驗證的 stock-5.7 遊戲）上端到端實測（連接 + 掃描 + 物件瀏覽）。
+* **`winmm.dll` proxy — 當 `dxgi` 或 `version` 檔名已被佔用時的備用槽位**: proxy 必須檔名沒被佔用才有效，而這在實務上是真實的限制 — *ReShade* 常以 `dxgi.dll` 形式安裝，部分遊戲本身也會附帶自己的 `version.dll`。`winmm.dll` 經實測**在已安裝的 UE 遊戲中 24/24 皆可匯入 — 與 `dxgi` 完全相同的集合**（對照之下 `dinput8` 只有 2/24），因此它是剩下唯一具備通用性的選擇。以 `build.ps1 -Target ProxyWinmm` 建置，或在 Proxy Deploy 分頁選擇 *winmm.dll*。已在 *The Adventures of Elliot*（UE 5.4）與 *SEED*（UE 4.27）實機驗證，180 個 export 全數轉發至真正的 `System32\winmm.dll`。請注意它**無法觸及任何 `dxgi` 觸及不到的遊戲** — 選它是為了槽位可用性，不是為了覆蓋率。
 * **切到背景就暫停的遊戲**: 部分遊戲（例如女神異聞錄３ Reload，`t.IdleWhenNotForeground=1`）在非前景視窗時會凍結遊戲執行緒 — 此時遊戲執行緒上的呼叫會逾時。本工具會**偵測停擺**（顯示琥珀色「game thread stalled」橫幅；相機 POV 讀取改走 raw 快取而不會卡住管道），而實驗性的 **Keep Foreground** 開關能直接解決根本原因，讓遊戲在背景時呼叫仍可運作。
 * **容器元素限制**: Array/Map/Set 的元素讀取受可調限制值控制，避免過度記憶體存取。如需處理大型容器，請在 Live Walker 中調整 **Array Limit** 滑桿。
 

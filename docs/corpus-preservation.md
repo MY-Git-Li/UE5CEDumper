@@ -209,7 +209,17 @@ UE_4.23 (45.33), UE_4.27 (54.19), UE_5.7 (74.13), UE_5.8 (84.70)** = 280.89 GB. 
 registered with the Epic Launcher (`LauncherInstalled.dat` → `"InstallationList": []`), so a
 delete is likely not re-downloadable in place — verify before removing.
 
-### 3d. Not installed
+### 3d. Not installed on Steam — but the BINARY is not lost
+
+**Superseded 2026-07-29.** Six rows this document and the manifest called "binary GONE" —
+`UE4.18-FF7R`, `FF7Re`, `Hogwarts_Legacy`, `Manor Lords`, `Octopath`, `DQ_I_II_HD2D` — all have
+**md5-identical copies** under `D:\UE_Analyze_Data\Game Binary backup`, verified against the MD5
+Ghidra recorded at import. Nothing was ever missing: `build_corpus_manifest.py` did not search
+that root, and `find_duplicate_copies` additionally skipped the search for STEAM rows *and* for
+GONE rows — exactly the two cases where a surviving copy matters most. Both guards are removed
+and `D:\UE_Analyze_Data` is now first in `DUPE_ROOTS`. **36 of 38 rows now carry at least one
+verified duplicate.** These titles therefore need a reinstall only to recover a **PDB**, never
+the binary.
 
 **`UE4.18-FF7R` — app 1462040, Steam title "FINAL FANTASY VII REMAKE INTERGRADE"** (the manifest's
 `FINAL FANTASY VII REMAKE` is the *installdir*, not the store name — search the store for
@@ -258,13 +268,130 @@ Free space at 00:18: C 980.3 · D 2362.1 · E 258.2 · F 801.2 · G 931.3 · H 6
 tightest at 28.6% and holds two corpus titles — it is the drive most likely to force a decision
 first, and it is *not* the Ghidra target.
 
+### Recovering a binary you no longer have — `corpus-provenance.tsv`
+
+`tools/ghidra/corpus-provenance.tsv` is a **snapshot** (2026-07-29) of every row's build identity.
+It exists because `build_corpus_manifest.py` **nulls `steam_buildid`/`size`/`sha256` the moment a
+row drifts** — correctly, since it must never assert the wrong build, but that destroys the pointer
+to the build a `.rep` was made from. Palworld drifted that same day. **Re-snapshot before games
+update, not after.** Four routes, strongest first:
+
+| route | rows | what it gives you |
+|---|---|---|
+| `STEAMDB-BUILDID` | 22 | exact: SteamDB app → Builds → buildid → manifest |
+| `STEAMLOG-MANIFEST` | **6** | Steam's own `console_log.txt` logs every depot fetch with app, depot, **exact manifest** and a timestamp. An archived file's mtime falls inside its download, so mtime → log line → manifest. A strong **candidate**, confirmed by md5. |
+| `STEAM-BACKUP-MANIFEST` | **4** | the **exact depot manifest id** out of a `sku.sis` in `X:\SteamLibrary backup` — `steamcmd +download_depot <app> <depot> <manifest>`. Survives uninstall *and* delisting. |
+| `REBUILD` | 4 | self-built; recompile from the installed engine |
+| `STEAMDB-MANIFEST` | **2** | manifest id resolved by hand off SteamDB's depot history, tie broken by an independent repo record (see below) |
+| `NONE-HASH-ONLY` | **0** | — |
+
+**Nothing in the corpus is now without a recovery route.**
+
+Two things that were wrong on the first pass and are worth not repeating:
+
+* **Use `file_modified`, never `file_created`.** A copy RESETS ctime but PRESERVES mtime, so an
+  *install → copy → uninstall* workflow keeps the original Steam write time. Measured: Hogwarts
+  ctime `2026-07-29` but mtime `2025-12-04`; Octopath mtime `2025-05-12`; Palworld mtime
+  `2026-07-15` = the pre-patch corpus build. Reading ctime made the dates look destroyed by the
+  corpus move when they were not.
+* **`sku.sis` beats every date.** The Steam backup descriptor records appid, depots and the exact
+  manifest id. Harvesting `X:\SteamLibrary backup` moved **FF7 Remake, FF7 Rebirth, Hogwarts
+  Legacy and DQ I&II** out of "md5 only" and into "exactly reproducible" — the three biggest
+  uninstall candidates in the drop list below.
+
+⚠ **`console_log.txt` ROTATES — it is the most perishable source here.** It was snapshotted on
+2026-07-29 holding only ten download records, and those ten happen to cover every archive row.
+Re-snapshot after any depot fetch you care about; once rotated, those manifest ids are gone and
+the archive rows fall back to md5-only. The full capture, preserved because the log will not keep it:
+
+```
+2026-07-25 22:55:40  app=1128920 depot=1128921 manifest=1228092871900976040
+2026-07-25 23:04:13  app=1128920 depot=1128921 manifest=1228092871900976040
+2026-07-25 23:16:20  app=526870  depot=526871  manifest=5235170890177666837
+2026-07-25 23:22:05  app=526870  depot=526871  manifest=4713640358549407449
+2026-07-25 23:24:28  app=526870  depot=526871  manifest=3007809920758804289
+2026-07-25 23:53:12  app=526870  depot=526871  manifest=5072022484048628830
+2026-07-26 00:22:12  app=526870  depot=526871  manifest=4631200912822720421
+2026-07-26 00:25:02  app=526870  depot=526871  manifest=5971929977835941106
+2026-07-26 13:19:00  app=1144800 depot=1144801 manifest=5221052602514244898
+2026-07-26 14:21:59  app=1144800 depot=1144801 manifest=8071507168854653981
+```
+
+**`UE4.22-Satisfactory` is the row that matters most** — it is the sole oracle for
+`GNAM_SAT422_1` (priority 715, the UE 4.22 GNames lander), so losing it leaves that pattern with
+no proof it works. It is **not** unrecoverable, only inconvenient: its best candidate is
+`526870:526871:5235170890177666837`, reached two independent ways — the maintainer's own reading of
+the Steam log (SteamDB dates it 2020-06-08, the right era for Satisfactory on UE 4.22), and the
+mtime correlation above picking the same manifest as the download closest after `2026-07-25 23:13`.
+Download it and confirm `md5 == a1df9f191f8978e6c05d7919237be565` before trusting it. It is also
+mirrored twice already (67 MB on `D:\tmp\Game archive` + `X:\UE_Analyze_Data\Game archive`).
+
+Two manifests in the log — `4631200912822720421` (2020-09-25) and `5971929977835941106`
+(2021-01-11) — correlate to no archive row. They are later Satisfactory builds that may or may not
+share a UE version with one already held; treat them as leads, not as identified rows.
+
+**`UE5.5-Everspace2` (ES2-0517) is RESOLVED — `1128920:1128921:4415922863161237626`**, and the way
+it was pinned is worth copying. SteamDB's depot history for 1128921 lists manifests published
+2024-11-14, 2025-05-12, 2025-05-16, 2025-05-28 and 2025-06-17. A snapshot taken on **2025-05-17**
+must have been running the **2025-05-16** one. The 2025-05-12 fallback is then *excluded* by an
+independent record already in this repo: `sweep.sh`'s own note calls `Everspace2b` **"two manifests
+newer (2025-06-17 vs the 05-17 snapshot)"** — newer than 2025-05-16 there are exactly two
+(2025-05-28, 2025-06-17), whereas newer than 2025-05-12 there would be three. `Everspace2b` is
+therefore the 2025-06-17 manifest `735055807809773736`, which is also the one currently installed.
+Confirm on download with `md5 == 1a1b0ede76b80a173969343683579129`.
+
+**Method worth reusing: date the snapshot, then let an existing repo note break the tie.** Neither
+the SteamDB list nor the project name alone was decisive; a sentence written months earlier for an
+unrelated reason was.
+
+### Do this BEFORE any of the drop steps: re-import without analysis
+
+**~88% of a `.rep` is Auto Analyze output, and the sweep does not read any of it.** This is the
+only lever here that frees space at **zero** capability cost — every step in the table below
+trades something away. Measured 2026-07-29, and verified rather than assumed:
+
+| | `UE423_Flying-Win64-Shipping` (49 MB EXE) |
+|---|---|
+| `-noanalysis` import | **169 MB, 46 seconds** |
+| fully analysed | **1,369 MB** |
+| | **8.1×  —  analysis is 88% of the `.rep`** |
+
+**Verified equivalent, not merely assumed:** `scan_patterns.java` run against the raw import
+returns the *identical* five verdicts to the recorded `UE4.23-Flying` row in `REPORT.md` —
+`GOBJ_ES53_1` OK-BEHIND, `GNAM_DI427_2` / `GWLD_TQ_1` / `SPARSE_DI427_1` / `GENG_X1` all
+UNIQUE-OK. It works because the scanner touches only `getMemory()` / `getBytes()` /
+`getImageBase()`; the imported program keeps the file's bytes, which is all it reads.
+Corroborating the ratio at scale: the two mid-analysis `*_UE581` projects sit at ~3× their EXE
+size while every finished project sits at 26–30×.
+
+```bash
+analyzeHeadless D:/Tools/GHIDRA_Projs <Name> -import "<path>\<file>.exe" -noanalysis
+```
+
+**Three caveats, all load-bearing:**
+1. **Needs the original binary.** Re-importing is only possible where the file still exists — so
+   this does NOT apply to `ES2-0517` and the others in §"Never drop" whose source is gone. For
+   those, Ghidra's *File → Export → Original File* should recover the bytes to re-import from,
+   but **that path is untested here** — do not bet an irreplaceable `.rep` on it.
+2. **Ten scripts genuinely need analysis** — `dump_func`, `decompile_functions`, `find_callers`,
+   `dump_xrefs2`, `dump_global_xref_aob`, `find_gobjects`, `dump_vtables`, `dump_types`,
+   `pe_probe`, `probe`. Those are for *reading code* when mining a new pattern or cracking a
+   symbol-less binary — an occasional, per-investigation need. Analyse into a throwaway project
+   then delete it, rather than storing analysis for all 43 permanently.
+3. **`find_syms3.java` needs the PDB applied**, which `-noanalysis` skips. For the five sweep
+   globals this no longer matters: `tools/pe/pdb_globals.py` reads them straight from the PDB
+   with no Ghidra at all.
+
+Applied across the 120.94 GB in `D:\Tools\GHIDRA_Projs` this is far and away the largest
+zero-loss saving available; do it before considering a single deletion below.
+
 ### Drop order under pressure
 
 Take these strictly in order. Re-run `preflight.py --sizes` between steps.
 
 | Step | What | Frees | Capability lost |
 |------|------|-------|-----------------|
-| 0 | The 5 orphan `.rep` — `Meltopia` 3.35, `UE423_Flying-Win64-DebugGame` 3.08, `Satfi426` 0.68, `ISDefenseEditor_UE410` 0.16, `ES1` 0.16 | **7.43 GB** | **None** for 3 of them (GROUND-TRUTH.md already calls Meltopia "superseded and can be deleted" and Satfi426 "superseded, do not re-chase"). ⚠ `UE423_Flying-Win64-DebugGame` is **queued work** (todo.md:36, "~free — its project is already analysed") and `ISDefenseEditor_UE410` (UE 4.10) is plausibly the only evidence behind the documented pre-4.11 unsupported floor. Drop only the 4.19 GB of the three superseded ones without further thought. |
+| 0 | The orphan `.rep` — `Meltopia` 3.35, `Satfi426` 0.68, `ISDefenseEditor_UE410` 0.16, `ES1` 0.16 | **4.35 GB** | **None.** GROUND-TRUTH.md already calls Meltopia "superseded and can be deleted" and Satfi426 "superseded, do not re-chase". **Both 2026-07-29 caveats on this row are now discharged:** `UE423_Flying-Win64-DebugGame` (3.08 GB) is no longer an orphan at all — it is the live project behind the `UE4.23-FlyingDbgGame` sweep row, so it has been REMOVED from this list; and `ISDefenseEditor_UE410` is no longer the only evidence for the pre-4.11 floor, which is now measured by two full-PDB 4.10.4 oracles (`UE410_Game_Shipping` / `..._Development`). Drop all four without further thought. |
 | 1 | 4 zero-contribution noise probes — `UE4.27-Artisan` 1.35, `UE5.5-ManorLords` 2.88, `UEx-DQ12HD2D` 1.60, `UE5.2-SatGameDLL` 2.28 | **8.11 GB** | Nothing measurable. Simulated exclusion: **0** patterns stop firing, **0** lose correctness evidence. Only §6 denominator mass. |
 | 2 | 5 exclusive-exercise noise probes — `UE4.27-Hogwarts` 3.65, `UE5.6-TQ2` 3.30, `UE5.1-Palworld` 2.77, `UE4.x-FF7Rebirth` 2.33, `UE4.18-Octopath` 0.77 | **12.82 GB** | **0** correctness. 6 patterns fall into the already-populated "never hits anywhere" bucket (`GOBJ_RE1`, `GOBJ_V9`, `GOBJ_OT_2`, `GWLD_TQ_2`, `GWLD_SF_3`, `GWLD_TQ_3`). Taking steps 1+2 removes 865.5 MB of the 2,877.2 MB monolithic executable mass (30.1%). Hogwarts first: it is Denuvo-packed and contributes 4.0% of §6 **numerator** hits from non-`.text` bytes. |
 | 3 | Version-redundant ORACLES, **one at a time**, re-sweeping between each — `UE5.5-Meltopia` 4.54, `UE4.27-DQ7R` 3.89, `UE4.27-Maelstrom` 3.81, `UE4.27-Breeders` 2.84, `UE4.20-HeliumRain` 1.39 | ≤ **16.47 GB** | Individually nothing. **Not jointly redundant**: Breeders + Maelstrom are the two independent symbolised 4.27s that proved DropIn's 32-byte `FUObjectItem` is a config artifact — keep at least one. Meltopia is the second symbolised *monolithic* 5.5 in a modular-heavy corpus. |
@@ -360,3 +487,48 @@ hour of first generation (a title reinstalled and it still read `BINARY GONE`).
   reproducible (it returns ≤ 0 h for six projects whose timestamps were reset by a copy, and
   924 h for Avowed), so any "GB reclaimed per re-analysis hour" ranking is unsupported. Time a
   real re-import before relying on one.
+
+
+-----
+
+## 6. `D:` is the working copy, `X:` is the backup
+
+`D:\UE_Analyze_Data` holds three trees and is the one to keep fast and current:
+
+| tree | size | contents |
+|---|---|---|
+| `Game Binary backup` | 11 GB | per-title EXE (+PDB where one exists), already consolidated |
+| `Game archive` | 21 GB | DropIn / ES2 / Satisfactory full installs |
+| `Varies Version builds` | 8.2 GB | the self-built engine samples, per config |
+
+`X:\UE_Analyze_Data` mirrors this onto a spinning disk with 800k+ files. **Do not walk it in a
+tool.** `build_corpus_manifest.py` now builds a single lazy basename index over all dupe roots
+instead of walking per row — without that, adding `X:` to the search would have walked it 38
+times. Full regeneration is 75 s.
+
+Everything a sweep needs is derivable from EXE+PDB, so the preservation target is **12.17 GB**
+(37 distinct EXEs 4.06 GB + 36 distinct PDBs 8.11 GB), not the ~123 GB of `.rep`.
+
+## 7. UE 4.27.2 — built, not yet in the corpus
+
+`D:\UE_Analyze_Data\Varies Version builds\4.27.2\{DebugGame,Development,Shipping}\Win64\`, each
+with EXE + PDB. **Import the Development one and it replaces `UE4.27-DropIn`'s sole-oracle role.**
+
+Why Development specifically: `GOBJ_DI427_1/2/3` are the only patterns for which DropIn is the
+sole oracle, and what they encode is the **32-byte `FUObjectItem`** (`shl r,5`). Those 8 bytes are
+`TStatId`, gated at 4.27 by `#if STATS || ENABLE_STATNAMEDEVENTS_UOBJECT` (`UObjectArray.h`
+@ `4.27.2-release`). `STATS` is 0 in Shipping, so a **Shipping 4.27 sample adds nothing** —
+Breeders and Maelstrom already cover the stock 24-byte item, which is how GROUND-TRUTH.md proved
+the 32-byte item is a config artifact rather than a 4.27 trait.
+
+This converts a sole-oracle dependency on an external store — where a patch can silently replace
+the build, as happened to ES2-0517 — into a locally rebuildable asset. It also gives a second
+three-config control group after 4.23, which can re-test the config-axis conclusions.
+
+## 8. Moving the corpus to a spinning disk: verify with a sweep, not with preflight
+
+`preflight.py` reads `.rep` metadata (`idata/**/*.prp`) and **never opens a program database**.
+A silently corrupted `.rep` — the realistic failure mode when moving ~120 GB onto an HDD — looks
+perfectly healthy to it. There is no cheap integrity check. **After the move, run one full sweep
+and diff `out/sweep/REPORT.md` against the previous one; an unchanged regression matrix is the
+only real acceptance test.**

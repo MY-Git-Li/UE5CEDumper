@@ -19,7 +19,7 @@ procedure for adding a new game. The sweep itself is scripted — do not hand-ru
 per project:
 
 ```sh
-bash tools/ghidra/sweep.sh                      # all 18 projects (~30 min at SWEEP_JOBS=3)
+bash tools/ghidra/sweep.sh                      # all 57 rows, MEASURED ~4m40s at SWEEP_JOBS=3
 bash tools/ghidra/sweep.sh UE4.27 UE5.7         # only tags matching these substrings
 py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
 ```
@@ -33,6 +33,9 @@ py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
 | `find_callers.java` | Java | For each function VA arg, lists call sites and the `LEA/MOV RCX` (`this`) set before each call — recovers a static global a method is invoked on (e.g. `LEA RCX,[GUObjectArray]; call`). |
 | `dump_global_xref_aob.java` | Java | **PDB-shipping games.** Resolves UE global symbols by name (`GWorld`, `GUObjectArray`, `NamePoolData`, `SparseDelegates`, `GEngine`, …) and, for every code xref, dumps the raw byte window + a disp-masked AOB candidate + read/write kind + containing function. Turns a symbol-rich binary into `Himmel.h` material in one pass. Filters out variable symbols (they lazy-load the whole datatype list → OOM). |
 | `scan_patterns.java` | Java | **The engine `sweep.sh` drives.** Mass-scans a **TSV** of signatures against every executable section and resolves each hit exactly like `Genau::TryResolveMatch`, reporting `hits / ok / decoy` plus a verdict: `UNIQUE-OK`, `OK-FIRST`, `OK-BEHIND` (**a decoy scans first**), `DECOY-ONLY`, `MISS`, `NO-TRUTH`. Also emits a per-pattern hotspot TSV and a **consensus** file — which VA the most *independent* patterns agree on, the only correctness signal available on a symbol-less binary — plus a *priority walk* showing what the runtime would land on there. Understands nibble wildcards. Env: `GS_TSV`, `GS_OUT`, `GS_TAG`, `GS_TRUE` (entries may carry a `programNameSubstring:` prefix, which is **required** for modular builds — their DLLs share image base `0x180000000` so their ranges overlap). Outputs are keyed by tag + program + image base; program name alone is not unique across projects. |
+| `replay_patterns.py` | py3 | **Replays the whole signature DB against a PE with NO Ghidra and no project** — reads `patterns.tsv`, resolves every RIP-relative match itself, and ranks the candidate VAs each target converges on. This is the corroboration half of the "derive truth without Ghidra" flow: `pdb_globals.py` says what the answer *is*, this says which patterns *find* it. `ONLY_TARGET=GNames TOPN=12` narrows it. ⚠️ It shows the top-N by voter count — **"not in the top N" is NOT "absent"**, a mistake that produced three wrong write-ups before the sweep corrected them. It also reports what *hits*, never what the validator walk *lands on*; only the sweep answers that. |
+| `inventory_builds.py` | py3 | **What did I build that the corpus is NOT testing?** Reconciles the self-built reference binaries on disk against the sweep rows that import them (via the manifest's `binary_last_seen`, never by re-parsing `.prp` — an earlier attempt did and matched 0 of 30). `preflight.py` structurally cannot answer this: it walks `sweep.sh` outward to files, so a binary no row mentions is outside its world. `--md` emits the table in [docs/reference-builds.md](../docs/reference-builds.md). |
+| `capture_provenance.py` | py3 | Regenerates `corpus-provenance.tsv`, the **build-identity snapshot**. Exists because `build_corpus_manifest.py` deliberately NULLs `steam_buildid`/size/sha256 on a drifted row, destroying the pointer to the build a `.rep` was made from the first time a game patches. Merges four sources: Steam `sku.sis` backups, `console_log.txt` depot downloads (which **rotate** — snapshot early), the manifest, and hand-resolved SteamDB entries. Idempotent. **Re-run BEFORE a game updates, not after.** |
 | `extract_patterns.py` | py3 | Parses **all** of `dll/src/Himmel.h` (macros + raw brace initialisers + string-concatenated constants) into the TSV `scan_patterns.java` eats. Lets you replay the entire signature database against a new binary in one pass. No deps. |
 | `gen_cands.py` | py3 | Turns a `dump_xrefs2.java` dump into hundreds of mechanically-enumerated candidate patterns (every xref × several window lengths, trailing wildcards trimmed, anchor-byte rule enforced). Feed the result to `scan_patterns.java` so selection is evidence-driven instead of eyeballed. |
 | `dump_xrefs2.java` | Java | Successor to `dump_global_xref_aob.java`: accepts `Label@hexVA` as well as symbol names, and per xref emits the disassembly context plus disp-masked **and** raw windows at four back-off depths (`AOB0/2/4/6`, each with its `io=`), so you can pick how much leading context a pattern needs. |
@@ -100,13 +103,46 @@ GS_TSV=$PWD/out/cands.tsv GS_TRUE="GWorld=<va>" analyzeHeadless ... -postScript 
 |--------|--------------|
 | `disasm_function.py` | Offline x64 disassembler for function VA(s) in a PE; annotates RIP-relative writable-`.data` targets and flags the zero-init **BSS** ones (where runtime-filled globals like `GUObjectArray` live). `py -m pip install capstone pefile` first. |
 | `ue_version.py` | Read a game's UE version out of its `++UE5+Release-X.Y` build tag, to decide whether it is worth a Ghidra import at all. Stdlib only. **~half of shipped games have the tag stripped**, so `UNKNOWN` means unknown, not uninteresting — it is a filter, not a gate. |
+| `func_bytes.py` | **Answer "is this function hollow?" offline** — resolves any symbol via the PDB, then reads the EXE bytes at that VA. A `#if !UE_BUILD_SHIPPING` body compiles to a bare `ret`; a live one does not. This is what disproved the long-standing "UCheatManager is body-stripped in Shipping" claim (it is not — the gate is that no *instance* exists). No game running, no Ghidra. |
+| `pdb_globals.py` | **Sweep ground truth out of a PDB, without opening Ghidra.** Prints GObjects / GNames / GWorld / SparseDelegates / GEngine and a paste-ready `GS_TRUE=` line for `tools/ghidra/sweep.sh`. Stdlib only — it reads the MSF publics stream directly. Replaces step 2 of GROUND-TRUTH.md's "Deriving truth for a new game" (a ~10-min headless run) with ~2 seconds, for any binary that ships symbols. When GObjects has no public symbol it prints the **pre-4.11 magic-static route** (`GetUObjectArray` → the `lea` feeding the ctor) instead of a bare "NOT FOUND". |
+| `pdb_match.py` | **"Can I trust this .pdb for this .exe?"** — the check to run on any PDB whose provenance you are not certain of. A matching FILENAME proves nothing: a PDB from a *different build of the same game* loads without complaint and yields addresses wrong by an unpredictable amount, which is the worst failure mode for ground truth because every value looks plausible. Compares the PE's CodeView **GUID + Age** against the PDB's own info stream (the linker mints a fresh GUID per link, so a rebuild cannot fake it), then decodes the publics stream to confirm it carries real content and not just a stripped shell. `--scan <dir>` walks a whole backup tree. Exit 0 = all usable. Also reports whether the PE was linked **`/Brepro`** (`IMAGE_DEBUG_TYPE_REPRO`), which is the ONLY sound way to know whether its `TimeDateStamp` is a build date or a content hash — plausibility is misleading (Hogwarts reads `2025-11-12` and Elliot `2026-07-15`; both are hashes). |
 
 ```sh
 py tools/pe/disasm_function.py "<game>.exe" 0x147A604E0 0x14814D2F0
 
 # Triage a whole Steam library before importing anything
 py tools/pe/ue_version.py "D:/SteamLibrary/steamapps/common"/*/*/Binaries/Win64/*-Shipping.exe
+
+# Ground truth for a new oracle. The GObjects base|base+0x10 alias is decided AUTOMATICALLY from
+# the PDB (5.8 made ~FFieldClass virtual, so `??1FFieldClass@@UEAA@XZ` = 5.8+ = no alias); the
+# tool prints which way it went and why. Override with --gobjects-alias / --no-gobjects-alias.
+py tools/pe/pdb_globals.py "<game>-Win64-Shipping.pdb"
+py tools/pe/pdb_globals.py "<game>.pdb" --grep FSparseDelegateStorage   # hunt decoys / prove absence
+
+# Vet a PDB BEFORE deriving truth from it — pairing (GUID+Age) and content in one pass.
+py tools/pe/pdb_match.py "<game>-Win64-Shipping.exe"          # partner inferred by name
+py tools/pe/pdb_match.py --scan "D:/UE_Analyze_Data/Game Binary backup"
 ```
+
+**The strongest PDB check is not this tool — it is reproducing a row you already have.** Pairing
+proves *which binary* the PDB describes; it does not prove your decode of it is right. Run
+`pdb_globals.py` on a PDB whose oracle is already in `sweep.sh` and diff the `GS_TRUE=` line
+against the recorded one. Measured 2026-07-29 over the 9 pairs in `Game Binary backup`: all 9 pair
+correctly, and **6 of 7 corpus oracles reproduce byte-for-byte**. Two things that look like
+failures and are not:
+
+* **`GObjects=A|B` is a SET, not an ordered pair.** `scan_patterns.java` reads `true=[a,b]` and
+  accepts either. Most rows are recorded ascending, a few descending (Everspace 2, Solarpunk) —
+  cosmetic only.
+* **A missing GNames can be correct for that title.** Solarpunk has neither `FName::GetNames` nor
+  `FNameDebugVisualizer::GetBlocks`, so `pdb_globals` legitimately reports NOT FOUND; its truth
+  came from the PDB→AOB Ghidra loop below. Absence is a routing problem, not a bad PDB.
+
+> **Validate it before trusting a new row**: re-run it on `UE423_Flying-Win64-Shipping.pdb` and
+> `StackOBot-Win64-Shipping.pdb` (5.8) and confirm it still reproduces those two `sweep.sh` rows
+> byte-for-byte. Then corroborate the new values independently — pattern-replay consensus, per
+> GROUND-TRUTH.md rule 4. A silently-drifting decoder is precisely the failure mode that file
+> exists to prevent (a single wrong VA has already corrupted a whole sweep once).
 
 > The authoritative version source stays the DLL's runtime detection (the
 > `UE5_Init: Complete (UEnnn, …)` line in the game's `init-0.log`), which reconciles the PE data

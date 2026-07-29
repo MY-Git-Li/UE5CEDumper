@@ -1,5 +1,8 @@
 # Recommended Test Games
 
+> **Real shipped titles only.** The stock engine samples we package ourselves (8 UE versions x up to 3 configs, used as PDB-bearing AOB oracles) live in
+> [reference-builds.md](reference-builds.md) — different subject, different questions.
+
 > Moved from CLAUDE.md. A curated list of games used to validate UE5CEDumper across UE versions.
 
 -----
