@@ -42,6 +42,57 @@ def guid_str(b):
             + "".join(f"{x:02X}" for x in b[10:16]))
 
 
+def pe_build_stamp(path):
+    """-> (timestamp, is_repro). AUTHORITATIVE test for whether TimeDateStamp is a real time.
+
+    With `/Brepro` the linker overwrites the COFF TimeDateStamp with a CONTENT HASH and emits a
+    debug-directory entry of type 16 (IMAGE_DEBUG_TYPE_REPRO). That entry is the flag — so never
+    guess from plausibility. Measured on this corpus, plausibility is actively misleading:
+    Hogwarts Legacy (4.27) reads `2025-11-12` and Elliot (5.4) reads `2026-07-15`; BOTH are hashes.
+    Roughly a fifth of 32-bit hashes land in a 2000-2030 window.
+
+    Rules of thumb, measured 2026-07-29 and NOT a version rule:
+      * Epic's UBT enables /Brepro on **SHIPPING only**, from ~5.3. Development and DebugGame keep
+        real link times at every version tested (4.10 -> 5.7).
+      * UE 5.8 non-Shipping writes TimeDateStamp = 0 outright — a third state, neither time nor
+        hash.
+      * Third-party studios choose for themselves: Hogwarts is /Brepro at 4.27 while DQ7R, the same
+        engine version, is not. So for a shipped game, TEST — do not infer from the UE version.
+    """
+    d = open(path, "rb").read()
+    pe = struct.unpack_from("<I", d, 0x3C)[0]
+    ts = struct.unpack_from("<I", d, pe + 8)[0]
+    types = [t for t, _sz, _off in _debug_entries(d, pe)]
+    return ts, (16 in types)
+
+
+def _debug_entries(d, pe):
+    """-> [(type, size, file_offset_of_payload)] from the PE debug directory."""
+    magic = struct.unpack_from("<H", d, pe + 24)[0]
+    dd = pe + 24 + (112 if magic == 0x20B else 96)
+    rva, size = struct.unpack_from("<II", d, dd + 6 * 8)
+    if not rva:
+        return []
+    nsec = struct.unpack_from("<H", d, pe + 6)[0]
+    optsz = struct.unpack_from("<H", d, pe + 20)[0]
+    secs = []
+    for i in range(nsec):
+        o = pe + 24 + optsz + i * 40
+        vsz, va, rsz, ptr = struct.unpack_from("<IIII", d, o + 8)
+        secs.append((va, max(vsz, rsz), ptr))
+    base = next((p + (rva - v) for v, s, p in secs if v <= rva < v + s), None)
+    if base is None:
+        return []
+    out = []
+    for i in range(size // 28):
+        e = base + i * 28
+        # IMAGE_DEBUG_DIRECTORY: Type@12, SizeOfData@16, AddressOfRawData@20, PointerToRawData@24.
+        out.append((struct.unpack_from("<I", d, e + 12)[0],
+                    struct.unpack_from("<I", d, e + 16)[0],
+                    struct.unpack_from("<I", d, e + 24)[0]))
+    return out
+
+
 def pe_codeview(path):
     """-> (guid_bytes, age, pdb_path_recorded_by_the_linker) or None."""
     d = open(path, "rb").read()
@@ -128,6 +179,16 @@ def check(exe, pdb):
     print(f"   PE  GUID {guid_str(g_pe)}  age {age_pe}")
     print(f"   PDB GUID {guid_str(g_db)}  age {age_db}")
     print(f"   linker recorded: {recorded}")
+    ts, repro = pe_build_stamp(exe)
+    if repro:
+        print(f"   BUILD TIME  ** /Brepro (IMAGE_DEBUG_TYPE_REPRO) — TimeDateStamp 0x{ts:08X} is a "
+              "CONTENT HASH, not a date. Do not read it as one even if it looks plausible.")
+    elif ts == 0:
+        print("   BUILD TIME  zeroed (0x00000000) — no link time recorded.")
+    else:
+        import time as _t
+        print(f"   BUILD TIME  {_t.strftime('%Y-%m-%d %H:%M', _t.gmtime(ts))} UTC "
+              f"(0x{ts:08X}) — real link time, no /Brepro flag.")
     if not ok:
         print("   PAIRING  ** MISMATCH — different link. This PDB's addresses do NOT describe "
               "this binary. UNUSABLE.")

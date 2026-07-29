@@ -19,7 +19,7 @@ procedure for adding a new game. The sweep itself is scripted — do not hand-ru
 per project:
 
 ```sh
-bash tools/ghidra/sweep.sh                      # all 18 projects (~30 min at SWEEP_JOBS=3)
+bash tools/ghidra/sweep.sh                      # all 57 rows (~50 min at SWEEP_JOBS=3)
 bash tools/ghidra/sweep.sh UE4.27 UE5.7         # only tags matching these substrings
 py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
 ```
@@ -104,7 +104,7 @@ GS_TSV=$PWD/out/cands.tsv GS_TRUE="GWorld=<va>" analyzeHeadless ... -postScript 
 | `ue_version.py` | Read a game's UE version out of its `++UE5+Release-X.Y` build tag, to decide whether it is worth a Ghidra import at all. Stdlib only. **~half of shipped games have the tag stripped**, so `UNKNOWN` means unknown, not uninteresting — it is a filter, not a gate. |
 | `func_bytes.py` | **Answer "is this function hollow?" offline** — resolves any symbol via the PDB, then reads the EXE bytes at that VA. A `#if !UE_BUILD_SHIPPING` body compiles to a bare `ret`; a live one does not. This is what disproved the long-standing "UCheatManager is body-stripped in Shipping" claim (it is not — the gate is that no *instance* exists). No game running, no Ghidra. |
 | `pdb_globals.py` | **Sweep ground truth out of a PDB, without opening Ghidra.** Prints GObjects / GNames / GWorld / SparseDelegates / GEngine and a paste-ready `GS_TRUE=` line for `tools/ghidra/sweep.sh`. Stdlib only — it reads the MSF publics stream directly. Replaces step 2 of GROUND-TRUTH.md's "Deriving truth for a new game" (a ~10-min headless run) with ~2 seconds, for any binary that ships symbols. When GObjects has no public symbol it prints the **pre-4.11 magic-static route** (`GetUObjectArray` → the `lea` feeding the ctor) instead of a bare "NOT FOUND". |
-| `pdb_match.py` | **"Can I trust this .pdb for this .exe?"** — the check to run on any PDB whose provenance you are not certain of. A matching FILENAME proves nothing: a PDB from a *different build of the same game* loads without complaint and yields addresses wrong by an unpredictable amount, which is the worst failure mode for ground truth because every value looks plausible. Compares the PE's CodeView **GUID + Age** against the PDB's own info stream (the linker mints a fresh GUID per link, so a rebuild cannot fake it), then decodes the publics stream to confirm it carries real content and not just a stripped shell. `--scan <dir>` walks a whole backup tree. Exit 0 = all usable. |
+| `pdb_match.py` | **"Can I trust this .pdb for this .exe?"** — the check to run on any PDB whose provenance you are not certain of. A matching FILENAME proves nothing: a PDB from a *different build of the same game* loads without complaint and yields addresses wrong by an unpredictable amount, which is the worst failure mode for ground truth because every value looks plausible. Compares the PE's CodeView **GUID + Age** against the PDB's own info stream (the linker mints a fresh GUID per link, so a rebuild cannot fake it), then decodes the publics stream to confirm it carries real content and not just a stripped shell. `--scan <dir>` walks a whole backup tree. Exit 0 = all usable. Also reports whether the PE was linked **`/Brepro`** (`IMAGE_DEBUG_TYPE_REPRO`), which is the ONLY sound way to know whether its `TimeDateStamp` is a build date or a content hash — plausibility is misleading (Hogwarts reads `2025-11-12` and Elliot `2026-07-15`; both are hashes). |
 
 ```sh
 py tools/pe/disasm_function.py "<game>.exe" 0x147A604E0 0x14814D2F0

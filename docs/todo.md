@@ -69,31 +69,49 @@ what the guard assumes — a wrong guard makes the correct check unreachable and
 confident negative. Note also that a null reads as *unknown* while `[]` plus that note is a
 **positive false claim**, which is why this was worse than the `steam_buildid` nulling.
 
-### RULE — never read a PE `TimeDateStamp` as a date without proving it is one
+### RULE — a PE `TimeDateStamp` is a date ONLY if `IMAGE_DEBUG_TYPE_REPRO` is absent
 
 Worth knowing because file mtime dates the *copy*, not the build, and the COFF `TimeDateStamp`
-looks like the fix. Sometimes it is. **From UE ~5.3 on it is not** — builds are linked `/Brepro`
-(reproducible), which overwrites that field with a **content hash**. Measured across the corpus:
+looks like the fix. Sometimes it is. **There is an authoritative test, so never guess:** with
+`/Brepro` (reproducible builds) the linker overwrites that field with a **content hash** and emits
+a debug-directory entry of **type 16 (`IMAGE_DEBUG_TYPE_REPRO`)**. That entry IS the answer.
+`tools/pe/pdb_match.py` now reports it on every check.
 
-| | link timestamp |
-|---|---|
-| 4.10 / 4.15 / 4.23 / 4.27 / 5.1 | REAL — 4.10.4 reads `2016-02-19`, Everspace 4.20 `2019-09-27` |
-| 5.3 / 5.4 / 5.7 / 5.8 (+ Avowed, Meltopia, TQ2, Solarpunk) | **`/Brepro` hash — not a time** |
+⚠ **Plausibility is worthless, and an earlier pass of this entry got it wrong by relying on it.**
+It classified by "does the value fall in a 2000–2030 window", which is true of roughly a fifth of
+32-bit hashes. Two corpus rows are hashes reading as perfectly ordinary dates:
 
-**A plausible-looking date proves nothing.** Roughly a fifth of 32-bit hashes land inside a
-2000–2030 window, and the corpus contains two live traps: UE **5.7** StackOBot reads `2022-09-28`
-(before 5.7 existed) and **5.4 Development** reads `2026-07-29 20:42` — *the day it was checked*.
+| binary | reads as | actually |
+|---|---|---|
+| **Hogwarts Legacy** (4.27) | `2025-11-12` | **`/Brepro` hash** — and the earlier pass called it REAL |
+| **The Adventures of Elliot** (5.4) | `2026-07-15` | **`/Brepro` hash** |
+| UE 5.7 StackOBot | `2022-09-28` | hash (before 5.7 existed) |
+| UE 5.4 Shipping | `2039-01-13` | hash (the value that prompted the recheck) |
 
-Two discriminators that do work:
-1. **Cross-config spread.** Configs of one build link minutes apart. Measured on 5.4:
-   Shipping `2039-01-13` vs Development `2026-07-29` — **393,153,207 s apart**, impossible.
-2. **Sanity against the engine.** A timestamp predating the engine version's release is a hash.
+**It is per-CONFIG, not per-version** — the other thing the earlier pass got wrong. Measured across
+the self-built oracles, where the builder and toolchain are controlled:
 
-So: usable as a **corroborating** signal on ≤5.1, never alone, and never on 5.3+. When the question
-is "is this the same build?", **skip timestamps entirely** — `binary_md5` answers it exactly, and
-for a PDB the CodeView **GUID+Age** (`tools/pe/pdb_match.py`) is a true per-link identity. A
-`/Brepro` hash is still a deterministic per-link value, so it works as a weak identity — just
-never as a clock.
+| | Shipping | Development | DebugGame |
+|---|---|---|---|
+| 4.15 / 4.23 / 4.27 | real | real | real |
+| 5.3 / 5.4 / 5.7 | **`/Brepro`** | real | real |
+| 5.8 | **`/Brepro`** | `TimeDateStamp = 0` | `TimeDateStamp = 0` |
+
+So Epic's UBT enables `/Brepro` on **Shipping only**, from ~5.3, and 5.8 non-Shipping zeroes the
+field outright — a third state that is neither a time nor a hash. This also kills the "cross-config
+spread" discriminator a previous pass proposed: the 5.4 spread was huge because it compared a hash
+against a *real* time, not because both were hashes. Right conclusion, wrong reasoning, and it
+would fail whenever both sides are hashed.
+
+**Third-party studios choose for themselves.** Hogwarts is `/Brepro` at **4.27** while DQ7R, the
+same engine version, is not. So for a shipped game the UE version predicts nothing — test the flag.
+And since every shipped game is a Shipping build, the useful-signal case is the *rare* one.
+
+Bottom line: usable as a corroborating signal only when type 16 is absent, and never as the primary
+answer. When the question is "is this the same build?", skip timestamps entirely — `binary_md5`
+answers it exactly, and for a PDB the CodeView **GUID+Age** is a true per-link identity. A
+`/Brepro` hash is still deterministic per link, so it works as a weak identity — just never as a
+clock.
 
 -----
 

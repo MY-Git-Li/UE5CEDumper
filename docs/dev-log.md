@@ -125,18 +125,29 @@ on disk is the corpus build" — false precisely where the field matters. Fixed 
 `size_prefilter=(state == 'MATCH')`; Palworld goes **0 → 2** copies. Unlike a nulled field, which
 reads as *unknown*, `[]` plus that note was a positive false claim.
 
-### PE link timestamps: real below ~5.3, `/Brepro` content hashes above it
+### PE link timestamps — there is an authoritative flag, and plausibility lies
 
 Asked whether a build's own time could stand in for file mtime (which dates the copy, not the
-build). Measured: **4.10 / 4.15 / 4.23 / 4.27 / 5.1 carry REAL link times** (4.10.4 reads
-`2016-02-19`), while **5.3 / 5.4 / 5.7 / 5.8 are `/Brepro`** — the field holds a content hash.
+build). First answer used a plausible-date heuristic and a cross-config-spread discriminator.
+**Both were wrong; a `2039-01-13` value that looked merely odd is what prompted the recheck.**
 
-A plausible date proves nothing: ~1 in 5 hashes lands in a 2000-2030 window, and the corpus holds
-two traps — 5.7 StackOBot reads `2022-09-28` (before 5.7 existed) and 5.4 Development reads the
-very day it was checked. Discriminators that work: **cross-config spread** (configs of one build
-link minutes apart; 5.4 Shipping vs Development are 393,153,207 s apart) and sanity against the
-engine's release. Conclusion recorded in todo.md: corroborating signal on <=5.1 only, never alone,
-and for "is this the same build?" use `binary_md5` or a PDB's CodeView GUID instead.
+The real test is a flag: with `/Brepro` the linker overwrites `TimeDateStamp` with a **content
+hash** and emits debug-directory entry **type 16 (`IMAGE_DEBUG_TYPE_REPRO`)**. Measured:
+
+* **Plausibility is worthless.** ~1 in 5 hashes lands in a 2000-2030 window. **Hogwarts Legacy
+  reads `2025-11-12` and Elliot reads `2026-07-15` — both hashes**, and the heuristic had scored
+  Hogwarts as a real link time.
+* **It is per-CONFIG, not per-version.** Epic's UBT sets `/Brepro` on **Shipping only** from ~5.3;
+  Development and DebugGame keep real link times at every version tested (4.10 → 5.7). UE 5.8
+  non-Shipping zeroes the field entirely — a third state.
+* That also kills the cross-config-spread discriminator: 5.4's 393-million-second spread came from
+  comparing a hash against a *real* time, not two hashes. Right conclusion, wrong reasoning.
+* **Studios choose for themselves** — Hogwarts is `/Brepro` at 4.27 while DQ7R, same version, is
+  not. The UE version predicts nothing for a shipped game.
+
+`pdb_match.py` now reports the flag on every check. Conclusion recorded in todo.md: a corroborating
+signal only when type 16 is absent, never the primary answer; for "is this the same build?" use
+`binary_md5` or a PDB CodeView GUID.
 
 ### `tools/pe/pdb_match.py` — "can I trust this PDB for this binary?"
 
