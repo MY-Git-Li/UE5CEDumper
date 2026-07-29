@@ -323,31 +323,41 @@ all). For layout and API-name questions the **installed engine source** is the b
 
 -----
 
-## AOB code-block library — EVALUATED 2026-07-29, decision pending
+## AOB specificity index (§6) — MEASURED and feasible, build it. Block library (§4) second.
 
-*Full evaluation in [aob-block-library-eval.md](aob-block-library-eval.md).* **Effort M · Risk low.**
+*Parent: [aob-block-library-eval.md](aob-block-library-eval.md), extended 2026-07-29 with §6.*
+**Effort M · Risk low.**
 
-Commit the `.text` regions the patterns land on (hotspot / true-site / decoy) plus a millisecond
-pre-test, so pattern shapes can be regression-tested **without Ghidra and without the 120.94 GB
-corpus**. The real driver is portability: the maintainer's **second machine has no corpus, no
-Ghidra projects, and 1–2 UE games**, and Auto Analyze is 3–4 h per project there — so the sweep
-simply does not exist on it.
+**The problem it solves:** answering *"is this candidate AOB too generic?"* currently needs the full
+~156 GB Ghidra corpus + ~53 GB `UE_Analyze_Data`. That makes pattern authoring single-machine,
+non-contributable, and dependent on 200 GB surviving.
 
-Two conclusions from the evaluation:
-1. **The copyright question does not have to be answered.** Every finding of the 2026-07-29 session
-   came from the **self-built** oracles (4.15 / 4.23.1 / 4.27.2 / 5.7.4 / 5.8.0 / 5.8.1 / Titan —
-   6 engine versions × up to 3 configs), which are the maintainer's own build output. Store bytes
-   from those only; third-party sites get metadata + a `sha256` so anyone owning the game can
-   regenerate locally. Note that **anonymising blocks does not change the copyright position** — it
-   removes attribution, not status.
-2. ⚠ **It is a TRIAGE tool, never an acceptance gate.** It answers shape questions (both failures
-   found this session were shape/register-allocation bugs) but *structurally cannot* answer noise
-   density — REPORT.md §6 hits/MB needs whole images. `Himmel.h` step 5 must keep meaning the sweep;
-   a pattern can pass every block and still take 22,000 hits on a real game.
+**§6 is now measured and the licensing question dissolves** — it ships a byte n-gram *frequency
+table*, never code. Validated on UE 5.4.4 Shipping against all 151 patterns: **0 upper-bound
+violations**, and monotone (bound <10 → max 4 measured hits; bound ≥1000 → max 852). Size ~9.3 MB
+per binary at threshold 16, less as a max-count union.
 
-Side benefit that may exceed the primary one: the repo has **no pattern regression test** between
-`extract_patterns.py`'s dead-constant check and the 40-minute sweep. This would fill that gap and
-run in CI.
+Build in this order — §6 before §4, because §6 needs no legal call, is already validated, and
+answers the question that actually blocks authoring:
+
+1. `tools/pe/build_ngram_index.py` — union index over the self-built inventory
+   ([reference-builds.md](reference-builds.md)). Offline, corpus machine.
+2. Commit the index.
+3. `tools/pe/aob_specificity.py` — AOB in; bound + limiting window + the run-<4 verdict out. Stdlib
+   only; **runs on the bare second machine and in CI.**
+4. **Answer the open question first-class: does a one-version index generalise?** Index 4.27 and 5.4
+   separately, score all 151, report divergence. Until then, union only.
+5. Then §4's shape blocks + `blocktest.py`.
+
+⚠ **Neither half is an acceptance gate.** Neither can say a pattern hits the RIGHT address —
+`GNAM_XX_1` scores a clean bound of 57 and is `DECOY-ONLY`. `Himmel.h` rule 5 keeps meaning the
+sweep; this is a pre-filter so the expensive run only sees plausible candidates.
+
+⚠ **The trap that already bit once, recorded so it does not repeat:** the first scorer indexed only
+n=6 and bucketed *"no literal run reaches 6 bytes"* as **rare** — so `GWLD_V3` (852 measured hits)
+scored "<8". That is the absence-of-evidence trap `replay_patterns.py` warns about, in a new place.
+Index n=4/5/6 and score at the largest n the longest run supports; **never let "unscoreable" fall
+into the "rare" bucket.**
 
 -----
 
