@@ -95,34 +95,73 @@ what made a 300 MB Development project look un-importable.
 
 -----
 
-## Finish the non-Shipping bisection: next self-built oracle is **UE 5.5**
+## Next self-built oracles, in order: **5.4 → 5.6 → 5.5**
 
-*Parent: the 5.3 build, 2026-07-29. Shipped in [dev-log.md](dev-log.md).* **Effort M · Risk low.**
+*Parent: the 5.3 build, 2026-07-29. Shipped in [dev-log.md](dev-log.md).* **Effort M each · Risk low.**
 
 **5.3 is DONE and it did its job.** Stock UE 5.3 ThirdPerson built in all three configs, imported
 `-noanalysis`, rows added to `sweep.sh`. It was chosen to bisect the non-Shipping GNames collapse
-and the Development row came back **healthy** — GNames n=15, sparse n=3 (`ES2_1` still reaches it,
-unlike 5.7.4+). So:
+and the Development row came back **healthy** — GNames lands `GNAM_ES53_1` UNIQUE-OK with no
+fall-through at all, sparse on `SPARSE_ES2_1`. So:
 
 | | 4.15 | 4.23 | 4.27 | **5.3** | 5.4–5.6 | 5.7.4 | 5.8.x |
 |---|---|---|---|---|---|---|---|
 | non-Shipping GNames | ✅ | ✅ | ✅ | ✅ | **?** | ⚠️ V1 only | ⚠️ V1 only |
 
-**The interval is now 5.4 / 5.5 / 5.6.** Next bisect = **5.5** (and 5.5 is also the version with
-three symbolised *Shipping* oracles already, so a non-Shipping row there pairs against real data).
+### THE ENGINE INSTALL IS TRANSIENT — that is what makes this affordable
 
-**No C++ project needed** — that was the 5.3 lesson and it generalises. A C++ project on a launcher
-engine can fail in UBT ("must be compiled with VS2022 17.4 (MSVC 14.34.x) or later … detected
-14.29.30159") purely because of toolset *ranking*: UE ranks families it does not know as 4, so a
-recognised-but-too-old 14.29 (VS2026's v142 component) outranks a perfectly good 14.44 and then
-fails the minimum-version gate. **Nothing needs fixing** — the launcher ships
-`UnrealGame{,-Win64-DebugGame,-Win64-Shipping}.exe` WITH PDBs, so a Blueprint-only project packages
-all three configs with nothing compiled. Use a **ThirdPerson** template so the result is also a
-Character-based target for the gameplay-feature matrix.
+5.3 established the pattern: **install → package 3 configs → `-noanalysis` import → DELETE the
+engine.** What stays is ~3.2 GB of packages + PDBs (mirror it to `X:` like the rest); the ~114 GB
+engine is temporary. Verified on 5.3 before deleting it: the `.rep`s are self-contained, the
+packages are runnable standalone (pak + launcher exe), and both D: and X: hold byte-identical
+copies. So this is not "which one can I afford" — it is a sequence, each step costing ~3 GB
+permanently.
+
+**One template is enough — do NOT package two.** An earlier version of this item said to build
+Flying *and* ThirdPerson. Measurement supersedes that: at 4.27, Flying vs 3rdPerson gave
+**identical voter sets down to the individual pattern IDs**, so the template does not affect
+engine-global resolution at all. Use **ThirdPerson**, because it is also the Character-based target
+the gameplay-feature matrix needs (Flying's pawn has no `CharacterMovement`).
+
+### Why this order, and the honest counter-argument
+
+**Pure bisection would say 5.5** — the transition is at 5.4/5.5/5.6/5.7, so testing 5.5 always
+leaves exactly two and pins it in exactly 2 installs, where 5.4 costs 1 if it collapses there but 3
+if it does not. **That is not the order below, deliberately**, because the exact boundary version is
+worth less than it looks: we already know **shipped games are unaffected**, which is the part that
+matters, and pinning 5.4-vs-5.5-vs-5.6 only pays off if someone actually mines a fix pattern — which
+needs samples *either side* of the boundary anyway. So order by durable corpus value instead:
+
+1. **5.4** — the **only UE5 version left with no symbolised oracle**. Elliot is 5.4 but its truth is
+   disassembly-derived with no PDB. It also gives **MindsEye (a UE 5.4.4 licensee fork) its first
+   stock-5.4 control** — `mindseye-fork-notes.md` is an entire re-derivation playbook currently
+   resting on inference about what stock 5.4 looks like, the same evidentiary shape as the
+   Avowed/DropIn gaps closed on 2026-07-29. Plus a 1-in-4 chance of pinning the boundary outright.
+2. **5.6** — the `UEnum::Names` → `FNameData` change (struct-of-arrays + tagged pointers, the `Neu`
+   module). 5.6 has a monolithic PDB oracle already (CrashReportClient) but no non-Shipping row.
+3. **5.5** — last, precisely because it is already the **best-covered** version: three symbolised
+   Shipping oracles (Everspace 2 ×2, Meltopia). Its non-Shipping row pairs against real data, which
+   is nice but is the smallest marginal gain of the three.
+
+### No C++ project needed — the 5.3 lesson, and it generalises
+
+A C++ project on a launcher engine can fail in UBT (*"must be compiled with Visual Studio 2022 17.4
+(MSVC 14.34.x) or later … detected 14.29.30159"*). The message blames the VS version and a forced
+`VisualStudio2019` setting; **both are wrong**. It is toolset *ranking*: UE ranks families it does
+not know as `FamilyRank=4`, so a recognised-but-too-old **14.29 (from VS2026's v142 component)**
+ranks 3, outranks a perfectly usable 14.44, and then fails the `>= 14.34` gate. **Nothing needs
+fixing** — the launcher ships `UnrealGame{,-Win64-DebugGame,-Win64-Shipping}.exe` **with PDBs**, so
+a Blueprint-only project packages all three configs with nothing compiled.
 
 Also extended BACKWARDS: **4.15.3 Development + DebugGame** rows added (the oldest config group in
 the corpus). `pdb_globals.py` gained a pre-4.23 GNames route for them — `FName::GetNames`'s load at
 +4, **no** `-0x10` — validated by reproducing the 4.15 Shipping row's recorded `GNames=142c92508`.
+
+**5.3's engine can be deleted** (~114 GB) — checked before saying so: its three `.rep`s are
+imported and self-contained, its packages run standalone, and D: and X: hold byte-identical copies
+(3168 MB / 100 files / 3 PDBs each). The only thing lost is the ability to rebuild a *different*
+5.3 sample, and per the note above a second template would add nothing anyway.
+
 -----
 
 ## Gameplay-feature regression matrix on the self-built samples (Teleport tab et al.)
