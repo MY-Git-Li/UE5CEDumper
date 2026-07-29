@@ -164,7 +164,7 @@ govern. Read that block too before adding, moving or deleting anything. The shor
   Every GNames pattern pins that FIRST lea to `48 8d 05` (rax) / `4c 8d 05` (r8) / `48 8d 15`
   (rdx) / `48 8d 35` (rsi) / `48 8d 2d` (rbp). **None admits rbx or r15.** A nibble-masked
   `4? 8d ?? <d32> eb ?? 48 8d 0d <d32> e8` covers it — but `48 8d ??` is only 2 literal bytes at
-  the head, so it must clear the full 51-binary gauntlet before it goes anywhere near the table
+  the head, so it must clear the full 65-program gauntlet before it goes anywhere near the table
   (rule 1 + the `GWLD_G42_4` counter-example). **NOT mined — deliberately.**
   Priority is genuinely low: nobody attaches the dumper to a Development build of a template
   project. The value is that it names a real blind spot in the GNames family, and it is the
@@ -262,6 +262,27 @@ Each cost at least one headless run to establish. Recorded so nobody spends anot
   `.rep` and the manifest stay valid — but `preflight.py --verify-hash` now reports Palworld as
   `id=MISMATCH` against the **live** Steam install, correctly. Re-point it at the backup by
   re-running `build_corpus_manifest.py`; do not hand-edit the generated manifest.
+- **The pre-4.11 support floor is MEASURED, and it has two independent causes.** UE 4.10.4 joined
+  the corpus 2026-07-29 (`UE410_Game_Shipping` / `..._Development`, both full-PDB), and **GObjects
+  scores 0 on both — correctly. Leave it ❌.**
+  1. *It cannot be found.* At 4.10 the array is a **function-local static behind a magic-static
+     guard** inside `GetUObjectArray()`. Consumers reach it with a `call`; the address is never
+     materialised inline, and all 52 `GOBJ_*` patterns are `lea reg,[rip+GUObjectArray]`-shaped.
+     4.11 promoted it to a plain `GUObjectArray` global, which is why Nekopara (4.11) resolves.
+     Measured: 74 GObjects candidates on Shipping / 105 on Development, and the true VA and its
+     `+0x10` alias are in **neither list at any rank** — not merely outside the top N.
+  2. *It could not be read even if handed over.* Per `4.10.4-release` source, `TUObjectArray` is
+     `TStaticIndirectArrayThreadSafeRead<UObjectBase, 8M, 16384>` and **`FUObjectItem` does not
+     exist** — elements are bare `UObjectBase*`. Neither the Flat-Base nor the Chunked preset
+     models that, and stride auto-detection has nothing to detect.
+  So do not "fix" 4.10 by mining a `GetUObjectArray`-shaped pattern: finding the address buys
+  nothing without a third array preset. **GNames/GWorld/GEngine all resolve normally**, so the rows
+  still earn their scan as the corpus's oldest coverage for those three.
+  Truth for GObjects came from disassembling `GetUObjectArray` (@`14023c2e0` Shipping /
+  `14067d730` Dev): the guarded init does `lea rbx,[rip+X]`, passes rbx as `this` to
+  `??0FUObjectArray@@QEAA@XZ`, returns rbx. Independently confirmed by
+  `GetObjectArrayForDebugVisualizers`, which is literally `GetUObjectArray(); add rax,0x10` — that
+  **measures** `ObjObjects@+0x10` at this version instead of inheriting it.
 - **DropIn's 32-byte `FUObjectItem` is a CONFIG artifact, not a 4.27 trait.** Proven by two
   independent symbolised 4.27 binaries (Breeders, Maelstrom) carrying the stock 24-byte item.
 - **A small `.msvcjmc` section does NOT mean a Development build.** Breeders and Maelstrom have
@@ -516,6 +537,25 @@ invisible and a modular build looks empty.
 
 ## Deriving truth for a new game
 
+00. **Adding a VERSION rather than a game? Look for the engine's own prebuilt targets before you
+    package or compile anything.** A launcher-installed engine ships monolithic game binaries
+    **with full PDBs** in `Engine/Binaries/Win64`, named `UE4Game*.exe` (UE4) or `UnrealGame*.exe`
+    (UE5). Surveyed 2026-07-29 across the installed engines:
+
+    | engine | Shipping | Development | DebugGame |
+    |---|---|---|---|
+    | 4.15 / 4.10 | ✅ | ✅ | ✗ |
+    | 4.23 / 4.27 / 5.4 / 5.7 / 5.8 | ✅ | ✅ | ✅ |
+
+    That is the entire oracle, free: copy the `.exe`+`.pdb`, run step 0, import with `-noanalysis`.
+    **It is what made UE 4.10 possible at all** — 4.10 needs VS2015, which is not installed, and no
+    project can be compiled for it. It is also the cheap route for any version where the C++ path
+    fights back (5.3's UBT `FamilyRank` failure). Packaging a Blueprint project is only worth it
+    when you need a *game-shaped* binary (game modules, cooked content); for engine globals these
+    are the same engine code.
+    ⚠ These are Epic's own builds, so they are Epic-stock by construction — good for engine truth,
+    useless for questions about how a *licensee fork* or a third-party build behaves.
+
 0. **If the binary ships a PDB, skip Ghidra entirely** — `py tools/pe/pdb_globals.py <file.pdb>`
    prints all five globals and a paste-ready `GS_TRUE=` line in about two seconds. It decodes the
    MSF publics stream itself (no deps), maps `(segment, offset)` through the PDB's own section
@@ -607,6 +647,15 @@ a hit inside `Core` as a correct `GObjects`, which lives in `CoreUObject`. Use s
 cannot alias: `-Core-Win64` does not match `-CoreUObject-Win64`.
 
 ```sh
+# UE 4.10.4 — UE4Game, the prebuilt monolithic target the LAUNCHER ENGINE ALREADY SHIPS with a full
+# PDB (Engine/Binaries/Win64/UE4Game{-Win64-Shipping,}.exe). Nothing was compiled: 4.10 needs VS2015
+# and it is not installed. Check for those prebuilt targets before assuming a version needs a
+# toolchain. The corpus's OLDEST binary. GObjects is EXPECTED to score 0 on both rows for two
+# independent reasons — see the pre-4.11 floor entry in "Settled facts". SparseDelegates absent by
+# design (4.23+); GNames is the pre-4.23 TNameEntryArray*; GWorld is typed UWorldProxy here.
+GS_TRUE="GObjects=1423422b0|1423422c0,GNames=14232f530,GWorld=14234edb8,GEngine=14234a450"   # Shipping
+GS_TRUE="GObjects=144bdb090|144bdb0a0,GNames=144bc0d50,GWorld=144be85f8,GEngine=144be35c8"   # Development
+
 # UE 4.18 — FF7 Remake. DERIVED BY DISASSEMBLY, not a PDB. GNames/GWorld intentionally absent.
 GS_TRUE="GObjects=1453bd470|1453bd480,GEngine=145879ee8"
 

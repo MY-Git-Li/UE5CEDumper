@@ -45,7 +45,7 @@
 //      table above the arrays — not from how new it is or who contributed it.
 //   5. VERIFY IT AGAINST THE CORPUS before trusting it:
 //         bash tools/ghidra/sweep.sh && py tools/ghidra/aggregate_sweep.py out/sweep
-//      58 programs, 43 with ground truth, UE 4.11-5.8. The bar is: correct on the binary
+//      65 programs, 52 with ground truth, UE 4.10-5.8. The bar is: correct on the binary
 //      it was mined from, and zero hits *or* correct everywhere else. A pattern that looks
 //      clean on one binary routinely produces decoys on another engine version — that is the
 //      entire point of the multi-binary gauntlet. See tools/ghidra/GROUND-TRUTH.md.
@@ -111,21 +111,36 @@
 //             UE 4.18 fork and UE 5.5), and the SPARSE_X1/X2 pair mined on Grimhook 5.1 that
 //             closed the sparse "n=1" cluster.
 //
-// SWEEP CORPUS as of build 2499 — 58 programs, of which 43 carry ground truth, spanning
-// UE 4.11 through 5.8 and CONTIGUOUS from 4.20 up (the 4.23 hole closed 2026-07-28; 5.3 is the
-// one partial rung, carrying SparseDelegates truth alone). Those 36 are PROGRAMS not games: a
-// modular Satisfactory project contributes Core + CoreUObject + Engine separately, since each
-// defines different globals. Most come from full PDBs; a handful (4.11 Nekopara, 4.13 Fantasynth,
-// 4.18 FF7 Remake, 4.18 DQ XI S, 4.21 Freud Gate, 4.27 DQ7R, 5.0 Light Maze, 5.4 Elliot) were
-// DERIVED BY DISASSEMBLY instead, which is why the per-game reasoning lives in GROUND-TRUTH.md
-// rather than here — that file is the authoritative corpus table and this paragraph is a summary
-// of it. Below 4.11 is gated as UNSUPPORTED (Genau checks MIN_SUPPORTED_UE_VERSION): 4.10 has no
-// FUObjectItem at all and ArrayLayout structurally cannot express its inline chunk table.
-// The remaining 15 are symbol-less MONOLITHIC titles (Palworld 5.1, TQ2, Octopath, FF7 Rebirth,
+// SWEEP CORPUS as of build 2504 — 65 programs, of which 52 carry ground truth, spanning
+// UE 4.10 through 5.8 and CONTIGUOUS from 4.20 up (the 4.23 hole closed 2026-07-28; the 5.3 rung
+// stopped being partial 2026-07-29 when a stock ThirdPerson build in all three configs replaced
+// Avowed's SparseDelegates-only truth). Those 52 are PROGRAMS not games: a modular Satisfactory
+// project contributes Core + CoreUObject + Engine separately, since each defines different
+// globals. Most come from full PDBs; a handful (4.11 Nekopara, 4.13 Fantasynth, 4.18 FF7 Remake,
+// 4.18 DQ XI S, 4.21 Freud Gate, 4.27 DQ7R, 5.0 Light Maze, 5.4 Elliot) were DERIVED BY
+// DISASSEMBLY instead, which is why the per-game reasoning lives in GROUND-TRUTH.md rather than
+// here — that file is the authoritative corpus table and this paragraph is a summary of it.
+// The remaining 13 are symbol-less MONOLITHIC titles (Palworld 5.1, TQ2, Octopath, FF7 Rebirth,
 // Manor Lords, DQ I&II HD-2D, The Artisan of Glimmith, Hogwarts Legacy, ...) used as noise
 // probes. They cannot say "right", only "did anything hit that should not have" — and that
 // question needs monolithic EXEs, because a 4-30 MB Satisfactory engine DLL understates the
 // collision rate of a 100-200 MB shipped game by several-fold.
+//
+// THE CORPUS NOW REACHES BELOW THE SUPPORTED FLOOR ON PURPOSE. UE 4.10.4 joined 2026-07-29 (two
+// rows, Shipping + Development, both full-PDB), and it is the ONLY place the regression matrix
+// carries a ❌: GObjects is unresolvable on both. That is the expected result — LEAVE IT ❌ — and
+// it converts "below 4.11 is gated as UNSUPPORTED" (Genau's MIN_SUPPORTED_UE_VERSION) from an
+// assertion into a measurement with two independent causes:
+//   (1) it cannot be FOUND — at 4.10 the array is a function-local static behind a magic-static
+//       guard in GetUObjectArray(), so consumers reach it by CALL and the address is never
+//       materialised inline; every GOBJ_* pattern is `lea reg,[rip+GUObjectArray]`-shaped. 4.11
+//       promoted it to a plain global, which is why 4.11 Nekopara resolves one row below.
+//   (2) it could not be READ if it were — 4.10 has no FUObjectItem at all (TUObjectArray is
+//       TStaticIndirectArrayThreadSafeRead, elements are bare UObjectBase*), and ArrayLayout
+//       structurally cannot express its inline chunk table.
+// So do NOT "fix" this by mining a GetUObjectArray-shaped pattern: cause (1) is the cheap half and
+// solving it alone buys nothing. GNames/GWorld/GEngine resolve normally on both rows, so they
+// still earn their scan as the corpus's oldest coverage for those three.
 //
 // BOTH ENDS OF THE RANGE ARE SELF-BUILT, which is what makes them trustworthy: UE4.23-Flying
 // (Shipping, Epic's installed 4.23.1 Launcher engine) and the StackOBot 5.7.4 / 5.8 PAIR

@@ -46,9 +46,54 @@ py "$REPO/tools/ghidra/extract_patterns.py" "$REPO/dll/src/Himmel.h" "$SWEEP_OUT
 # ---------------------------------------------------------------------------------------------
 ROWS=(
 # ---- symbolised oracles (full PDB) ----
-# UE 4.15.3 — the "Flying" template, Shipping. THE OLDEST SYMBOLISED BINARY IN THE CORPUS and the
-# only oracle below 4.20: it turns the 4.13-4.19 FLAT FFixedUObjectArray / 24-byte FUObjectItem
-# band from source interpolation into measurement (Objects@base+0x10, Max@+0x18, Num@+0x1C).
+# ── UE 4.10.4 UE4Game, Shipping + Development ─────────────────────────────────────────────────
+# THE OLDEST BINARY IN THE CORPUS, older than Nekopara 4.11, and the only symbolised oracle below
+# 4.15. Epic stock: CL 2872498, `++depot+UE4-Releases+4.10`, IsLicenseeVersion=0.
+#
+# NOTHING WAS COMPILED. 4.10 needs VS2015, which is not installed — but the launcher engine already
+# SHIPS prebuilt MONOLITHIC game targets with full PDBs in Engine/Binaries/Win64:
+# `UE4Game-Win64-Shipping.exe` (38.7 MB) and `UE4Game.exe` (83 MB, Development). Same escape hatch
+# the 5.3 rows used, and it generalises: for any launcher engine, look for the prebuilt UE4Game/
+# UnrealGame targets BEFORE concluding a version needs a toolchain. There is no prebuilt DebugGame.
+#
+# ⚠ GObjects IS EXPECTED TO SCORE 0 ON BOTH ROWS. That is the finding, not a defect — LEAVE IT ❌.
+# At 4.10 the array is a FUNCTION-LOCAL STATIC behind a magic-static guard inside
+# `GetUObjectArray()`, so every consumer reaches it with a CALL and never materialises the address
+# inline; all 52 GObjects patterns are `lea reg,[rip+GUObjectArray]`-shaped and cannot match. 4.11
+# promoted it to a plain `GUObjectArray` global, which is exactly why Nekopara (4.11) resolves.
+# This MEASURES the pre-4.11 support floor the repo already asserts, instead of assuming it.
+# Measured: 74 GObjects candidates on Shipping / 105 on Development, and the true VA (and its
+# +0x10 alias) is in NEITHER list at any rank — not merely outside the top N.
+#
+# Truth recovery, both rows double-derived and in agreement:
+#   GObjects — by disassembly, since there is no S_PUB32 for it. `GetUObjectArray` @14023c2e0
+#     (Shipping) / @14067d730 (Dev): the guarded init does `lea rbx,[rip+X]`, passes rbx as `this`
+#     to `??0FUObjectArray@@QEAA@XZ`, and returns rbx — so X is the array. Independently confirmed
+#     by `GetObjectArrayForDebugVisualizers`, which is literally `GetUObjectArray(); add rax,0x10`.
+#     That also MEASURES ObjObjects@+0x10 here rather than inheriting it, so the `|base+0x10` alias
+#     on these two rows is verified.
+#   GNames/GWorld/GEngine — `pdb_globals.py` + a full 151-pattern byte replay, which agree exactly.
+# GNames is the pre-4.23 `TNameEntryArray*` (FName::GetNames load at +4, no -0x10). GWorld is typed
+# `UWorldProxy` at 4.10 (`?GWorld@@3VUWorldProxy@@A`) — a wrapper, same storage. SparseDelegates
+# ABSENT BY DESIGN (4.23+ feature).
+#
+# Coverage, and it is what makes the Development row worth its scan: Shipping is comfortable
+# (GNames n=3, GWorld n=2, GEngine n=3) but Development is THREADBARE — GNames and GWorld are each
+# held by a SINGLE voter. Both still resolve, and the reason is PRIORITY, not consensus:
+#   GWorld  — the top consensus row is a DECOY (144bdc140, n=2, GWLD_SAT52_1+GWLD_V3), but
+#             `GWLD_FD_1` is pri=102 against that decoy's 365, so the walk lands correctly FIRST.
+#             Read the priority walk, not the n= ranking; they disagree here.
+#   GNames  — `GNAM_XX_1` (pri=717) is the first hitting pattern and its first hit is the truth,
+#             while every n>=2 consensus row is a decoy.
+# Another rule-5 payout: two single-voter patterns are the only thing holding the oldest engine in
+# the corpus up, and on consensus alone both would look wrong.
+# Both imported with `-import ... -noanalysis`; do NOT "fix" them by analysing them.
+"UE4.10-Game|UE410_Game_Shipping|-|GObjects=1423422b0|1423422c0,GNames=14232f530,GWorld=14234edb8,GEngine=14234a450"
+"UE4.10-GameDev|UE410_Game_Development|-|GObjects=144bdb090|144bdb0a0,GNames=144bc0d50,GWorld=144be85f8,GEngine=144be35c8"
+# UE 4.15.3 — the "Flying" template, Shipping. The oldest oracle between 4.10 and 4.20, and the
+# oldest one whose GObjects actually RESOLVES (the 4.10 rows above cannot — magic-static): it turns
+# the 4.13-4.19 FLAT FFixedUObjectArray / 24-byte FUObjectItem band from source interpolation into
+# measurement (Objects@base+0x10, Max@+0x18, Num@+0x1C).
 # GNames is NOT a symbol — pre-4.23 has no FNamePool; it is the static FName::GetNames @0x1401F54B0
 # tests-and-stores (load at +4), corroborated by 9 RIP xrefs across GetNames/StaticInit/
 # InitInternal_FindOrAddNameEntry<char,wchar_t>. SparseDelegates correctly ABSENT (4.23+ feature):

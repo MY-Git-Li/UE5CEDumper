@@ -19,55 +19,59 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
-## ▶ RESUME HERE — exact state as of 2026-07-29 end of session
+## ▶ Corpus state as of 2026-07-29 (build 2504) — the sweep is CURRENT
 
-`sweep.sh` is at **52 rows**; every row's Ghidra project exists on disk. Each newly added row was
-verified individually by running `scan_patterns.java` against its derived truth right after import,
-**but a full sweep has NOT been re-run since**, so `out/sweep/REPORT.md` and the two corpus counts
-in `Himmel.h`'s header (**58 programs / 43 oracles**) are the *previous* measurement. They are
-deliberately left at the last MEASURED value — do not hand-raise them.
+`sweep.sh` is at **54 rows**. A **full** sweep ran 2026-07-29 and `out/sweep/REPORT.md`,
+`Himmel.h`'s header counts (**65 programs / 52 oracles**, UE **4.10–5.8**) and this file all agree.
+Nothing in the corpus is stale or blocked. The 5.8.1 Development row that was waiting on a Ghidra
+lock has been swept; its lock is gone.
 
-Blocking one thing only: **`StackOBot_Development_UE581.lock`** is still held by an open Ghidra
-Auto Analyze (5+ hours, `.rep` grown 1.0 → 2.0 GB). **That analysis is pure waste** — the sweep
-reads raw bytes, that row's truth is already derived and in `sweep.sh`, and the corpus already
-contains projects saved mid-analysis (DQ7R, Elliot) which scan fine. Safe to cancel; delete a stale
-`.lock` if one is left behind.
+**One ❌ in the regression matrix, and it is deliberate: UE 4.10 GObjects on both rows. Leave it.**
+It measures the pre-4.11 support floor rather than asserting it — full reasoning in `Himmel.h`'s
+corpus block and GROUND-TRUTH.md §"Settled facts". Do not mine a `GetUObjectArray` pattern to
+"fix" it; 4.10 has no `FUObjectItem` at all, so finding the address would not make it readable.
 
-Then, in order:
+Tooling, all no-Ghidra: `tools/pe/pdb_globals.py` (truth from a PDB — now also points at the
+pre-4.11 magic-static route when GObjects has no symbol), `tools/ghidra/replay_patterns.py`
+(corroborate by byte replay), `tools/pe/func_bytes.py` (is a function hollow?),
+`tools/ghidra/capture_provenance.py` (build-identity snapshot).
 
-```bash
-bash tools/ghidra/sweep.sh && py tools/ghidra/aggregate_sweep.py out/sweep   # full, ~50 min
-```
-
-and afterwards update the two counts in `Himmel.h`'s header from `REPORT.md`.
-
-Tooling added this session, all no-Ghidra: `tools/pe/pdb_globals.py` (truth from a PDB),
-`tools/ghidra/replay_patterns.py` (corroborate by byte replay), `tools/pe/func_bytes.py` (is a
-function hollow?), `tools/ghidra/capture_provenance.py` (build-identity snapshot).
+⚡ **Adding a new engine VERSION is now nearly free — check for prebuilt targets first.** A
+launcher-installed engine ships monolithic `UE4Game*.exe` / `UnrealGame*.exe` **with full PDBs** in
+`Engine/Binaries/Win64`. Surveyed on this machine: 4.23 / 4.27 / **5.4** / 5.7 / 5.8 have all three
+configs; 4.10 and 4.15 have Shipping + Development. That is what made 4.10 possible at all (it
+needs VS2015, which is not installed). **UE 5.4 is installed and ready to harvest with no
+packaging and no compiler** — copy, `pdb_globals.py`, import `-noanalysis`, add rows.
 
 -----
 
-## Corpus: the 5.8.1 Development sweep row still unrun (Ghidra holds its lock)
+## `preflight.py` reports DRIFT: 16 of 54 sweep rows have no manifest entry
 
-*Parent: the 2026-07-29 corpus pass; shipped in [dev-log.md](dev-log.md) build 2503.*
-**Effort S · Risk low.**
+*Parent: the 2026-07-29 corpus growth; [dev-log.md](dev-log.md) builds 2503/2504.*
+**Effort S · Risk med (the fix is destructive).**
 
-The 4.27.2 three-config import, the 4.23 DebugGame row, the three 5.7.4/5.8.0 DebugGame rows and
-the `GOBJ_DI427_1` 105 → 256 demotion all landed and swept green (58 programs / 43 oracles,
-"every target present in every oracle resolves to the correct address").
+`py tools/ghidra/preflight.py` → **`verdict: DRIFT (exit 3)`**. Not blocking — it also reports
+`rows selected 54 / sweep-ready 54 / BLOCKING 0`, and the sweep runs green. The 16 rows are every
+self-built or engine-shipped oracle added across the last two sessions (4.10 ×2, 4.15 ×2, 4.23
+DbgG, 4.27 ×3, 5.3 ×3, the 5.7.4/5.8 DebugGame trio, …).
 
-**Remaining: just `UE5.8.1-StackOBotDev`.** `UE5.8.1-StackOBot` (Shipping) was swept once its lock
-cleared — all five targets, matching the offline derivation exactly. The Development row's truth is
-already in `sweep.sh` and double-derived; it only needs its lock released. Once it is:
+**Do not just re-run `build_corpus_manifest.py` to clear it.** It has no merge/additive mode — it
+fully regenerates, and by design **NULLs `steam_buildid` / size / sha256 on any row whose on-disk
+bytes are no longer the corpus bytes**. Palworld has drifted, so a regenerate silently discards the
+buildid pointing at the build its `.rep` was made from. That is why `corpus-provenance.tsv` exists.
 
-```bash
-bash tools/ghidra/sweep.sh UE5.8.1 && py tools/ghidra/aggregate_sweep.py out/sweep
-```
+Three honest options:
+1. **Leave it** (default). The 16 missing rows are the ones with the *least* need for a manifest —
+   they are self-built or shipped inside an installable engine, so their recovery story is "install
+   the engine and copy the prebuilt target", which no hash helps with. The cost is that DRIFT
+   becomes the normal verdict, which erodes the signal.
+2. **Regenerate, accepting the Palworld loss** — defensible *now* but only because
+   `corpus-provenance.tsv` already preserves that buildid. Verify it is still there first, and
+   re-snapshot with `capture_provenance.py` before, not after.
+3. **Add `--merge` to the generator** so new tags are appended and existing rows keep their
+   recorded identity unless their bytes verify. The real fix, and it also removes the trap
+   permanently. Smallest of the three in code, largest in review.
 
-⚠️ **Prefer the FULL sweep over that filter.** Five further rows (5.3 ×3, 4.15 ×2) were added after
-this item was written, so a `UE5.8.1`-filtered run would leave `REPORT.md` describing a corpus that
-no longer exists. See **RESUME HERE** at the top. The resulting program/oracle counts are not
-predicted here on purpose — read them off `REPORT.md` and copy them into `Himmel.h`'s header.
 -----
 
 ## UE5 non-Shipping: GNames reaches nothing — decide whether to mine a pattern
@@ -77,18 +81,25 @@ predicted here on purpose — read them off `REPORT.md` and copy them into `Himm
 
 **On a non-Shipping UE5 build, GNames survives on ONE pattern and costs ~2,300 wasted validations
 to get there.** Sweep-verified 2026-07-29: it lands on **`GNAM_V1`** (priority 870, 4 literal
-bytes) after **2,199 / 2,369 / 2,424** rejected candidates on 5.7.4-DbgG / 5.8.0-DbgG / Titan —
-**the three most expensive fall-throughs in the corpus**, next worst 475. It is **config, not a
-version regression**; every Shipping build resolves normally, so **no shipped game is affected**:
+bytes) after **2,199 / 2,369 / 2,372 / 2,424** rejected candidates on 5.7.4-DbgG / 5.8.0-DbgG /
+5.8.1-Dev / Titan — **the four most expensive fall-throughs in the corpus**, next worst 475. It is
+**config, not a version regression**; every Shipping build resolves normally, so **no shipped game
+is affected**:
 
-| | 4.23.1 | 4.27.2 | 5.7.4 | 5.8.0 | 5.8.1 |
-|---|---|---|---|---|---|
-| Shipping | ✅ | ✅ | ✅ | ✅ n=11 | ✅ n=11 |
-| Development / DebugGame | ✅ n=16 | ✅ n=16 | ❌ **n=0** | ❌ **n=0** | ❌ **n=0** |
+| | 4.10.4 | 4.15.3 | 4.23.1 | 4.27.2 | **5.3** | 5.7.4 | 5.8.0 | 5.8.1 |
+|---|---|---|---|---|---|---|---|---|
+| Shipping | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ n=11 | ✅ n=11 |
+| Development / DebugGame | ✅ | ✅ (1w) | ✅ n=16 | ✅ n=16 | ✅ **clean** | ❌ **n=0** | ❌ **n=0** | ❌ **n=0** |
 
-⚠ **The boundary is between 4.27 and 5.7.4, NOT at 5.8** — the first pass called it a 5.8 thing and
-that was wrong; 5.7.4 DebugGame was measured afterwards and behaves identically. **The 5.0–5.6
-non-Shipping band is untested**, so do not narrow the claim further without measuring one.
+⚠ **The boundary is NOT at 5.8** — the first pass called it a 5.8 thing and that was wrong; 5.7.4
+DebugGame behaves identically.
+
+**Bisected 2026-07-29 to 5.4 / 5.5 / 5.6.** The 5.3 Dev + DebugGame rows land on `GNAM_ES53_1`
+with **zero** wasted validations — not merely "resolves", but *clean*, better than 4.23/4.27. So
+the collapse begins somewhere in **5.4–5.6**, and that is exactly why the next self-built oracles
+are ordered **5.4 → 5.6 → 5.5** (below): 5.4 and 5.6 pin the interval to a single version, and
+whichever way they land 5.5 is then decided or trivially confirmed. 4.10 and 4.15 extend the
+healthy band downward, so this is a UE5-era regression with a sharp edge, not a slow drift.
 
 **Not project-specific.** A second, unrelated 5.8.0 DebugGame project (Titan) matches StackOBot's
 coverage *down to the individual pattern IDs* — same GObjects quartet, same GWorld n=13, same
@@ -103,12 +114,13 @@ Decision needed, because it is genuinely marginal:
 - **Do nothing** (default). Nobody attaches to a Development build of a template project, and the
   candidate fix `4? 8d ?? <d32> eb ?? 48 8d 0d <d32> e8` has only ~2 literal bytes at its head —
   in the band where `GWLD_G42_4` proves wildcarding backfires.
-- **Or mine it**, and put it through the full 51-binary gauntlet before it goes anywhere near the
+- **Or mine it**, and put it through the full 65-program gauntlet before it goes anywhere near the
   table. If it survives decoy-free it is also insurance for a shipped game whose register pressure
   happens to land the same way.
 
-Regardless of the outcome, the `UE5.8.1-StackOBotDev` row is now in `sweep.sh` so the gap shows as
-❌ in the regression matrix instead of being invisible. **Leave it showing ❌** until it is fixed.
+All four affected rows are in `sweep.sh` and swept, so the cost is visible as a ⚠️ with its wasted
+count in the regression matrix instead of being invisible. **Leave them showing that** until fixed
+— note they are ⚠️ (lands correct, expensively), not ❌; the only ❌ in the corpus is 4.10 GObjects.
 
 **Second result from the same pass, and arguably the more important one — rule 5 just paid out.**
 The sparse-delegate patterns that were kept purely as redundancy are the *only* thing holding that
@@ -118,10 +130,10 @@ thinnest coverage anywhere in the corpus. Every one of the three was added again
 binary that already resolved, i.e. they looked like dead weight at the time. Had any been pruned,
 a whole build configuration would have silently lost sparse-delegate support.
 
-Three more non-Shipping oracles are **already derived and parked as commented rows in `sweep.sh`**
-(5.7.4 DebugGame, 5.8.0 DebugGame, 5.8.0 Titan DebugGame) — only the Ghidra import is missing.
-**Import with `-noanalysis`**: the sweep reads raw bytes and never needs auto-analyze, which is
-what made a 300 MB Development project look un-importable.
+All three of the non-Shipping oracles this item was written against (5.7.4 DebugGame, 5.8.0
+DebugGame, 5.8.0 Titan DebugGame) are imported `-noanalysis` and swept — the sweep reads raw bytes
+and never needs auto-analyze, which is what had made a 300 MB Development project look
+un-importable.
 
 -----
 
@@ -134,11 +146,25 @@ what made a 300 MB Development project look un-importable.
 and the Development row came back **healthy** — GNames lands `GNAM_ES53_1` UNIQUE-OK with no
 fall-through at all, sparse on `SPARSE_ES2_1`. So:
 
-| | 4.15 | 4.23 | 4.27 | **5.3** | 5.4–5.6 | 5.7.4 | 5.8.x |
-|---|---|---|---|---|---|---|---|
-| non-Shipping GNames | ✅ | ✅ | ✅ | ✅ | **?** | ⚠️ V1 only | ⚠️ V1 only |
+| | 4.10 | 4.15 | 4.23 | 4.27 | **5.3** | 5.4–5.6 | 5.7.4 | 5.8.x |
+|---|---|---|---|---|---|---|---|---|
+| non-Shipping GNames | ✅ | ✅ | ✅ | ✅ | ✅ | **?** | ⚠️ V1 only | ⚠️ V1 only |
 
-### THE ENGINE INSTALL IS TRANSIENT — that is what makes this affordable
+### FOR AOB TRUTH ALONE, 5.4 IS ALREADY FREE — no packaging, no compiler
+
+**UE_5.4 is installed and ships prebuilt `UnrealGame{,-Win64-Shipping,-Win64-DebugGame}.exe` with
+full PDBs** in `Engine/Binaries/Win64` (so do 4.23 / 4.27 / 5.7 / 5.8; 4.10 / 4.15 ship two of the
+three). Copy → `pdb_globals.py` → import `-noanalysis` → add rows. That is the whole 5.4 AOB
+oracle, at zero build cost — it is what made 4.10 possible when VS2015 was unavailable.
+
+⚠ **But that shortcut does NOT cover step 2 of this item.** `UnrealGame.exe` is the bare engine
+default with no content and no `ACharacter` to possess, so it can answer "where are the engine
+globals" and nothing else. **The gameplay-feature matrix still needs a packaged ThirdPerson
+project** (GodMode/Teleport/Laufen/Hemmung all need a real pawn to act on). Treat them as two
+separate deliverables that happen to share a version number: take the free AOB rows now, and
+package only when doing the gameplay pass.
+
+### THE ENGINE INSTALL IS TRANSIENT — that is what makes the packaged half affordable
 
 5.3 established the pattern: **install → package 3 configs → `-noanalysis` import → DELETE the
 engine.** What stays is ~3.2 GB of packages + PDBs (mirror it to `X:` like the rest); the ~114 GB

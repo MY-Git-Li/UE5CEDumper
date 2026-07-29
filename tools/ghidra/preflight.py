@@ -1147,7 +1147,9 @@ def main(argv: list[str]) -> int:
                   f"{len(g['duplicate_imports'])} of them are stub re-imports")
             print("      NOT a scoring hazard: these map only the 1104-byte DOS stub "
                   "(base 0000:0000) and score hits=0 on every pattern; aggregate_sweep.py "
-                  "already excludes them, which is why REPORT.md says 51 programs, not 55")
+                  "already excludes them, which is why REPORT.md's program count is LOWER "
+                  "than the raw import count (it also reports them as 'skipped N broken "
+                  "imports'). Do not hardcode either number here - the corpus grows.")
             print("      side effect (real): scan_patterns.java builds its output name from "
                   "the image base, so '@0000:0000' is truncated by NTFS at the ':' — the .txt/"
                   ".tsv land in ALTERNATE DATA STREAMS of a 0-byte file in out/sweep/. "

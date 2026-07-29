@@ -20,6 +20,64 @@ builds ≤696 in
 
 -----
 
+## 2026-07-29 - UE 4.10 joins the corpus BELOW the support floor; 58 -> 65 programs (build 2504)
+
+Same-day follow-on to build 2503. Two things landed: the full sweep that 2503 could not run, and
+the corpus's oldest binary.
+
+### UE 4.10.4, and why its ❌ is the point
+
+`UE410_Game_Shipping` + `UE410_Game_Development`, both full-PDB, both Epic-stock (CL 2872498,
+`++depot+UE4-Releases+4.10`, `IsLicenseeVersion=0`). **Nothing was compiled** — 4.10 needs VS2015,
+which is not installed. The launcher engine already ships monolithic `UE4Game-Win64-Shipping.exe`
+(38.7 MB) and `UE4Game.exe` (83 MB) with PDBs in `Engine/Binaries/Win64`.
+
+That generalises, and it is now step `00` of the derivation recipe: **check for the engine's own
+prebuilt game targets before packaging or compiling anything.** Surveyed across the installed
+engines — 4.23 / 4.27 / **5.4** / 5.7 / 5.8 ship all three configs, 4.10 / 4.15 ship Shipping +
+Development. The caveat is that these are content-free engine defaults: fine for engine globals,
+useless for the gameplay-feature matrix, which still needs a packaged Character-based project.
+
+**GObjects is unresolvable on both rows, and it is meant to be — the only ❌ in the matrix.** It
+converts "below 4.11 is UNSUPPORTED" from an assertion into a measurement with two independent
+causes:
+
+1. *It cannot be found.* At 4.10 the array is a **function-local static behind a magic-static
+   guard** in `GetUObjectArray()`; consumers reach it by `call` and never materialise the address
+   inline, while all 52 `GOBJ_*` patterns are `lea reg,[rip+GUObjectArray]`-shaped. 4.11 promoted
+   it to a plain global — which is exactly why 4.11 Nekopara resolves one row below. Measured: 74
+   GObjects candidates on Shipping / 105 on Development, with the true VA and its `+0x10` alias in
+   **neither list at any rank**.
+2. *It could not be read anyway.* Per `4.10.4-release` source, `TUObjectArray` is
+   `TStaticIndirectArrayThreadSafeRead` and **`FUObjectItem` does not exist** — elements are bare
+   `UObjectBase*`. No `ArrayLayout` preset models that.
+
+So mining a `GetUObjectArray`-shaped pattern would buy nothing. GNames/GWorld/GEngine resolve
+normally, so the rows still earn their scan as the oldest coverage for those three.
+
+Truth for GObjects came from disassembly (no public symbol exists): the guarded init does
+`lea rbx,[rip+X]`, passes rbx as `this` to `??0FUObjectArray@@QEAA@XZ` and returns rbx —
+corroborated by `GetObjectArrayForDebugVisualizers`, which is literally `GetUObjectArray();
+add rax,0x10` and therefore **measures** `ObjObjects@+0x10` at this version instead of inheriting
+it. `pdb_globals.py` now prints that route as a hint when GObjects has no symbol, so the dead end
+is not rediscovered; both of its validation rows (4.23-Flying, 5.8-StackOBot) still reproduce
+byte-for-byte.
+
+### The full sweep — 65 programs / 52 oracles, UE 4.10-5.8
+
+54 rows, run end to end for the first time since the 5.3 / 4.15 / 4.27.2 additions. The 5.8.1
+Development row that build 2503 left blocked on a Ghidra lock is included.
+
+* **The non-Shipping GNames collapse is bisected to 5.4/5.5/5.6.** The 5.3 Development and
+  DebugGame rows land on `GNAM_ES53_1` with **zero** wasted validations — cleaner than 4.23/4.27 —
+  while 5.7.4 / 5.8.0 / 5.8.1 / Titan fall through to `GNAM_V1` after 2,199 / 2,369 / 2,372 /
+  2,424. 4.10 and 4.15 extend the healthy band downward, so it is a sharp UE5-era edge, not drift.
+* Two documentation caveats discharged: `UE423_Flying-Win64-DebugGame` is a live sweep row rather
+  than an orphan `.rep`, and `ISDefenseEditor_UE410` is no longer the sole evidence for the
+  pre-4.11 floor — both noted in the corpus-preservation drop list.
+
+-----
+
 ## 2026-07-29 - Ground truth without Ghidra; corpus 51 -> 58 programs; three documented beliefs corrected (build 2503)
 
 A corpus/tooling pass, not a feature one. The through-line: **almost everything this project uses
