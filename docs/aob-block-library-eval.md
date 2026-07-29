@@ -3,9 +3,12 @@
 > **2026-07-29 late addendum — the density half is now SOLVED and measured; see §6.**
 > §3 below says a block library "structurally cannot" answer *"how many spurious hits will this take
 > on a 150 MB `.text`?"*. That is still true **of blocks**, but a second artifact answers it: a
-> thresholded **byte n-gram frequency index**, which ships no code, needs no legal call, and was
-> validated against all 151 patterns with **zero upper-bound violations**. The two are complements,
-> not alternatives — blocks cover *shape*, the index covers *density*.
+> thresholded **byte n-gram frequency index**, which ships no code and needs no legal call. Built
+> and validated 2026-07-29: **0 upper-bound violations on the 12 binaries it is built from** — but
+> step 4 then measured it on the 58 it never saw and found **0.20% violations for `CLEAR`, with a
+> real tail (932 hits against a bound of 15)**. So it is a proof on its own sources and a strong
+> prior elsewhere; read §6's step-4 subsection before quoting the clean number. The two artifacts
+> are complements, not alternatives — blocks cover *shape*, the index covers *density*.
 
 **The idea (maintainer's).** Extract the `.text` regions the AOB patterns actually land on —
 frequently-hit **hotspots**, per-game **occasional/unique** sites, and **decoy noise** — commit them
