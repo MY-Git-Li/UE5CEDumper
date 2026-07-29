@@ -221,12 +221,37 @@ never breaks it, so tune it to the size budget.
 a **pre-filter, not an acceptance gate**. `Himmel.h` rule 5 keeps meaning the sweep. What it buys is
 that the 200 GB corpus only ever sees candidates that are already plausible.
 
-### MUST be answered before trusting it
+### ANSWERED 2026-07-29 (step 4) — and the answer reshapes the contract
 
-**Does an index from one version generalise to another?** A pattern rare in 5.4 could be common in
-4.27 — the corpus is multi-version for exactly that reason. **Not yet measured.** Until it is, build
-the union and treat a single-version index as indicative only. The test is cheap: index 4.27 and 5.4
-separately, score all 151 patterns against both, and report how far the bounds diverge.
+Two questions, and the one that mattered was not the one this section originally asked.
+
+**Q1 — does a ONE-VERSION index generalise across versions? YES.** A 4.27-only index judged against
+the 5.4 binary it had never seen: **0 violations in 113 patterns.** Two single-version indexes
+(4.27 vs 5.4) disagree on the CLEAR/UNPROVEN *label* for 9 of 158 rows (6%), but neither is ever
+unsound. Stock engine code is similar enough across versions that version coverage is not the risk.
+
+**Q2 — does the shipped 12-binary union hold on binaries it never saw? NO, not as a proof.**
+
+| group | pairs | violations | rate |
+|---|---|---|---|
+| the 12 source binaries | 1,017 | **0** | 0.00% |
+| 58 binaries never indexed | 7,345 | **27** | 0.37% |
+| …of those, `CLEAR`-verdict | 3,055 | **6** | **0.20%** — median 0, 99th pct 10, **MAX 932** |
+
+**`CLEAR` is a proof on the index's own sources and a strong prior everywhere else.** The tail is
+real: `GNAM_UD2` bounds at ≤15 and takes **932** hits on FF7 Remake; `GOBJ_AV2` bounds at ≤15 and
+takes 510 on Avowed.
+
+**The cause is code coverage, not version.** The index is built from *content-free stock templates*,
+so it has seen UE engine code and essentially **no game code**, while a shipped title adds 100+ MB
+of studio code on top. The worst offenders are exactly the most non-standard binaries in the corpus
+(FF7R, Avowed). Since §1/§2 mean third-party code can never be indexed, **this limit is STRUCTURAL
+and permanent — not a threshold to tune, not a bug to fix.**
+
+**What that changes:** nothing about the build order, and everything about the wording. The tool
+must never say "certified"; it says *quiet in stock engine code*, with the measured unseen-binary
+rate attached. Both `aob_specificity.py`'s header and its `CLEAR` verdict text now carry these
+numbers, so a user on another machine reads the caveat without finding this file.
 
 ### Build order
 

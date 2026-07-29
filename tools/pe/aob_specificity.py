@@ -8,9 +8,21 @@ neither, so this runs on a bare second machine and in CI. That portability is th
 see docs/aob-block-library-eval.md §6.
 
 WHAT THE NUMBER MEANS. Every occurrence of the whole pattern must contain each of its literal
-windows, so the frequency of the RAREST window is a hard UPPER BOUND on the pattern's hit count.
-Validated against all 151 Himmel.h patterns: zero violations. It is deliberately loose — wildcards
-constrain far more than literal runs do — so read it as "at most this many", never as an estimate.
+windows, so the frequency of the RAREST window is an UPPER BOUND on the pattern's hit count *in the
+code the index was built from*. Deliberately loose — wildcards constrain far more than literal runs
+do — so read it as "at most this many", never as an estimate.
+
+⚠ THE BOUND IS A PROOF ONLY ON THE INDEX'S OWN SOURCES, AND A PRIOR EVERYWHERE ELSE. Measured:
+
+    on the 12 source binaries      0 violations / 1,017 pairs      (proof)
+    on 58 binaries never indexed   27 violations / 7,345  (0.37%)  (prior)
+      of which CLEAR-verdict        6 violations / 3,055  (0.20%)  median 0, 99th pct 10, MAX 932
+
+The failures are NOT a version problem — a 4.27-only index bounds a 5.4 binary with 0 violations
+in 113. They are a CODE-COVERAGE problem: the index is built from content-free stock templates, so
+it has seen UE engine code and essentially no game code, while a shipped title adds 100+ MB of
+studio code. Licensing means that half can never be indexed, so this limit is STRUCTURAL and
+permanent, not a tuning knob. GNAM_UD2 bounds at 15 and takes 932 hits on FF7 Remake.
 
 WHAT IT CANNOT TELL YOU: whether the pattern hits the RIGHT address. `GNAM_XX_1` bounds at a clean
 57 and is DECOY-ONLY. This is a PRE-FILTER, not an acceptance gate — `Himmel.h` rule 5 keeps meaning
@@ -145,8 +157,11 @@ def verdict(bound, longest, lit, floor):
     if bound is None:
         return ("UNSCOREABLE", "no window the index can size. NOT the same as 'rare' — unknown.")
     if bound <= floor:
-        return ("CLEAR", f"certified quiet — under {floor + 1} occurrences of its rarest window in "
-                         "every source binary. Measured worst case for this class: 13 hits.")
+        return ("CLEAR", f"quiet in STOCK ENGINE CODE — under {floor + 1} occurrences of its rarest "
+                         "window in every source binary (proven there: 0 violations / 1,017 pairs). "
+                         "On a real game it is a STRONG PRIOR, not a proof: 0.20% violation rate "
+                         "over 3,055 unseen pairs, median 0 and 99th pct 10 hits, but the tail is "
+                         "real — GNAM_UD2 bounds at 15 and takes 932 on FF7 Remake.")
     return ("UNPROVEN", f"cannot certify (rarest window bounds at {bound}). This is NOT evidence "
                         "the pattern is noisy — the bound is very loose, and most patterns landing "
                         "here measure in single digits. Sweep it to find out.")

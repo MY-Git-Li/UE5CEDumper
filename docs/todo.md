@@ -345,9 +345,13 @@ answers the question that actually blocks authoring:
 2. Commit the index.
 3. `tools/pe/aob_specificity.py` — AOB in; bound + limiting window + the run-<4 verdict out. Stdlib
    only; **runs on the bare second machine and in CI.**
-4. **Answer the open question first-class: does a one-version index generalise?** Index 4.27 and 5.4
-   separately, score all 151, report divergence. Until then, union only.
-5. Then §4's shape blocks + `blocktest.py`.
+4. ~~Does a one-version index generalise?~~ **ANSWERED — see §6 of the eval.** Cross-*version* is
+   fine (4.27-only index vs the 5.4 binary: 0 violations / 113). Cross-*codebase* is not: on the 58
+   binaries the index never saw, `CLEAR` violates at **0.20%** with a real tail (`GNAM_UD2` bounds
+   ≤15, takes 932 on FF7R). Cause is code coverage — stock templates contain no game code, and
+   licensing means third-party code can never be indexed, so the limit is **structural**. Wording
+   in the tool now says "quiet in stock engine code", never "certified".
+5. **NEXT: §4's shape blocks + `blocktest.py`.** Steps 1–4 are done and committed.
 
 ⚠ **Neither half is an acceptance gate.** Neither can say a pattern hits the RIGHT address —
 `GNAM_XX_1` scores a clean bound of 57 and is `DECOY-ONLY`. `Himmel.h` rule 5 keeps meaning the
