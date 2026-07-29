@@ -95,49 +95,34 @@ what made a 300 MB Development project look un-importable.
 
 -----
 
-## Next self-built oracle: **UE 5.3, all three configs** (blank/Flying template, not StackOBot)
+## Finish the non-Shipping bisection: next self-built oracle is **UE 5.5**
 
-*Parent: the block-library evaluation + the non-Shipping GNames finding.* **Effort M · Risk low.**
+*Parent: the 5.3 build, 2026-07-29. Shipped in [dev-log.md](dev-log.md).* **Effort M · Risk low.**
 
-Asked which UE 5.1–5.6 version is worth self-compiling. **5.3**, and it wins on three independent
-counts rather than one:
+**5.3 is DONE and it did its job.** Stock UE 5.3 ThirdPerson built in all three configs, imported
+`-noanalysis`, rows added to `sweep.sh`. It was chosen to bisect the non-Shipping GNames collapse
+and the Development row came back **healthy** — GNames n=15, sparse n=3 (`ES2_1` still reaches it,
+unlike 5.7.4+). So:
 
-1. **It bisects the only open question.** Non-Shipping GNames is ✅ at 4.27 and ⚠️`GNAM_V1`-only at
-   5.7.4; **5.0–5.6 is untested**. 5.3 is the midpoint, so one build halves the interval whichever
-   way it lands (✅ ⇒ boundary is 5.4–5.7; ⚠️ ⇒ boundary is 5.0–5.3).
-2. **5.3 is the emptiest version in the corpus.** Its only binary is Avowed — no PDB, and truth for
-   **1 of 5 targets** (SparseDelegates alone). GObjects/GNames/GWorld/GEngine have **zero** ground
-   truth at 5.3 anywhere. Every other UE5 version has at least one 5/5 row.
-3. **It settles Avowed's packing the way Breeders/Maelstrom settled DropIn's.** Avowed's 20-byte
-   `FUObjectItem` is *attributed* to the Obsidian fork, but with no stock 5.3 that is an assertion,
-   not a measurement — the exact evidentiary gap DropIn's 32-byte item had until 2026-07-29. A stock
-   5.3 closes it, and gives `GOBJ_AV1`/`AV2` (currently dead weight outside Avowed) a real
-   decoy-check.
+| | 4.15 | 4.23 | 4.27 | **5.3** | 5.4–5.6 | 5.7.4 | 5.8.x |
+|---|---|---|---|---|---|---|---|
+| non-Shipping GNames | ✅ | ✅ | ✅ | ✅ | **?** | ⚠️ V1 only | ⚠️ V1 only |
 
-**Package TWO templates from the one engine install — they serve different purposes.**
-* **Flying / blank** for the AOB corpus: it extends the existing 4.15 → 4.23 → 4.27 Flying ladder
-  into UE5, making the **4.27 ↔ 5.3 comparison same-project**, and 4.27↔5.x is where the boundary
-  sits. (StackOBot cannot be reused here: UE assets are forward-compatible only, so the 5.8 project
-  cannot be downgraded to 5.3.)
-* **Third Person / StackOBot-like** for the *gameplay-feature* matrix below: the Flying pawn has
-  **no `CharacterMovement`**, so Laufen (MaxWalkSpeed/GravityScale/JumpZVelocity), Solitar and the
-  Fly/SeeThrough paths have nothing to bind to on it. A Character-based template is required to
-  exercise them at all.
+**The interval is now 5.4 / 5.5 / 5.6.** Next bisect = **5.5** (and 5.5 is also the version with
+three symbolised *Shipping* oracles already, so a non-Shipping row there pairs against real data).
 
-The engine install (~90 GB) is the expensive part and is shared; packaging a second template
-afterwards is minutes.
+**No C++ project needed** — that was the 5.3 lesson and it generalises. A C++ project on a launcher
+engine can fail in UBT ("must be compiled with VS2022 17.4 (MSVC 14.34.x) or later … detected
+14.29.30159") purely because of toolset *ranking*: UE ranks families it does not know as 4, so a
+recognised-but-too-old 14.29 (VS2026's v142 component) outranks a perfectly good 14.44 and then
+fails the minimum-version gate. **Nothing needs fixing** — the launcher ships
+`UnrealGame{,-Win64-DebugGame,-Win64-Shipping}.exe` WITH PDBs, so a Blueprint-only project packages
+all three configs with nothing compiled. Use a **ThirdPerson** template so the result is also a
+Character-based target for the gameplay-feature matrix.
 
-⚠ **Cost:** none of 5.1–5.6 is installed (present: 4.10, 4.15, 4.23, 4.27, 5.7, 5.8), so this is a
-fresh engine install (~90 GB) whichever version is chosen — an argument for the highest-payoff one
-rather than the most convenient.
-
-*Second choice: 5.4* — Elliot's truth is disassembly-derived and would gain a symbolised
-cross-check, and MindsEye (5.4.4 licensee fork) has no stock-5.4 control. Strictly weaker on all
-three counts above.
-
-Then: `-noanalysis` import ×3 → `py tools/pe/pdb_globals.py` per PDB → byte-replay corroboration →
-three `sweep.sh` rows → one sweep.
-
+Also extended BACKWARDS: **4.15.3 Development + DebugGame** rows added (the oldest config group in
+the corpus). `pdb_globals.py` gained a pre-4.23 GNames route for them — `FName::GetNames`'s load at
++4, **no** `-0x10` — validated by reproducing the 4.15 Shipping row's recorded `GNames=142c92508`.
 -----
 
 ## Gameplay-feature regression matrix on the self-built samples (Teleport tab et al.)

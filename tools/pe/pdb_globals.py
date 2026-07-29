@@ -234,11 +234,35 @@ def main():
     n, r = find(syms, "?SparseDelegates@FSparseDelegateStorage@@")
     emit("SparseDelegates", n, r, note=(n[:60] + "...") if n else "")
 
-    # GNames: no symbol at any version. FNameDebugVisualizer::GetBlocks is
-    # `lea rax,[&Pool.Entries.Blocks]; ret` -> RIP target - 0x10 = NamePoolData.
-    n, r = find(syms, "?GetBlocks@FNameDebugVisualizer@@")
-    if r is None:
-        print("  GNames           NOT FOUND (no FNameDebugVisualizer::GetBlocks)")
+    # GNames: no symbol at any version, so it is always recovered from a function.
+    #
+    # PRE-4.23 comes FIRST because `FNameDebugVisualizer` does not exist yet — there is no
+    # FNamePool at all, GNames is the `TNameEntryArray*` that `FName::GetNames` lazily allocates.
+    # Its prologue is `sub rsp,0x28; mov rax,[rip+Names]; test rax,rax; ...`, so the load sits at
+    # +4 and needs NO -0x10 (that adjustment is an FNamePool/Blocks artifact and applying it here
+    # would silently land 16 bytes low). Validated against the UE4.15-Flying Shipping row already
+    # in sweep.sh: this reproduces its recorded GNames=142c92508 exactly.
+    n, r = find(syms, "?GetNames@FName@@")
+    if r is not None:
+        gn = base + r
+        code = read_at_va(exe, gn, 24)
+        hit = next((o for o in range(12) if code[o:o + 3] == b"\x48\x8b\x05"), None)
+        if hit is not None:
+            disp = struct.unpack_from("<i", code, hit + 3)[0]
+            out["GNames"] = gn + hit + 7 + disp
+            print(f"  GNames           {out['GNames']:x}   pre-4.23 TNameEntryArray via "
+                  f"FName::GetNames @{gn:x}, load at +{hit} (no -0x10)")
+        else:
+            print(f"  GNames           UNRESOLVED — FName::GetNames @{gn:x} has no "
+                  f"`48 8B 05` in its first 12 bytes: {code[:12].hex(' ')}")
+        n, r = None, None
+    else:
+        n, r = find(syms, "?GetBlocks@FNameDebugVisualizer@@")
+    if n is None and r is None and "GNames" in out:
+        pass
+    elif r is None:
+        print("  GNames           NOT FOUND (neither FName::GetNames nor "
+              "FNameDebugVisualizer::GetBlocks)")
     else:
         gb = base + r
         code = read_at_va(exe, gb, 8)

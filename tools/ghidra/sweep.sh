@@ -62,6 +62,16 @@ ROWS=(
 # FSlateApplication::CurrentApplication.
 # NOTE the project name misspells "Flying" as "Flyinh" — use it verbatim.
 "UE4.15-Flying|UE415_Flyinh-Win64-Shipping|-|GObjects=142ccc200|142ccc210,GNames=142c92508,GWorld=142ce7770,GEngine=142ce6898"
+# 4.15.3 Development + DebugGame — the same project's non-Shipping twins, and the OLDEST config
+# group in the corpus. They anchor the far end of the non-Shipping GNames question: healthy at
+# 4.15 / 4.23 / 4.27 / 5.3, collapsed to GNAM_V1-only at 5.7.4 / 5.8.x.
+# SparseDelegates is ABSENT BY DESIGN on all three 4.15 rows (4.23+ feature), not missing.
+# GNames here is the pre-4.23 `TNameEntryArray*`, taken from `FName::GetNames`'s load at +4 with
+# NO -0x10 (that adjustment is an FNamePool/Blocks artifact). `pdb_globals.py` does this
+# automatically now, and the recipe was validated by reproducing the Shipping row's recorded
+# GNames=142c92508 above before being used on these two.
+"UE4.15-FlyingDev|UE415_Flyinh_Development|-|GObjects=1456b9b40|1456b9b50,GNames=1456501c0,GWorld=1456d8b40,GEngine=1456d7838"
+"UE4.15-FlyingDbgGame|UE415_Flyinh_DebugGame|-|GObjects=1456bcbc0|1456bcbd0,GNames=14564e5a0,GWorld=1456dbbc0,GEngine=1456da8b8"
 "UE4.20-Everspace|ES1-420|-|GObjects=142e797f0|142e79800,GNames=1431dead8,GWorld=1432e1ac0,GEngine=1432df470"
 # HELIUM RAIN 4.20.3 — the SECOND symbolised 4.20, so the pre-4.23 GNames derivation no longer
 # rests on Everspace alone. Pre-4.23: no FNamePool (GNames is the TNameEntryArray* that
@@ -138,6 +148,30 @@ ROWS=(
 # (Breeders/Maelstrom/DQ7R are third-party builds).
 "UE4.27-FlyingShipping|UE427_Flying-Win64-Shipping|-|GObjects=1448a9500|1448a9510,GNames=14486d1c0,GWorld=1449f18b0,SparseDelegates=144457b60,GEngine=1449edf98"
 "UE5.2-Satisfactory|SF521_pdb|-|@SF521@"
+# ── UE 5.3 ThirdPerson, built by the maintainer in all three configs ───────────────────────────
+# 5.3's FIRST SYMBOLISED ORACLE, and it closes the corpus's worst version hole: until now the only
+# 5.3 binary was Avowed — no PDB, and truth for **1 of 5 targets** (SparseDelegates alone), so
+# GObjects/GNames/GWorld/GEngine had ZERO ground truth at 5.3 anywhere. Every other UE5 version had
+# at least one 5/5 row.
+#
+# Two things it is positioned to settle:
+#   * Avowed's 20-byte packed FUObjectItem is ATTRIBUTED to the Obsidian fork but has never been
+#     measured against a stock 5.3. Same evidentiary gap DropIn's 32-byte item had until 2026-07-29,
+#     and the same fix: a stock build of the same version. It also gives GOBJ_AV1/AV2 — currently
+#     0-correct outside Avowed — their first real decoy check.
+#   * It BISECTS the non-Shipping GNames collapse (fine at 4.27, GNAM_V1-only at 5.7.4, and
+#     5.0-5.6 untested). Whichever way the Development/DebugGame rows land, the interval halves.
+#
+# NO C++ TOOLCHAIN WAS NEEDED, and that is worth recording because the obvious route fails: a C++
+# project on 5.3 dies in UBT with "must be compiled with VS2022 17.4 (MSVC 14.34.x) or later …
+# detected 14.29.30159". Cause (from UBT's own log) is the FamilyRank pick — UE 5.3 predates
+# 14.44/14.50/14.51 so it ranks them all 4 ("unknown"), while the one family it recognises, 14.29
+# from VS2026's v142 component, ranks 3 and wins — then fails the >=14.34 gate. The launcher engine
+# ships UnrealGame{,-Win64-DebugGame,-Win64-Shipping}.exe WITH PDBs, so a Blueprint-only project
+# packages all three configs with nothing compiled.
+"UE5.3-ThirdPerson|ThirdPerson53_Shipping|-|GObjects=146859320|146859330,GNames=1467b2f80,GWorld=1469c6208,SparseDelegates=1465f1650,GEngine=1469c3418"
+"UE5.3-ThirdPersonDev|ThirdPerson53_Development|-|GObjects=14e7b1b90|14e7b1ba0,GNames=14e6d9640,GWorld=14e99c0a8,SparseDelegates=14e527700,GEngine=14e997078"
+"UE5.3-ThirdPersonDbgGame|ThirdPerson53_DebugGame|-|GObjects=14e7c4b90|14e7c4ba0,GNames=14e6ec640,GWorld=14e9af0a8,SparseDelegates=14e53a700,GEngine=14e9aa078"
 "UE5.5-Everspace2|ES2-0517|-|GObjects=149aa7ef0|149aa7ee0,GNames=149c009c0,GWorld=149b37d18,SparseDelegates=149aa7e90,GEngine=149da5810"
 # Second UE 5.5 Everspace 2, two manifests newer (2025-06-17 vs the 05-17 snapshot). Same engine,
 # same studio, different compile — the ONLY same-game cross-build pair in the corpus, and so the

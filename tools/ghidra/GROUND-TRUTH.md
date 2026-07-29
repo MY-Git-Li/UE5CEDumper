@@ -125,6 +125,7 @@ govern. Read that block too before adding, moving or deleting anything. The shor
   | 4.23.1 | Flying, DebugGame | ✅ n=16 | ✅ n=4 |
   | 4.27.2 | Flying, Development | ✅ n=16 | ✅ n=4 |
   | 4.27.2 | Flying, DebugGame | ✅ n=16 | ✅ n=4 |
+  | **5.3** | **ThirdPerson53, Development** | ✅ **n=15** | ✅ n=3 |
   | **5.7.4** | **StackOBot, DebugGame** | ⚠ **`GNAM_V1` only** | ⚠ **n=1 — `MEL55_1` ALONE** |
   | **5.8.0** | **StackOBot, DebugGame** | ⚠ **`GNAM_V1` only, OK-BEHIND ×197** | ⚠ n=2 (`X1`+`X2`) |
   | **5.8.0** | **Titan, DebugGame** | ⚠ **`GNAM_V1` only** | ⚠ n=2 (`X1`+`X2`) |
@@ -141,8 +142,11 @@ govern. Read that block too before adding, moving or deleting anything. The shor
   the same `{CT3, CT4, G42_1}` GNames decoy cluster. That was the last alternative explanation;
   it is the build configuration and nothing else.
 
-  **The 5.0–5.6 non-Shipping band is untested** — the boundary could be anywhere in it. Do not
-  write it up as "a 5.7+ thing" without measuring one.
+  **BOUNDARY HALVED 2026-07-29 — it is between 5.3 and 5.7.4.** A self-built stock 5.3
+  ThirdPerson (three configs) was added precisely to bisect this, and its Development row comes
+  back **healthy**: GNames n=15, sparse n=3 (`ES2_1`+`X1`+`X2`, i.e. `ES2_1` still reaches it,
+  unlike 5.7.4+). So the collapse begins somewhere in **5.4 / 5.5 / 5.6**, which remains untested.
+  Do not write it up as "a 5.7+ thing" without measuring one of those three.
 
   Not a scan artifact: the same harness reproduces the 5.8.0-Shipping consensus (`149eba940`,
   n=11) exactly, `GNAM_V7` (CallFollow) takes 0 hits, and the Development EXE's 227 exports

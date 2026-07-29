@@ -152,6 +152,42 @@ surviving records were transcribed into the doc.
 * [aob-block-library-eval.md](aob-block-library-eval.md) — evaluated, not built. The copyright
   question is sidesteppable because every finding this session came from the **self-built** tier.
 
+### Same day, later: 5.3 + 4.15 config groups — sweep.sh 47 -> 52 rows
+
+Five more rows, all `-noanalysis` imports, each corroborated by running `scan_patterns.java`
+against its derived truth immediately after import.
+
+**UE 5.3 ThirdPerson x3 configs — 5.3's FIRST symbolised oracle.** Until now the only 5.3 binary
+was Avowed: no PDB, truth for 1 of 5 targets, so GObjects/GNames/GWorld/GEngine had *zero* ground
+truth at 5.3. It was picked to bisect the non-Shipping GNames collapse and **it did**: the two
+non-Shipping rows land GNames on `GNAM_ES53_1` **UNIQUE-OK** — no fall-through at all — and sparse
+on `SPARSE_ES2_1`. So the collapse starts **after 5.3**, and the open interval shrinks from
+5.0-5.6 to **5.4 / 5.5 / 5.6**. Next bisect is 5.5.
+
+**UE 4.15.3 Development + DebugGame** — the oldest config group in the corpus, anchoring the far
+end. Both resolve all four applicable targets (SparseDelegates absent by design pre-4.23);
+GNames lands on `GNAM_SAT422_1`, GWorld on `GWLD_FD_1`.
+
+**`pdb_globals.py` gained a pre-4.23 GNames route**, which it previously could not do at all —
+`FNameDebugVisualizer` does not exist before 4.23, so it now falls back to `FName::GetNames` and
+takes the RIP load at **+4 with NO `-0x10`** (that adjustment is an FNamePool/Blocks artifact and
+applying it here lands 16 bytes low). Validated the same way as everything else: it reproduces the
+UE4.15-Flying Shipping row's recorded `GNames=142c92508` exactly before being used on the new two.
+
+**`UE5.8.1-StackOBot` (Shipping) swept** once Ghidra released its lock — all five targets, matching
+the offline derivation. Only `UE5.8.1-StackOBotDev` is still outstanding.
+
+**A C++ project was NOT needed for any of this, and the failure that prompted the question is worth
+recording.** A C++ project on the 5.3 launcher engine dies in UBT with *"must be compiled with
+Visual Studio 2022 17.4 (MSVC 14.34.x) or later … The current compiler version was detected as:
+14.29.30159"*. The message blames the VS version and a forced `VisualStudio2019` setting; both are
+wrong here. From UBT's own log it is **toolset ranking**: UE 5.3 predates 14.44/14.50/14.51 so it
+ranks all of them `FamilyRank=4` ("unknown"), while the one family it recognises — 14.29, supplied
+by **VS2026's v142 component**, not by any VS2019 install — ranks 3, wins, and then fails the
+`>= 14.34` gate. VS2022's 14.44 was perfectly usable and lost for being too *new* to be in the
+table. Nothing needed fixing: the launcher ships `UnrealGame{,-Win64-DebugGame,-Win64-Shipping}.exe`
+**with PDBs**, so a Blueprint-only project packages all three configs with nothing compiled.
+
 -----
 
 ## 2026-07-27 - GWLD_FD_1: the GWorld fall-through list is now empty (build 2478)
