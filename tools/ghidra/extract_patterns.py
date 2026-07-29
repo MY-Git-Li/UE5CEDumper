@@ -166,6 +166,13 @@ def ev(x):
     except Exception:
         return 0
 
+# Create the output directory. `out/` is gitignored (.gitignore:33 `[Oo]ut/`) and nothing under it
+# is tracked, so on a FRESH CHECKOUT — every CI run — `out/sweep/` does not exist and this open()
+# died with FileNotFoundError. Callers should not have to know that.
+_outdir = os.path.dirname(os.path.abspath(OUT))
+if _outdir:
+    os.makedirs(_outdir, exist_ok=True)
+
 with open(OUT, "w", encoding="utf-8") as f:
     f.write("id\ttarget\tresolve\tio\topc\ttot\tadj\tpri\tsrc\tpattern\tnote\n")
     for r in sorted(uniq, key=lambda r: (r["target"], ev(r["pri"]))):
