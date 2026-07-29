@@ -19,7 +19,7 @@ procedure for adding a new game. The sweep itself is scripted — do not hand-ru
 per project:
 
 ```sh
-bash tools/ghidra/sweep.sh                      # all 57 rows (~50 min at SWEEP_JOBS=3)
+bash tools/ghidra/sweep.sh                      # all 57 rows, MEASURED ~4m40s at SWEEP_JOBS=3
 bash tools/ghidra/sweep.sh UE4.27 UE5.7         # only tags matching these substrings
 py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
 ```

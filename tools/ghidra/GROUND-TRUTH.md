@@ -7,7 +7,23 @@ Every address below was resolved from a real PDB symbol (or, where noted, from a
 **The sweep is scripted — do not hand-run `analyzeHeadless` per project:**
 
 ```bash
-bash tools/ghidra/sweep.sh                      # everything (~40 min at SWEEP_JOBS=3)
+bash tools/ghidra/sweep.sh                      # everything, MEASURED ~4m40s at SWEEP_JOBS=3
+```
+
+**The full sweep is CHEAP — always run it, never a filtered subset "to save time".** Measured
+2026-07-29 on 57 rows / 70 programs: **4m38s**, against **4m34s** for the 54-row run half an hour
+earlier. It does not scale the way the row count suggests, and it never did: `-noanalysis
+-readOnly` has been in the runner since the first scripted sweep (`f70fa66`), so `scan_patterns`
+only ever reads raw bytes.
+
+⚠ The `~30 min` / `~40 min` / `~50 min` figures this file and `tools/README.md` carried for months
+were **never measured** — they were inherited from the pre-script era when each project was
+hand-run *with* Auto Analyze. One of them was even "updated" by scaling the wrong number up with
+the row count. They are now replaced with the timing above. The only reason to use a tag filter is
+to isolate one row while debugging it; the correctness argument for the full run (a filtered run
+leaves `REPORT.md` describing a corpus that no longer exists) is unopposed by any real cost.
+
+```sh
 bash tools/ghidra/sweep.sh UE4.27 UE5.7         # only tags matching these substrings
 py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
 ```

@@ -21,10 +21,17 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Corpus state as of 2026-07-29 (build 2505) — the sweep is CURRENT
 
-`sweep.sh` is at **57 rows**. A full sweep ran 2026-07-29 (plus a filtered re-run for the three new
-5.4 rows) and `out/sweep/REPORT.md`, `Himmel.h`'s header counts (**70 programs / 55 oracles**, UE
-**4.10–5.8**) and this file all agree. `preflight.py` returns **`GO (exit 0)`** — the manifest was
-regenerated and covers exactly the 57 sweep tags. Nothing is stale or blocked.
+`sweep.sh` is at **57 rows**. A full sweep ran 2026-07-29 and `out/sweep/REPORT.md`, `Himmel.h`'s
+header counts (**70 programs / 55 oracles**, UE **4.10–5.8**) and this file all agree.
+`preflight.py` returns **`GO (exit 0)`** — the manifest was regenerated and covers exactly the 57
+sweep tags. Nothing is stale or blocked. Matrix: **162 ✅ / 59 ⚠️ / 2 ❌**.
+
+⏱ **The full sweep costs ~4m40s, not the ~30–50 min the docs claimed for months.** Measured: 4m38s
+for 57 rows vs 4m34s for 54. Those old figures were never taken — they date from the pre-script era
+of hand-running each project *with* Auto Analyze, and one was even "updated" by scaling the wrong
+number with the row count. **So never reach for a tag filter to save time**; use one only to
+isolate a row while debugging. The correctness argument for always running the full sweep (a
+filtered run leaves `REPORT.md` describing a corpus that no longer exists) now costs nothing.
 
 **One ❌ in the regression matrix, and it is deliberate: UE 4.10 GObjects on both rows. Leave it.**
 It measures the pre-4.11 support floor rather than asserting it — full reasoning in `Himmel.h`'s
