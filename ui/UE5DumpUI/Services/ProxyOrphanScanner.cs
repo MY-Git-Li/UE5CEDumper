@@ -561,6 +561,33 @@ internal static class ProxyOrphanScanner
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Which report files have aged out. Pure so the rule is testable without a clock or a filesystem.
+    ///
+    /// <para>Two properties that are the whole point:</para>
+    /// <list type="bullet">
+    /// <item><b>The NEWEST report is never returned</b>, whatever its age. Someone who made one report
+    /// months ago and kept it deliberately must not have it vanish — this is the only case where the
+    /// cleanup could destroy something wanted, and one guard removes it.</item>
+    /// <item>Age, not a count. A count has the same flaw the log retention documents: several reports
+    /// in one before/after session would evict an older useful one regardless of its date.</item>
+    /// </list>
+    /// </summary>
+    internal static IReadOnlyList<string> SelectExpiredReports(
+        IReadOnlyList<(string Path, DateTime Written)> files, DateTime now, int maxAgeDays)
+    {
+        if (files.Count <= 1) return Array.Empty<string>();   // never prune the only one
+
+        var newest = files.OrderByDescending(f => f.Written).First();
+        DateTime cutoff = now.AddDays(-maxAgeDays);
+        return files
+            .Where(f => !ReferenceEquals(f.Path, newest.Path)
+                        && !string.Equals(f.Path, newest.Path, StringComparison.OrdinalIgnoreCase)
+                        && f.Written < cutoff)
+            .Select(f => f.Path)
+            .ToArray();
+    }
+
     /// <summary>Human-readable source list for the report.</summary>
     internal static string DescribeSources(OrphanScanSources src)
     {

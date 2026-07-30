@@ -597,3 +597,13 @@ the folder chain gets no anchor and is left alone.
 They can, and only in one direction. The report is a snapshot; every condition is checked again
 immediately before anything is removed, and the plan is then narrowed to what you confirmed. So the
 real result **can be smaller than the report, and never larger.**
+
+### Where the reports live, and how long they stay
+
+`%LOCALAPPDATA%\UE5CEDumper\Reports\leftover-proxies-<timestamp>.txt`, one per click, never
+overwritten — so two scans can be compared and a report you are still reading is never replaced.
+
+Old ones are aged out after **30 days**, and only when you write a NEW report — a launch that never
+touches this feature deletes nothing. **The newest report is never removed, whatever its age**, so one
+you kept deliberately survives. Age rather than "keep the last N" for the same reason the logs use
+age: several reports in one before/after session would otherwise evict an older, more useful one.

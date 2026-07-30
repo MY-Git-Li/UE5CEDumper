@@ -671,6 +671,63 @@ public class ProxyOrphanScannerTests
         Assert.Contains("dxgi.dll", txt, StringComparison.Ordinal);
     }
 
+    // ── Report retention ─────────────────────────────────────────────────────
+
+    private static readonly DateTime Now = new(2026, 7, 30, 12, 0, 0);
+
+    [Fact]
+    public void SelectExpiredReports_KeepsTheNewestWhateverItsAge()
+    {
+        // The one case where this cleanup could destroy something wanted: a single report made months
+        // ago and kept deliberately. One guard removes it.
+        var files = new[] { (@"C:\r\old.txt", Now.AddDays(-400)) };
+
+        Assert.Empty(ProxyOrphanScanner.SelectExpiredReports(files, Now, 30));
+    }
+
+    [Fact]
+    public void SelectExpiredReports_KeepsTheNewestEvenWhenEverythingIsExpired()
+    {
+        var files = new[]
+        {
+            (@"C:\r\a.txt", Now.AddDays(-100)),
+            (@"C:\r\b.txt", Now.AddDays(-90)),
+            (@"C:\r\newest.txt", Now.AddDays(-80)),
+        };
+
+        var expired = ProxyOrphanScanner.SelectExpiredReports(files, Now, 30);
+
+        Assert.Equal(2, expired.Count);
+        Assert.DoesNotContain(@"C:\r\newest.txt", expired);
+    }
+
+    [Fact]
+    public void SelectExpiredReports_KeepsEverythingInsideTheWindow()
+    {
+        // A burst of reports in one before/after session must all survive — that is exactly the case
+        // a "keep the last N" rule would get wrong.
+        var files = Enumerable.Range(0, 8)
+            .Select(i => ($@"C:\r\{i}.txt", Now.AddMinutes(-i)))
+            .ToArray();
+
+        Assert.Empty(ProxyOrphanScanner.SelectExpiredReports(files, Now, 30));
+    }
+
+    [Fact]
+    public void SelectExpiredReports_PrunesOnlyPastTheCutoff()
+    {
+        var files = new[]
+        {
+            (@"C:\r\fresh.txt", Now.AddDays(-1)),
+            (@"C:\r\edge.txt", Now.AddDays(-30).AddMinutes(1)),   // just inside
+            (@"C:\r\stale.txt", Now.AddDays(-31)),
+        };
+
+        var expired = ProxyOrphanScanner.SelectExpiredReports(files, Now, 30);
+
+        Assert.Equal(new[] { @"C:\r\stale.txt" }, expired);
+    }
+
     [Fact]
     public void DescribeSources_NamesEachFlag()
     {

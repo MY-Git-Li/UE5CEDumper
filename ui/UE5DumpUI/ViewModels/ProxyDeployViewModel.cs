@@ -632,6 +632,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
                 build > 0 ? build.ToString() : "unknown");
 
             await File.WriteAllTextAsync(file, text);
+            PruneAgedReports(dir);
             await _platform.OpenWithShellAsync(file);
 
             SetOperationResult($"Report written: {file}", 0);
@@ -648,6 +649,36 @@ public partial class ProxyDeployViewModel : ViewModelBase
     /// can disable the scan buttons without the SCAN's cancel button appearing during a delete —
     /// which would offer to cancel an operation it is not wired to.</summary>
     [ObservableProperty] private bool _isRemovingOrphans;
+
+    /// <summary>
+    /// Age out old reports. Runs when a new report is WRITTEN, not at startup: these are
+    /// user-initiated artefacts, so a launch that never touches the feature must not silently delete
+    /// anything. Best-effort — failing to tidy up must never stop the report the user asked for.
+    /// </summary>
+    private void PruneAgedReports(string dir)
+    {
+        try
+        {
+            var files = Directory.EnumerateFiles(dir, "leftover-proxies-*.txt")
+                .Select(p => (Path: p, Written: File.GetLastWriteTime(p)))
+                .ToList();
+
+            foreach (string old in Services.ProxyOrphanScanner.SelectExpiredReports(
+                         files, DateTime.Now, Constants.ReportMaxAgeDays))
+            {
+                try
+                {
+                    File.Delete(old);
+                    _log.Info("ProxyDeploy", $"Removed aged leftover report {Path.GetFileName(old)}");
+                }
+                catch { /* one undeletable report must not stop the rest */ }
+            }
+        }
+        catch
+        {
+            // The report itself is already written; tidying is not worth surfacing an error for.
+        }
+    }
 
     [RelayCommand]
     private async Task DeleteSelectedOrphansAsync(CancellationToken ct)
