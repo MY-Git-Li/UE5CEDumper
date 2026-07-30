@@ -20,6 +20,105 @@ builds ≤696 in
 
 -----
 
+## 2026-07-30 - Leftover proxy cleanup: Report + Execute, and the first directory deletion in the app (build 2525)
+
+Uninstalling a game leaves its folder behind when our proxy DLL is in it — Steam will not delete a
+file it does not own. Measured on this machine: **9 leftover shells**, the oldest carrying a build-447
+proxy. New card in the Proxy Deploy tab finds them and removes them.
+
+### Two authorisations, not one — and the second is enforced by the kernel
+
+The first design bound "may we delete the file" to "is the folder clean", so a folder shared with a
+third party refused the whole row and left OUR litter on disk forever. The repo owner called that out:
+removing our own DLL is a **must**, the folder is what is negotiable. Separated:
+
+* **Our DLL always goes**, to the **Recycle Bin** (`SHFileOperationW` + `FOF_ALLOWUNDO`), never
+  unlinked, so a wrong call is recoverable. Refused on non-fixed drives, because `FOF_ALLOWUNDO` on a
+  volume with no recycler **silently hard-deletes** and the promise would be a lie.
+* **Folders** are removed leaf→root with the **NON-recursive** `Directory.Delete`, one level at a
+  time. That is a kernel-enforced emptiness check no pre-computed plan can fake: the walk stops by
+  itself at the first level that still holds anything, so "prune only while empty, stop at the level
+  with other files" needs no predicate at all. It also closes the scan→confirm→act race for free.
+
+That change also fixed a real defect in the first design: its "each ancestor holds only the path
+child" clause **refused 2 of the 9 real orphans** (`Deep Rock Galactic\FSD` also holds `Saved\`,
+`Romancing SaGa 2\Game` also holds `GlobalConfig\`), leaving their DLLs forever.
+
+### Report and Execute
+
+Two buttons. **Report…** writes `%LOCALAPPDATA%\UE5CEDumper\Reports\leftover-proxies-<stamp>.txt` and
+ShellExecutes it — the full plan, readable outside a modal, keepable. Built from the same rows Execute
+acts on, so the two cannot describe different plans. It states its own limits in its own text
+(snapshot, re-checked at execution), and three of those sentences are pinned by a test because without
+them the button is a list with no context.
+
+**"Smaller, never larger" is a property of the code, not a hope.** Execute re-plans from disk AND
+**intersects** the fresh plan with what the row authorised. Re-planning alone was not enough: a folder
+that merely stopped being shared between the scan and the click came back prunable, and we would have
+removed directories the confirmation said would be left in place.
+
+### Identity: two signals, OR
+
+`ProductName == "UE5CEDumper"` plus a corroborating identity field, OR **6 of 13 founding export
+names**. Measured: our proxies 13/13; System32 `version.dll` and `dxgi.dll` **0/13**, correctly
+refused. The export leg earns its place for a job no other signal can do — it is the only one
+evaluable through an **already-open handle**, which is what lets the pre-delete re-check hold
+`FileShare.Read | FileShare.Delete` across verify→recycle and deny a writer restoring a real
+`version.dll` (Steam "Verify integrity" is the realistic race, not an attacker).
+
+### Discovery: three sources, and my first instinct was wrong
+
+Measured coverage: the bounded Steam-library shape scan finds **9/9**; the DLL load log finds **2/9**.
+I had called the log the primary source — it is not; its value is the **non-Steam** paths the Steam
+scan structurally cannot see. Union of: Steam shape scan (authoritative), our deploy log, the DLL load
+banner. Steam's `content_log.txt` was evaluated and **rejected as a discovery source** — it records
+uninstall AppIDs but not paths (67% correlatable), its window is ~6 weeks, and it did not contain the
+actual case at all. `appmanifest` absence dominates it informationally with no time window.
+
+Liveness is two independent vetoes, either sufficient: no `appmanifest` naming the install dir (checked
+**per library** — measured, the same installdir existed in two libraries at once, one live one a shell),
+and no executable under the game root. Plus a leaf `.exe` pre-pass that also protects a proxy the user
+deployed on purpose into a live game.
+
+### Performance: 30 s → 0.7 s, and the cause was not where anyone guessed
+
+The first version took ~30 s. Not the scan (measured: 129 games, 2520 directory ops, **0.74 s**) and
+not the logs (**0.6 MB / 64 files**). It was `ClassifyLeaf` classifying EVERY file in every candidate
+folder — a live game's `Binaries\Win64` holds dozens of DLLs, each getting a version-resource read and
+possibly a full PE export parse. Early-exit on the first non-ours file (the quantifier is universal, so
+the verdict cannot change) plus the leaf `.exe` pre-pass: **725 ms**.
+
+### Adversarially reviewed, then fixed
+
+A 9-agent review found **zero data-loss paths** — the `SHFILEOPSTRUCTW` x64 layout was independently
+re-derived correct — but three places where consent did not match what ran, all now closed: the
+delete-path re-check dropped the live-game veto (empty set), the executed plan was a fresh plan rather
+than the confirmed one, and the confirmation printed "no game content anywhere" from a check that was
+**never implemented** (dead `LiveContentDirNames`; the only content signal is the executable walk).
+Also fixed: `TryReadAcfInstallDir` failed OPEN on a present-but-malformed `installdir` line — which
+tears precisely while Steam is writing it, i.e. while the game is live.
+
+UI defects from the same review: an unbounded list inside a `DockPanel.Top` child pushed the game
+DataGrid off-screen at the measured 9 rows (now `ScrollViewer MaxHeight`), failures rendered in success
+green, a cleaned row's checkbox stayed enabled, a Cancel button bound to the SCAN showed during a
+delete, and a vanished file reported "nothing was removed".
+
+### Verified, not assumed
+
+3059 tests. The Recycle Bin was proven by a real call **plus** counting
+`Shell.Application.Namespace(0xA)` before/after (34 → 35, item found by name) — `rc == 0` and
+`!File.Exists` is also what a hard delete looks like. AOT trimmed publish clean, no IL2xxx/IL3xxx.
+The measured filesystem traps behind all of this are in
+[lessons-learned.md](lessons-learned.md#windows-filesystem-traps-measured-while-building-leftover-proxy-cleanup-build-2525);
+the user-facing recipe is in [tips.md](tips.md).
+
+Also fixed on the way, a real bug this feature depended on: the DLL's load banner wrote its host path
+with `GetModuleFileNameA`, so non-codepage characters were destroyed — a real install logged as
+`EVERSPACE? 2`, and `?` is not a legal path character, making that log line unusable. Now UTF-8 encodes
+the wide path already in hand (`dll/src/Heiter.cpp`).
+
+-----
+
 ## 2026-07-30 - Pre-UE4 (UE3) refused by design; the too-old gate turns out to have never fired (build 2508)
 
 Prompted by a UE3 title — Gal\*Gun: Double Peace (`GG2Game.exe`, UE3 x64, 51 MB). The question was

@@ -27,9 +27,15 @@ public sealed class ProxyDeployService : IProxyDeployService
     // ────────────────────────────────────────────────────────────────
 
     public Task<IReadOnlyList<string>> GetSteamLibraryFoldersAsync(CancellationToken ct = default)
+        => Task.Run(GetSteamLibraryFoldersCore, ct);
+
+    /// <summary>
+    /// Synchronous core of <see cref="GetSteamLibraryFoldersAsync"/>. Extracted so callers that are
+    /// ALREADY on a worker thread can use it without nesting a second <c>Task.Run</c> or blocking on
+    /// a task — the leftover-proxy scan needs the library list from inside its own worker.
+    /// </summary>
+    private IReadOnlyList<string> GetSteamLibraryFoldersCore()
     {
-        return Task.Run(() =>
-        {
             var result = new List<string>();
             try
             {
@@ -77,7 +83,6 @@ public sealed class ProxyDeployService : IProxyDeployService
             }
 
             return (IReadOnlyList<string>)result;
-        }, ct);
     }
 
     private static string? GetSteamInstallPath()
@@ -1083,6 +1088,544 @@ public sealed class ProxyDeployService : IProxyDeployService
 
         ApplyStatus(update);   // caller's thread — see the threading contract above
         return ok;
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Leftover ("orphan") proxy cleanup — the impure shell
+    //
+    // ALL policy lives in ProxyOrphanScanner (pure, no System.IO). This region holds the only
+    // filesystem calls the feature makes, and there are deliberately few of them.
+    //
+    // THE ONE RULE A REVIEWER MUST ENFORCE HERE: no bare `catch { }` around a directory
+    // enumeration. The rest of this file swallows enumeration failures and continues, which is
+    // right for a SCAN and catastrophic for a DELETE predicate — combined with the laziness of
+    // Directory.Enumerate* it produces a partial listing indistinguishable from a clean folder.
+    // RealProbe returns null on any failure and PlanPrune refuses on null.
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The ONLY place this feature reads a directory. Bare <c>EnumerateFileSystemEntries</c>
+    /// overload on purpose: the <c>EnumerationOptions</c> overload defaults to
+    /// <c>AttributesToSkip = Hidden | System</c>, so a folder holding a hidden save file would
+    /// enumerate as holding only our DLL. Materialised INSIDE the try because the enumerator is
+    /// lazy and would otherwise throw mid-<c>foreach</c> and leave a half-built list.
+    /// </summary>
+    private static DirSnapshot? RealProbe(string path)
+    {
+        try
+        {
+            var di = new DirectoryInfo(path);
+            if (!di.Exists) return null;
+            bool reparse = (di.Attributes & FileAttributes.ReparsePoint) != 0;
+
+            var files = new List<string>();
+            var dirs = new List<string>();
+            foreach (string entry in Directory.EnumerateFileSystemEntries(path))
+            {
+                if (Directory.Exists(entry)) dirs.Add(Path.GetFileName(entry));
+                else files.Add(Path.GetFileName(entry));
+            }
+            return new DirSnapshot(path, files, dirs, reparse);
+        }
+        catch
+        {
+            // Missing, denied, or vanished mid-listing. NEVER "empty".
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Is this file one of ours? Two independent signals, OR-combined.
+    ///
+    /// <para>The resource signal (<c>ProductName</c> plus a corroborating identity field) covers
+    /// every proxy ever shipped. The export quorum exists for a different job: it is the only
+    /// signal evaluable through an ALREADY-OPEN handle, which is what lets the removal path
+    /// re-verify identity across the confirm→delete gap. Keeping both also means a build-system
+    /// change that dropped <c>version.rc</c> from the proxy targets would degrade recall instead of
+    /// silently recognising nothing.</para>
+    ///
+    /// <para>Returns <see cref="FileOwnership.Unreadable"/> rather than Foreign when the file
+    /// cannot be inspected at all, so the caller can say why instead of quietly skipping.</para>
+    /// </summary>
+    private FileOwnership ClassifyFileOwnership(string fullPath)
+    {
+        bool sawAnything = false;
+        try
+        {
+            var info = FileVersionInfo.GetVersionInfo(fullPath);
+            sawAnything = true;
+            if (string.Equals(info.ProductName, Constants.ProxyProductName, StringComparison.OrdinalIgnoreCase)
+                && (string.Equals(info.InternalName, "UE5Dumper", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(info.OriginalFilename, "UE5Dumper.dll", StringComparison.OrdinalIgnoreCase)))
+            {
+                return FileOwnership.Ours;
+            }
+        }
+        catch
+        {
+            // No version resource / not a PE / vanished — fall through to the export probe.
+        }
+
+        try
+        {
+            using var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read,
+                                          FileShare.Read | FileShare.Delete);
+            sawAnything = true;
+            if (ProxyImportAnalyzer.HasExportQuorum(fs)) return FileOwnership.Ours;
+        }
+        catch
+        {
+            return FileOwnership.Unreadable;
+        }
+
+        return sawAnything ? FileOwnership.Foreign : FileOwnership.Unreadable;
+    }
+
+    /// <summary>
+    /// Is this Steam game folder genuinely gone? TWO independent signals, either one vetoes:
+    /// a Steam <c>appmanifest</c> still naming the install directory, or any executable surviving
+    /// under the game root.
+    ///
+    /// <para>The manifest check must be PER LIBRARY, not global — measured on a real machine, the
+    /// same <c>installdir</c> name existed in two libraries at once, one installed and one an
+    /// orphaned shell. A global name match would have refused the shell forever.</para>
+    ///
+    /// <para>A manifest that exists but cannot be parsed counts as PRESENT. "Cannot tell" must fail
+    /// closed, and no attempt is made to interpret <c>StateFlags</c>: mid-update bit patterns are
+    /// guesswork, so any manifest at all is a refusal.</para>
+    /// </summary>
+    private static LivenessResult ProbeSteamLiveness(string commonRoot, string gameFolderName, string gameRoot)
+    {
+        try
+        {
+            string? steamapps = Path.GetDirectoryName(commonRoot);
+            if (steamapps != null && Directory.Exists(steamapps))
+            {
+                foreach (string acf in Directory.EnumerateFiles(steamapps, "appmanifest_*.acf"))
+                {
+                    string? installDir = TryReadAcfInstallDir(acf, out bool unreadable);
+                    if (unreadable)
+                    {
+                        return new LivenessResult(OrphanVerdict.SteamManifestPresent,
+                            $"A Steam manifest ({Path.GetFileName(acf)}) could not be read, so the game may still be installed.",
+                            "");
+                    }
+                    if (installDir != null &&
+                        string.Equals(installDir, gameFolderName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new LivenessResult(OrphanVerdict.SteamManifestPresent,
+                            $"Steam still lists this game as installed ({Path.GetFileName(acf)}).", "");
+                    }
+                }
+            }
+        }
+        catch
+        {
+            return new LivenessResult(OrphanVerdict.SteamManifestPresent,
+                "The Steam manifest folder could not be read, so installation state is unknown.", "");
+        }
+
+        // Second signal: any surviving executable means content is still there.
+        try
+        {
+            foreach (string exe in Directory.EnumerateFiles(gameRoot, "*.exe", SearchOption.AllDirectories))
+            {
+                return new LivenessResult(OrphanVerdict.LiveContentPresent,
+                    $"An executable is still present ({Path.GetFileName(exe)}), so the game is not gone.", "");
+            }
+        }
+        catch
+        {
+            return new LivenessResult(OrphanVerdict.LiveContentPresent,
+                "The game folder could not be fully read, so it is not treated as empty.", "");
+        }
+
+        return new LivenessResult(OrphanVerdict.Deletable, "",
+            "no executable survives anywhere under the game folder");
+    }
+
+    /// <summary>Read <c>"installdir"</c> from a Steam appmanifest. Sets
+    /// <paramref name="unreadable"/> when the file exists but could not be read at all.</summary>
+    private static string? TryReadAcfInstallDir(string acfPath, out bool unreadable)
+    {
+        unreadable = false;
+        try
+        {
+            foreach (string line in File.ReadLines(acfPath))
+            {
+                int k = line.IndexOf("\"installdir\"", StringComparison.OrdinalIgnoreCase);
+                if (k < 0) continue;
+
+                // The key IS here but the value could not be parsed — a truncated write, an unusual
+                // quoting, a format change. That must count as UNREADABLE, not as "this manifest
+                // names nothing": returning null here would let a manifest that really does claim
+                // this folder fall through and the game get treated as uninstalled.
+                int q1 = line.IndexOf('"', k + 12);
+                int q2 = q1 < 0 ? -1 : line.IndexOf('"', q1 + 1);
+                if (q1 < 0 || q2 < 0)
+                {
+                    unreadable = true;
+                    return null;
+                }
+                return line[(q1 + 1)..q2];
+            }
+            return null;
+        }
+        catch
+        {
+            unreadable = true;
+            return null;
+        }
+    }
+
+    public async Task<IReadOnlyList<OrphanProxy>> FindOrphanProxiesAsync(
+        OrphanScanSources sources,
+        IReadOnlySet<string> liveBinariesDirs,
+        IProgress<OrphanScanProgress>? progress,
+        CancellationToken ct = default)
+    {
+        // Rows are CONSTRUCTED on the worker, which is safe because nothing is bound yet — the same
+        // thing FindUeGamesAsync does with DetectedGame. What must not happen on a worker is
+        // MUTATING an already-bound row; see the threading contract on IProxyDeployService.
+        return await Task.Run(() =>
+        {
+            var libs = GetSteamLibraryFoldersCore();
+            var commonRoots = libs
+                .Select(l => Path.Combine(l, "steamapps", "common"))
+                .Where(Directory.Exists)
+                .ToList();
+
+            var candidates = new List<(string Dir, OrphanScanSources Src)>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void AddCandidate(string dir, OrphanScanSources src)
+            {
+                if (!ProxyOrphanScanner.TryNormalizeDir(dir, out string norm)) return;
+                int i = candidates.FindIndex(c => string.Equals(c.Dir, norm, StringComparison.OrdinalIgnoreCase));
+                if (i >= 0) { candidates[i] = (candidates[i].Dir, candidates[i].Src | src); return; }
+                if (seen.Add(norm)) candidates.Add((norm, src));
+            }
+
+            // Source 1 — the authoritative one: a bounded shape scan of the Steam libraries. It is
+            // the only source that sees a leftover nobody ever logged.
+            if (sources.HasFlag(OrphanScanSources.SteamShapeScan))
+            {
+                foreach (string common in commonRoots)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    foreach (string binDir in EnumerateBinariesWin64Under(common, ct))
+                        AddCandidate(binDir, OrphanScanSources.SteamShapeScan);
+                }
+            }
+
+            // Sources 2 and 3 — log-derived. Their unique value is NON-Steam locations, which
+            // source 1 structurally cannot see. Both are best-effort.
+            if (sources.HasFlag(OrphanScanSources.DeployLog))
+                foreach (string d in CandidatesFromLogs("view-*.log", isDllLog: false))
+                    AddCandidate(d, OrphanScanSources.DeployLog);
+
+            if (sources.HasFlag(OrphanScanSources.DllLoadLog))
+                foreach (string d in CandidatesFromLogs("init-*.log", isDllLog: true))
+                    AddCandidate(d, OrphanScanSources.DllLoadLog);
+
+            var rows = new List<OrphanProxy>();
+            int examined = 0;
+            foreach (var (dir, src) in candidates)
+            {
+                ct.ThrowIfCancellationRequested();
+                examined++;
+                progress?.Report(new OrphanScanProgress(dir, examined, rows.Count));
+
+                PrunePlan plan = ProxyOrphanScanner.PlanPrune(
+                    dir, commonRoots, liveBinariesDirs,
+                    RealProbe, ClassifyFileOwnership, ProbeSteamLiveness);
+
+                // Only surface rows that either can be acted on, or that hold something of ours and
+                // are blocked for a reason worth telling the user about. A folder with nothing of
+                // ours in it is not this feature's business and must not appear.
+                bool actionable = plan.Verdict is OrphanVerdict.Deletable or OrphanVerdict.FileOnly;
+                if (!actionable) continue;
+
+                rows.Add(BuildOrphanRow(dir, src, plan));
+            }
+
+            _log.Info("ProxyDeploy",
+                $"Orphan scan: {candidates.Count} candidate folder(s) examined, {rows.Count} leftover(s) found");
+            return (IReadOnlyList<OrphanProxy>)rows;
+        }, ct);
+    }
+
+    private OrphanProxy BuildOrphanRow(string dir, OrphanScanSources src, PrunePlan plan)
+    {
+        long size = 0;
+        string version = "";
+        foreach (string f in plan.FilesToRecycle)
+        {
+            try
+            {
+                var fi = new FileInfo(f);
+                if (fi.Exists) size += fi.Length;
+                if (version.Length == 0) version = GetDllVersion(f) ?? "";
+            }
+            catch { /* display-only detail; a missing size must not fail the row */ }
+        }
+
+        return new OrphanProxy
+        {
+            DllPath = plan.FilesToRecycle.Count > 0 ? plan.FilesToRecycle[0] : dir,
+            DllDirectory = dir,
+            DllNames = string.Join(", ", plan.FilesToRecycle.Select(Path.GetFileName)),
+            AuthorisedFiles = plan.FilesToRecycle,
+            SizeBytes = size,
+            FileVersion = version,
+            ChainDirs = plan.DirsToRemove,
+            TopmostRemovableDir = plan.DirsToRemove.Count > 0 ? plan.DirsToRemove[^1] : "",
+            Source = src,
+            Verdict = plan.Verdict,
+            Blockers = plan.Blockers,
+            EvidenceText = plan.EvidenceText,
+        };
+    }
+
+    /// <summary>
+    /// Bounded search for <c>...\Binaries\Win64</c> under a Steam <c>common</c> root. Bounded, not a
+    /// full walk: only the game folder and up to two levels below it, which covers every layout
+    /// measured (<c>&lt;Game&gt;\Binaries\Win64</c>, <c>&lt;Game&gt;\&lt;Proj&gt;\Binaries\Win64</c>
+    /// and the extra-wrapper <c>&lt;Game&gt;\Package\&lt;Proj&gt;\Binaries\Win64</c>).
+    /// </summary>
+    private static IEnumerable<string> EnumerateBinariesWin64Under(string common, CancellationToken ct)
+    {
+        List<string> gameDirs;
+        try { gameDirs = Directory.EnumerateDirectories(common).ToList(); }
+        catch { yield break; }
+
+        foreach (string game in gameDirs)
+        {
+            ct.ThrowIfCancellationRequested();
+            foreach (string bin in ProbeLevels(game, 2))
+                yield return bin;
+        }
+    }
+
+    private static IEnumerable<string> ProbeLevels(string root, int depth)
+    {
+        string direct = Path.Combine(root, "Binaries", "Win64");
+        bool directExists;
+        try { directExists = Directory.Exists(direct); } catch { directExists = false; }
+        if (directExists) yield return direct;
+
+        if (depth <= 0) yield break;
+
+        List<string> subs;
+        try { subs = Directory.EnumerateDirectories(root).ToList(); } catch { yield break; }
+        foreach (string sub in subs)
+            foreach (string bin in ProbeLevels(sub, depth - 1))
+                yield return bin;
+    }
+
+    /// <summary>
+    /// Candidate directories recovered from our own log tree. Best-effort by design: the log
+    /// retention window bounds how far back this can see, and a proxy deployed but never launched
+    /// leaves no DLL banner at all — which is exactly why the Steam shape scan is the primary
+    /// source and this is a complement.
+    /// </summary>
+    private IEnumerable<string> CandidatesFromLogs(string filePattern, bool isDllLog)
+    {
+        List<string> lines = new();
+        try
+        {
+            string logRoot = _platform.GetLogDirectoryPath();
+            if (!Directory.Exists(logRoot)) return Array.Empty<string>();
+
+            foreach (string dir in Directory.EnumerateDirectories(logRoot))
+            {
+                foreach (string file in Directory.EnumerateFiles(dir, filePattern))
+                {
+                    try { lines.AddRange(File.ReadLines(file)); }
+                    catch { /* one unreadable log must not stop the sweep */ }
+                }
+            }
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+        return ProxyOrphanScanner.CandidateDirsFrom(lines, isDllLog);
+    }
+
+    public async Task<OrphanRemovalResult> RemoveOrphanProxyAsync(
+        OrphanProxy row, IReadOnlySet<string> liveBinariesDirs, CancellationToken ct = default)
+    {
+        return await Task.Run(() =>
+        {
+            var libs = GetSteamLibraryFoldersCore();
+            var commonRoots = libs
+                .Select(l => Path.Combine(l, "steamapps", "common"))
+                .Where(Directory.Exists)
+                .ToList();
+
+            // RE-EVALUATE from scratch. The plan the user confirmed was computed before they read
+            // the dialog; anything could have changed since, and the cost of re-running it is one
+            // directory listing.
+            //
+            // liveBinariesDirs is threaded in from the row so the LiveGameFolder veto the SCAN applied
+            // is applied again here. Passing an empty set made the delete path strictly weaker than
+            // the scan that authorised it, which is the wrong direction for a re-check.
+            PrunePlan plan = ProxyOrphanScanner.PlanPrune(
+                row.DllDirectory, commonRoots, liveBinariesDirs,
+                RealProbe, ClassifyFileOwnership, ProbeSteamLiveness);
+
+            if (plan.Verdict is not (OrphanVerdict.Deletable or OrphanVerdict.FileOnly))
+            {
+                string why = plan.Blockers.Count > 0 ? plan.Blockers[0] : "no longer eligible";
+                _log.Warn("ProxyDeploy", $"Orphan removal refused on re-check ({row.DllDirectory}): {why}");
+                return new OrphanRemovalResult(false, $"Skipped — {why}", 0, 0);
+            }
+
+            // INTERSECT the fresh plan with what the user actually authorised. Re-planning alone is
+            // not enough: a folder that merely stopped being shared between the scan and the click
+            // would come back as prunable and we would remove directories the confirmation said would
+            // be left in place. The intersection is what makes "the result can be smaller, never
+            // larger" true rather than aspirational — and the report and dialog both say those words.
+            var authorisedFiles = new HashSet<string>(row.AuthorisedFiles, StringComparer.OrdinalIgnoreCase);
+            var authorisedDirs = new HashSet<string>(row.ChainDirs, StringComparer.OrdinalIgnoreCase);
+            var filesToRecycle = plan.FilesToRecycle.Where(authorisedFiles.Contains).ToList();
+            var dirsToRemove = plan.DirsToRemove.Where(authorisedDirs.Contains).ToList();
+
+            if (filesToRecycle.Count < plan.FilesToRecycle.Count || dirsToRemove.Count < plan.DirsToRemove.Count)
+            {
+                _log.Info("ProxyDeploy",
+                    $"Orphan removal narrowed to what was confirmed for {row.DllDirectory}: " +
+                    $"{filesToRecycle.Count}/{plan.FilesToRecycle.Count} file(s), " +
+                    $"{dirsToRemove.Count}/{plan.DirsToRemove.Count} folder(s)");
+            }
+            if (filesToRecycle.Count == 0)
+                return new OrphanRemovalResult(false, "Skipped — nothing left that you confirmed", 0, 0);
+
+            var locked = new List<string>();
+            var readOnly = new List<string>();
+            var failed = new List<string>();
+            int recycled = 0;
+            int vanished = 0;   // already gone before we got to it — not a failure, not a removal
+
+            foreach (string file in filesToRecycle)   // the CONFIRMED subset, not the fresh plan
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var fi = new FileInfo(file);
+                    if (!fi.Exists)
+                    {
+                        // Already gone (a parallel cleanup, or the user deleted it by hand while the
+                        // dialog was open). Count it so the outcome does not claim "nothing was
+                        // removed" and does not invent a cause that never occurred.
+                        vanished++;
+                        continue;
+                    }
+
+                    // Never clear ReadOnly: a user who set it meant it. Report and move on.
+                    if ((fi.Attributes & FileAttributes.ReadOnly) != 0)
+                    {
+                        readOnly.Add(fi.Name);
+                        continue;
+                    }
+
+                    // Final identity check through a HELD handle. FileShare.Read denies a writer
+                    // trying to replace the file (Steam "Verify integrity" restoring a real
+                    // version.dll is the realistic race, not an attacker), while FileShare.Delete
+                    // still permits the recycle below.
+                    using (var fs = new FileStream(file, FileMode.Open, FileAccess.Read,
+                                                   FileShare.Read | FileShare.Delete))
+                    {
+                        if (!ProxyImportAnalyzer.HasExportQuorum(fs))
+                        {
+                            _log.Warn("ProxyDeploy",
+                                $"Orphan removal skipped {file}: failed the pre-delete identity re-check");
+                            failed.Add(fi.Name);
+                            continue;
+                        }
+                    }
+
+                    if (_platform.MoveToRecycleBin(file))
+                    {
+                        recycled++;
+                        _log.Info("ProxyDeploy", $"Recycled leftover proxy {file}");
+                    }
+                    else
+                    {
+                        failed.Add(fi.Name);
+                        _log.Warn("ProxyDeploy", $"Could not recycle {file} (refused or no Recycle Bin)");
+                    }
+                }
+                catch (IOException ex) when (ex.HResult == unchecked((int)0x80070020)
+                                          || ex.Message.Contains("being used", StringComparison.OrdinalIgnoreCase))
+                {
+                    locked.Add(Path.GetFileName(file));
+                    _log.Warn("ProxyDeploy", $"Leftover proxy {file} is locked");
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    failed.Add(Path.GetFileName(file));
+                    _log.Warn("ProxyDeploy", $"Access denied removing {file}: {ex.Message}");
+                }
+                catch (Exception ex)
+                {
+                    failed.Add(Path.GetFileName(file));
+                    _log.Error("ProxyDeploy", $"Unexpected error removing {file}: {ex.Message}");
+                }
+            }
+
+            // Prune only when EVERY file went. A folder that still holds one of our DLLs must keep
+            // its folder, or the next scan cannot find it again.
+            int dirsRemoved = 0;
+            string? pruneStopReason = null;
+            bool allFilesGone = recycled + vanished == filesToRecycle.Count && locked.Count == 0
+                                && readOnly.Count == 0 && failed.Count == 0;
+            if (allFilesGone)
+            {
+                foreach (string dir in dirsToRemove)   // deepest-first, and only what was confirmed
+                {
+                    ct.ThrowIfCancellationRequested();
+                    try
+                    {
+                        // NON-recursive on purpose. This is the kernel-enforced emptiness check:
+                        // anything left inside — including something created while the user read
+                        // the dialog — makes this throw, and the walk stops right there.
+                        Directory.Delete(dir, recursive: false);
+                        dirsRemoved++;
+                        _log.Info("ProxyDeploy", $"Removed empty folder {dir}");
+                    }
+                    catch (IOException ex)
+                    {
+                        // EXPECTED and the whole point: the folder still holds something, so it and
+                        // everything above it are kept. Info, not a warning.
+                        pruneStopReason = "a folder still had something in it";
+                        _log.Info("ProxyDeploy", $"Stopped pruning at {dir} (not empty): {ex.Message}");
+                        break;
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        // NOT the same thing, and it must not read as "not empty" to the user: the
+                        // folder may well be empty and we simply are not allowed to remove it. Warn,
+                        // and say so in the result text so the difference is visible.
+                        pruneStopReason = $"permission was denied on {Path.GetFileName(dir)}";
+                        _log.Warn("ProxyDeploy", $"Access denied removing folder {dir}: {ex.Message}");
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        pruneStopReason = $"an unexpected error on {Path.GetFileName(dir)}";
+                        _log.Error("ProxyDeploy", $"Unexpected error removing folder {dir}: {ex.Message}");
+                        break;
+                    }
+                }
+            }
+
+            var (success, message) = ProxyOrphanScanner.ResolveRemovalOutcome(
+                recycled, vanished, dirsRemoved, dirsToRemove.Count, locked, readOnly, failed,
+                pruneStopReason);
+            return new OrphanRemovalResult(success, message, recycled, dirsRemoved);
+        }, ct);
     }
 
     // ────────────────────────────────────────────────────────────────

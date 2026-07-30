@@ -14,7 +14,13 @@ public partial class ProxyDeployPanel : UserControl
         DataContextChanged += (_, _) =>
         {
             if (DataContext is ProxyDeployViewModel vm)
+            {
                 vm.PickProcessAsync = () => ProcessPickerWindow.ShowAsync(vm.ListGameProcessesAsync);
+                // Same reason: the VM asks for a confirmation and never knows a Window exists.
+                // Note the VM REFUSES to delete when this is unset, rather than proceeding — the
+                // dialog is where the exact paths are disclosed, so no dialog means no deletion.
+                vm.ConfirmOrphanRemovalAsync = OrphanCleanupConfirmDialog.ShowAsync;
+            }
         };
     }
 }

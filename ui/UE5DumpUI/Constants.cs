@@ -28,6 +28,19 @@ public static class Constants
     public const int MaxProcessFolders = 20;           // Clean up oldest beyond this
     public const int LogMaxAgeDays = 21;               // Keep this in sync with Grimoire::LOG_RETENTION_DAYS
 
+    // Leftover-proxy cleanup reports (Reports/leftover-proxies-<stamp>.txt).
+    //
+    // AGE, not a generation count, for the same reason the logs above use age — and the flaw is the
+    // same one, just driven by clicks instead of launches: comparing before/after can produce several
+    // reports in one session, and "keep the last 5" would then evict a genuinely older useful one
+    // regardless of its date.
+    //
+    // Longer than the log window on purpose: a report is the record of a DESTRUCTIVE action, which is
+    // exactly the thing someone comes back to look at. Pruned when a new report is written rather than
+    // at startup (these are user-initiated artefacts, so a launch that never touches the feature must
+    // not silently delete anything), and the NEWEST report is never pruned whatever its age.
+    public const int ReportMaxAgeDays = 30;
+
     // Log category names
     public const string LogCatInit = "init";
     public const string LogCatPipe = "pipe";

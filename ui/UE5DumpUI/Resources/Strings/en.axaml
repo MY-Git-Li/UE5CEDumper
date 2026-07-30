@@ -754,6 +754,30 @@
     <sys:String x:Key="str.ProxyDeploy.RefreshDrives">Refresh Drives</sys:String>
     <sys:String x:Key="str.ProxyDeploy.CancelScan">Cancel</sys:String>
 
+    <!-- Leftover ("orphan") proxy cleanup. Uninstalling a game leaves its folder behind BECAUSE our
+         proxy DLL is a file Steam does not own, so an empty shell survives with our DLL inside it. -->
+    <sys:String x:Key="str.ProxyDeploy.Orphans.Header">Leftover proxy DLLs</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.Intro">Uninstalling a game leaves its folder behind when our proxy DLL is still in it — Steam will not delete a file it does not own. This finds those leftovers. Nothing is removed until you check a row and confirm.</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.Scan">Find leftovers</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.ScanTip">Scans your Steam libraries for folders that hold only our proxy DLL, plus any location our own logs show a proxy was deployed to. Reports only — it never deletes.</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.Report">Report…</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.ReportTip">Writes a dry-run text file listing exactly what would be removed and what would be left alone, then opens it. Changes nothing on disk.</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.Delete">Delete checked ({0})</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.DeleteTip">Moves the checked DLLs to the Recycle Bin, then removes the folders they leave empty. You will see the exact paths first.</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.OpenFolder">Open folder</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.NoneFound">No leftover proxy DLLs found.</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.FileOnlyNote">Outside a Steam library — only the DLL is removed, the folders are left alone.</sys:String>
+
+    <!-- Confirmation window -->
+    <sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmTitle">Remove leftover proxy DLLs?</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmLead">Our DLLs below are moved to the Recycle Bin, so this can be undone from there. Folders are then removed one level at a time and only while each is left completely empty — the moment a folder still holds anything, that folder and everything above it are kept.</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmFilesHeader">Files moved to the Recycle Bin</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmDirsHeader">Folders tried, in this order — each only if it is left empty</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmWhyHeader">Why this is judged a leftover</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmKeptNote">Not touched: {0}</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmYes">Move to Recycle Bin</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmNo">Cancel</sys:String>
+
     <!-- Export -->
     <sys:String x:Key="str.Toolbar.Options">⚙ Options</sys:String>
     <sys:String x:Key="str.Toolbar.Export">Export</sys:String>

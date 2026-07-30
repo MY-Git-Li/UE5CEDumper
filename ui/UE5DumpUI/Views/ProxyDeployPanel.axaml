@@ -124,6 +124,90 @@
                  VerticalAlignment="Center" Margin="8,0"/>
     </StackPanel>
 
+    <!-- Leftover proxy cleanup. A vertical list rather than the Drives card's WrapPanel because
+         these rows carry full absolute paths. Rows default UNCHECKED and there is deliberately no
+         select-all: this is the only destructive action in the panel, so each row is opted into
+         individually. -->
+    <Border DockPanel.Dock="Top" Background="#252526" CornerRadius="4" Padding="8"
+            Margin="0,0,0,8">
+      <StackPanel Spacing="6">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <TextBlock Text="{StaticResource str.ProxyDeploy.Orphans.Header}"
+                     Foreground="#CCCCCC" VerticalAlignment="Center" FontWeight="Bold"/>
+          <Button Content="{StaticResource str.ProxyDeploy.Orphans.Scan}"
+                  Command="{Binding ScanOrphansCommand}"
+                  ToolTip.Tip="{StaticResource str.ProxyDeploy.Orphans.ScanTip}"
+                  Classes="accent" Padding="12,4"/>
+          <!-- Bound to IsScanning, NOT to IsRemovingOrphans: this cancels the SCAN, and showing it
+               during a delete would offer to cancel an operation it is not wired to. -->
+          <Button Content="{StaticResource str.ProxyDeploy.CancelScan}"
+                  Command="{Binding ScanOrphansCancelCommand}"
+                  IsVisible="{Binding IsScanning}"
+                  Padding="12,4"/>
+          <!-- Report and Execute deliberately side by side: the dry run is a first-class action, not
+               something buried inside the confirmation. It writes a file the user reads at their own
+               pace, outside any modal, before authorising anything. -->
+          <Button Content="{StaticResource str.ProxyDeploy.Orphans.Report}"
+                  Command="{Binding WriteOrphanReportCommand}"
+                  ToolTip.Tip="{StaticResource str.ProxyDeploy.Orphans.ReportTip}"
+                  IsEnabled="{Binding CanWriteOrphanReport}"
+                  Padding="12,4" FontSize="11"/>
+          <Button Content="{Binding DeleteOrphansLabel}"
+                  Command="{Binding DeleteSelectedOrphansCommand}"
+                  ToolTip.Tip="{StaticResource str.ProxyDeploy.Orphans.DeleteTip}"
+                  IsEnabled="{Binding HasOrphanSelection}"
+                  Foreground="#E05252" Padding="12,4" FontSize="11"/>
+        </StackPanel>
+        <TextBlock Text="{StaticResource str.ProxyDeploy.Orphans.Intro}"
+                   Foreground="#8A8A8A" FontSize="11" TextWrapping="Wrap"/>
+        <TextBlock Text="{StaticResource str.ProxyDeploy.Orphans.NoneFound}"
+                   Foreground="#7EC97A" FontSize="11"
+                   IsVisible="{Binding ShowNoOrphansFound}"/>
+        <!-- MaxHeight + scroller is load-bearing, not polish: a DockPanel measures its Top children
+             with infinite available height, so an unbounded list of 9 rows (the measured count on a
+             real machine) takes the space the game DataGrid needs and pushes it out of the panel.
+             IsVisible keeps the list costing nothing until a scan has run. -->
+        <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      IsVisible="{Binding OrphanScanRan}">
+        <ItemsControl ItemsSource="{Binding Orphans}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="m:OrphanProxy">
+              <Border Background="#2D2D30" CornerRadius="3" Padding="6" Margin="0,2">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <CheckBox Grid.Column="0"
+                            IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                            IsEnabled="{Binding IsActionable}"
+                            VerticalAlignment="Top" Margin="0,0,6,0"/>
+                  <StackPanel Grid.Column="1" Spacing="1">
+                    <TextBlock Text="{Binding DllDirectory}"
+                               Foreground="#D4D4D4" FontFamily="Consolas" FontSize="11"
+                               TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                      <TextBlock Text="{Binding DllNames}" Foreground="#4EC9B0" FontSize="11"/>
+                      <TextBlock Text="{Binding FileVersion}" Foreground="#8A8A8A" FontSize="11"/>
+                      <TextBlock Text="{Binding SizeText}" Foreground="#8A8A8A" FontSize="11"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding ActionSummary}"
+                               Foreground="#E6A817" FontSize="11" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding StatusText}"
+                               Foreground="{Binding StatusColor}" FontSize="11" TextWrapping="Wrap"
+                               IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                  </StackPanel>
+                  <Button Grid.Column="2"
+                          Content="{StaticResource str.ProxyDeploy.Orphans.OpenFolder}"
+                          Command="{Binding $parent[ItemsControl].((vm:ProxyDeployViewModel)DataContext).OpenOrphanFolderCommand}"
+                          CommandParameter="{Binding}"
+                          Padding="8,2" FontSize="11" VerticalAlignment="Top"/>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        </ScrollViewer>
+      </StackPanel>
+    </Border>
+
     <!-- Route guidance. Deliberately always-visible rather than a tooltip: this
          panel is where the user picks between deploying a proxy and injecting,
          and the three delivery routes are not equally good. A tooltip here would
