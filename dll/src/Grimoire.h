@@ -276,6 +276,21 @@ namespace Grimoire {
 // cannot express. Read off Epic's source at tags 4.10.2-release / 4.11.0-release.
 constexpr uint32_t MIN_SUPPORTED_UE_VERSION = 411;
 
+// Sentinel UEVersion meaning "POSITIVELY IDENTIFIED as pre-UE4" (Unreal Engine 3 or older),
+// as distinct from "detection found nothing, so we are guessing". Fits the existing
+// major*100+minor convention so it reads as UE 3.0 and sorts below MIN_SUPPORTED_UE_VERSION —
+// which is the whole point: the existing too-old gate fires on it with no new flag to plumb,
+// and the value survives the HintCache round-trip for free (a bool computed inside detection
+// would be absent on launch 2, because a cache hit skips detection entirely).
+//
+// A pre-UE4 engine is not "a version we are behind on", it is a DIFFERENT OBJECT MODEL: no
+// FUObjectArray, no FUObjectItem, no FNamePool, and UObject::Class / UObject::Name are not at
+// the offsets every scan validator hardcodes (measured on a UE3 shipping binary: Outer @+0x40,
+// Class @+0x50, vs OFF_UOBJECT_CLASS = 0x10 here). So ValidateCyclicClassChain rejects even a
+// CORRECT UE3 GObjects address, and neither a UE-version override nor an Extra Scan can bridge
+// it. Skipping the scan and saying so is the only honest answer.
+constexpr uint32_t PRE_UE4_SENTINEL_VERSION = 300;
+
 constexpr int OBJECTS_PER_CHUNK        = 64 * 1024;
 
 // --- FNamePool ---

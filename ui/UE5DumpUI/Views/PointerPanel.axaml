@@ -79,6 +79,15 @@
             <TextBlock Text="{StaticResource str.Pointers.VersionTooOld}"
                        Foreground="#E88" FontSize="11" TextWrapping="Wrap"/>
           </Border>
+          <!-- Pre-UE4 (UE3) positively identified. Mutually exclusive with the banner above:
+               both are driven by IsVersionTooOld and split on the sentinel version, because the
+               two refusals have different reasons AND different remedies. -->
+          <Border Background="#3A2226" BorderBrush="#E05252" BorderThickness="1"
+                  CornerRadius="4" Padding="10,8" Margin="0,6,0,0"
+                  IsVisible="{Binding ShowPreUE4Warning}">
+            <TextBlock Text="{StaticResource str.Pointers.EnginePreUE4}"
+                       Foreground="#E88" FontSize="11" TextWrapping="Wrap"/>
+          </Border>
 
           <!-- Legacy "version not detected" warning, kept for backward compat -->
           <TextBlock Text="{StaticResource str.Pointers.VersionWarning}"

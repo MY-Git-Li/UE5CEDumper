@@ -281,6 +281,60 @@ public class DumpServiceTests
     }
 
     [Fact]
+    public async Task GetPointersAsync_CarriesPreUE4SentinelAndRefusalFlag()
+    {
+        // A pre-UE4 (UE3) refusal reaches the UI as ue_version = 300 (the sentinel) plus
+        // is_version_too_old = true. Both must survive the get_pointers-only path, because the
+        // sentinel is the ONLY thing that tells PointerPanelViewModel which of the two refusal
+        // banners to show — there is deliberately no extra pipe field for it.
+        _pipe.SetHandler(req =>
+        {
+            var cmd = req["cmd"]?.GetValue<string>();
+            if (cmd == "get_pointers")
+                return new JsonObject
+                {
+                    ["ok"] = true,
+                    ["ue_version"] = 300,
+                    ["is_version_too_old"] = true,
+                    ["gobjects"] = "0x0",
+                    ["gnames"] = "0x0",
+                    ["object_count"] = 0,
+                };
+            return new JsonObject { ["ok"] = true };
+        });
+
+        var svc = CreateService();
+        var state = await svc.GetPointersAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(300, state.UEVersion);
+        Assert.True(state.IsVersionTooOld);
+    }
+
+    [Fact]
+    public async Task GetPointersAsync_OmittedRefusalFlagReadsAsNotGated()
+    {
+        // An older DLL omits is_version_too_old entirely; "not gated" is the right default.
+        _pipe.SetHandler(req =>
+        {
+            var cmd = req["cmd"]?.GetValue<string>();
+            if (cmd == "get_pointers")
+                return new JsonObject
+                {
+                    ["ok"] = true,
+                    ["ue_version"] = 504,
+                    ["gobjects"] = "0x1",
+                    ["gnames"] = "0x2",
+                };
+            return new JsonObject { ["ok"] = true };
+        });
+
+        var svc = CreateService();
+        var state = await svc.GetPointersAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(state.IsVersionTooOld);
+    }
+
+    [Fact]
     public async Task SetUeVersionOverrideAsync_SendsCorrectPayloadAndRefetches()
     {
         JsonObject? lastOverrideReq = null;
@@ -483,6 +537,124 @@ public class DumpServiceTests
 
         Assert.Equal(504, state.UEVersion);
         Assert.False(state.VersionDetected);
+    }
+
+    // Regression: BuildEngineState took `bool versionDetected = true` — a non-nullable default
+    // with no "absent" sentinel — and never read ptrs["version_detected"]. InitAsync passed the
+    // real value, GetPointersAsync did not, so the honest
+    // "⚠ Version not detected — inferred from engine analysis (custom UE build?)" badge
+    // (PointerPanelViewModel.ShowVersionWarning) showed after connect and then VANISHED on the
+    // next pointer refresh. The DLL puts the field on every snapshot (Fern.cpp
+    // FillPointerSnapshot) — the UI has to read it.
+    [Fact]
+    public async Task GetPointersAsync_ParsesVersionDetectedFalse()
+    {
+        _pipe.SetHandler(req =>
+        {
+            var cmd = req["cmd"]?.GetValue<string>();
+            if (cmd == "get_pointers")
+                return new JsonObject
+                {
+                    ["ok"] = true,
+                    ["gobjects"] = "0x7FF600A12340",
+                    ["gnames"] = "0x7FF600B56780",
+                    ["object_count"] = 32759,
+                    ["ue_version"] = 504,
+                    ["version_detected"] = false,
+                    ["is_low_confidence"] = true,
+                };
+            return new JsonObject { ["ok"] = true };
+        });
+
+        var svc = CreateService();
+        var state = await svc.GetPointersAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(504, state.UEVersion);
+        Assert.False(state.VersionDetected);
+        // is_low_confidence was already read from the wire (bool? param) — pin it so the two
+        // flags can't diverge again.
+        Assert.True(state.IsLowConfidence);
+    }
+
+    [Fact]
+    public async Task GetPointersAsync_VersionDetectedDefaultsTrueWhenFieldAbsent()
+    {
+        // A DLL that predates the flag omits it → "detected", i.e. no warning badge.
+        _pipe.SetHandler(_ => new JsonObject
+        {
+            ["ok"] = true,
+            ["gobjects"] = "0x10",
+            ["gnames"] = "0x20",
+            ["object_count"] = 1,
+        });
+
+        var svc = CreateService();
+        var state = await svc.GetPointersAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(state.VersionDetected);
+        Assert.False(state.IsLowConfidence);
+    }
+
+    // The user-visible symptom: any refresh routed through GetPointersAsync (invoke-timeout
+    // change, UE version override) used to reset VersionDetected to the `= true` default.
+    // Models The Adventures of Elliot: ueVersion=504, versionDetected=false, lowConfidence=true.
+    [Fact]
+    public async Task SetInvokeTimeoutAsync_PreservesVersionDetectedFalse()
+    {
+        _pipe.SetHandler(req =>
+        {
+            var cmd = req["cmd"]?.GetValue<string>();
+            if (cmd == "set_invoke_timeout")
+                return new JsonObject { ["ok"] = true, ["invoke_timeout_ms"] = 15000, ["persisted"] = true };
+            if (cmd == "get_pointers")
+                return new JsonObject
+                {
+                    ["ok"] = true,
+                    ["gobjects"] = "0x10",
+                    ["gnames"] = "0x20",
+                    ["object_count"] = 5,
+                    ["ue_version"] = 504,
+                    ["version_detected"] = false,
+                    ["is_low_confidence"] = true,
+                    ["is_user_override"] = false,
+                    ["invoke_timeout_ms"] = 15000,
+                };
+            return new JsonObject { ["ok"] = true };
+        });
+
+        var svc = CreateService();
+        var state = await svc.SetInvokeTimeoutAsync(15000, persist: true, TestContext.Current.CancellationToken);
+
+        Assert.Equal(15000, state.InvokeTimeoutMs);
+        Assert.False(state.VersionDetected);   // warning badge must survive the refresh
+        Assert.True(state.IsLowConfidence);
+        Assert.False(state.IsUserOverride);
+    }
+
+    [Fact]
+    public async Task GetScanStatusAsync_CompletionParsesVersionDetectedFalse()
+    {
+        // scan_status completion carries the same FillPointerSnapshot payload as get_pointers.
+        _pipe.SetHandler(_ => new JsonObject
+        {
+            ["ok"] = true,
+            ["running"] = false,
+            ["phase"] = 3,
+            ["status_text"] = "Complete",
+            ["scanned"] = true,
+            ["gobjects"] = "0x10",
+            ["gnames"] = "0x20",
+            ["object_count"] = 7,
+            ["ue_version"] = 504,
+            ["version_detected"] = false,
+        });
+
+        var svc = CreateService();
+        var status = await svc.GetScanStatusAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(status.EngineState);
+        Assert.Equal(504, status.EngineState!.UEVersion);
+        Assert.False(status.EngineState.VersionDetected);
     }
 
     [Fact]

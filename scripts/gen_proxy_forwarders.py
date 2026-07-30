@@ -284,6 +284,10 @@ def emit_def(name, dll, exports, ue5_exports):
         BANNER.format(dll=dll).replace("//", ";").rstrip(),
         "; ============================================================",
         "",
+        # LIBRARY sets IMAGE_EXPORT_DIRECTORY.Name -- what the module reports as
+        # its own name. Windows resolves the proxy by on-disk filename, but a
+        # wrong name here misleads any tool that reports module identity.
+        f"LIBRARY {name.lower()}",
         "EXPORTS",
         f"    ; --- Windows {dll} forwarding (export = asm thunk @ real-ordinal) ---",
     ]
@@ -301,7 +305,11 @@ def ue5_export_list():
     out, seen_ue5 = [], False
     for line in open(path, encoding="utf-8"):
         s = line.strip()
-        if not s or s.startswith(";") or s == "EXPORTS":
+        # LIBRARY names the module; it is per-proxy and emit_def writes its own.
+        # Harvesting dxgi's would plant "LIBRARY dxgi" inside the generated
+        # EXPORTS block, making the built DLL report dxgi.dll as its own name.
+        if (not s or s.startswith(";") or s == "EXPORTS"
+                or s.upper().startswith("LIBRARY")):
             continue
         if "=" in s:            # a forwarding entry, not ours
             continue

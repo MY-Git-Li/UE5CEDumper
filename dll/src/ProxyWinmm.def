@@ -12,6 +12,7 @@
 ; System32 winmm.dll. DO NOT EDIT BY HAND -- re-run the generator.
 ; ============================================================
 
+LIBRARY winmm
 EXPORTS
     ; --- Windows winmm.dll forwarding (export = asm thunk @ real-ordinal) ---
     mciExecute                    = f0 @3
@@ -196,7 +197,6 @@ EXPORTS
     waveOutWrite                  = f179 @182
 
     ; --- UE5CEDumper C ABI (unchanged from the other proxies) ---
-    LIBRARY dxgi
     UE5_Init
     UE5_Shutdown
     UE5_GetVersion

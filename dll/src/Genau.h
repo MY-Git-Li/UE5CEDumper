@@ -32,7 +32,12 @@ using ScanProgressFn = std::function<void(int phase, const char* text)>;
 // rev 2 (build ~2394): VERSIONINFO StringFileInfo ProductVersion/FileVersion fallback,
 // UTF-16LE pass in the Tier-1 memory scan, and Tier 1 no longer requires the needle
 // table's trailing '.' (real tags are "++UE4+Release-4.27", so it never matched before).
-constexpr uint32_t kVersionDetectLogicRev = 2;
+// rev 3: pre-UE4 (UE3) marker check in DetectVersionDetailed's terminal branch, returning
+// Grimoire::PRE_UE4_SENTINEL_VERSION. The bump is MANDATORY, not cosmetic: a UE3 game that
+// already ran under rev 2 is cached as ueVersion=504, and the cache-reuse branch would restore
+// that forever without ever re-detecting — i.e. the fix would silently not apply to the very
+// machine that hit the problem.
+constexpr uint32_t kVersionDetectLogicRev = 3;
 
 struct EnginePointers {
     uintptr_t GObjects  = 0;   // FUObjectArray*
@@ -45,6 +50,18 @@ struct EnginePointers {
     bool      bLowConfidence   = false;// true = detection used Tier 3 bare-pattern OR publisher-bias fallback
 
     /// true = the engine predates anything this dumper can read, so the scan was SKIPPED.
+    ///
+    /// Covers TWO cases, distinguished downstream by UEVersion alone (no extra field):
+    ///   * UEVersion 400..410 — a CONFIDENTLY detected UE 4.0-4.10, i.e. "the right family,
+    ///     a version too old". Only reachable via DetectVersionFromPEResource's major==4
+    ///     branch; the memory needle table floors at 4.18 and can never go below it.
+    ///   * UEVersion == Grimoire::PRE_UE4_SENTINEL_VERSION (300) — positively identified as
+    ///     pre-UE4 (UE3) by CountPreUE4Markers, i.e. "not this engine family at all". Set only
+    ///     in DetectVersionDetailed's terminal branch, so it requires that the PE resource and
+    ///     all three memory tiers already found nothing.
+    /// The UI must NOT collapse the two: 4.10's remedy line ("set an override") is actively
+    /// wrong for UE3, whose override list has no expressible value and whose structures do not
+    /// exist at any version. See str.Pointers.VersionTooOld vs str.Pointers.EnginePreUE4.
     ///
     /// UE 4.10 and earlier have no `FUObjectItem` at all: `FUObjectArray::ObjObjects` is a
     /// `TStaticIndirectArrayThreadSafeRead` of raw `UObjectBase*` (stride 8) whose chunk table is

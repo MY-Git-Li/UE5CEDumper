@@ -20,6 +20,140 @@ builds ≤696 in
 
 -----
 
+## 2026-07-30 - Pre-UE4 (UE3) refused by design; the too-old gate turns out to have never fired (build 2508)
+
+Prompted by a UE3 title — Gal\*Gun: Double Peace (`GG2Game.exe`, UE3 x64, 51 MB). The question was
+whether the existing `MIN_SUPPORTED_UE_VERSION = 411` gate already stops it. It does not, and the
+reason generalises further than expected.
+
+### The gate could not fire, and three of its four conjuncts failed
+
+Measured against the real binary: `DetectVersionFromPEResource` returns 0 (its `ProductVersion` is a
+**game** version, `1.0.10897.0` — `major` is neither 4 nor 5, and the StringFileInfo strings hold no
+`++UEx+Release-` tag). Re-running `DetectVersionDetailed`'s Tier 1/2/3 loops over the reconstructed
+mapped image: **zero hits on all three tiers** — the needle table floors at `"4.18."`, so no entry
+can match a UE3 version. `CompanyName` is `Epic Games, Inc.`, and `kPublishers` holds only
+`SQUARE ENIX`, so the publisher bias does not apply either. Control lands on `Genau.cpp`'s
+detection-failed fallback: **`UEVersion = 504`, `bLowConfidence = true`, `bVersionDetected = false`**.
+
+So the gate's four-way AND fails on `504 < 411` **first** — the decisive one. Correcting the
+confidence flags would change nothing; the fallback *number* is above the floor.
+
+### A stale comment, and a stronger claim than it was making
+
+The gate's rationale comment named **Fantasynth and NEKOPALIVE** as the titles that burned ~4 s to
+reach "no winner" before it existed. Both are wrong for that role, and the HintCache proves it:
+`Nekopara.exe` is recorded `ueVersion=411, versionDetected=true, gObjects.method="aob"` and
+`Fantasynth-Win64-Shipping.exe` `ueVersion=413, ..., "aob"` — both at or **above** the floor, both
+with GObjects **resolved**. `test-games.md` already lists NEKOPALIVE as fully working. They are the
+two titles that *define* the 4.11 support floor, not examples of gated failures. Comment corrected.
+
+The defensible form of the claim is broader: **across all 30 games in the local HintCache the
+minimum detected version is 411, so this gate has never fired on a real title.** Its only trigger is
+a PE `ProductVersion` of literally 4.0–4.10, which no installed game reports. It gates "an honestly
+self-labelled UE 4.10", not "an engine too old" — the 4.10 evidence is the two reference builds in
+the AOB corpus.
+
+### `Grimoire::PRE_UE4_SENTINEL_VERSION = 300`
+
+`CountPreUE4Markers` runs in `DetectVersionDetailed`'s **terminal branch** and, on ≥2 of 4 markers,
+returns 300 at tier 1 — which trips the existing gate. Two decisions carried the design:
+
+* **A sentinel number, not a new bool.** A flag computed inside detection would be false on launch 2,
+  because a HintCache hit skips detection entirely; the number round-trips for free. It also reuses
+  all 12 non-presentation wiring sites verbatim — no new `EnginePointers` field, `Frieren` global,
+  `Fern` JSON key, `EngineState` property or `DumpService` parse line.
+* **Terminal-branch placement is the false-positive defence.** Reaching that line already proves the
+  PE resource, Tier 1 (ASCII + UTF-16LE), Tier 2 and Tier 3 all found nothing, so "no UE4/UE5
+  evidence" is a property of the control flow rather than a separate test that could be written
+  wrong. Absence alone is never sufficient — that is exactly the state of SUPPORTED stripped-tag
+  titles (Elliot detects as 0 by the identical route), so gating on it would refuse working games.
+
+Markers, measured: `UnrealEngine3`, `SeqAct_` (UE3 Kismet's native-registration table — the object
+model, not a strippable version string), `PhysXLoader64`, and an Epic `LegalCopyright` whose newest
+year is ≤2013. **65 supported binaries scored 0/4** (30 reference builds UE 4.10–5.8 + 35 installed
+UE games); Gal\*Gun scores 4/4. Rejected: bare `UE3` (3–85 hits in every one of the 30 supported
+builds) and nonstandard section names (27 of 30 carry one). Full table + the Manor Lords near miss
+(`Epic Games` copyright with **no** year, which is why an explicit year is required) in
+[technical-notes.md](technical-notes.md).
+
+### Two latent holes closed on the way
+
+* **The publisher rule had TWO sites, not one.** `Genau.cpp`'s cache-reuse branch re-applies
+  `publisher != nullptr → bLowConfidence` **live on every launch after the first**. Guarding only
+  the fresh-detection site would have gated a thumbprinted pre-UE4 title correctly once and then
+  silently un-gated it forever. Both now carry `&& UEVersion >= MIN_SUPPORTED_UE_VERSION`. No
+  behavioural change for any supported game: three independent floors keep every real version ≥411.
+* **`ShowVersionTooOldWarning` was never notified.** It is a plain computed property and
+  `_isVersionTooOld` has no `[NotifyPropertyChangedFor]`, so it was missing from
+  `NotifyComputedProperties` — meaning the existing red banner only rendered if its binding happened
+  to be evaluated for the first time *after* `Update()` had run. On any refresh of an already-attached
+  panel it stayed hidden. Both banners are now raised, with a regression test.
+
+### Honest messaging, and Extra Scan actually disabled
+
+A second string (`str.Pointers.EnginePreUE4`) rather than reusing the 4.10 one, because that text
+ends "set a UE version override" — advice that cannot work for UE3 at any version, and the override
+list has no value below 4.18 anyway. The new text says what the engine is, that the skip was
+deliberate, and that Extra Scan is disabled — and it is: `CanExtraScan` now excludes a refused
+engine, and the DLL refuses `CMD_RESCAN` / `CMD_APPLY_RESCAN` too, so the pipe stays honest even if a
+client ignores the hidden button. That second refusal matters independently: apply re-enters
+`Aura::Init` and `ValidateAndFixOffsets(g_cachedUEVersion)` **outside** `FindAll`, so the gate's
+early return does not by itself fence a refused version out of the version-dependent code.
+
+The override deliberately stays **enabled**, and the message points at it: it is the only escape if
+the marker check ever false-positives on a real UE4/UE5 game, and the gate's `!bUserOverride`
+conjunct exists for exactly that.
+
+`kVersionDetectLogicRev` 2 → 3. Mandatory, not cosmetic: a UE3 game already cached as `ueVersion=504`
+would otherwise be restored from cache forever and never re-detected — the fix would silently not
+apply to the machine that reported the problem.
+
+### LIVE-VERIFIED, both sides (build 2516)
+
+**Gal\*Gun: Double Peace** (`GG2Game`, PE hash `57FC3FE20352D000`), `scan-0.log` reads exactly the
+intended sequence: `PE VERSIONINFO Product=1.0 File=1.0 — unrecognised` → memory tiers miss →
+`PreUE4: Epic copyright newest year 2012 (PRE-UE4)`, `marker 'SeqAct_ (UE3 Kismet)' hit at
+0x244DAF9`, `marker 'UnrealEngine3' hit at 0x2729BD0`, `marker 'PhysXLoader64 (PhysX 2.8)' hit at
+0x2AA61D0` → `PRE-UE4 engine POSITIVELY identified (4/4 markers, 2 needed) -> sentinel 300` →
+`UE Version = 300 (tier=1, detected=yes, lowConfidence=no)` → `SKIPPING the scan`. **No AOB pass
+ran at all.** The marker sweep cost **~31 ms** (45.959 → 45.990); the 1.9 s before it is the
+pre-existing Tier-2/3 needle scan, which the gate still cannot avoid because it sits after
+`DetectVersionDetailed`.
+
+**The Adventures of Elliot** — the mandatory regression target, being the one supported title
+measured on the same version==0 path. `pre-UE4 markers 0/4, below the 2 needed` → falls through →
+`UE Version = 427 (tier=0, detected=no, lowConfidence=yes, publisher=SQUARE_ENIX)` → all four
+globals `(aob)`, name sanity **10/10**, 352,853 objects. The narrowed publisher rule correctly does
+NOT fire here (427 ≥ 411), so its low-confidence badge is untouched.
+
+### One thing only a live run could show
+
+The banner rendered correctly, but the three pointer cards below it read **"🔴 All AOB patterns
+failed"** and **"⚠ AOB failed — found via not found"** — after a scan that never happened. Those
+lines key on `PatternsHit == 0`, and on a refused engine 0 hits means 0 patterns **tried**, so they
+were not merely noisy but false, and they contradicted the banner directly above them. Every
+per-pointer failure line is now silent when `IsVersionTooOld`: `ShowG{Objects,Names,World}Warning`,
+`G{Objects,Names,World}AobAllFailed`, `IsGEngineNotFound` (its method is only `"not_found"` because
+`FindGEngineSlot` never ran) and `IsSparseDelegatesUnsupported`. That last one is factually true for
+a real UE 4.10, but printing "sparse delegates did not exist yet" beside "this engine is
+unsupported" implies the rest of the panel works — so both refusal flavours now show exactly one
+explanation. Paired tests pin both directions: silence when refused, and a genuine 0-hit sweep on a
+supported engine still reports itself.
+
+### UE3 support itself: evaluated, NOT built
+
+The blocker is not the array shape — `Aura::ArrayLayout` can already express UE3's flat
+`TArray<UObject*>` as `{0x00, 0x0C, 0x08, -1, -1}`, an *easier* shape than 4.10's inline chunk table.
+It is that `OFF_UOBJECT_CLASS`/`OFF_UOBJECT_NAME` are `constexpr` and baked into the scan validators
+themselves, so `ValidateCyclicClassChain` rejects even a **correct** UE3 GObjects address (measured
+on this binary via its own exported `UObject::GetOutermost`: `Outer` @+0x40, `Class` @+0x50). ~113
+use sites plus a bootstrap probe, and an AOB layer that can never have a symbolised oracle (UE3 was
+never public source; the only public UE3, UDK, is Win32-only). 22–42 dev-days for an order of 10–30
+**x64** UE3 titles, against a dumper that is x64-only by construction. Not pursued.
+
+-----
+
 ## 2026-07-29 - UE 4.10 + stock 5.4.4 join; 58 -> 70 programs; the GNames bisection closes at 5.4 (build 2505)
 
 Same-day follow-on to build 2503. Two things landed: the full sweep that 2503 could not run, and

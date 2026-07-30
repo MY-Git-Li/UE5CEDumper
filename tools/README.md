@@ -105,6 +105,7 @@ GS_TSV=$PWD/out/cands.tsv GS_TRUE="GWorld=<va>" analyzeHeadless ... -postScript 
 |--------|--------------|
 | `disasm_function.py` | Offline x64 disassembler for function VA(s) in a PE; annotates RIP-relative writable-`.data` targets and flags the zero-init **BSS** ones (where runtime-filled globals like `GUObjectArray` live). `py -m pip install capstone pefile` first. |
 | `ue_version.py` | Read a game's UE version out of its `++UE5+Release-X.Y` build tag, to decide whether it is worth a Ghidra import at all. Stdlib only. **~half of shipped games have the tag stripped**, so `UNKNOWN` means unknown, not uninteresting — it is a filter, not a gate. |
+| `pre_ue4_markers.py` | **Offline twin of the DLL's `CountPreUE4Markers`** (`Genau.cpp`) — scores a PE for pre-UE4 (UE3) markers, which is what makes the DLL REFUSE to scan a game. There is no C++ unit-test project here, so this script plus a live run is the whole verification story: keep the two marker tables in step by hand. `--corpus` walks the reference builds and asserts every one scores below the 2-of-4 threshold (measured: **0/4 on all 30 reference builds and all 35 installed UE games**; the UE3 title scores 4/4). Needs the ~200 GB corpus for `--corpus`, so like `blocktest.py` it cannot run in CI. Stdlib only. |
 | `func_bytes.py` | **Answer "is this function hollow?" offline** — resolves any symbol via the PDB, then reads the EXE bytes at that VA. A `#if !UE_BUILD_SHIPPING` body compiles to a bare `ret`; a live one does not. This is what disproved the long-standing "UCheatManager is body-stripped in Shipping" claim (it is not — the gate is that no *instance* exists). No game running, no Ghidra. |
 | `pdb_globals.py` | **Sweep ground truth out of a PDB, without opening Ghidra.** Prints GObjects / GNames / GWorld / SparseDelegates / GEngine and a paste-ready `GS_TRUE=` line for `tools/ghidra/sweep.sh`. Stdlib only — it reads the MSF publics stream directly. Replaces step 2 of GROUND-TRUTH.md's "Deriving truth for a new game" (a ~10-min headless run) with ~2 seconds, for any binary that ships symbols. When GObjects has no public symbol it prints the **pre-4.11 magic-static route** (`GetUObjectArray` → the `lea` feeding the ctor) instead of a bare "NOT FOUND". |
 | `build_ngram_index.py` | **Builds the AOB specificity index** — slides a window over the self-built binaries' executable sections and stores a `{byte-sequence: count}` frequency table. **Ships no code**: only sequences at/above `--threshold` are kept, which is what makes it non-reconstructive (a COMPLETE overlapping n-gram table *is* assemblable via de Bruijn, like DNA sequencing — thresholding drops exactly the rare distinctive sequences that assembly needs). Needs numpy + the corpus; run on the corpus machine only. |
@@ -116,6 +117,10 @@ py tools/pe/disasm_function.py "<game>.exe" 0x147A604E0 0x14814D2F0
 
 # Triage a whole Steam library before importing anything
 py tools/pe/ue_version.py "D:/SteamLibrary/steamapps/common"/*/*/Binaries/Win64/*-Shipping.exe
+
+# Is this a pre-UE4 engine (which the DLL refuses), and does the marker set false-positive?
+py tools/pe/pre_ue4_markers.py "<game>.exe"
+py tools/pe/pre_ue4_markers.py --corpus        # must print PASS after touching the marker table
 
 # Ground truth for a new oracle. The GObjects base|base+0x10 alias is decided AUTOMATICALLY from
 # the PDB (5.8 made ~FFieldClass virtual, so `??1FFieldClass@@UEAA@XZ` = 5.8+ = no alias); the

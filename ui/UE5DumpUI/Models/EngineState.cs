@@ -14,11 +14,17 @@ public sealed class EngineState
     /// <summary>True when ueVersion came from Tier 3 bare-pattern OR publisher-bias fallback — UI surfaces a warning.</summary>
     public bool IsLowConfidence { get; init; }
 
-    /// <summary>True when the engine predates UE 4.11 and the DLL therefore SKIPPED the scan
-    /// entirely. Pre-4.11 has no <c>FUObjectItem</c> — the object array holds raw
-    /// <c>UObjectBase*</c> at stride 8 in an inline chunk table, a shape the layout presets
-    /// cannot express — so every pointer comes back empty by design, not by failure. Only ever
-    /// set on a confidently detected version; a guess or a user override is never gated.</summary>
+    /// <summary>True when the DLL SKIPPED the scan entirely because the engine is not something
+    /// it can read. Every pointer comes back empty by design, not by failure. Only ever set on a
+    /// confidently detected version; a guess or a user override is never gated.
+    /// <para>
+    /// Two cases, split on <see cref="UEVersion"/> — see
+    /// <c>PointerPanelViewModel.PreUE4SentinelVersion</c>:
+    /// 400-410 is UE 4.0-4.10 (pre-<c>FUObjectItem</c>: raw <c>UObjectBase*</c> at stride 8 in an
+    /// inline chunk table, a shape the layout presets cannot express), while 300 means positively
+    /// identified as pre-UE4 (UE3) — a different object model with no <c>FUObjectArray</c> and no
+    /// <c>FNamePool</c> at all. They get different banners because they have different remedies.
+    /// </para></summary>
     public bool IsVersionTooOld { get; init; }
 
     /// <summary>Publisher thumbprint key (e.g. "SQUARE_ENIX") detected from PE VERSIONINFO — empty if no match.</summary>
