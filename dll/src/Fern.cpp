@@ -4174,6 +4174,19 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             extern uintptr_t g_cachedGObjects;
             extern uintptr_t g_cachedGNames;
             extern uintptr_t g_cachedGWorld;
+            extern bool      g_cachedVersionTooOld;
+
+            // The engine was REFUSED, not scanned — Genau's too-old gate returned before any
+            // pattern ran (see Genau::FindAll's gate). Extra Scan probes .data against the same
+            // UE4/UE5 FUObjectArray presets and the same hardcoded OFF_UOBJECT_CLASS class
+            // chain, so on a pre-4.11 / pre-UE4 binary it is a guaranteed no-op that would burn
+            // 5-20 s and, worse, contradict the panel text telling the user it cannot help.
+            // Refuse it here so the pipe is honest even if a client ignores the disabled button.
+            if (g_cachedVersionTooOld) {
+                return Renge::MakeError(id, "Unsupported engine — the scan was skipped by design; "
+                                            "Extra Scan cannot find UE4/UE5 structures that do "
+                                            "not exist in this binary").dump();
+            }
 
             bool needGObj = (g_cachedGObjects == 0);
             bool needGWld = (g_cachedGWorld == 0) && (g_cachedGObjects != 0) && (g_cachedGNames != 0);
@@ -4238,6 +4251,17 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             extern uint32_t    g_cachedUEVersion;
             extern const char* g_cachedGObjectsMethod;
             extern const char* g_cachedGWorldMethod;
+            extern bool        g_cachedVersionTooOld;
+
+            // Belt-and-braces twin of the CMD_RESCAN refusal. This matters independently: apply
+            // re-enters Aura::Init and Genau::ValidateAndFixOffsets(g_cachedUEVersion) OUTSIDE
+            // FindAll, so the gate's early return does not fence a refused version out of the
+            // version-dependent code — with the UE3 sentinel that argument would be 300 and
+            // select layout branches no supported game can reach.
+            if (g_cachedVersionTooOld) {
+                return Renge::MakeError(id, "Unsupported engine — nothing to apply; the scan was "
+                                            "skipped by design").dump();
+            }
 
             bool applied = false;
 

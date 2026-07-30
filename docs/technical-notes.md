@@ -223,6 +223,84 @@ Cheapest single tell: an immediate **`cmp r32, 0x800000`** checked against an ob
 old regime `MaxTotalElements` is a compile-time literal in the bounds check; in the new regime the
 maximum is a runtime field, so that immediate does not appear.
 
+### Pre-UE4 (Unreal Engine 3) — REFUSED BY DESIGN (build 2508)
+
+UE3 is not "an older version of this"; it is a different object model. There is no
+`FUObjectArray`, no `FUObjectItem` and no `FNamePool` at all: the global array is
+`UObject::GObjObjects`, a plain `TArray<UObject*>`, and names come from `FName::Names`, a flat
+`TArray<FNameEntry*>`. Measured on a shipping UE3 x64 binary via its own exported
+`UObject::GetOutermost`: **`Outer` @+0x40, `Class` @+0x50, `UStruct::SuperStruct` @+0x78** — versus
+`Grimoire::OFF_UOBJECT_CLASS = 0x10` here.
+
+That last fact is what makes UE3 unreachable rather than merely unimplemented.
+`ValidateCyclicClassChain` gates **every** `ValidateGObjects` accept path and terminates on
+`*(X + OFF_UOBJECT_CLASS) == X` (UClass's self-reference). At +0x10 a UE3 object has a different
+field entirely, so a **correct** UE3 GObjects address is rejected before it can be accepted. The
+same constant is baked into `Aura::LooksLikeUObject` (stride probing) and `ProbeStride`'s name
+scoring. Promoting those constants to `DynOff` is ~113 use sites plus a bootstrap probe that must
+find Class/Name without already knowing them — see the evaluation summary in
+[roadmap.md](roadmap.md) before reopening this.
+
+Interesting counterpoint, recorded so the estimate is not re-derived from scratch:
+`Aura::ArrayLayout` **can already express** `TArray<UObject*>` as `{0x00, 0x0C, 0x08, -1, -1}` —
+UE3's array is an EASIER shape than 4.10's, not the same wall. The blocker is the validators, not
+the layout.
+
+#### How a pre-UE4 binary is identified
+
+The numeric floor alone cannot catch it. `MIN_SUPPORTED_UE_VERSION = 411` is only reachable via
+`DetectVersionFromPEResource`'s `major == 4` branch (`400 + minor`); the memory needle table floors
+at `"4.18."`. A UE3 game's PE version is a **game** version (e.g. `1.0.10897.0`), so detection
+returned 0 and `FindAll`'s fallback guessed **504** — above the floor — and the title consumed a
+full 150-pattern sweep to reach "no winner", then advised a UE-version override that could never
+help. `Grimoire::PRE_UE4_SENTINEL_VERSION = 300` closes that: `CountPreUE4Markers` runs in
+`DetectVersionDetailed`'s **terminal branch** and, on ≥2 of 4 markers, returns 300 at tier 1, which
+trips the existing too-old gate with no new flag to plumb.
+
+Two design rules that must not be relaxed:
+
+1. **Positive markers only.** The *absence* of a UE4/UE5 tag is exactly the state of SUPPORTED
+   stripped-tag titles (The Adventures of Elliot detects as version 0 by the identical route), so
+   absence is a necessary conjunct and never a sufficient one. Placing the check in the terminal
+   branch makes "no UE4/UE5 evidence" a property of the control flow rather than a separate test.
+2. **The sentinel, not a bool.** A flag computed inside detection would be absent on launch 2,
+   because a HintCache hit skips detection entirely. The *number* round-trips for free.
+
+| Marker | Gal\*Gun DP (UE3) | 30 reference builds, UE 4.10–5.8 | 35 installed UE games |
+|---|---|---|---|
+| `UnrealEngine3` (ASCII / UTF-16LE) | 3 / 1 | 0 | 0 |
+| `SeqAct_` (ASCII / UTF-16LE) | 10 / 108 | 0 | 0 |
+| `PhysXLoader64` (import name) | 1 | 0 | 0 |
+| Epic `LegalCopyright` with a year ≤ 2013 | 2012 | 0 | 0 |
+| **score** | **4 / 4 → refused** | **0/4 on all 30** | **only this one title scores** |
+
+`SeqAct_` is the strongest: it is UE3 Kismet's native-registration table (neighbouring bytes read
+`USeqAct_Latent` / `execAbortFor` / `USeqAct_Delay`) — the object model itself, not a version string
+a publisher can strip. UE4 deleted Kismet for Blueprints, which is why it measures 0 everywhere.
+
+The copyright year tracks the **engine snapshot**, not the ship date: Gal\*Gun DP shipped 2015 and
+still reads `Copyright 1998-2012 Epic Games, Inc.` UE4.0 went public in March 2014, so an Epic
+notice ending ≤2013 cannot be UE4/UE5. **The inference is one-directional** — a 2014+ year proves
+nothing (Fantasynth and NEKOPALIVE both read 2016 and are UE 4.13 / 4.11).
+
+Two rejected markers, so they are not retried:
+
+* **`UE3`** — occurs 3–85 times in **every one** of the 30 supported reference binaries. Using it
+  would refuse the entire corpus. (Consistent with `HasUEAnchorNearby` already treating short
+  `UE4`/`UE5` tokens as generic noise.)
+* **A nonstandard section name** (Gal\*Gun has `.nep`) — not a discriminator: 27 of the 30
+  supported binaries carry one (`.uedbg`, `.lpp_pre`, `.msvcjmc`, `.detourc`, …).
+
+Near miss worth knowing: **Manor Lords** (UE 5.5, supported) ships `Copyright Epic Games, Inc. All
+Rights Reserved.` with **no year**. The copyright marker therefore requires an *explicit* year — a
+"no year OR an old year" rule would refuse it.
+
+Re-measure with `py tools/pe/pre_ue4_markers.py --corpus` (the offline twin of the C++ counter; it
+needs the reference corpus, so like `blocktest.py` it cannot run in CI). The **mandatory** live
+regression target is a supported title that also reaches the terminal branch — measured, that is
+**The Adventures of Elliot** (PE 1.2, detects as 0 → 504). Solarpunk and Titan Quest II do *not*
+qualify: their PE resources report 5.7, so they exit at tier 1 and never reach the marker check.
+
 ### FUObjectItem Sizes
 
 | Size | Used by |

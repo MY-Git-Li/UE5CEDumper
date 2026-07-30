@@ -211,12 +211,29 @@ public partial class PointerPanelViewModel : ViewModelBase
     /// <summary>True when version was detected with high confidence and no override is in effect.</summary>
     public bool ShowVersionDetectedBadge => HasData && VersionDetected && !IsUserOverride && !IsLowConfidence;
 
-    /// <summary>True when the engine predates UE 4.11, so the DLL skipped the scan outright.
+    /// <summary>
+    /// Sentinel UeVersion meaning "positively identified as pre-UE4 (UE3)" rather than
+    /// "UE 4.0-4.10". Mirrors <c>Grimoire::PRE_UE4_SENTINEL_VERSION</c> in the DLL.
+    /// </summary>
+    public const int PreUE4SentinelVersion = 300;
+
+    /// <summary>True when the engine is UE 4.0-4.10, so the DLL skipped the scan outright.
     /// Pre-4.11 has no FUObjectItem — the object array holds raw UObjectBase* at stride 8 in an
     /// INLINE chunk table, which the layout presets cannot express — so every pointer being
     /// empty is by design here, not a scan that failed. Shown instead of the usual
-    /// "not found" text, which would send the user hunting for a pattern that cannot exist.</summary>
-    public bool ShowVersionTooOldWarning => HasData && IsVersionTooOld;
+    /// "not found" text, which would send the user hunting for a pattern that cannot exist.
+    /// Excludes the pre-UE4 sentinel, which gets its own message: telling a UE3 user to
+    /// "set a UE version override" is advice that cannot work at any version.</summary>
+    public bool ShowVersionTooOldWarning => HasData && IsVersionTooOld
+        && UeVersion != PreUE4SentinelVersion;
+
+    /// <summary>True when the engine was positively identified as pre-UE4 (Unreal Engine 3).
+    /// A different object model rather than an older version of this one — no FUObjectArray,
+    /// no FNamePool — so unlike every other warning here there is nothing to tune, and both
+    /// the override and Extra Scan are disabled rather than merely useless. The discriminator
+    /// is the version number already on the wire, so this needed no new pipe field.</summary>
+    public bool ShowPreUE4Warning => HasData && IsVersionTooOld
+        && UeVersion == PreUE4SentinelVersion;
 
     /// <summary>True when a SquareEnix (or future) publisher thumbprint was matched.</summary>
     public bool ShowPublisherHint => HasData && !string.IsNullOrEmpty(PublisherThumbprint);
@@ -238,28 +255,36 @@ public partial class PointerPanelViewModel : ViewModelBase
         "UE 5.5", "UE 5.6", "UE 5.7", "UE 5.8",
     };
 
+    // A REFUSED engine (IsVersionTooOld) silences every per-pointer failure line below. Nothing
+    // was tried there — Genau's gate returns before the first pattern runs — so "AOB failed" and
+    // "All AOB patterns failed" are not just noise, they are false, and they directly contradict
+    // the banner that says every pointer is empty by design. The banner is the whole explanation.
+    // Verified against a live UE3 run: without this the panel read "🔴 All AOB patterns failed" +
+    // "⚠ AOB failed — found via not found" on all three pointers after a scan that never happened.
+
     /// <summary>True when GObjects was found via fallback (not AOB).</summary>
-    public bool ShowGObjectsWarning => HasData && GObjectsMethod != "aob";
+    public bool ShowGObjectsWarning => HasData && !IsVersionTooOld && GObjectsMethod != "aob";
 
     /// <summary>True when GNames was found via fallback (not AOB).</summary>
-    public bool ShowGNamesWarning => HasData && GNamesMethod != "aob";
+    public bool ShowGNamesWarning => HasData && !IsVersionTooOld && GNamesMethod != "aob";
 
     /// <summary>True when GWorld was not found at all.</summary>
-    public bool ShowGWorldWarning => HasData && GWorldMethod == "not_found";
+    public bool ShowGWorldWarning => HasData && !IsVersionTooOld && GWorldMethod == "not_found";
 
     /// <summary>True when GWorld was found via a recovery path (not direct AOB, and not missing) —
     /// e.g. instance_scan_recovery / engine_recovery. Surfaces the method so a recovered GWorld
     /// reads as such instead of looking like a normal AOB hit.</summary>
     public bool ShowGWorldRecovered => HasData && GWorldMethod != "aob" && GWorldMethod != "not_found";
 
-    /// <summary>True when ALL GObjects AOB patterns failed (0 hits).</summary>
-    public bool GObjectsAobAllFailed => HasData && GObjectsPatternsHit == 0;
+    /// <summary>True when ALL GObjects AOB patterns failed (0 hits). Never on a refused engine,
+    /// where 0 hits means 0 patterns TRIED.</summary>
+    public bool GObjectsAobAllFailed => HasData && !IsVersionTooOld && GObjectsPatternsHit == 0;
 
-    /// <summary>True when ALL GNames AOB patterns failed (0 hits).</summary>
-    public bool GNamesAobAllFailed => HasData && GNamesPatternsHit == 0;
+    /// <summary>True when ALL GNames AOB patterns failed (0 hits). See GObjectsAobAllFailed.</summary>
+    public bool GNamesAobAllFailed => HasData && !IsVersionTooOld && GNamesPatternsHit == 0;
 
-    /// <summary>True when ALL GWorld AOB patterns failed (0 hits).</summary>
-    public bool GWorldAobAllFailed => HasData && GWorldPatternsHit == 0;
+    /// <summary>True when ALL GWorld AOB patterns failed (0 hits). See GObjectsAobAllFailed.</summary>
+    public bool GWorldAobAllFailed => HasData && !IsVersionTooOld && GWorldPatternsHit == 0;
 
     /// <summary>Formatted scan method label for GObjects.</summary>
     public string GObjectsMethodLabel => FormatMethodLabel(GObjectsMethod);
@@ -292,8 +317,13 @@ public partial class PointerPanelViewModel : ViewModelBase
     public bool HasSparseDelegatesScanAddr => HasData && IsNonZeroAddr(SparseDelegatesScanAddr);
     /// <summary>True when SparseDelegates was successfully resolved (UE 4.23+ + AOB hit).</summary>
     public bool IsSparseDelegatesFound => HasData && IsNonZeroAddr(SparseDelegatesAddress);
-    /// <summary>True when UE &lt; 4.23 — sparse delegates did not exist yet.</summary>
-    public bool IsSparseDelegatesUnsupported => HasData && UeVersion > 0 && UeVersion < 423;
+    /// <summary>True when UE &lt; 4.23 — sparse delegates did not exist yet.
+    /// Silent on a refused engine (both flavours): for UE 4.10 the statement is factually true,
+    /// but printing it beside "this engine is unsupported" is noise that implies the rest of the
+    /// panel works. The &gt;= 400 floor is kept as defence-in-depth so the pre-UE4 sentinel (300)
+    /// can never read as a real sub-4.23 version even if IsVersionTooOld were somehow false.</summary>
+    public bool IsSparseDelegatesUnsupported => HasData && !IsVersionTooOld
+        && UeVersion >= 400 && UeVersion < 423;
     /// <summary>True when UE 4.23+ but AOB scan didn't find the static (warning state).</summary>
     public bool IsSparseDelegatesNotFound => HasData && UeVersion >= 423
         && SparseDelegatesMethod == "not_found";
@@ -305,14 +335,19 @@ public partial class PointerPanelViewModel : ViewModelBase
     /// <summary>True when GEngine has a non-zero AOB scan address.</summary>
     public bool HasGEngineScanAddr => HasData && IsNonZeroAddr(GEngineScanAddr);
     /// <summary>True when no GEngine AOB validated — engine lookups fall back to the
-    /// GObjects walk and a GameEngine-rooted CE export cannot be made restart-proof.</summary>
-    public bool IsGEngineNotFound => HasData && GEngineMethod == "not_found";
+    /// GObjects walk and a GameEngine-rooted CE export cannot be made restart-proof.
+    /// Silent on a refused engine: FindGEngineSlot never ran, so the method is only
+    /// "not_found" because it is the struct default.</summary>
+    public bool IsGEngineNotFound => HasData && !IsVersionTooOld && GEngineMethod == "not_found";
 
     /// <summary>
     /// True when Extra Scan button should be visible:
     /// connected, not already scanning, and some pointer is missing.
+    /// Never on a refused engine — Extra Scan probes the same UE4/UE5 presets and the same
+    /// hardcoded UObject::Class chain, so it is a guaranteed no-op there, and offering it would
+    /// contradict the banner that says it cannot help. The DLL refuses the command too.
     /// </summary>
-    public bool CanExtraScan => HasData && !IsScanning
+    public bool CanExtraScan => HasData && !IsScanning && !IsVersionTooOld
         && (IsPointerMissing(GObjectsAddress) || GWorldMethod == "not_found");
 
     // --- AOBMaker button enable state ---
@@ -500,6 +535,13 @@ public partial class PointerPanelViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowUserOverrideBadge));
         OnPropertyChanged(nameof(ShowLowConfidenceWarning));
         OnPropertyChanged(nameof(ShowVersionDetectedBadge));
+        // Both refusal banners. ShowVersionTooOldWarning was MISSING here before the pre-UE4
+        // work: IsVersionTooOld is an [ObservableProperty] with no NotifyPropertyChangedFor, so
+        // the computed property never re-raised and the red banner only rendered if the binding
+        // happened to be evaluated for the first time after Update() had already run. On any
+        // refresh of an already-attached panel it stayed hidden.
+        OnPropertyChanged(nameof(ShowVersionTooOldWarning));
+        OnPropertyChanged(nameof(ShowPreUE4Warning));
         OnPropertyChanged(nameof(ShowInvokeTimeoutOverrideBadge));
         OnPropertyChanged(nameof(ShowPublisherHint));
         OnPropertyChanged(nameof(PublisherLabel));

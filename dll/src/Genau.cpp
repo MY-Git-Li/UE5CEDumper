@@ -2478,6 +2478,152 @@ static uint32_t DetectVersionFromPEResource() {
     return 0;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Pre-UE4 (Unreal Engine 3) positive identification
+//
+// The too-old gate can only be reached by a version NUMBER below 4.11, and the only path
+// that produces one is DetectVersionFromPEResource's major==4 branch — so a UE3 title, whose
+// PE resource carries a game version like 1.0.x, slipped straight through it and consumed a
+// full 150-pattern AOB sweep to arrive at "no winner" plus a misleading "set an override"
+// nudge. These markers give the DLL a way to say "this is not Unreal 4/5 at all".
+//
+// DESIGN RULE — POSITIVE markers only. The ABSENCE of a UE4/UE5 branch tag must NEVER be
+// sufficient on its own: that is exactly the state of the SUPPORTED stripped-tag titles
+// (The Adventures of Elliot detects as version 0 by the identical route), so gating on
+// absence would refuse working games. Absence is a necessary conjunct, never a sufficient one.
+//
+// FALSE-POSITIVE MEASUREMENTS behind this marker set:
+//   * 30 reference builds spanning UE 4.10-5.8 (Shipping / Development / DebugGame):
+//     "UnrealEngine3" 0 hits, "SeqAct_" 0 hits, "PhysXLoader64" 0 hits. Zero false positives.
+//   * 35 locally installed UE games: exactly ONE (the UE3 title) matches "Epic Games" in
+//     LegalCopyright AND carries a year. Manor Lords (UE 5.5) matches "Epic Games" but ships
+//     NO year, which is why HasPreUE4EpicCopyright requires an explicit one.
+//   * REJECTED as a marker: the bare token "UE3". It occurs 3-85 times in every one of the 30
+//     supported reference binaries — using it would refuse the entire corpus. (Consistent with
+//     HasUEAnchorNearby already treating short "UE4"/"UE5" tokens as generic noise.)
+//   * REJECTED as a marker: the unusual ".nep" section name. Nonstandard section names are not
+//     a discriminator — 27 of the 30 supported binaries carry one (.uedbg, .lpp_pre, .msvcjmc,
+//     .detourc, ...). Kept as a log breadcrumb only.
+//
+// "SeqAct_" is the strongest of the four: it is UE3's Kismet native-registration table
+// (neighbouring bytes read USeqAct_Latent / execAbortFor / USeqAct_Delay), i.e. the object
+// model itself rather than a version string a publisher can strip or fake. UE4 deleted Kismet
+// outright in favour of Blueprints, which is why it measures 0 across every supported build.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// UE4.0 went public in March 2014, so 2013 is the last year an Epic copyright notice can
+// carry and still be pre-UE4.
+constexpr int      kLastPreUE4CopyrightYear = 2013;
+constexpr int      kPreUE4MarkerCount       = 4;
+// 2-of-4. The threshold is conservative on purpose: a UE3 title that strips its markers falls
+// through to today's behaviour (full scan, no winner), which is the right direction to fail in.
+constexpr int      kPreUE4MarkerThreshold   = 2;
+
+// Internal: does the PE VERSIONINFO carry an Epic Games copyright whose NEWEST year predates
+// UE4? Epic bumps the engine copyright year every release, and the year tracks the ENGINE
+// SNAPSHOT rather than the game's ship date — the UE3 title measured here shipped in 2015 and
+// still reads "Copyright 1998-2012 Epic Games, Inc.", because 2012 is the snapshot it licensed.
+// That makes it a better engine-age proxy than a release date.
+//
+// The inference is ONE-DIRECTIONAL: year <= 2013 implies not-UE4/UE5, but year >= 2014 implies
+// nothing (late UE3 games shipped well past 2014). Only the first direction is used here.
+static bool HasPreUE4EpicCopyright() {
+    wchar_t exePath[MAX_PATH] = {};
+    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) return false;
+
+    DWORD handle = 0;
+    DWORD infoSize = GetFileVersionInfoSizeW(exePath, &handle);
+    if (!infoSize) return false;
+
+    std::vector<uint8_t> buf(infoSize);
+    if (!GetFileVersionInfoW(exePath, handle, infoSize, buf.data())) return false;
+
+    std::string copyright = ReadVersionInfoString(buf.data(), L"LegalCopyright");
+    if (copyright.empty()) return false;
+    if (AsciiUpper(copyright).find("EPIC GAMES") == std::string::npos) return false;
+
+    // Newest 19xx/20xx year in the string. An Epic notice with NO year proves nothing — that
+    // is Manor Lords (UE 5.5, supported) — so a missing year must NOT count as "old".
+    int newest = 0;
+    for (size_t i = 0; i + 4 <= copyright.size(); ++i) {
+        const char* p = copyright.c_str() + i;
+        if (!((p[0] == '1' && p[1] == '9') || (p[0] == '2' && p[1] == '0'))) continue;
+        if (p[2] < '0' || p[2] > '9' || p[3] < '0' || p[3] > '9') continue;
+        int year = (p[0] - '0') * 1000 + (p[1] - '0') * 100 + (p[2] - '0') * 10 + (p[3] - '0');
+        if (year > newest) newest = year;
+        i += 3;
+    }
+    if (newest == 0) {
+        Sein::Info("SCAN:Ver", "PreUE4: Epic copyright with no year — not counted ('%s')",
+                   copyright.c_str());
+        return false;
+    }
+
+    bool isOld = (newest <= kLastPreUE4CopyrightYear);
+    Sein::Info("SCAN:Ver", "PreUE4: Epic copyright newest year %d (%s) — '%s'",
+               newest, isOld ? "PRE-UE4" : "UE4-era or later", copyright.c_str());
+    return isOld;
+}
+
+// Internal: count how many independent pre-UE4 markers this module carries (0..4).
+//
+// The three string markers are found in ONE pass over the image, not one pass each. That
+// matters because this runs on the version==0 path, which is shared with stripped-tag but
+// fully SUPPORTED titles — Elliot is a 482 MB image, and six full naive sweeps over it would
+// be a visible regression on a game that must keep working.
+static int CountPreUE4Markers() {
+    static const char* kMarkerNames[kPreUE4MarkerCount] = {
+        "UnrealEngine3", "SeqAct_ (UE3 Kismet)", "PhysXLoader64 (PhysX 2.8)",
+        "Epic copyright <= 2013",
+    };
+    bool found[kPreUE4MarkerCount] = {};
+
+    found[3] = HasPreUE4EpicCopyright();
+
+    uintptr_t base = Macht::GetModuleBase(nullptr);
+    size_t    size = Macht::GetModuleSize(nullptr);
+    if (base && size) {
+        // Narrow AND UTF-16LE for the two text markers — the same two-encoding rule Tier 1
+        // uses, because some builds keep a literal only as a wide string.
+        struct Pat { std::vector<uint8_t> bytes; int marker; };
+        std::vector<Pat> pats;
+        auto add = [&pats](const char* s, bool wide, int marker) {
+            std::vector<uint8_t> b;
+            for (const char* p = s; *p; ++p) {
+                b.push_back(static_cast<uint8_t>(*p));
+                if (wide) b.push_back(0);
+            }
+            pats.push_back({ std::move(b), marker });
+        };
+        add("UnrealEngine3", false, 0);
+        add("UnrealEngine3", true,  0);
+        add("SeqAct_",       false, 1);
+        add("SeqAct_",       true,  1);
+        add("PhysXLoader64", false, 2);   // an IMPORT name; never appears UTF-16
+
+        const uint8_t* scan = reinterpret_cast<const uint8_t*>(base);
+        for (size_t off = 0; off < size; ++off) {
+            // Cheap first-byte reject: every pattern starts 'U', 'S' or 'P'.
+            uint8_t c = scan[off];
+            if (c != 'U' && c != 'S' && c != 'P') continue;
+            for (const auto& p : pats) {
+                if (found[p.marker] || p.bytes[0] != c) continue;
+                if (off + p.bytes.size() > size) continue;
+                if (memcmp(scan + off, p.bytes.data(), p.bytes.size()) == 0) {
+                    found[p.marker] = true;
+                    Sein::Info("SCAN:Ver", "PreUE4: marker '%s' hit at 0x%zX",
+                               kMarkerNames[p.marker], off);
+                }
+            }
+            if (found[0] && found[1] && found[2]) break;   // all three string markers in
+        }
+    }
+
+    int score = 0;
+    for (bool f : found) if (f) ++score;
+    return score;
+}
+
 // Internal: scan a window of memory for any of a set of UE-related anchor
 // substrings. Used by Tier 3 to require contextual evidence ("Engine",
 // "Unreal", "UE4", "UE5", "++UE") near a bare version pattern, so that
@@ -2514,6 +2660,9 @@ static bool HasUEAnchorNearby(const uint8_t* scan, size_t size,
 struct VersionScanResult {
     uint32_t version = 0;
     int      tier    = 0;
+    // true = `version` is Grimoire::PRE_UE4_SENTINEL_VERSION, set by the marker check in the
+    // terminal branch. File-local struct, so adding a field has no ABI impact.
+    bool     preUE4  = false;
 };
 
 static VersionScanResult DetectVersionDetailed() {
@@ -2644,7 +2793,39 @@ static VersionScanResult DetectVersionDetailed() {
         return bestTier3;
     }
 
-    Sein::Warn("SCAN:Ver", "DetectVersion: Could not detect UE version from PE or memory");
+    // Nothing in the UE4/UE5 vocabulary matched. Before giving up — and letting FindAll fall
+    // back to guessing 5.4 — ask the OPPOSITE question: is this positively a pre-UE4 engine?
+    //
+    // Placing the check HERE, rather than at the top of this function, IS the false-positive
+    // defence. Reaching this line already proves the PE resource, Tier 1 (ASCII + UTF-16LE),
+    // Tier 2 and Tier 3 all found nothing, so "no UE4/UE5 evidence" is a STRUCTURAL property of
+    // the control flow rather than a separate test that could be written wrong. Any binary
+    // carrying a table-recognised engine tag returned long before this point and can never be
+    // gated here.
+    //
+    // RESIDUAL EXPOSURE, stated so it is not forgotten: the needle table floors at "4.18.", so
+    // a genuine UE 4.11-4.17 title whose PE resource is also unusable reaches this same line
+    // (Fantasynth carries "++UE4+Release-4.13" and Tier 1 still misses it — its PE resource is
+    // what saves it). That is precisely why the bar is 2 markers and why every marker is
+    // UE3-exclusive rather than merely "old-looking".
+    int markers = CountPreUE4Markers();
+    if (markers >= kPreUE4MarkerThreshold) {
+        Sein::Warn("SCAN:Ver",
+                   "DetectVersion: PRE-UE4 engine POSITIVELY identified (%d/%d markers, %d needed)"
+                   " -> sentinel %u. The AOB scan will be skipped, not attempted.",
+                   markers, kPreUE4MarkerCount, kPreUE4MarkerThreshold,
+                   Grimoire::PRE_UE4_SENTINEL_VERSION);
+        r.version = Grimoire::PRE_UE4_SENTINEL_VERSION;
+        // Tier 1: this is a positive identification, not a fragile guess. It must NOT read as
+        // low confidence — FindAll's too-old gate requires !bLowConfidence.
+        r.tier    = 1;
+        r.preUE4  = true;
+        return r;
+    }
+
+    Sein::Warn("SCAN:Ver", "DetectVersion: Could not detect UE version from PE or memory "
+               "(pre-UE4 markers %d/%d, below the %d needed)",
+               markers, kPreUE4MarkerCount, kPreUE4MarkerThreshold);
     return r;
 }
 
@@ -4344,7 +4525,15 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
         // match means unreliable version strings, so the badge must always nudge toward an override.
         // Applying it live (not just from cache) keeps the badge honest even if the publisher table
         // gains a new shipper after this game was already cached (the old publisher gate was live too).
-        out.bLowConfidence   = hints.lowConfidence || (publisher != nullptr);
+        //
+        // The >= MIN_SUPPORTED guard mirrors the identical rule in the fresh-detection branch
+        // below, and it MUST be here too: this is the branch that runs on every launch after the
+        // first, so guarding only the fresh path would gate a pre-UE4 game correctly once and
+        // then silently un-gate it from launch 2 onward. Publisher bias exists to flag an
+        // UNRELIABLE version STRING; it has nothing to say about a version we refused outright.
+        out.bLowConfidence   = hints.lowConfidence
+                            || (publisher != nullptr
+                                && out.UEVersion >= Grimoire::MIN_SUPPORTED_UE_VERSION);
         LOG_INFO("FindAll: UE Version = %u (cached, rev=%u, detected=%s, lowConf=%s) — skipped DetectVersion",
                  out.UEVersion, hints.versionDetectRev,
                  out.bVersionDetected ? "yes" : "no",
@@ -4385,7 +4574,14 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
         // so the badge must always nudge the user toward setting an override — even when
         // detection produced a clean Tier 1 / Tier 2 hit, since those strings can come from
         // bundled SDKs (PhysX, etc.) rather than the actual engine.
-        if (publisher) {
+        //
+        // Scoped to versions at or above the support floor. Below it the version is not a
+        // fragile guess to be second-guessed, it is a refusal — and because the too-old gate
+        // requires !bLowConfidence, an unconditional rule here would let a thumbprinted
+        // publisher's pre-UE4 title defeat the gate. No behavioural change for any supported
+        // game: the needle table floors at 4.18 and the PE-resource path at 400+minor, so the
+        // only ways to land below 411 are the 4.0-4.10 resource branch and the UE3 sentinel.
+        if (publisher && out.UEVersion >= Grimoire::MIN_SUPPORTED_UE_VERSION) {
             out.bLowConfidence = true;
         }
 
@@ -4397,12 +4593,25 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
     }
 
     // ── Too-old gate ────────────────────────────────────────────────────────
-    // UE 4.10 and earlier predate FUObjectItem entirely: ObjObjects is a
-    // TStaticIndirectArrayThreadSafeRead of raw UObjectBase* (stride 8) with an INLINE chunk
-    // table, which ArrayLayout cannot express at all. Nothing downstream can work, and scanning
-    // anyway costs ~4 s of AVX2 passes to arrive at "55 patterns, no winner" — which is exactly
-    // what Fantasynth and NEKOPALIVE did before this gate. Verified against Epic's source:
-    // 4.10.2 has no FUObjectItem; 4.11.0 introduces it (16 bytes, ClusterAndFlags packed).
+    // Two distinct refusals share this one exit, distinguished by the version number alone:
+    //
+    //  (a) UE 4.0-4.10 — the right engine family, a version too old. Pre-4.11 predates
+    //      FUObjectItem entirely: ObjObjects is a TStaticIndirectArrayThreadSafeRead of raw
+    //      UObjectBase* (stride 8) with an INLINE chunk table, which ArrayLayout cannot express
+    //      at all. Verified against Epic's source: 4.10.2 has no FUObjectItem; 4.11.0 introduces
+    //      it (16 bytes, ClusterAndFlags packed). Reachable ONLY via DetectVersionFromPEResource's
+    //      major==4 branch — the memory needle table floors at "4.18." and can never go below it,
+    //      which is worth knowing before assuming this path is exercised often. (It is not: no
+    //      title in the local 35-game corpus reports a 4.0-4.10 PE version. The 4.10 evidence is
+    //      the two reference builds in the AOB corpus, see Himmel.h's provenance block.)
+    //
+    //  (b) UEVersion == PRE_UE4_SENTINEL_VERSION — positively identified as pre-UE4 (UE3) by
+    //      CountPreUE4Markers. A different object model, not an older version of this one: no
+    //      FUObjectArray, no FNamePool, and UObject::Class/Name nowhere near the offsets the
+    //      validators hardcode. Before this case existed such a game fell through the gate
+    //      entirely (its PE version is a GAME version like 1.0.x, so detection returned 0 and
+    //      the fallback guessed 5.4 — above the floor), and paid a full 150-pattern sweep to
+    //      reach "no winner" plus a "set an override" nudge that could never help.
     //
     // Deliberately gated on a CONFIDENT detection only. A low-confidence or publisher-biased
     // version is a guess, and a user override is the user's call — misreading a working game as
@@ -4410,11 +4619,19 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
     if (out.UEVersion < Grimoire::MIN_SUPPORTED_UE_VERSION
         && out.bVersionDetected && !out.bLowConfidence && !out.bUserOverride) {
         out.bVersionTooOld = true;
-        LOG_WARN("FindAll: UE %u is older than the minimum supported %u — SKIPPING the scan. "
-                 "Pre-4.11 has no FUObjectItem (raw UObjectBase* in an inline chunk table), so "
-                 "no pattern or preset can resolve GObjects. Set a UE version override if this "
-                 "detection is wrong.",
-                 out.UEVersion, Grimoire::MIN_SUPPORTED_UE_VERSION);
+        if (out.UEVersion == Grimoire::PRE_UE4_SENTINEL_VERSION) {
+            LOG_WARN("FindAll: PRE-UE4 engine (Unreal Engine 3) — SKIPPING the scan. There is no "
+                     "FUObjectArray, no FUObjectItem and no FNamePool in this binary, and its "
+                     "UObject layout puts Class/Name nowhere near the offsets the validators "
+                     "require, so no pattern, preset, override or Extra Scan can resolve "
+                     "GObjects. This is a refusal by design, not a scan failure.");
+        } else {
+            LOG_WARN("FindAll: UE %u is older than the minimum supported %u — SKIPPING the scan. "
+                     "Pre-4.11 has no FUObjectItem (raw UObjectBase* in an inline chunk table), so "
+                     "no pattern or preset can resolve GObjects. Set a UE version override if this "
+                     "detection is wrong.",
+                     out.UEVersion, Grimoire::MIN_SUPPORTED_UE_VERSION);
+        }
         return true;   // not a failure — a clean, explained no-op
     }
 

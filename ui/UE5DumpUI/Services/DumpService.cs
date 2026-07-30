@@ -34,14 +34,17 @@ public sealed class DumpService : IDumpService
             ueVersion = ptrs["ue_version"]?.GetValue<int>() ?? 0;
         }
 
-        // version_detected: true if PE/memory scan succeeded, false if using default/inferred
-        var versionDetected = res["version_detected"]?.GetValue<bool>() ?? true;
+        // version_detected: true if PE/memory scan succeeded, false if using default/inferred.
+        // Same prefer-init-fall-back-to-ptrs shape as the two flags below — both responses
+        // read the same DLL global (Fern.cpp CMD_INIT vs FillPointerSnapshot).
+        var versionDetected = res["version_detected"]?.GetValue<bool>()
+                              ?? ptrs["version_detected"]?.GetValue<bool>() ?? true;
         // is_user_override / is_low_confidence: prefer init response (more authoritative), fall back to ptrs.
         var isUserOverride  = res["is_user_override"]?.GetValue<bool>()
                               ?? ptrs["is_user_override"]?.GetValue<bool>() ?? false;
         var isLowConfidence = res["is_low_confidence"]?.GetValue<bool>()
                               ?? ptrs["is_low_confidence"]?.GetValue<bool>() ?? false;
-        // build_number (build 653+): present only on the init response, not get_pointers.
+        // build_number (build 653+): on the init response AND on every pointer snapshot.
         // Older DLLs omit the field — preserved as 0 so the UI can warn "DLL pre-dates
         // the build-number probe; assume stale".
         var dllBuildNumber  = res["build_number"]?.GetValue<int>() ?? 0;
@@ -96,8 +99,19 @@ public sealed class DumpService : IDumpService
         return await GetPointersAsync(ct);
     }
 
-    /// <summary>Build EngineState from a get_pointers response, with optional overrides from init.</summary>
-    private static EngineState BuildEngineState(JsonObject ptrs, int ueVersion = 0, bool versionDetected = true,
+    /// <summary>
+    /// Build EngineState from a get_pointers response, with optional overrides from init.
+    ///
+    /// CONTRACT: every optional parameter must carry an "absent" sentinel (null for bools,
+    /// 0 for ints) and fall back to the wire field. A non-nullable default silently wins over
+    /// the payload for callers that don't pass it — that is exactly how `versionDetected = true`
+    /// made the "⚠ Version not detected" badge vanish on every GetPointersAsync refresh
+    /// (invoke-timeout change, UE version override) while InitAsync still showed it.
+    /// The DLL emits ue_version / version_detected / is_user_override / is_low_confidence /
+    /// build_number on BOTH responses from the same cached globals (Fern.cpp CMD_INIT and
+    /// FillPointerSnapshot), so the wire fallback can never disagree with the init value.
+    /// </summary>
+    private static EngineState BuildEngineState(JsonObject ptrs, int ueVersion = 0, bool? versionDetected = null,
                                                  bool? isUserOverride = null, bool? isLowConfidence = null,
                                                  int dllBuildNumber = 0)
     {
@@ -109,7 +123,10 @@ public sealed class DumpService : IDumpService
         return new EngineState
         {
             UEVersion = ueVersion,
-            VersionDetected = versionDetected,
+            // Absent on the wire reads as "detected", i.e. no warning — the right default for
+            // a DLL that predates the flag. A DLL that HAS the flag always sends it, so a
+            // pointer refresh keeps version_detected=false and the warning stays put.
+            VersionDetected = versionDetected ?? ptrs["version_detected"]?.GetValue<bool>() ?? true,
             IsUserOverride = isUserOverride ?? ptrs["is_user_override"]?.GetValue<bool>() ?? false,
             IsLowConfidence = isLowConfidence ?? ptrs["is_low_confidence"]?.GetValue<bool>() ?? false,
             // Only the pointers payload carries this — an older DLL omits it, which reads as
@@ -2718,9 +2735,10 @@ public sealed class DumpService : IDumpService
         EngineState? engineState = null;
         if (!running && res["scanned"]?.GetValue<bool>() == true)
         {
-            var ueVersion = res["ue_version"]?.GetValue<int>() ?? 0;
-            var versionDetected = res["version_detected"]?.GetValue<bool>() ?? true;
-            engineState = BuildEngineState(res, ueVersion, versionDetected);
+            // scan_status completion carries the full FillPointerSnapshot payload, so
+            // BuildEngineState reads ue_version / version_detected straight off `res`.
+            // Re-parsing them here to pass back in would just be a second copy that can drift.
+            engineState = BuildEngineState(res);
         }
 
         return new ScanStatusResult

@@ -330,6 +330,12 @@
     <sys:String x:Key="str.Pointers.Copy">Copy</sys:String>
     <sys:String x:Key="str.Pointers.NotConnected">Not connected — connect to view pointers</sys:String>
     <sys:String x:Key="str.Pointers.VersionTooOld">Unsupported engine — UE 4.11 is the oldest this tool can read. UE 4.10 and earlier have no FUObjectItem: the object array holds raw UObjectBase* pointers in an inline chunk table, a layout the dumper cannot express, so the scan was skipped rather than run and fail. If this version was detected wrongly, set a UE version override above and reconnect.</sys:String>
+    <!-- Separate from VersionTooOld on purpose: that message's remedy line ("set a UE version
+         override") is actively WRONG here. The override list has no value below UE 4.18, and no
+         value at any version would help, because the structures being looked for do not exist in
+         a pre-UE4 binary at all. Keeping two strings also keeps the 4.10 explanation truthful —
+         4.10 is still a live case, with two reference builds in the AOB corpus. -->
+    <sys:String x:Key="str.Pointers.EnginePreUE4">Unsupported engine — this game is built on Unreal Engine 3, not UE4/UE5. UE3 has no FUObjectArray and no FUObjectItem at all: its objects live in an UnrealScript-era reflection system whose UObject and FName layouts differ fundamentally, so there is no global object array for this tool to walk. The scan was skipped deliberately rather than run and fail — every pointer being empty is by design here. Extra Scan is disabled because it probes for the same UE4/UE5 structures and cannot find what is absent. Identified from Unreal Engine 3 markers in the executable, with no UE4 or UE5 build tag anywhere in it. If that identification is wrong and this really is UE4/UE5, set a UE version override above and reconnect — an override forces the scan to run anyway.</sys:String>
     <sys:String x:Key="str.Pointers.VersionWarning">&#x26A0; Version not detected — inferred from engine analysis (custom UE build?)</sys:String>
     <sys:String x:Key="str.Pointers.VersionDetectedBadge">&#x2713; Detected</sys:String>
     <sys:String x:Key="str.Pointers.VersionUserOverrideBadge">&#x1F527; User Override</sys:String>
