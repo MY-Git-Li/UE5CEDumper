@@ -56,6 +56,25 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: AOB pattern regression (blocks)
+        shell: pwsh
+        # The ONLY automated check on Himmel.h's patterns. Everything else needs ~200 GB of Ghidra
+        # projects that exist on one machine, so before this an edit to a pattern was unverifiable
+        # in CI. Asserts each recorded site still RESOLVES to its recorded address — not merely
+        # that some bytes still match, which would pass a broken displacement.
+        # Pure stdlib, no Ghidra, no corpus, seconds. See docs/aob-block-library-eval.md §4.
+        run: |
+          # Resolve an interpreter explicitly. This runner uses a custom label, so do not assume
+          # which of python/python3/py is on PATH — and report it, so a missing interpreter reads as
+          # "no Python" instead of a cryptic failure in the next line.
+          $py = @('python','python3','py') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+          if (-not $py) { throw 'no Python interpreter on PATH (tried python, python3, py)' }
+          Write-Host "using $py -- $(& $py --version)"
+          & $py tools/ghidra/extract_patterns.py dll/src/Himmel.h out/sweep/patterns.tsv
+          if ($LASTEXITCODE -ne 0) { throw "extract_patterns.py failed ($LASTEXITCODE)" }
+          & $py tools/ghidra/blocktest.py
+          if ($LASTEXITCODE -ne 0) { throw "blocktest FAILED ($LASTEXITCODE) - a pattern no longer resolves to its recorded address" }
+
       - name: Build + test + AOT publish (the gate)
         shell: pwsh
         # -Mode Publish -Target All == C++ DLL + Native-AOT UI + full test suite.

@@ -107,4 +107,8 @@ def main():
             print(f"  {va:x}  n={len(ids):<3} [{names}]{mark}")
 
 
-main()
+if __name__ == "__main__":
+    # Guard so extract_blocks.py can reuse sections()/compile_pat()/scan() by import. Without
+    # it the module ran main() at import and died on sys.argv -- the same trap pdb_globals.py
+    # had, and the second time this exact bug has cost a run.
+    main()
