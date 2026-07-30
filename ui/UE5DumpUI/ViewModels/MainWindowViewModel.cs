@@ -618,7 +618,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (proxyDeploy != null)
         {
-            ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
+            // platform is passed only so the leftover-proxy rows can offer "Open folder".
+            ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log, platform);
             // Auto-connect the pipe after a successful in-UI DLL injection.
             ProxyDeploy.RequestConnectAsync = () => ConnectCommand.ExecuteAsync(null);
             // Persist the remembered-proxy map (a Dictionary mutation isn't caught

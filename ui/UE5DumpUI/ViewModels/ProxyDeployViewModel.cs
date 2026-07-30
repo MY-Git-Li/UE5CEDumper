@@ -17,6 +17,10 @@ public partial class ProxyDeployViewModel : ViewModelBase
     private readonly IProxyDeployService _deploy;
     private readonly ILoggingService _log;
 
+    /// <summary>Only used to reveal a leftover folder in Explorer. Optional so existing call sites
+    /// and test doubles keep compiling; the command no-ops when it is absent.</summary>
+    private readonly IPlatformService? _platform;
+
     [ObservableProperty] private bool _isScanning;
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private string _sourceDllPath = "";
@@ -165,10 +169,12 @@ public partial class ProxyDeployViewModel : ViewModelBase
     /// <summary>Whether any games are selected for batch operations.</summary>
     public bool HasSelection => Games.Any(g => g.IsSelected);
 
-    public ProxyDeployViewModel(IProxyDeployService deploy, ILoggingService log)
+    public ProxyDeployViewModel(IProxyDeployService deploy, ILoggingService log,
+                                IPlatformService? platform = null)
     {
         _deploy = deploy;
         _log = log;
+        _platform = platform;
 
         UpdateSourceDllInfo();
     }
@@ -454,6 +460,258 @@ public partial class ProxyDeployViewModel : ViewModelBase
     /// returns the chosen process (or null on cancel). A delegate so the VM never
     /// references a View.</summary>
     public Func<Task<GameProcessInfo?>>? PickProcessAsync { get; set; }
+
+    // ── Leftover ("orphan") proxy cleanup ────────────────────────────────────
+    //
+    // Report-first, per-row opt-in. Every measured route to data loss in this feature lives in the
+    // delete half; the detection half's worst outcome is a wrong row in a list. So: rows default
+    // UNCHECKED, there is deliberately NO select-all, the scan never runs as part of Scan Steam or
+    // Refresh, and the confirmation lists the exact paths before anything moves.
+
+    /// <summary>Leftover proxy DLLs found by the cleanup scan. NEVER merged into
+    /// <c>Games</c> — "Update all" walks <c>Games</c> and would redeploy a fresh proxy into the
+    /// uninstalled game's folder, i.e. re-create exactly what this feature removes.</summary>
+    public ObservableCollection<OrphanProxy> Orphans { get; } = new();
+
+    [ObservableProperty] private bool _orphanScanRan;
+
+    /// <summary>Only say "none found" after a scan has actually run — before that, silence.</summary>
+    public bool ShowNoOrphansFound => OrphanScanRan && Orphans.Count == 0;
+
+    /// <summary>Delete-button label, kept in en.axaml per the UI-strings rule.</summary>
+    public string DeleteOrphansLabel =>
+        Res.Format("str.ProxyDeploy.Orphans.Delete", SelectedOrphanCount);
+
+    /// <summary>Set by the panel code-behind: shows the confirmation window and returns whether the
+    /// user agreed. A delegate for the same reason <see cref="PickProcessAsync"/> is one.</summary>
+    public Func<IReadOnlyList<OrphanProxy>, Task<bool>>? ConfirmOrphanRemovalAsync { get; set; }
+
+    /// <summary>How many rows are checked. Re-raised manually at every mutation site, matching this
+    /// VM's existing <c>HasSelection</c> idiom (there is no NotifyComputedProperties helper here).</summary>
+    public int SelectedOrphanCount => Orphans.Count(o => o.IsSelected && o.IsActionable);
+
+    /// <summary>True when the delete button should be enabled.</summary>
+    public bool HasOrphanSelection => SelectedOrphanCount > 0;
+
+    /// <summary>Re-raise the orphan selection computed properties. Called by the view when a row
+    /// checkbox toggles, because a change inside a collection item is not observed by the collection.</summary>
+    public void NotifyOrphanSelectionChanged()
+    {
+        OnPropertyChanged(nameof(SelectedOrphanCount));
+        OnPropertyChanged(nameof(HasOrphanSelection));
+        OnPropertyChanged(nameof(DeleteOrphansLabel));
+        OnPropertyChanged(nameof(ShowNoOrphansFound));
+        OnPropertyChanged(nameof(CanWriteOrphanReport));
+    }
+
+    private void OnOrphanRowChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(OrphanProxy.IsSelected) or nameof(OrphanProxy.IsRemoved))
+            NotifyOrphanSelectionChanged();
+    }
+
+    /// <summary>Reveal a leftover folder in Explorer so the user can look before agreeing.</summary>
+    [RelayCommand]
+    private async Task OpenOrphanFolderAsync(OrphanProxy? row)
+    {
+        if (row == null || _platform == null) return;
+        try { await _platform.RevealInExplorerAsync(row.DllDirectory); }
+        catch (Exception ex)
+        {
+            _log.Warn("ProxyDeploy", $"Could not open {row.DllDirectory}: {ex.Message}");
+        }
+    }
+
+    [RelayCommand(IncludeCancelCommand = true)]
+    private async Task ScanOrphansAsync(CancellationToken ct)
+    {
+        // Also blocked during a removal: a scan clears Orphans, which would pull the rows out from
+        // under a running delete and erase its per-row report.
+        if (IsScanning || IsRemovingOrphans)
+        {
+            LastOperationResult = "Wait for the current operation to finish";
+            return;
+        }
+
+        try
+        {
+            ClearError();
+            IsScanning = true;
+            StatusColor = StatusNeutral;
+            StatusText = "Looking for leftover proxy DLLs...";
+            LastOperationResult = null;
+
+            // Constructed on the UI thread → the callback marshals back to it.
+            var progress = new Progress<OrphanScanProgress>(p =>
+                StatusText = $"Checking {p.Examined} folder(s) — {p.Found} leftover(s) found");
+
+            var found = await _deploy.FindOrphanProxiesAsync(
+                OrphanScanSources.SteamShapeScan | OrphanScanSources.DeployLog | OrphanScanSources.DllLoadLog,
+                LiveBinariesDirs(), progress, ct);
+
+            foreach (var old in Orphans) old.PropertyChanged -= OnOrphanRowChanged;
+            Orphans.Clear();
+            foreach (var o in found)
+            {
+                // A change INSIDE a collection item is not observed by the collection, so the
+                // checked-count would never update. Subscribe per row (and unsubscribe above, or a
+                // repeated scan leaks handlers into rows the list no longer shows).
+                o.PropertyChanged += OnOrphanRowChanged;
+                Orphans.Add(o);
+            }
+            OrphanScanRan = true;
+            NotifyOrphanSelectionChanged();
+
+            SetOperationResult(
+                Orphans.Count == 0
+                    ? "No leftover proxy DLLs found"
+                    : $"Found {Orphans.Count} leftover proxy DLL(s) — nothing removed yet",
+                0);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Scan cancelled";
+        }
+        catch (Exception ex)
+        {
+            StatusText = "Leftover scan failed";
+            StatusColor = StatusError;
+            SetError(ex);
+            _log.Error("ProxyDeploy", $"Orphan scan failed: {ex.Message}");
+        }
+        finally
+        {
+            IsScanning = false;
+        }
+    }
+
+    /// <summary>True once a scan has produced rows, so Report has something to write.</summary>
+    public bool CanWriteOrphanReport => Orphans.Count > 0;
+
+    /// <summary>
+    /// Binaries folders of games we already know are installed. Passed to BOTH the scan and the
+    /// removal so the installed-game veto is applied at both ends; giving the removal an empty set
+    /// made the deleting path weaker than the scan that authorised it.
+    /// </summary>
+    private IReadOnlySet<string> LiveBinariesDirs() => new HashSet<string>(
+        Games.Select(g => g.BinariesDir).Where(d => !string.IsNullOrEmpty(d)),
+        StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// REPORT (dry run): write what Execute WOULD do to a .txt and open it. Deliberately a separate
+    /// button from the delete: the whole difficulty of this feature is convincing the user we will not
+    /// remove the wrong thing, and the honest answer to that is to hand them the plan in a file they
+    /// can read at their own pace, outside a modal dialog, before anything is authorised.
+    ///
+    /// <para>It shares the row objects with the delete path, so the two cannot describe different
+    /// plans. What it cannot promise is that the world will not change in between — the report says so
+    /// itself, and Execute re-evaluates from disk.</para>
+    /// </summary>
+    [RelayCommand]
+    private async Task WriteOrphanReportAsync()
+    {
+        if (Orphans.Count == 0) { LastOperationResult = "Nothing to report — run the scan first"; return; }
+        if (_platform == null) { LastOperationResult = "Report unavailable on this platform"; return; }
+
+        try
+        {
+            ClearError();
+            string dir = Path.Combine(_platform.GetAppDataPath(), "Reports");
+            Directory.CreateDirectory(dir);
+            // Timestamped rather than overwritten so two scans can be compared, and so a report the
+            // user is still reading is never replaced under them.
+            string file = Path.Combine(dir, $"leftover-proxies-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+
+            // Same EntryAssembly + Version.Revision trick the System tab uses — see
+            // PointerPanelViewModel.ReadUiBuildNumber for why "build" lives in Revision.
+            int build = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.Revision ?? 0;
+
+            string text = Services.ProxyOrphanScanner.BuildReport(
+                Orphans.ToList(),
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                build > 0 ? build.ToString() : "unknown");
+
+            await File.WriteAllTextAsync(file, text);
+            await _platform.OpenWithShellAsync(file);
+
+            SetOperationResult($"Report written: {file}", 0);
+        }
+        catch (Exception ex)
+        {
+            StatusColor = StatusError;
+            SetError(ex);
+            _log.Error("ProxyDeploy", $"Writing the leftover report failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>True while a removal is running. Separate from <see cref="IsScanning"/> so the panel
+    /// can disable the scan buttons without the SCAN's cancel button appearing during a delete —
+    /// which would offer to cancel an operation it is not wired to.</summary>
+    [ObservableProperty] private bool _isRemovingOrphans;
+
+    [RelayCommand]
+    private async Task DeleteSelectedOrphansAsync(CancellationToken ct)
+    {
+        // IsScanning is shared with Scan Steam / Scan Drives / Refresh in this panel, and a delete
+        // running concurrently with a scan would have the first finisher clear the flag for both.
+        if (IsScanning || IsRemovingOrphans)
+        {
+            LastOperationResult = "Wait for the current operation to finish";
+            return;
+        }
+
+        var picked = Orphans.Where(o => o.IsSelected && o.IsActionable).ToList();
+        if (picked.Count == 0) { LastOperationResult = "Nothing checked"; return; }
+
+        // The confirmation is mandatory: with no delegate wired we refuse rather than proceed
+        // silently, because the dialog is where the exact paths are disclosed.
+        if (ConfirmOrphanRemovalAsync == null)
+        {
+            LastOperationResult = "Confirmation dialog unavailable — nothing was removed";
+            return;
+        }
+        if (!await ConfirmOrphanRemovalAsync(picked))
+        {
+            LastOperationResult = "Cancelled — nothing was removed";
+            return;
+        }
+
+        int ok = 0, fail = 0;
+        var live = LiveBinariesDirs();
+        try
+        {
+            IsRemovingOrphans = true;
+            foreach (var row in picked)
+            {
+                ct.ThrowIfCancellationRequested();
+                var result = await _deploy.RemoveOrphanProxyAsync(row, live, ct);
+
+                // Bound-property writes happen HERE, after the await, on the caller's thread.
+                row.StatusText = result.Message;
+                row.StatusIsError = !result.Success;
+                row.IsRemoved = result.Success;
+                if (result.Success) { row.IsSelected = false; ok++; } else fail++;
+            }
+            NotifyOrphanSelectionChanged();
+            SetOperationResult($"Cleaned {ok} of {picked.Count} leftover(s)", fail);
+        }
+        catch (OperationCanceledException)
+        {
+            // Report what DID happen — a cancel that discards the tally would hide a half-pruned chain.
+            NotifyOrphanSelectionChanged();
+            SetOperationResult($"Cleanup cancelled after {ok} of {picked.Count} leftover(s)", fail);
+        }
+        catch (Exception ex)
+        {
+            StatusColor = StatusError;
+            SetError(ex);
+            _log.Error("ProxyDeploy", $"Orphan cleanup failed: {ex.Message}");
+        }
+        finally
+        {
+            IsRemovingOrphans = false;
+        }
+    }
 
     /// <summary>Set by MainWindowViewModel: connect the pipe after a successful
     /// inject (best-effort auto-connect).</summary>

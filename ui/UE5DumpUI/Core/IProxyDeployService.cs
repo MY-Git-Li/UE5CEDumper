@@ -108,6 +108,55 @@ public interface IProxyDeployService
     Task<bool> UndeployAsync(DetectedGame game, CancellationToken ct = default);
 
     /// <summary>
+    /// Find LEFTOVER proxy DLLs of ours — folders still holding one of our proxies after the game
+    /// that owned them was uninstalled. Steam leaves the folder behind precisely because it contains
+    /// a file Steam does not own, so the shell survives with our DLL alone inside it.
+    ///
+    /// <para>Purely a REPORT. It deletes nothing, and it must not be folded into the Scan Steam or
+    /// Refresh flows — the caller invokes it from its own button.</para>
+    ///
+    /// <para><paramref name="liveBinariesDirs"/> is the set of <c>DetectedGame.BinariesDir</c> values
+    /// the panel already knows to be installed; any candidate matching one is refused outright.</para>
+    /// </summary>
+    /// <remarks>
+    /// THREADING: the same contract as <see cref="RefreshDeployStatusAsync"/> above applies, with one
+    /// clarification. CONSTRUCTING <see cref="OrphanProxy"/> rows on a worker is safe — nothing is
+    /// data-bound until the caller adds them to a collection. MUTATING an already-bound row from a
+    /// worker is not, and is the shape that produced the libSkiaSharp access violation. So: build the
+    /// list on the worker, return it, add it on the UI thread; and apply every per-row result from
+    /// <see cref="RemoveOrphanProxyAsync"/> after the await. Callers must not use ConfigureAwait(false).
+    /// </remarks>
+    Task<IReadOnlyList<OrphanProxy>> FindOrphanProxiesAsync(
+        OrphanScanSources sources,
+        IReadOnlySet<string> liveBinariesDirs,
+        IProgress<OrphanScanProgress>? progress = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove one leftover row: move its file(s) to the RECYCLE BIN (never unlink), then remove the
+    /// now-empty folder chain one level at a time with the NON-recursive
+    /// <c>Directory.Delete</c> — which is a kernel-enforced emptiness check and closes the
+    /// confirm→delete race, because anything created in the meantime simply makes that step throw
+    /// and the walk stops there.
+    ///
+    /// <para>The full eligibility decision is RE-EVALUATED from disk first, then INTERSECTED with what
+    /// the row actually authorised (<see cref="OrphanProxy.AuthorisedFiles"/> /
+    /// <see cref="OrphanProxy.ChainDirs"/>). Both halves matter: re-evaluating stops a stale plan
+    /// being acted on, and intersecting stops a newly-eligible folder being removed when the user was
+    /// told it would be left alone. Together they make "the result can be smaller than what you were
+    /// shown, never larger" a property of the code rather than a hope.</para>
+    ///
+    /// <para><paramref name="liveBinariesDirs"/> must be the SAME set given to
+    /// <see cref="FindOrphanProxiesAsync"/>, so the installed-game veto is re-applied here too;
+    /// passing an empty set would make the deleting path weaker than the scan that authorised it.</para>
+    ///
+    /// <para>Returns an immutable result so the caller can apply it to bound properties on its own
+    /// thread.</para>
+    /// </summary>
+    Task<OrphanRemovalResult> RemoveOrphanProxyAsync(
+        OrphanProxy row, IReadOnlySet<string> liveBinariesDirs, CancellationToken ct = default);
+
+    /// <summary>
     /// Compute a per-game proxy suggestion for each detected game and write it to
     /// <c>SuggestedProxyType</c> / <c>SuggestedProxy</c>. Preference order:
     /// (0) a proxy CONFIRMED to have loaded this game (<paramref name="confirmedByExe"/>,

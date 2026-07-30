@@ -247,6 +247,141 @@ internal static class ProxyImportAnalyzer
         return string.Join(", ", parts);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // EXPORT table reader — used by the leftover-proxy cleanup to confirm a DLL is ours
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Read the exported NAMES from a PE (data directory 0). Returns an empty set for anything that
+    /// is not a readable PE with a name-exporting export directory — never throws for malformed
+    /// input, because every caller treats "cannot tell" as "not ours" and must fail closed.
+    ///
+    /// <para>Why this exists next to the import reader instead of sharing its RVA translator:
+    /// <c>Analyze</c>'s <c>RvaToOffset</c> is a local function closing over three of its locals, and
+    /// restructuring a path the proxy-suggestion feature depends on is a worse trade than repeating
+    /// ~20 lines of header parse. The leaf readers (<see cref="ReadU16"/>, <see cref="ReadU32"/>,
+    /// <see cref="ReadAsciiZ"/>) ARE shared, which is where the subtle code is.</para>
+    ///
+    /// <para>Takes a <see cref="Stream"/> rather than a path on purpose: it is the only ownership
+    /// signal that can be evaluated through an ALREADY-OPEN handle, which is what lets the caller
+    /// re-verify identity across the confirm→delete gap without the path being swapped underneath
+    /// it. <c>FileVersionInfo</c> takes a path only and cannot do that.</para>
+    /// </summary>
+    internal static IReadOnlySet<string> ReadExportNames(Stream pe)
+    {
+        var empty = (IReadOnlySet<string>)new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            long len = pe.Length;
+            if (len < 0x40) return empty;
+
+            if (ReadU16(pe, 0) != 0x5A4D) return empty;            // 'MZ'
+            long lfanew = ReadU32(pe, 0x3C);
+            if (lfanew <= 0 || lfanew + 24 > len) return empty;
+            if (ReadU32(pe, lfanew) != 0x00004550) return empty;    // 'PE\0\0'
+
+            long fileHeader = lfanew + 4;
+            int numSections = ReadU16(pe, fileHeader + 2);
+            int sizeOfOptional = ReadU16(pe, fileHeader + 16);
+
+            long opt = lfanew + 24;
+            ushort magic = (ushort)ReadU16(pe, opt);
+            bool is64 = magic == PE32PLUS;
+            if (magic != PE32PLUS && magic != PE32) return empty;
+
+            uint sizeOfHeaders = ReadU32(pe, opt + 60);
+            long numRvaOff = opt + (is64 ? 108 : 92);
+            long dataDirOff = opt + (is64 ? 112 : 96);
+            if (ReadU32(pe, numRvaOff) < 1) return empty;           // no export directory entry
+
+            long secOff = opt + sizeOfOptional;
+            var sections = new List<(uint Va, uint VSize, uint RawSize, uint RawPtr)>(numSections);
+            for (int i = 0; i < numSections; i++)
+            {
+                long s = secOff + (long)i * 40;
+                if (s + 40 > len) break;
+                sections.Add((ReadU32(pe, s + 12), ReadU32(pe, s + 8), ReadU32(pe, s + 16), ReadU32(pe, s + 20)));
+            }
+
+            long? Rva(uint rva)
+            {
+                if (rva == 0) return null;
+                if (rva < sizeOfHeaders) return rva;
+                foreach (var (va, vSize, rawSize, rawPtr) in sections)
+                {
+                    uint span = Math.Max(vSize, rawSize);
+                    if (rva >= va && rva < va + span)
+                    {
+                        long off = (long)rva - va + rawPtr;
+                        return (off >= 0 && off < len) ? off : (long?)null;
+                    }
+                }
+                return null;
+            }
+
+            uint expRva = ReadU32(pe, dataDirOff);                   // data directory 0 == exports
+            long? expOff = Rva(expRva);
+            if (expOff == null || expOff.Value + 0x28 > len) return empty;
+
+            uint numNames = ReadU32(pe, expOff.Value + 0x18);
+            uint namesRva = ReadU32(pe, expOff.Value + 0x20);
+            if (numNames == 0 || numNames > 65536) return empty;     // sanity bound
+            long? namesOff = Rva(namesRva);
+            if (namesOff == null) return empty;
+
+            var result = new HashSet<string>(StringComparer.Ordinal);
+            for (uint i = 0; i < numNames; i++)
+            {
+                long entry = namesOff.Value + (long)i * 4;
+                if (entry + 4 > len) break;
+                long? nameOff = Rva(ReadU32(pe, entry));
+                if (nameOff == null) continue;
+                string name = ReadAsciiZ(pe, nameOff.Value, len);
+                if (name.Length > 0) result.Add(name);
+            }
+            return result;
+        }
+        catch
+        {
+            // Malformed / truncated / unreadable — the caller must treat this as "not ours".
+            return empty;
+        }
+    }
+
+    /// <summary>
+    /// Export names that have been present in EVERY proxy we have ever shipped. Used as a QUORUM,
+    /// not individually: a single <c>UE5_Init</c> is a weak signal (that exact name is guessable),
+    /// whereas a foreign DLL matching six of these exact spellings is not a credible accident.
+    /// </summary>
+    internal static readonly string[] FoundingExportNames =
+    {
+        "UE5_Init", "UE5_Shutdown", "UE5_GetVersion",
+        "UE5_GetGObjectsAddr", "UE5_GetGNamesAddr",
+        "UE5_GetObjectByIndex", "UE5_GetObjectFullName",
+        "UE5_WalkClassBegin", "UE5_WalkClassGetField", "UE5_WalkClassEnd",
+        "UE5_ResolveFName", "UE5_FindObject", "UE5_FindClass",
+    };
+
+    /// <summary>Default number of <see cref="FoundingExportNames"/> that must be present.</summary>
+    internal const int DefaultExportQuorum = 6;
+
+    /// <summary>
+    /// Does this PE export at least <paramref name="quorum"/> of our founding C ABI names? This is
+    /// the identity signal that works through an open handle and does not depend on the version
+    /// resource surviving a build-system change.
+    /// </summary>
+    internal static bool HasExportQuorum(Stream pe, int quorum = DefaultExportQuorum)
+    {
+        IReadOnlySet<string> names = ReadExportNames(pe);
+        if (names.Count == 0) return false;
+        int hits = 0;
+        foreach (string n in FoundingExportNames)
+        {
+            if (names.Contains(n) && ++hits >= quorum) return true;
+        }
+        return false;
+    }
+
     // ── Little-endian PE field readers (seekable stream) ──
     private static int ReadU16(Stream s, long off)
     {

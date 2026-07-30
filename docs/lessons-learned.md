@@ -133,6 +133,45 @@
 - **Multi-module AOB scan (`Macht::AOBScanAllModules`) handles modular UE on the dump side**, but proxy deploy is the orthogonal half — even if the DLL would find GObjects in `CoreUObject-Win64-Shipping.dll` post-injection, the DLL never loads in the first place if `version.dll` is in the wrong folder. The 15-game corpus already contained `FactoryGameSteam`'s 4,868 BPGCs cleanly — proving the scan side works once we get loaded — so the issue was always proxy-deploy detection, not scanning.
 - **EA-launcher games block both `version.dll` and `dinput8.dll` proxy preloading** (build 704 *Star Wars Jedi: Fallen Order* lesson — UE 4.21, install path `H:\SteamLibrary\steamapps\common\Jedi Fallen Order`). The install puts two **identical 58.4 MB** exes side-by-side in `SwGame\Binaries\Win64\`: the canonical UE name `SwGame-Win64-Shipping.exe` plus a renamed copy `starwarsjedifallenorder.exe` that EA's launcher actually targets. CE sees the running process name as the latter. **Neither proxy DLL is loaded** by the wrapped process — EA's launcher applies `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)` (or equivalent) before spawning the UE binary, stripping the exe's own directory from the DLL search path so version.dll / dinput8.dll dropped alongside it never resolves. Scan side itself works fine once the DLL is inside the process — GObjects / GNames / GWorld all resolve cleanly via CE manual injection. **Action**: document CE injection as the workaround in the UI's Proxy Deploy panel error state for any title where proxy deploy "succeeds" (file copied) but the pipe never connects after game launch. Likely also affects other EA App / Origin / Ubisoft Connect / battle.net launcher titles — keep an eye out and accumulate the list. Don't try to "fix" the proxy side — it's outside our control; the launcher is the one stripping the search path.
 
+### Windows filesystem traps, measured while building leftover-proxy cleanup (build 2525)
+
+The first directory-deleting feature in the app. Every one of these was **measured on a real machine**,
+and each makes the obvious implementation dangerous. They generalise well beyond this feature.
+
+- **`EnumerationOptions` silently hides Hidden and System entries.** `new EnumerationOptions()` defaults
+  to `AttributesToSkip = FileAttributes.Hidden | FileAttributes.System`. Measured: a folder holding
+  `version.dll` plus a `+h +s desktop.ini` enumerated as **2 entries via the bare
+  `Directory.EnumerateFileSystemEntries(path)` overload and 1 via the `EnumerationOptions` overload**.
+  For a delete predicate that turns "this folder holds someone's hidden save" into "this folder holds
+  only our DLL". **Use the bare overload whenever the answer decides a deletion.**
+- **`Directory.Enumerate*` is LAZY, so `catch { }` around a `foreach` yields a PARTIAL list that is
+  indistinguishable from a complete short one.** This is the more dangerous half of the trap because the
+  surrounding code's own idiom (`ProxyDeployService.cs`, several places) IS `catch { }` — correct for a
+  SCAN, catastrophic for a DELETE. Materialise inside the `try` and treat any exception as "unknown",
+  never as "empty".
+- **`File.Delete` through a junction destroys the TARGET's file.** With `Win64` as a junction to a real
+  folder, enumeration listed the target's contents as if they were local, and deleting "our DLL" there
+  removed the real file inside the target. Check `FileAttributes.ReparsePoint` **before** touching
+  anything, and refuse rather than resolving the target.
+- **`Directory.Delete(path, recursive: true)` on a folder containing an unvalidated junction removes the
+  junction and THEN throws `UnauthorizedAccessException`** — a half-completed operation the caller
+  believes did nothing. Prefer the **non-recursive** overload walked one level at a time: it throws
+  unless the directory is genuinely empty, which is a kernel-enforced emptiness check no pre-computed
+  plan can fake, and it closes the check→confirm→act race for free (anything created in between simply
+  makes that step throw and the walk stops).
+- **`FOF_ALLOWUNDO` on a volume with no recycler silently HARD-deletes.** So a "moved to the Recycle Bin"
+  promise must be guarded by `DriveInfo.DriveType == DriveType.Fixed`, and refusing is the right
+  behaviour — never fall back to a permanent delete.
+- **Verify a recycle actually recycled.** `SHFileOperationW` returning 0 and `File.Exists == false` is
+  ALSO what a hard delete looks like. Proven properly by counting `Shell.Application.Namespace(0xA)`
+  before/after (measured 34 → 35, item found by name). A struct-marshalling error would give `rc=0x57`.
+- **`Path.GetFileName` returns `""` for a path with a trailing separator**, so a shape test like "is this
+  folder named Win64" silently fails on `C:\a\Binaries\Win64\`. Trim separators first.
+- **Deleting a directory can fail for two unrelated reasons that must not be reported as one.**
+  `IOException` = still has something in it (expected, the whole point). `UnauthorizedAccessException` =
+  it may well be empty and we simply may not remove it. Collapsing them sends the user hunting for a
+  file that is not there.
+
 -----
 
 ## Pipe Protocol / Batching

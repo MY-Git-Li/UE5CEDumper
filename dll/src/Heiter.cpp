@@ -9,6 +9,7 @@
 #include "Sein.h"
 #include "BuildStamp.h"
 #include "Grimoire.h"
+#include "Utf8Helpers.h"
 
 // Global DLL module handle — used by CEPlugin.cpp to resolve the DLL's
 // own file path when injecting into the game process.
@@ -173,11 +174,17 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID /*reserved*/) {
             std::wstring fileName = (lastSlash != std::wstring::npos)
                 ? fullPath.substr(lastSlash + 1) : fullPath;
 
-            // Narrow for log message
-            char procNameA[MAX_PATH] = {};
-            GetModuleFileNameA(nullptr, procNameA, MAX_PATH);
+            // UTF-8 encode the WIDE path already in hand rather than asking Windows for a
+            // narrow one. GetModuleFileNameA converts through the ANSI code page, which
+            // DESTROYS any character the code page cannot represent: a real install at
+            // "...\EVERSPACE™ 2\..." logged as "EVERSPACE? 2", and '?' is not a legal path
+            // character — so the logged path could not be opened, existence-checked, or matched
+            // back to a folder. The log files are UTF-8, so the wide path round-trips exactly.
+            // This line is a data source for the Proxy Deploy orphan scan, which recovers
+            // deployment locations from it; a mangled path is an unusable row there.
+            std::string procPathU8 = Utf8Helpers::EncodeUtf16(fullPath.c_str(), fullPath.size());
             LOG_INFO("UE5Dumper DLL loaded | build: %s | process: %s [PID=%lu]",
-                     BuildStamp::VersionString(), procNameA, GetCurrentProcessId());
+                     BuildStamp::VersionString(), procPathU8.c_str(), GetCurrentProcessId());
 
             // Initialize per-process mirror log subfolder
             Sein::InitProcessMirror(fileName);

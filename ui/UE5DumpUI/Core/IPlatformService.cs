@@ -56,6 +56,29 @@ public interface IPlatformService
         Task.FromResult<string?>(null);
 
     /// <summary>
+    /// Open a path with its default handler (ShellExecute), e.g. a .txt in the user's text editor.
+    /// Distinct from <see cref="RevealInExplorerAsync"/>, which opens Explorer AT the file instead of
+    /// opening the file itself. Default no-op so non-Windows implementations and test doubles need
+    /// not provide it. Never throws — failing to open a report must not disturb the app.
+    /// </summary>
+    Task OpenWithShellAsync(string path) => Task.CompletedTask;
+
+    /// <summary>
+    /// Move a file to the Recycle Bin so the operation is UNDOABLE. Returns true only when the
+    /// shell reports success and the operation was not aborted.
+    ///
+    /// <para>Default returns <b>false</b>, and false means <b>refuse</b> — a caller must never fall
+    /// back to <c>File.Delete</c>. The whole point of routing leftover-proxy cleanup through the
+    /// Recycle Bin is that a wrong call costs nothing; a silent downgrade to a permanent delete
+    /// would remove that property while keeping the reassuring wording.</para>
+    ///
+    /// <para>The Windows implementation additionally refuses on any volume that is not
+    /// <see cref="System.IO.DriveType.Fixed"/>: <c>FOF_ALLOWUNDO</c> on a volume with no recycler
+    /// silently hard-deletes, which would make the promise a lie.</para>
+    /// </summary>
+    bool MoveToRecycleBin(string path) => false;
+
+    /// <summary>
     /// Opt the running process into the Windows Restart Manager so a
     /// reboot / update relaunches it on next sign-in (Win10 + Win11, gated by
     /// the user's "restart apps" setting). Default no-op so non-Windows

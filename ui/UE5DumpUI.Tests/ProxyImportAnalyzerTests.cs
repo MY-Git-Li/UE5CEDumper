@@ -314,6 +314,66 @@ public class ProxyImportAnalyzerTests
         return buf;
     }
 
+    // ── Export-name reader: the "is this DLL ours" signal used by leftover-proxy cleanup ──
+
+    [Fact]
+    public void ReadExportNames_NonPeInput_ReturnsEmptyRatherThanThrowing()
+    {
+        // Every caller treats "cannot tell" as "not ours", so this must fail closed, never throw.
+        using var junk = new MemoryStream(Encoding.ASCII.GetBytes("this is not a PE file at all"));
+        Assert.Empty(ProxyImportAnalyzer.ReadExportNames(junk));
+
+        using var empty = new MemoryStream();
+        Assert.Empty(ProxyImportAnalyzer.ReadExportNames(empty));
+        Assert.False(ProxyImportAnalyzer.HasExportQuorum(empty));
+    }
+
+    [Fact]
+    public void HasExportQuorum_RealBuiltProxy_SatisfiesIt()
+    {
+        // Asserted against the ACTUAL artifact so that a build-system change which drops the UE5_*
+        // exports (or renames one) turns into a red build rather than a silent loss of recall — the
+        // cleanup would quietly stop recognising its own DLLs.
+        string? proxy = FindBuiltProxy();
+        Assert.SkipWhen(proxy == null, "dist/proxy/version.dll not built in this checkout");
+
+        using var fs = File.OpenRead(proxy!);
+        var names = ProxyImportAnalyzer.ReadExportNames(fs);
+
+        // Every founding name must be present, not merely the quorum — the quorum exists to tolerate
+        // a FUTURE rename, not to excuse one today.
+        foreach (string expected in ProxyImportAnalyzer.FoundingExportNames)
+            Assert.Contains(expected, names);
+
+        fs.Position = 0;
+        Assert.True(ProxyImportAnalyzer.HasExportQuorum(fs));
+    }
+
+    [Fact]
+    public void HasExportQuorum_GenuineWindowsSystemDll_IsRejected()
+    {
+        // The catastrophic false positive this signal must never produce: deleting the real
+        // version.dll. It exports 17 names, none of them ours.
+        string sys = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
+                                  "version.dll");
+        Assert.SkipWhen(!File.Exists(sys), "System32\\version.dll not present");
+
+        using var fs = File.OpenRead(sys);
+        Assert.False(ProxyImportAnalyzer.HasExportQuorum(fs));
+    }
+
+    /// <summary>Locate dist/proxy/version.dll by walking up from the test assembly.</summary>
+    private static string? FindBuiltProxy()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (int i = 0; i < 8 && dir != null; i++, dir = dir.Parent)
+        {
+            string candidate = Path.Combine(dir.FullName, "dist", "proxy", "version.dll");
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
     private static void WriteU16(byte[] b, int off, ushort v) =>
         BinaryPrimitives.WriteUInt16LittleEndian(b.AsSpan(off), v);
 

@@ -225,6 +225,24 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
         return Task.CompletedTask;
     }
 
+    public Task OpenWithShellAsync(string path)
+    {
+        try
+        {
+            if (File.Exists(path) || Directory.Exists(path))
+            {
+                // ShellExecute semantics: hand the path to whatever the user has associated with it.
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            }
+        }
+        catch
+        {
+            // Opening a report must never crash the UI — the file is written either way and the
+            // caller shows its path.
+        }
+        return Task.CompletedTask;
+    }
+
     // --- Drive enumeration + physical-disk mapping -----------------------
     // Used by the generic (non-Steam) UE-game scan to schedule per-physical-disk
     // sequential / cross-disk parallel walks. Enumeration is pure managed BCL;
@@ -672,6 +690,79 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWow64Process(IntPtr hProcess,
         [MarshalAs(UnmanagedType.Bool)] out bool wow64Process);
+
+    // --- Recycle Bin (P/Invoke) -------------------------------------------
+    // Used by the Proxy Deploy leftover-proxy cleanup. Everything that feature removes is a FILE
+    // moved here, never unlinked, so a wrong decision is recoverable from the bin. Empty folders
+    // are removed with Directory.Delete afterwards, which needs no undo: an empty folder holds
+    // nothing to lose, and the non-recursive overload refuses if it is not actually empty.
+
+    private const uint FO_DELETE = 0x0003;
+    private const ushort FOF_SILENT = 0x0004;
+    private const ushort FOF_NOCONFIRMATION = 0x0010;
+    private const ushort FOF_ALLOWUNDO = 0x0040;          // <- the bit that means "Recycle Bin"
+    private const ushort FOF_NOERRORUI = 0x0400;
+
+    // Contains string fields, so this is marshalled rather than blittable — classic DllImport with
+    // CharSet.Unicode handles that without AllowUnsafeBlocks (see the imm32 note above for why this
+    // project avoids LibraryImport). Sequential layout inserts the x64 padding after wFunc and
+    // fFlags automatically; do not add Pack.
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct SHFILEOPSTRUCTW
+    {
+        public IntPtr hwnd;
+        public uint wFunc;
+        [MarshalAs(UnmanagedType.LPWStr)] public string pFrom;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? pTo;
+        public ushort fFlags;                 // FILEOP_FLAGS is a WORD, not a DWORD
+        [MarshalAs(UnmanagedType.Bool)] public bool fAnyOperationsAborted;
+        public IntPtr hNameMappings;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? lpszProgressTitle;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "SHFileOperationW", ExactSpelling = true)]
+    private static extern int SHFileOperationW(ref SHFILEOPSTRUCTW lpFileOp);
+
+    public bool MoveToRecycleBin(string path)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return false;
+
+            // FOF_ALLOWUNDO on a volume with no recycler silently HARD-deletes, which would turn
+            // the caller's "moved to the Recycle Bin" promise into a lie. Refuse instead.
+            // The caller logs the refusal; this layer stays free of a logging dependency.
+            string? root = Path.GetPathRoot(Path.GetFullPath(path));
+            if (string.IsNullOrEmpty(root) || new DriveInfo(root).DriveType != DriveType.Fixed)
+                return false;
+
+            var op = new SHFILEOPSTRUCTW
+            {
+                hwnd = IntPtr.Zero,
+                wFunc = FO_DELETE,
+                // pFrom is a DOUBLE-null-terminated list. String marshalling appends one null, so
+                // the explicit "\0" here supplies the second. Without it the shell reads past the
+                // buffer looking for the list terminator.
+                pFrom = path + "\0",
+                pTo = null,
+                fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT,
+                fAnyOperationsAborted = false,
+                hNameMappings = IntPtr.Zero,
+                lpszProgressTitle = null,
+            };
+
+            int rc = SHFileOperationW(ref op);
+            // Both conditions matter: a nonzero rc is a shell error, and fAnyOperationsAborted is
+            // set when the shell silently declined part of the request (e.g. a policy block) while
+            // still returning 0. Treating either as failure keeps the caller from pruning folders
+            // whose file is actually still there.
+            return rc == 0 && !op.fAnyOperationsAborted;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     public void Dispose()
     {

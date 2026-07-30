@@ -542,3 +542,58 @@ Auto snapshot deliberately does **not** lower the scan thread priority — that 
 tried and reverted because it starves the capture ~20× when the game is busy. The
 lever is the **idle gap** between snapshots: a longer interval leaves the game more
 breathing room. The capture itself already caps its worker threads at `cores − 2`.
+
+-----
+
+## Cleaning up leftover proxy DLLs after uninstalling a game
+
+**The symptom.** You uninstall a game from Steam and the game's folder is still there, holding
+nothing but our `version.dll` (or `dxgi.dll` / `winmm.dll` / `dinput8.dll`). That is not a Steam
+bug: Steam will not delete a file it does not own, so our proxy keeps the whole folder chain alive.
+Measured on one real machine: **9 leftover shells**, the oldest from build 447.
+
+**Where.** Proxy Deploy tab → *Leftover proxy DLLs* card.
+
+| Button | What it does |
+|---|---|
+| **Find leftovers** | Scans and REPORTS. Changes nothing. |
+| **Report…** | Writes a dry-run `.txt` listing every path and opens it. Changes nothing. |
+| **Delete checked (N)** | The only button that touches the disk. Rows start unchecked and there is no select-all. |
+
+### The two-step, and why it is two steps
+
+*Find leftovers* only lists. **Report…** writes
+`%LOCALAPPDATA%\UE5CEDumper\Reports\leftover-proxies-<timestamp>.txt` and opens it in whatever you
+use for text files, so you can read the full plan outside a modal dialog and keep it. It is built
+from the same rows the delete acts on, so it cannot describe a different plan.
+
+Then tick the rows you want and press delete; you get one more confirmation listing the same paths.
+
+### What it will and will not remove
+
+- **Our DLL always goes** — to the **Recycle Bin**, never unlinked, so a wrong call is recoverable.
+- **Folders are removed one level at a time and only while each is left completely empty.** The
+  moment a folder still holds anything, that folder and everything above it are kept. The Steam
+  library's `common` folder is never touched.
+- **Anything that is not ours is never touched.** If ReShade's `dxgi.dll` shares the folder with our
+  `winmm.dll`, only `winmm.dll` goes and the folders all stay. Same for a dead tool's leftover
+  `.log` / `.ini`.
+- **A folder that still holds an executable is skipped entirely** — that is an installed game, and a
+  proxy you deployed on purpose. Use *Undeploy* for those.
+- **Steam is asked first.** If any `appmanifest_*.acf` in that library still names the folder, the
+  row is refused outright, even if the folder looks empty — that is what stops a mid-update or
+  mid-verify game being mistaken for an uninstalled one.
+- **Junctions and symbolic links are refused**, and a folder we cannot fully read is refused. "Could
+  not read it" never counts as "it is empty".
+
+### Non-Steam locations
+
+Rows found outside a Steam library (recovered from our own logs) are listed as **file only**: the DLL
+is recycled, no folder is removed. There is no `appmanifest` out there to prove the game is gone, so
+the folder chain gets no anchor and is left alone.
+
+### If the report and the result disagree
+
+They can, and only in one direction. The report is a snapshot; every condition is checked again
+immediately before anything is removed, and the plan is then narrowed to what you confirmed. So the
+real result **can be smaller than the report, and never larger.**
