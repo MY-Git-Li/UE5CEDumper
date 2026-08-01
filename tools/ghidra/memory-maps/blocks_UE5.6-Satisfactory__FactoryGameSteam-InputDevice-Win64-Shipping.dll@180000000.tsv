@@ -1,0 +1,12 @@
+# program	FactoryGameSteam-InputDevice-Win64-Shipping.dll
+# tag	UE5.6-Satisfactory
+# image_base	180000000
+# image_base_str	180000000
+name	start	size	exec	init	read	write	md5
+Headers	180000000	1024	0	1	1	0	0d0defca9695db20ccee55d8a0fbc899
+.text	180001000	6656	1	1	1	0	52e0154d64e41faf99357a7466b5fe8a
+.rdata	180003000	6656	0	1	1	0	6c2c452881b17b2f56e4b7674bac45ca
+.data	180005000	912	0	1	1	1	67f4a751a72bac56e40f1fad9e64b5cc
+.pdata	180006000	1024	0	1	1	0	eb0bcdef511d4631c63ae13d01e21dea
+.rsrc	180007000	59392	0	1	1	0	a5a7d1cd7fb7bbb03b957d5d7cdf9944
+.reloc	180016000	512	0	1	1	0	597e03ec2524965e5573f0d060f67f39

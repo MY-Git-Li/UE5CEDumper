@@ -90,6 +90,13 @@ jobs:
           # and only a human can tell those apart (see eval §7).
           & $py tools/pe/aob_specificity.py --tsv out/sweep/patterns.tsv --baseline tools/pe/aob-specificity-baseline.tsv --check
           if ($LASTEXITCODE -ne 0) { throw "aob_specificity --check FAILED ($LASTEXITCODE) - a pattern's noise profile changed, or a new pattern landed unrecorded. Read the diff before regenerating the baseline." }
+          # The Ghidra-free sweep's port guard (build 2545). The full acceptance test is
+          # byte-identical output vs a Ghidra run, which needs the 59 GB archive and cannot run
+          # here; this covers the two places the port can silently diverge - the bytes.find
+          # prefilter that replaced the Java's anchor-bucket sweep, and pe_memory.py's
+          # max(SizeOfRawData, VirtualSize) section rule. Stdlib-only, ~1s, no corpus.
+          & $py tools/ghidra/pe_scan_selftest.py
+          if ($LASTEXITCODE -ne 0) { throw "pe_scan_selftest FAILED ($LASTEXITCODE) - pe_scan_patterns.py/pe_memory.py no longer match the behaviour scan_patterns.java specifies" }
 
       - name: Build + test + AOT publish (the gate)
         shell: pwsh

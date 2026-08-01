@@ -24,6 +24,21 @@ bash tools/ghidra/sweep.sh UE4.27 UE5.7         # only tags matching these subst
 py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
 ```
 
+### …or without Ghidra at all
+
+`scan_patterns.java` uses four Ghidra APIs and **zero** analysis APIs, so for the sweep a program
+is nothing but *image base + block map + bytes* — all of which come out of the game binary.
+`pe_sweep.py` does the same sweep from the PEs, with **byte-identical output**, no JVM and no
+Ghidra install. Authoring a *new* AOB still needs Ghidra (decompiler, xrefs, symbols); replaying
+the database does not.
+
+```sh
+SWEEP_SCRIPT=dump_blocks.java SWEEP_OUT=$PWD/out/blocks-dump bash tools/ghidra/sweep.sh  # once
+py tools/ghidra/check_pe_memory.py --blocks out/blocks-dump --map out/pe-corpus-map.tsv
+py tools/ghidra/pe_sweep.py                                    # -> out/pe-sweep
+py tools/ghidra/compare_sweeps.py out/sweep out/pe-sweep       # the acceptance test
+```
+
 | Script | Lang | What it does |
 |--------|------|--------------|
 | `sweep.sh` | bash | **The whole regression sweep.** Extracts `Himmel.h` → TSV, then replays it against every project in its table with that project's `GS_TRUE`, N projects at a time (a Ghidra project takes an *exclusive* lock, so parallelism is safe across projects and never within one). The truth table lives here in executable form so it cannot drift from the docs. |
@@ -33,6 +48,13 @@ py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
 | `find_callers.java` | Java | For each function VA arg, lists call sites and the `LEA/MOV RCX` (`this`) set before each call — recovers a static global a method is invoked on (e.g. `LEA RCX,[GUObjectArray]; call`). |
 | `dump_global_xref_aob.java` | Java | **PDB-shipping games.** Resolves UE global symbols by name (`GWorld`, `GUObjectArray`, `NamePoolData`, `SparseDelegates`, `GEngine`, …) and, for every code xref, dumps the raw byte window + a disp-masked AOB candidate + read/write kind + containing function. Turns a symbol-rich binary into `Himmel.h` material in one pass. Filters out variable symbols (they lazy-load the whole datatype list → OOM). |
 | `scan_patterns.java` | Java | **The engine `sweep.sh` drives.** Mass-scans a **TSV** of signatures against every executable section and resolves each hit exactly like `Genau::TryResolveMatch`, reporting `hits / ok / decoy` plus a verdict: `UNIQUE-OK`, `OK-FIRST`, `OK-BEHIND` (**a decoy scans first**), `DECOY-ONLY`, `MISS`, `NO-TRUTH`. Also emits a per-pattern hotspot TSV and a **consensus** file — which VA the most *independent* patterns agree on, the only correctness signal available on a symbol-less binary — plus a *priority walk* showing what the runtime would land on there. Understands nibble wildcards. Env: `GS_TSV`, `GS_OUT`, `GS_TAG`, `GS_TRUE` (entries may carry a `programNameSubstring:` prefix, which is **required** for modular builds — their DLLs share image base `0x180000000` so their ranges overlap). Outputs are keyed by tag + program + image base; program name alone is not unique across projects. |
+| `dump_blocks.java` | Java | Emits a program's **complete memory model** — image base, every block (start/size/exec/init/read/write) and an **MD5 per initialized block** — as a few KB of TSV. The oracle for "does a PE reader see what Ghidra sees": matching starts and sizes prove only the layout agrees, the digest proves the *bytes* do. Driven by `sweep.sh` via `SWEEP_SCRIPT` so it reuses the same ROWS table. |
+| `pe_memory.py` | py3 | Ghidra's memory model of a PE, rebuilt from the PE alone: the block map plus `getBlock`/`contains`/`getLong` with Ghidra's semantics. The non-obvious rule is that a section's initialized block is **`max(SizeOfRawData, VirtualSize)`**, zero-padded — raw alone fits 28 of 29 corpus programs and breaks on the packed DQ7R build. |
+| `pe_scan_patterns.py` | py3 | `scan_patterns.java` with no Ghidra, output byte-for-byte identical: same signed-64-bit arithmetic, same Java `HALF_UP` `%f` rounding, same CRLF. Prefilters each pattern on its longest literal run instead of sweeping an anchor-bucket map (equivalent match set, tractable in CPython). |
+| `pe_sweep.py` | py3 | The Ghidra-free sweep driver. **Parses `sweep.sh`'s ROWS table rather than copying it**, so the two sweeps cannot disagree about which project carries which truth VAs; program list and binary paths come from the hash-verified map. A row it cannot map is reported UNMAPPED, never silently skipped. |
+| `check_pe_memory.py` | py3 | Diffs `pe_memory.py` against `dump_blocks.java` per block, by hash, and writes the verified tag/program → PE path map the sweep consumes. Accepts a candidate only on a digest match — a matching filename has never been evidence in this corpus. |
+| `compare_sweeps.py` | py3 | The acceptance test: are two sweep output dirs byte-identical, in both directions? A summary comparison would pass a scanner that had quietly lost half its hits on one program. |
+| `pe_scan_selftest.py` | py3 | Stdlib-only, ~1 s, no corpus: prefilter vs a brute-force matcher over patterns with **planted** matches, the block model against a synthetic PE, and the Java formatting quirks. Every check is paired with a negative control that must fail. |
 | `replay_patterns.py` | py3 | **Replays the whole signature DB against a PE with NO Ghidra and no project** — reads `patterns.tsv`, resolves every RIP-relative match itself, and ranks the candidate VAs each target converges on. This is the corroboration half of the "derive truth without Ghidra" flow: `pdb_globals.py` says what the answer *is*, this says which patterns *find* it. `ONLY_TARGET=GNames TOPN=12` narrows it. ⚠️ It shows the top-N by voter count — **"not in the top N" is NOT "absent"**, a mistake that produced three wrong write-ups before the sweep corrected them. It also reports what *hits*, never what the validator walk *lands on*; only the sweep answers that. |
 | `inventory_builds.py` | py3 | **What did I build that the corpus is NOT testing?** Reconciles the self-built reference binaries on disk against the sweep rows that import them (via the manifest's `binary_last_seen`, never by re-parsing `.prp` — an earlier attempt did and matched 0 of 30). `preflight.py` structurally cannot answer this: it walks `sweep.sh` outward to files, so a binary no row mentions is outside its world. `--md` emits the table in [docs/reference-builds.md](../docs/reference-builds.md). |
 | `capture_provenance.py` | py3 | Regenerates `corpus-provenance.tsv`, the **build-identity snapshot**. Exists because `build_corpus_manifest.py` deliberately NULLs `steam_buildid`/size/sha256 on a drifted row, destroying the pointer to the build a `.rep` was made from the first time a game patches. Merges four sources: Steam `sku.sis` backups, `console_log.txt` depot downloads (which **rotate** — snapshot early), the manifest, and hand-resolved SteamDB entries. Idempotent. **Re-run BEFORE a game updates, not after.** |

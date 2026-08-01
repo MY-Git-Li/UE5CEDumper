@@ -1,0 +1,7 @@
+# program	FactoryGameSteam-CoreUObject-Win64-Shipping.dll
+# tag	UE5.6-Satisfactory
+# image_base	0
+# image_base_str	0000:0000
+name	start	size	exec	init	read	write	md5
+CODE_0	10000	1104	1	1	1	1	6864ef7b0e3bc7a2e5713a455fe09210
+HEADER	0	64	0	1	0	0	ce87a5cce19a62e04a767e0e94333361
