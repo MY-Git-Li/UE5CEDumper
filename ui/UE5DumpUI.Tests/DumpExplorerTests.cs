@@ -20,6 +20,11 @@ public class DumpExplorerTests
     // A small, well-formed "Dump All" corpus: meta + 2 classes (one with props
     // and a func) + a summary line. The BP_Player addr differs from the live one
     // to prove matching is by path, not the dump-time address.
+    /// <summary>Same fixture as <see cref="SampleJsonl"/> but carrying a pe_hash, so the
+    /// build-identity arm of the cross-game gate can be exercised in both directions.</summary>
+    private static string SampleJsonlWithHash =>
+        SampleJsonl.Replace("\"module\":\"Game.exe\"", "\"module\":\"Game.exe\",\"pe_hash\":\"ABCD1234\"");
+
     private const string SampleJsonl =
         "{\"kind\":\"meta\",\"ue_version\":505,\"module\":\"Game.exe\",\"object_count\":1000,\"dumped_at\":\"2026-07-10T00:00:00Z\",\"dumper_build\":2034}\n" +
         "{\"kind\":\"class\",\"name\":\"BP_Player_C\",\"addr\":\"0x1000\",\"path\":\"" + PlayerPath + "\",\"meta\":\"BlueprintGeneratedClass\",\"super\":\"Character\",\"props\":[" +
@@ -137,6 +142,21 @@ public class DumpExplorerTests
     private sealed class FakeDumpService : StubDumpService
     {
         public List<UObjectNode> Objects { get; } = new();
+
+        /// <summary>Live game identity the match gate reads. Defaults to the module the
+        /// <see cref="SampleJsonl"/> fixture declares, so the ordinary tests exercise the
+        /// same-game path.</summary>
+        public EngineState NextState { get; set; } = new() { ModuleName = "Game.exe" };
+        /// <summary>Simulate a DLL that cannot report identity (probe throws).</summary>
+        public bool FailPointers { get; set; }
+        public int PointerCalls { get; private set; }
+
+        public override Task<EngineState> GetPointersAsync(CancellationToken ct = default)
+        {
+            PointerCalls++;
+            if (FailPointers) throw new InvalidOperationException("pipe down");
+            return Task.FromResult(NextState);
+        }
 
         public override Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default, bool includePath = false)
         {
@@ -297,6 +317,117 @@ public class DumpExplorerTests
             var propRow = vm.Matched.First(e => e.Kind == DumpEntryKind.Property);
             vm.FindInstancesCommand.Execute(propRow);
             Assert.Equal("BP_Player_C", cls);
+        }
+        finally { File.Delete(path); }
+    }
+
+    // ---- cross-game identity gate (build 2538) ----
+    //
+    // The live match joins on bare class NAMES, and every UE title has Object / Actor /
+    // Pawn / PlayerController. So loading game A's dump against game B does not fail — it
+    // "succeeds" and hands back B's addresses under A's labels. These pin all four arms of
+    // the gate; asserting only the refusal would not notice the same-game path regressing
+    // into a refusal, which would break the feature's normal use.
+
+    [Fact]
+    public async Task Vm_LiveMatch_RefusesWhenTheConnectedGameIsADifferentModule()
+    {
+        var path = await WriteTempAsync(SampleJsonl);   // meta module = "Game.exe"
+        try
+        {
+            var dump = LiveGameWithPlayer();
+            dump.NextState = new EngineState { ModuleName = "OtherGame.exe" };
+            var vm = CreateVm(dump, new MockPlatformService(Path.GetTempPath()));
+            vm.SetConnected(true);
+            await vm.LoadFromPathAsync(path);
+
+            Assert.False(vm.LiveChecked);
+            Assert.Empty(vm.Matched);                       // nothing may be claimed live
+            Assert.All(vm.Unmatched, e => Assert.False(e.IsMatched));
+            Assert.All(vm.Unmatched, e => Assert.Equal("", e.LiveAddr));
+            Assert.Contains("refused", vm.StatusText);
+            Assert.Contains("Game.exe", vm.StatusText);     // names BOTH sides
+            Assert.Contains("OtherGame.exe", vm.StatusText);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Vm_LiveMatch_SameModuleAndBuild_MatchesWithNoCaveat()
+    {
+        var path = await WriteTempAsync(SampleJsonlWithHash);
+        try
+        {
+            var dump = LiveGameWithPlayer();
+            dump.NextState = new EngineState { ModuleName = "Game.exe", PeHash = "ABCD1234" };
+            var vm = CreateVm(dump, new MockPlatformService(Path.GetTempPath()));
+            vm.SetConnected(true);
+            await vm.LoadFromPathAsync(path);
+
+            Assert.True(vm.LiveChecked);
+            Assert.NotEmpty(vm.Matched);
+            Assert.DoesNotContain("refused", vm.StatusText);
+            Assert.DoesNotContain("Different build", vm.StatusText);
+            Assert.DoesNotContain("identity unknown", vm.StatusText);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Vm_LiveMatch_SameModuleDifferentBuild_StillMatchesButSaysSo()
+    {
+        // A dump of THIS game taken before a patch is the feature's normal use, so a
+        // pe_hash mismatch must NOT refuse — only warn that offsets may have moved.
+        var path = await WriteTempAsync(SampleJsonlWithHash);
+        try
+        {
+            var dump = LiveGameWithPlayer();
+            dump.NextState = new EngineState { ModuleName = "Game.exe", PeHash = "99999999" };
+            var vm = CreateVm(dump, new MockPlatformService(Path.GetTempPath()));
+            vm.SetConnected(true);
+            await vm.LoadFromPathAsync(path);
+
+            Assert.True(vm.LiveChecked);
+            Assert.NotEmpty(vm.Matched);                    // still useful
+            Assert.Contains("Different build", vm.StatusText);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Vm_LiveMatch_NoPeHashInDump_MatchesButWillNotClaimIdentityWasChecked()
+    {
+        var path = await WriteTempAsync(SampleJsonl);       // fixture has no pe_hash
+        try
+        {
+            var dump = LiveGameWithPlayer();
+            dump.NextState = new EngineState { ModuleName = "Game.exe", PeHash = "ABCD1234" };
+            var vm = CreateVm(dump, new MockPlatformService(Path.GetTempPath()));
+            vm.SetConnected(true);
+            await vm.LoadFromPathAsync(path);
+
+            Assert.True(vm.LiveChecked);
+            Assert.NotEmpty(vm.Matched);
+            Assert.Contains("identity unknown", vm.StatusText);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Vm_LiveMatch_IdentityProbeFails_SkipsRatherThanMatchingBlind()
+    {
+        var path = await WriteTempAsync(SampleJsonl);
+        try
+        {
+            var dump = LiveGameWithPlayer();
+            dump.FailPointers = true;
+            var vm = CreateVm(dump, new MockPlatformService(Path.GetTempPath()));
+            vm.SetConnected(true);
+            await vm.LoadFromPathAsync(path);
+
+            Assert.False(vm.LiveChecked);
+            Assert.Empty(vm.Matched);
+            Assert.Contains("identity", vm.StatusText);
         }
         finally { File.Delete(path); }
     }
