@@ -78,6 +78,15 @@ IGNORE_EXACT = {
     "meta.Executable Location",  # ditto, and the corpus's recorded paths are stale anyway
     "has_pdb_applied",           # derived label, added after the first probe run
     "analysis_state",            # derived label; compared explicitly below instead
+    # A REBUILD IS SUPPOSED TO BE ON THE CURRENT GHIDRA. This was briefly graded as a MISMATCH,
+    # which made `ES2-0517` (the corpus's only 11.3.2 project; the other 72 programs are 12.1.2)
+    # look irreproducible and led to the advice "keep that .rep, or keep an 11.3.2 install".
+    # That is backwards, and it does not scale: on 12.2 or 13.0 EVERY project would suddenly be
+    # "irreproducible" against a pinned original. The version an artifact was born on is not a
+    # property worth preserving — the strategy is to rebuild on the installed Ghidra and, if a new
+    # release breaks something, stay on the working version until it is fixed. Reported as an
+    # informational line below, never as a failure.
+    "meta.Created With Ghidra Version",
 }
 IGNORE_PREFIX = ("meta.SourceFile",)   # hundreds of PDB build-tree paths; provenance, not identity
 RIP_SLACK = (1 << 31) + 0x10000        # see compare_block_maps
@@ -190,6 +199,10 @@ def compare_identity(orig, new):
         msgs.append("SYMBOL DIGEST DIFFERS: orig=%s (%s symbols) rebuild=%s (%s symbols)"
                     % (a.get("symbols_sha256"), a.get("symbols"),
                        b.get("symbols_sha256"), b.get("symbols")))
+    gv_a, gv_b = a.get("meta.Created With Ghidra Version"), b.get("meta.Created With Ghidra Version")
+    if gv_a and gv_b and gv_a != gv_b:
+        msgs.append("note: original was built by Ghidra %s, rebuild by %s — expected, and the "
+                    "point: the rebuild is on the CURRENT toolchain" % (gv_a, gv_b))
     v["analysis"] = (not orig_analysed) or ((b.get("instructions") or "0") != "0")
     analysis_gap = not v["analysis"]
     if analysis_gap:

@@ -20,6 +20,38 @@ builds ≤696 in
 
 -----
 
+## 2026-08-01 - Two corrections to the entry below: the backup claim, and pinning a Ghidra version (build 2545)
+
+The entry below is left as written (this file is append-only). Both of its closing claims were
+wrong, and the maintainer caught both.
+
+### "The corpus is single-copy" — WITHDRAWN
+
+`X:\Ghidra_Projs_Backup` is on **the other machine**. I checked `X:` from the laptop, found no such
+drive, and wrote "the corpus is single-copy … `X:\Ghidra_Projs_Backup` never produced a file" into
+three documents. **A drive-letter check only reports the machine you ran it on.** This is the same
+failure the measurement-discipline notes already warn about — a number (or here, an absence)
+recorded without its conditions — and it slipped through because an absent drive *feels* like a
+fact about the world rather than about one host. Backup state must be asserted from the machine
+that holds it, naming that machine.
+
+### "Keep an 11.3.2 install for ES2-0517" — BACKWARDS
+
+`reimport_verify.py` graded `meta.Created With Ghidra Version: orig='11.3.2' rebuild='12.1.2'` as a
+`MISMATCH`, which made the corpus's one 11.3.2 project look irreproducible and produced the advice
+"keep that `.rep`, or keep an 11.3.2 install". That does not scale: on 12.2 or 13.0 **every**
+project would read as irreproducible against a pinned original.
+
+The rule is the inverse — *always rebuild on the installed Ghidra; if a new release breaks
+something, stay on the working version until it is fixed.* An artifact's birth version is not a
+property worth preserving. The field is now an informational note, never a failure, and
+**`ES2-0517` grades `REBUILT-MODULO-ANALYSIS` like every other analysed row: 17 of 17 rows verified,
+zero mismatches.** The follow-through is to re-import it from
+`D:\UE_Analyze_data\Game archive\ES2\5.5-0517 (…)`, which also permanently removes the
+language-version upgrade it re-runs on every open.
+
+-----
+
 ## 2026-08-01 - A deleted `.rep` can be rebuilt: demonstrated, graded on a symbol-table digest (build 2545)
 
 `docs/todo.md` carried a standing rule — no `.rep` may be deleted until a re-import is demonstrated
