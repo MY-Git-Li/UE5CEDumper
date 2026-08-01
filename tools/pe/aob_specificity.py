@@ -207,18 +207,94 @@ def main():
 
     if "--tsv" in args:
         tsv = args[args.index("--tsv") + 1]
+        baseline = None
+        if "--baseline" in args:
+            baseline = args[args.index("--baseline") + 1]
+        do_update = "--update-baseline" in args
+        do_check = "--check" in args
+
         rows = [l.rstrip("\n").split("\t") for l in open(tsv, encoding="utf-8")]
         hdr, rows = rows[0], rows[1:]
         ix = {k: i for i, k in enumerate(hdr)}
         tally = {}
+        computed = {}
         print(f"\n{'pattern':<18} {'tgt':<16} {'bound':>10}  verdict")
         for r in sorted(rows, key=lambda r: r[ix["id"]]):
             b, _n, _w, lg, lt = score(idx, r[ix["pattern"]])
             v, _ = verdict(b, lg, lt, idx.threshold - 1)
             tally[v] = tally.get(v, 0) + 1
-            print(f"  {r[ix['id']]:<16} {r[ix['target']]:<16} "
+            pid = r[ix["id"]]
+            computed[pid] = (r[ix["target"]], "-" if b is None else str(b), v)
+            print(f"  {pid:<16} {r[ix['target']]:<16} "
                   f"{('—' if b is None else b):>10}  {v}")
         print("\n  " + "   ".join(f"{k}={n}" for k, n in sorted(tally.items())))
+
+        if not (do_update or do_check):
+            return 0
+        if not baseline:
+            print("\n--check / --update-baseline need --baseline <path>")
+            return 2
+
+        if do_update:
+            with open(baseline, "w", encoding="utf-8", newline="\n") as f:
+                f.write("# AOB specificity baseline — regenerate with:\n"
+                        "#   py tools/pe/aob_specificity.py --tsv out/sweep/patterns.tsv \\\n"
+                        "#      --baseline tools/pe/aob-specificity-baseline.tsv --update-baseline\n"
+                        "# A DIFF HERE IS THE POINT. It means a pattern's noise profile changed, or a\n"
+                        "# new pattern landed without anyone looking at its specificity. Both deserve a\n"
+                        "# human. Never regenerate to make CI green without reading the diff first —\n"
+                        "# `bound` rising is a pattern getting noisier.\n"
+                        "# NOTE: `verdict` CLEAR means \"this window is ABSENT from the index\", i.e.\n"
+                        "# never observed — NOT \"measured to be rare\". See aob-block-library-eval.md §7.\n"
+                        "id\ttarget\tbound\tverdict\n")
+                for pid in sorted(computed):
+                    t, b, v = computed[pid]
+                    f.write(f"{pid}\t{t}\t{b}\t{v}\n")
+            print(f"\nbaseline written: {baseline}  ({len(computed)} patterns)")
+            return 0
+
+        # --check: golden-file compare. Any difference fails; the message says how to refresh.
+        if not os.path.exists(baseline):
+            print(f"\nCHECK FAILED: baseline not found: {baseline}")
+            return 1
+        recorded = {}
+        with open(baseline, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("#") or line.startswith("id\t") or not line.strip():
+                    continue
+                p = line.rstrip("\n").split("\t")
+                if len(p) >= 4:
+                    recorded[p[0]] = (p[1], p[2], p[3])
+        problems = []
+        for pid in sorted(set(computed) | set(recorded)):
+            c, r = computed.get(pid), recorded.get(pid)
+            if r is None:
+                problems.append(f"NEW pattern {pid} ({c[0]}) scores bound={c[1]} {c[2]} — record it")
+            elif c is None:
+                problems.append(f"GONE from Himmel.h: {pid} — stale baseline row")
+            elif c[1:] != r[1:]:
+                worse = ""
+                try:
+                    if c[1] != "-" and r[1] != "-" and int(c[1]) > int(r[1]):
+                        worse = "  <-- BOUND ROSE: the pattern got noisier"
+                except ValueError:
+                    pass
+                if r[2] == "CLEAR" and c[2] != "CLEAR":
+                    worse += "  <-- lost CLEAR"
+                problems.append(f"CHANGED {pid}: bound {r[1]}->{c[1]}  verdict {r[2]}->{c[2]}{worse}")
+        if problems:
+            print("\nCHECK FAILED — specificity differs from the recorded baseline:\n")
+            for p in problems:
+                print("  *", p)
+            print("\nThis is the authoring gate (aob-block-library-eval.md build order, step 5).")
+            print("Read the diff, then if it is intended:")
+            print("  py tools/pe/aob_specificity.py --tsv out/sweep/patterns.tsv \\")
+            print(f"     --baseline {baseline} --update-baseline")
+            print("\nA rising `bound` means the pattern matches more of the indexed corpus.")
+            print("A verdict moving CLEAR->UNPROVEN can ALSO mean the index improved — CLEAR only")
+            print("ever means \"never seen\" (eval §7), so check which changed before assuming fault.")
+            return 1
+        print(f"\nCHECK OK: {len(computed)} patterns match the recorded specificity baseline")
         return 0
 
     if not args:
