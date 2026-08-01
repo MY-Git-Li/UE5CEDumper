@@ -58,6 +58,14 @@ struct ForcedFieldInfo {
     int32_t     held = 0;     // live instance count the field resolved on last tick
     uintptr_t   sampleOwner = 0; // one live owner addr (Locate-in-GWorld handoff); 0 = none
     int32_t     sampleOffset = -1; // field offset within the owner
+    // Last tick's instance pool hit SOLIDE_MAX_INSTANCES, so `held` is a floor, not a
+    // total: more live instances of this class exist and are NOT being held. Without
+    // this the UI cannot tell "found nothing" from "found more than the cap and threw
+    // the rest away" — the pool is walked in ascending GObjects order, so the ones
+    // dropped are the most recently spawned. Never report a true total here: the cheap
+    // scan path breaks at the cap (Aura.cpp), and counting past it would cost a full
+    // GObjects walk on every 300 ms re-assert tick.
+    bool        poolTruncated = false;
 };
 
 // One ranked stealth-meter candidate from FindStealthMeter.

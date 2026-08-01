@@ -55,6 +55,9 @@ struct Job {
     int32_t     held         = 0;
     uintptr_t   sampleOwner  = 0;
     int32_t     sampleOffset = -1;
+    // Last tick's pool hit the cap → `held` is a floor. Also the single definition of
+    // "capped" used by the base-prune guard below.
+    bool        poolTruncated = false;
 };
 std::vector<Job> s_jobs;
 
@@ -292,13 +295,22 @@ void ApplyJobLocked(Job& job, bool restore, bool* drifted) {
         job.sampleOwner = sampleOwner;
         job.sampleOffset = sampleOffset;
         job.lastRefusal = refusal;
+        // Aura already computed this two lines up and we used to drop it on the floor,
+        // leaving "held: 0" and "held: 256 of who-knows-how-many" indistinguishable.
+        job.poolTruncated = rset.truncated;
         // Prune per-instance bases for owners no longer in the live pool — bounds the map
         // and avoids restoring a stale base to a GC-reused address. Only when the pool was
         // NOT capped: a capped result is a shifting first-N window, so an absent owner may
         // be live-but-past-cap (not gone) — dropping its true base then recapturing our
         // own forced value later would corrupt the restore. Below the cap the pool is
         // complete, so absent == genuinely gone. (L4)
-        if (static_cast<int32_t>(rset.results.size()) < Grimoire::SOLIDE_MAX_INSTANCES) {
+        //
+        // Uses Aura's own `truncated` rather than re-deriving "capped" from the result
+        // size, so the prune guard and the UI badge can never disagree about whether the
+        // pool was complete. Equivalent on this path by construction: FindInstancesByClass
+        // is called with the default buildHistogram=false, where Aura sets
+        // truncated = (results.size() >= maxResults) — exactly the old test, negated.
+        if (!rset.truncated) {
             for (auto it = job.baseByOwner.begin(); it != job.baseByOwner.end(); )
                 it = seen.count(it->first) ? std::next(it) : job.baseByOwner.erase(it);
         }
@@ -443,6 +455,7 @@ int32_t GetState(std::vector<ForcedFieldInfo>& out) {
         fi.held        = j.held;
         fi.sampleOwner = j.sampleOwner;
         fi.sampleOffset= j.sampleOffset;
+        fi.poolTruncated = j.poolTruncated;
         out.push_back(std::move(fi));
     }
     return FR_OK;

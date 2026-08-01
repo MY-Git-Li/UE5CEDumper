@@ -155,6 +155,53 @@ public class PropertySearchForceTests
         Assert.Equal(1, dump.ResetAllCalls);
     }
 
+    // A capped instance pool makes Held a FLOOR, not a total: more live instances exist
+    // and are NOT held. Both directions are pinned — asserting only the capped case
+    // cannot tell you the uncapped message regressed, and the uncapped one is the common
+    // path a user reads.
+    [Fact]
+    public async Task Force_capped_pool_says_more_exist_unheld()
+    {
+        var dump = new RecordingDump { NextForce = new() { Held = 256, Resolved = true, Truncated = true } };
+        var vm = new PropertySearchViewModel(dump, new NoopLog());
+
+        await vm.ForceBoolOnCommand.ExecuteAsync(NewMatch("BoolProperty", "bInvincible"));
+
+        Assert.Contains("cap reached", vm.StatusText);
+        Assert.Contains("256 instance(s)", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task Force_uncapped_pool_does_not_claim_a_cap()
+    {
+        var dump = new RecordingDump { NextForce = new() { Held = 3, Resolved = true, Truncated = false } };
+        var vm = new PropertySearchViewModel(dump, new NoopLog());
+
+        await vm.ForceBoolOnCommand.ExecuteAsync(NewMatch("BoolProperty", "bInvincible"));
+
+        Assert.DoesNotContain("cap reached", vm.StatusText);
+        Assert.Contains("3 instance(s)", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task RefreshForcedFields_carries_the_capped_flag_onto_the_row()
+    {
+        var dump = new RecordingDump
+        {
+            NextForcedFields = new List<ForcedFieldInfo>
+            {
+                new() { ClassName = "BP_Enemy_C", FieldName = "bInvincible", Kind = "bool", Held = 256, Truncated = true },
+                new() { ClassName = "BP_Door_C",  FieldName = "bLocked",     Kind = "bool", Held = 2 },
+            },
+        };
+        var vm = new PropertySearchViewModel(dump, new NoopLog());
+
+        await vm.RefreshForcedFieldsAsync();
+
+        Assert.True(vm.ForcedFields[0].Truncated);    // drives the "⚠ capped" badge
+        Assert.False(vm.ForcedFields[1].Truncated);
+    }
+
     [Fact]
     public void ForceEnabled_reflects_experimental_gate()
     {

@@ -115,6 +115,12 @@
                            VerticalAlignment="Center" Text="{Binding FieldName}"/>
                 <TextBlock Foreground="#4EC9B0" FontSize="11" VerticalAlignment="Center"
                            Text="{Binding Held, StringFormat='({0} held)'}"/>
+                <!-- Held is a floor when the pool was capped — say so, or "(256 held)"
+                     reads as "all of them". -->
+                <TextBlock Foreground="#D7BA7D" FontSize="11" VerticalAlignment="Center"
+                           IsVisible="{Binding Truncated}"
+                           Text="{StaticResource str.PropertySearch.ForcedCapped}"
+                           ToolTip.Tip="{StaticResource str.Tip.PropertySearch.ForcedCapped}"/>
               </StackPanel>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
