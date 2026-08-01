@@ -90,11 +90,24 @@ is the explanation. Env knobs: `GHIDRA_HOME`, `GHIDRA_PROJS`, `SWEEP_OUT`, `SWEE
 >    at 8 jobs/14G**. Lowering `SWEEP_XMX` is the real lever; raising `SWEEP_JOBS` without doing so
 >    walks into the commit limit.
 >
-> ⚠ **`one_project()` always exits 0.** Its last statement is
-> `echo "   done $TAG (exit=$?)"` — `$?` is expanded *before* `echo` runs, so the printed text is
-> correct, but the function then returns `echo`'s status. Every backgrounded job therefore succeeds
-> as far as `wait` and the script's own exit code are concerned. Counting `grep -c "exit=0"` over
-> the OUTPUT works; trusting the exit status does not.
+> ✅ **`one_project()` used to always exit 0 — FIXED 2026-08-01.** Its last statement was
+> `echo "   done $TAG (exit=$?)"`; `$?` is expanded *before* `echo` runs, so the printed text was
+> always correct, but the function then returned `echo`'s status. Every backgrounded job "succeeded"
+> as far as `wait` and the script's own exit code were concerned. It now captures `rc`, returns it,
+> and appends failures to `$SWEEP_OUT/_failures.tsv` (tag + code + log path — a file, because each
+> job is its own subshell and a counter could never reach the parent). The script prints the failing
+> tags and **exits 1** if any project failed.
+>
+> The reap loop had to change with it. `wait -n 2>/dev/null || wait` was only safe while every job
+> returned 0: once a real status propagates, a FAILED job makes `wait -n` non-zero, the `||` fires,
+> and a bare `wait` drains every remaining job while `running` drops by just one. Measured on a
+> 6-job / 1-failure harness: **2869 ms with the version probe vs 4069 ms with the old idiom (+42%)**,
+> and it gets worse with more failures. `have_wait_n` is now decided from `BASH_VERSINFO`, which no
+> job's exit code can fool.
+>
+> Why it matters beyond tidiness: a project that dies produces **no scan TSV**, and a missing TSV
+> becomes a missing ROW in `REPORT.md` — which reads as *"that pattern was never tested"* rather
+> than *"that project did not run"*. Silence looked like coverage.
 
 ## Read this first if you are going to CHANGE a pattern
 
