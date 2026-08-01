@@ -1,0 +1,7 @@
+# program	MaelstromV2-Win64-Shipping.exe
+# tag	UE4.27-Maelstrom
+# image_base	0
+# image_base_str	0000:0000
+name	start	size	exec	init	read	write	md5
+CODE_0	10000	1104	1	1	1	1	bf2cde781b141ebffcb6c3fcb0e56240
+HEADER	0	64	0	1	0	0	9fdcd94392c6e7c6d3c0736d106fae8b

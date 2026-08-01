@@ -122,7 +122,7 @@ analyzeHeadless <projdir> <proj> -process <glob> -noanalysis -readOnly -postScri
 (`sweep.sh:237-240`). **It never opens the original game binary.** Ghidra applied the PDB at
 import time and the symbols live inside the `.rep`.
 
-Consequences, and they are the spine of this whole document:
+Consequences, and they were the spine of this whole document:
 
 * A `.rep` is the **artifact of record**. Losing one loses the capability.
 * The game install / archived binary is only needed to **RE-IMPORT** — i.e. to rebuild a `.rep`
@@ -132,6 +132,31 @@ Consequences, and they are the spine of this whole document:
 
 Verified empirically: in the last sweep, `UE4.18-FF7R` and `UE4.27-DropIn` both produced complete
 scan TSVs while their binaries were off-disk.
+
+### 0a. …and since 2026-08-01 there is a second sweep with the OPPOSITE dependency
+
+`py tools/ghidra/pe_sweep.py` replays the same signature database from the **game binaries**, and
+opens no project at all. It is not an approximation of the above — `compare_sweeps.py` grades it at
+**210/210 files byte-identical**, and `check_pe_memory.py` shows **70/70** programs' image base,
+complete block map and per-block **MD5** reconstructed from the PE. See
+[dev-log](dev-log.md) (build 2545).
+
+So the two questions have swapped tools, and both are now answerable:
+
+| question | tool | needs |
+|---|---|---|
+| can I re-run the regression sweep today? | `pe_sweep.py` | the **binaries** (`D:\UE_Analyze_data`) |
+| can I author a NEW AOB today? | Ghidra | the **`.rep`** (decompiler, xrefs, symbols) |
+
+**This does NOT license deleting a `.rep`.** What changed is that the `.rep` is no longer the
+artifact of record *for the sweep*; it is still the artifact of record for **authoring**, and a
+re-import has still never been demonstrated end to end. The rule in
+[todo.md](todo.md) stands: demonstrate one reconstruction before deleting anything.
+
+One practical consequence worth banking now: `ES2-0517` re-runs a **language-version upgrade on
+every open** (`-readOnly` discards it), and that upgrade — not the scan — dominates its runtime. It
+was the last row to finish in all three Ghidra runs on 2026-08-01, by a wide margin. If a future
+run looks hung on that project, it is probably not hung.
 
 -----
 

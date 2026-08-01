@@ -19,55 +19,40 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
-## ▶ NEXT UP — drop Ghidra from the sweep (measured 2026-08-01, NOT started)
+## ▶ Ghidra is out of the sweep — SHIPPED 2026-08-01, acceptance passed (build 2545)
 
-**Read this first if you are picking the corpus work back up.** The premise is verified; only the
-implementation is missing.
+`py tools/ghidra/pe_sweep.py` replays the whole signature database from the **game binaries**, with
+**byte-identical output**, no JVM and no Ghidra install. Measured on the laptop (32 logical cores,
+8 Python workers): **138 s** against **773 s** for `sweep.sh` at `SWEEP_JOBS=3` — and the 138 s
+figure is the same whether or not a Ghidra JVM is running alongside it.
 
-### The finding
+* **`compare_sweeps.py out/sweep-ref-ghidra2 out/pe-sweep` → 210/210 files byte-identical**,
+  0 differing, 0 only-in-B. `aggregate_sweep.py`'s `REPORT.md` matches too, modulo one line naming
+  the broken imports the PE route cannot produce. Matrix unchanged: **162 ✅ / 59 ⚠️ / 2 ❌** over
+  55 oracle rows / 70 programs.
+* **`check_pe_memory.py` → 70/70 EXACT** — image base, complete block map and a **per-block MD5**,
+  all reconstructed from the PE. The 74 Ghidra-side maps are committed
+  ([`tools/ghidra/memory-maps/`](../tools/ghidra/memory-maps/), 62 KB) so this runs on a machine
+  with the archive and no Ghidra, and so `pe_memory.py` has a regression oracle.
 
-`tools/ghidra/scan_patterns.java` (398 lines) touches **four** Ghidra APIs and **zero** analysis
-APIs — no `FunctionManager`, `Listing`, `SymbolTable`, `ReferenceManager`, Decompiler or
-`DataTypeManager`:
+Ghidra is still required to **author** a new AOB (decompiler, xrefs, symbols). Only the replay
+moved.
 
-```
-currentProgram x4    getImageBase x2    getMemory x1    getBlocks x1
-per block: isExecute() / isInitialized() / getBytes() / getStart()
-```
+### What still has to happen before a `.rep` is deleted
 
-So a 181.2 GB Ghidra corpus is, *for the sweep*, a container holding **image base + section table +
-executable bytes**. Measured from the scan TSVs' own `exec_mb` column: **5.93 GB across 69
-programs** (mean 88 MB, max 414 MB) — a **31x** container overhead, ~**1.7 GB** compressed.
+Unchanged, and this is the part the acceptance test does **not** cover: *"the inputs exist"* is not
+*"a re-import reproduces the `.rep`"*, and that has still never been demonstrated once.
+`corpus_relocate.py` proves the inputs are present (57/57); `check_pe_memory.py` now proves the
+*sweep* does not need the `.rep`; neither proves a `.rep` can be rebuilt. **Demonstrate one
+re-import end-to-end before deleting anything.**
 
-### Plan
+Two things worth knowing when that day comes:
 
-1. **Ghidra export script, run ONCE per project** — emit `(image base, FULL block map, exec bytes)`
-   per program. The block map must be **complete, not just the executable blocks**:
-   `scan_patterns.java` calls `mem.getBlock(va).isExecute()` to *reject* a resolved target that
-   lands in a non-executable block, so start/end/isExecute/isInitialized are needed for every block.
-2. **Pure-Python sweep** over those blobs, replacing the `analyzeHeadless` invocation.
-   `tools/ghidra/replay_patterns.py` already does the no-Ghidra scan **from a PE**; the new part is
-   reading a blob instead.
-3. **ACCEPTANCE: the scan TSVs must be byte-identical to a Ghidra run.** Nothing less counts.
-
-⚠ **A reference run has to be produced first — the one from 2026-08-01 was deleted.**
-`bash tools/ghidra/sweep.sh` at shipped defaults, ~12-15 min on the laptop, and keep `SWEEP_OUT`.
-
-### What it buys, and what it does NOT
-
-Buys: no JVM, no Ghidra install (the second machine has neither), no 12-15 min wall time, and no
-GB-scale transient writes — `-readOnly` does **not** mean no writes; measured, the JVMs wrote
-~1 GB each into `.rep`-local temp DB files that are created and deleted, which is why a file-scan
-shows 0 MB changed while the write counters climb. That is also the real cause of the USB incident.
-
-Does NOT buy: anything for **authoring** a new AOB, which needs the decompiler, xrefs and symbols.
-That is the only remaining reason to keep a `.rep`, and the decision can wait until after step 3.
-
-### Do NOT delete any `.rep` before step 3 passes
-
-"The inputs exist" is not "a re-import reproduces the .rep", and that has never been demonstrated
-once. `corpus_relocate.py` proves the *inputs* are all present (57/57); it says nothing about
-reconstruction.
+* `ES2-0517` re-runs a **language-version upgrade on every open** (`-readOnly` discards it), and
+  that upgrade — not the scan — dominates its runtime; it was the last row to finish in all three
+  Ghidra runs by a wide margin.
+* Four projects hold a **stub re-import** beside the real program (image base `0000:0000`, ~1 KB of
+  DOS header mapped as code). They are pure Ghidra artifacts, and their scan output is noise.
 
 -----
 

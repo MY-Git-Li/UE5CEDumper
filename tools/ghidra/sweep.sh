@@ -10,7 +10,12 @@
 #   bash tools/ghidra/sweep.sh              # everything
 #   bash tools/ghidra/sweep.sh UE4.27 UE5.7 # only tags matching these substrings
 #
-# Env overrides: GHIDRA_HOME, GHIDRA_PROJS, SWEEP_OUT, SWEEP_XMX
+# Env overrides: GHIDRA_HOME, GHIDRA_PROJS, SWEEP_OUT, SWEEP_XMX, SWEEP_SCRIPT
+#
+# SWEEP_SCRIPT runs a DIFFERENT postScript over the same ROWS table — the point being that the
+# table (which project carries which truth VAs, and which `-process` glob each row needs) exists
+# once and cannot drift between tools:
+#   SWEEP_SCRIPT=dump_blocks.java SWEEP_OUT=$PWD/out/blocks bash tools/ghidra/sweep.sh
 #
 # Afterwards:  py tools/ghidra/aggregate_sweep.py <SWEEP_OUT>
 set -u
@@ -19,6 +24,7 @@ GHIDRA_HOME="${GHIDRA_HOME:-D:/Tools/ghidra_12.1.2_PUBLIC}"
 GHIDRA_PROJS="${GHIDRA_PROJS:-D:/Tools/GHIDRA_Projs}"
 SWEEP_OUT="${SWEEP_OUT:-$PWD/out/sweep}"
 SWEEP_XMX="${SWEEP_XMX:-14G}"
+SWEEP_SCRIPT="${SWEEP_SCRIPT:-scan_patterns.java}"
 HL="$GHIDRA_HOME/support/analyzeHeadless.bat"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
@@ -431,9 +437,12 @@ one_project() {
   local LOG="$SWEEP_OUT/log_$(echo "$TAG" | tr -c 'A-Za-z0-9._-' '_').txt"
   local PROC=(-process)
   [ "$GLOB" != "-" ] && PROC=(-process "$GLOB")
+  # GB_* are dump_blocks.java's env; harmless to scan_patterns.java and vice versa, so both
+  # scripts can be driven from this one table without a per-script branch here.
   GS_OUT="$SWEEP_OUT" GS_TSV="$SWEEP_OUT/patterns.tsv" GS_TRUE="$TRUE" GS_TAG="$TAG" \
+  GB_OUT="$SWEEP_OUT" GB_TAG="$TAG" \
      "$HL" "$GHIDRA_PROJS" "$PROJ" "${PROC[@]}" -noanalysis -readOnly \
-     -scriptPath "$REPO/tools/ghidra" -postScript scan_patterns.java > "$LOG" 2>&1
+     -scriptPath "$REPO/tools/ghidra" -postScript "$SWEEP_SCRIPT" > "$LOG" 2>&1
   local rc=$?
   echo "   done $TAG (exit=$rc)  log: $LOG"
   # Record failures to a FILE, not a variable: each call runs in its own background

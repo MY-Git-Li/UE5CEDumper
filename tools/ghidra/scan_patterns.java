@@ -247,7 +247,14 @@ public class scan_patterns extends GhidraScript {
             List<Sig> lst = e.getValue();
             lst.sort((a, b) -> a.pri - b.pri);
 
-            Map<Long, Set<String>> consensus = new HashMap<>();
+            // LinkedHashMap, NOT HashMap. The consensus listing below sorts by vote count with a
+            // STABLE sort, so equal-count rows come out in this map's iteration order — which for
+            // a HashMap is bucket order, a function of Long.hashCode's spread and the table's
+            // resize history. That is deterministic but reproducible only by emulating
+            // java.util.HashMap, it would shift under a JDK upgrade, and it made the file
+            // impossible to compare against the pure-Python sweep (pe_scan_patterns.py).
+            // First-appearance order is just as arbitrary a tiebreak and is stable everywhere.
+            Map<Long, Set<String>> consensus = new LinkedHashMap<>();
 
             for (Sig s : lst) {
                 long nHits = s.nHits;

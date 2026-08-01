@@ -20,6 +20,75 @@ builds ≤696 in
 
 -----
 
+## 2026-08-01 - The AOB sweep no longer needs Ghidra: 210/210 files byte-identical from the PEs (build 2545)
+
+`scan_patterns.java` calls **four** Ghidra APIs and **zero** analysis APIs — `getImageBase`,
+`getMemory`, `getBlocks`, and per block `isExecute` / `isInitialized` / `getBytes` / `getStart`. So
+for the sweep a 181 GB Ghidra corpus is a container holding *image base + block map + bytes*, and
+all three come out of the game binary. `py tools/ghidra/pe_sweep.py` now replays the whole
+signature database from the binaries: **138 s** vs **773 s** for `sweep.sh`, no JVM, no Ghidra
+install, and none of the GB-scale transient writes that `-readOnly` does not prevent.
+
+### The bar was byte-identical output, because a sweep's wrong answers look right
+
+A sweep answers "does the first hitting pattern by priority resolve correctly on this build". Wrong
+answers to that stay plausible. Grading a replacement on a summary comparison — *the same patterns
+are still green* — would pass a scanner that had quietly lost half its hits on one program, so
+`compare_sweeps.py` compares **bytes, and the file set in both directions**.
+
+* **210/210 identical**, 0 differing, 0 only-in-B, against a fresh `sweep.sh` reference.
+* `aggregate_sweep.py`'s `REPORT.md` matches too, modulo one line naming the broken imports the PE
+  route cannot produce. Matrix **162 ✅ / 59 ⚠️ / 2 ❌** — unchanged.
+* The only A-only files are 12 belonging to **4 stub re-imports** (image base `0000:0000`, ~1 KB of
+  DOS header mapped as code) that exist in the `.rep` and not in any PE.
+
+### The section rule that 69 of 70 programs agreed on and one refuted
+
+Ghidra's initialized block for a section is **`max(SizeOfRawData, VirtualSize)`**, zero-padded.
+Both simpler rules fit real evidence and both are wrong:
+
+* `min(raw, virtual)` — what `replay_patterns.py` uses — is short by 24-450 bytes on nearly every
+  section, since raw is virtual rounded up to the file alignment.
+* **raw alone reproduced Ghidra's `exec bytes` on 28 of 29 measured programs**, which is exactly
+  the kind of agreement that reads as conclusive. The exception is **DQ7R**, a packed build whose
+  *executable* `.debug` section has `vsz` 1024 bytes larger than `rsz`.
+
+`dump_blocks.java` settles it rather than argument: it emits Ghidra's own map plus an **MD5 per
+initialized block**, and `check_pe_memory.py` diffs the two. Matching starts and sizes would prove
+only that the layout agrees; the digest is what proves the bytes do. **70/70 EXACT.** The 74 maps
+are committed (`tools/ghidra/memory-maps/`, 62 KB) so the check runs without Ghidra and
+`pe_memory.py` has a regression oracle instead of a remembered rule.
+
+Ghidra synthesizes a `tdb` block at `0xff00000000` on PDB-bearing imports. That is exempted by a
+**computed** criterion — non-executable and outside one signed-32-bit displacement of every
+executable block, so no `getBlock`/`getLong` a scan performs can reach it — and every exemption is
+printed, never dropped silently.
+
+### A latent non-determinism in the Java, found by trying to reproduce it
+
+`scan_patterns.java` built its consensus table in a `HashMap` and then stably sorted by vote count,
+so equal-count rows came out in **bucket order** — a function of `Long.hashCode`'s spread and the
+table's resize history. Worse, the listing truncates at 6 rows once votes fall to `n=1`, so map
+order changed **which rows appeared**, not merely their order. Deterministic, but reproducible only
+by emulating `java.util.HashMap`, and free to shift under a JDK upgrade. Now a `LinkedHashMap`.
+Scope verified rather than asserted: over 222 files, **0 `scan_*` changed and 64 `consensus_*` did**.
+
+### Tests
+
+`pe_scan_selftest.py` — stdlib only, ~1 s, no corpus. Prefilter vs a brute-force matcher over 400
+random patterns with **planted** matches (992 hits; unseeded, the same test found 12 and would have
+passed with the prefilter deleted), the block model against a synthetic PE, the 40 000-hit detail
+cap that **no corpus program reaches**, and Java's `HALF_UP` `%f` rounding. Every check is paired
+with a negative control that must fail.
+
+### What did NOT change
+
+Authoring a new AOB still needs Ghidra — decompiler, xrefs, symbols. Only the replay moved. And
+**no `.rep` may be deleted yet**: the acceptance test proves the sweep does not need them, not that
+one can be rebuilt, which has still never been demonstrated.
+
+-----
+
 ## 2026-07-30 - Leftover proxy cleanup: Report + Execute, and the first directory deletion in the app (build 2525)
 
 Uninstalling a game leaves its folder behind when our proxy DLL is in it — Steam will not delete a
