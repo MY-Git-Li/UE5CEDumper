@@ -56,11 +56,12 @@ rebuilding is a recovery path, not a substitute for the copy.
 
 Four things to keep in view when the deletion decision is actually made:
 
-* **`ES2-0517` is the only project created by Ghidra 11.3.2**; the other 72 programs are 12.1.2.
-  That is the cause of its language-version upgrade on every open (`-readOnly` discards it, so it
-  re-runs every time and dominates that row's runtime). **Fix it by re-importing from the archive,
-  not by preserving 11.3.2** — pinning an artifact's birth version does not scale past the next
-  Ghidra release. See [corpus-preservation.md](corpus-preservation.md) §0c.
+* ~~`ES2-0517`'s per-open language upgrade~~ — **FIXED 2026-08-01.** Upgraded in place (one run
+  without `-readOnly`): **12 m 43 s once**, and the same scan went from **>10 min, not finishing**
+  to **30 s**. Behaviour-preserving — scan/consensus/blocks byte-identical, symbol digest and all
+  507,555 functions / 28,635,821 instructions unchanged. It was the only project needing it.
+  Upgrading beats re-importing: the migration keeps the analysis, a re-import would re-run it.
+  See [corpus-preservation.md](corpus-preservation.md) §0d.
 * **18 patterns have exactly one program where they resolve correctly** — Satisfactory 7 across
   four DLLs, UE4.22-Satisfactory 4, Solarpunk 4, Everspace 2. That reads as a reason to keep those
   `.rep`s and is not: `pe_sweep.py` reads binaries, so the risk attaches to the **binary**, and all
