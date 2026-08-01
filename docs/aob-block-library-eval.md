@@ -4,7 +4,7 @@
 > §3 below says a block library "structurally cannot" answer *"how many spurious hits will this take
 > on a 150 MB `.text`?"*. That is still true **of blocks**, but a second artifact answers it: a
 > thresholded **byte n-gram frequency index**, which ships no code and needs no legal call. Built
-> and validated 2026-07-29: **0 upper-bound violations on the 12 binaries it is built from** — but
+> and validated 2026-07-29: **0 upper-bound violations on the 11 binaries it is built from** — but
 > step 4 then measured it on the 58 it never saw and found **0.20% violations for `CLEAR`, with a
 > real tail (932 hits against a bound of 15)**. So it is a proof on its own sources and a strong
 > prior elsewhere; read §6's step-4 subsection before quoting the clean number. The two artifacts
@@ -344,3 +344,73 @@ numbers, so a user on another machine reads the caveat without finding this file
 
 Note 1–3 are independent of the §4 block work and can land first; §4's `blocktest.py` and this share
 the same motivation (a regression test that is not the 200 GB corpus) and the same home.
+
+-----
+
+## 7. MEASURED 2026-08-01 — what `CLEAR` actually means, and why merging corpora is dominated
+
+Two questions were put to the index a year's worth of assumptions later: *should the threshold be
+lowered to make it more accurate?* and *should non-UE binaries be folded in as extra coverage?*
+Both were answered by instrumenting the reader rather than by reasoning about it, and both answers
+are different from the obvious one.
+
+### 7.1 `CLEAR` means "never seen", not "rare" — so a higher CLEAR count is a WORSE index
+
+`aob_specificity.py`'s `lookup()` returns `threshold - 1` (= 15) on a binary-search miss, and the
+smallest bucket any table stores decodes to 16. **A present key therefore can never fall under the
+floor.** Measured across `patterns.tsv`:
+
+```
+CLEAR verdicts whose limiting window is ABSENT from the table : 47
+CLEAR verdicts whose limiting window is PRESENT (real bucket) :  0
+```
+
+So `CLEAR` is exactly the statement *"this window occurs fewer than `threshold` times in the code we
+indexed"*, and the 3.57 M stored records contribute to **no** CLEAR — they exist only to deny it.
+The reductio: AOBMaker's **x86** index, which contains zero x64 code, certifies **109** of our x64
+patterns `CLEAR`. Ignorance and quietness are indistinguishable to this metric, and the count moves
+the wrong way as coverage improves. Never report the CLEAR count as a quality figure.
+
+### 7.2 Threshold 16 → 8: a real improvement, with a real price
+
+Lowering it moves the floor 15 → 7, so every surviving `CLEAR` is a stronger claim. Measured:
+
+| | T = 16 | T = 8 |
+|---|---|---|
+| worst TRUE hit count under a `CLEAR` | 13 | **1** |
+| known out-of-sample violators | 2 (`GNAM_UD2` 932 on FF7R, `GOBJ_AV2` 510 on Avowed) | **1** — `GNAM_UD2`'s window has union count 13, so at T=8 it becomes a present key, loses `CLEAR`, and the 932-hit error disappears |
+| committed size (gz) | 10.3 MB | ~22.5 MB |
+| patterns demoted from `CLEAR` | — | 8 (genuinely quiet ones, correctly reclassified as unmeasured) |
+
+This corrects an earlier claim that lowering the threshold "would not touch the violations at all".
+It touches one of the two.
+
+### 7.3 Merging corpora is strictly dominated by keeping them separate
+
+`merge_max` (`build_ngram_index.py`) is a per-key **MAX**, so adding sources is monotone
+non-decreasing on the bound — folding AOBMaker's 38-binary non-UE index into ours made **39 bounds
+looser and 0 tighter**. That is correct behaviour, not degradation: it is the tool acquiring
+evidence (§7.1).
+
+But `score()` **minimises over windows**, and that settles the design:
+
+```
+merged index          =  min_w  max(A, B)
+two indexes, take max =  max( min_w A , min_w B )
+                         min-max  >=  max-min
+```
+
+Measured over 114 scoreable patterns: merged was **tighter in 0 cases and looser in 4**
+(`GENG_DI427_1` 64 vs 32, `GOBJ_G42_1` 128 vs 64, `GWLD_SF_2` 262144 vs 131072, `GWLD_ES53_2` 65536
+vs 32768), with identical CLEAR counts. **Keep indexes separate and query each; take the larger
+score.** Never looser than merging, and it preserves the ability to ask the UE-only question —
+which merging destroys irreversibly.
+
+The "mixed corpus is hard to reconstruct" argument is not what protects the artifact, and should not
+be relied on. The structural barrier is stronger and simpler: because the stored count is a **MAX
+across sources, not a sum**, the multiset is not the n-gram spectrum of *any* byte stream. There is
+no assembly target to recover. Thresholding is a second, tunable barrier layered on top of that one.
+
+Practical note: `build_ngram_index.py` cannot build a mixed corpus as written — `pick_sources()`
+hardcodes a single root, Shipping-only, `\Engine\`-excluded, ≥5 MB, with no `--roots`. Adding one
+would be the prerequisite, and §7.3 says not to bother.
