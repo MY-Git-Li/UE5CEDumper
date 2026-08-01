@@ -7,7 +7,7 @@ Every address below was resolved from a real PDB symbol (or, where noted, from a
 **The sweep is scripted — do not hand-run `analyzeHeadless` per project:**
 
 ```bash
-bash tools/ghidra/sweep.sh                      # everything; 4m38s desktop / 14m32s laptop @ JOBS=3
+bash tools/ghidra/sweep.sh                      # everything; 4m38s desktop / 12-15min laptop @ JOBS=3
 ```
 
 **The full sweep is CHEAP relative to what it buys — always run it, never a filtered subset "to
@@ -24,12 +24,20 @@ the repo. **Never quote a sweep duration without saying which machine produced i
 | machine | CPU | corpus on | rows / programs | `SWEEP_JOBS=3` | date |
 |---|---|---|---|---|---|
 | desktop | Ryzen 9 **9950X3D**, 64 GB | — | 57 / 70 | **4m38s** (278 s) | 2026-07-29 |
-| laptop (MSI Raider A18) | Ryzen 9 **9955HX3D** 16C/32T, base 2.5 GHz, 61.6 GB | internal NVMe (CT2000T500SSD8) | 57 / 74 | **14m32s** (872 s) | 2026-08-01 |
+| laptop (MSI Raider A18) | Ryzen 9 **9955HX3D** 16C/32T, base 2.5 GHz, 61.6 GB | internal NVMe (CT2000T500SSD8) | 57 / 74 | **12–15 min** (715–872 s) | 2026-08-01 |
 
-The laptop run: shipped defaults (`SWEEP_JOBS=3`, `SWEEP_XMX=14G`), 57/57 rows `exit=0`, 74 scan
-TSVs, 0 failures. An independently instrumented run on the same laptop measured 850.5 s — 2.5% from
-872 s, so the figure is stable, not noise. The 54-row comparison (`4m34s`) belongs to the desktop
-row; do not read it against the laptop.
+**The laptop row is a RANGE on purpose.** Three runs, same machine, same shipped defaults
+(`SWEEP_JOBS=3`, `SWEEP_XMX=14G`), all 57/57 `exit=0` / 74 scan TSVs / 0 failures:
+
+| run | seconds | condition |
+|---|---|---|
+| independently instrumented | 850.5 | — |
+| first full run | **872** | immediately post-reboot, cold cache |
+| verification run | **715** | warm cache (this machine runs PrimoCache, a write-back block cache) |
+
+**22% spread on one machine**, entirely from cache state. So even after pinning the machine, a
+single number still over-claims — quote the range, and say whether the cache was warm. The 54-row
+`4m34s` comparison belongs to the desktop row; do not read it against the laptop.
 
 Practical consequence: **on the laptop this is a ~15-minute job, not a 5-minute one.** That does not
 change the advice below (3→8 jobs saves ~12.6%, and the downside is the corpus), but it does change
@@ -71,7 +79,7 @@ is the explanation. Env knobs: `GHIDRA_HOME`, `GHIDRA_PROJS`, `SWEEP_OUT`, `SWEE
 > sits on.
 >
 > Weigh it against the measured cost, using the row for the machine you are actually on (see the
-> timing table above — 4m38s desktop, 14m32s laptop). On the laptop, 3→8 jobs saves **108.8 s
+> timing table above — 4m38s desktop, 12-15 min laptop). On the laptop, 3→8 jobs saves **108.8 s
 > (12.6%)**: real, but set against corrupting the artifact of record, and §"Never drop" lists
 > projects whose `.rep` is the last copy in existence.
 >
