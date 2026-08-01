@@ -1547,6 +1547,30 @@ Pick up when the active plan finishes or when blocked.
 
 Shipped + unit-tests-pass but unproven on real games:
 
+- **Solide pool-truncation badge — `⚠ capped` / "cap reached, more exist unheld"** (build 2531+;
+  DLL `Solide`/`Fern` + Property Search + Teleport Stealth card). `Aura` already computed
+  `rset.truncated` and `Solide` was dropping it, so "0 live instances matched" and "matched more
+  than `SOLIDE_MAX_INSTANCES`=256 and discarded the rest" were indistinguishable. Now plumbed to
+  both `force_field` and `get_forced_fields`, and the Stealth card **withdraws** its
+  "you are minimal to detection" claim when the pool was capped (that claim is false for every
+  instance past the cap).
+  **What offline already settled — do not spend live time on it:** the wire parse both ways incl.
+  the older-DLL missing-key default (`SolideTruncationWireTests`, 4 tests), both VM messages in
+  both directions (`PropertySearchForceTests` ×3, `TeleportViewModelTests` ×1), and the prune-guard
+  swap being an exact no-op (`!rset.truncated` ≡ the old size test on this path, since
+  `FindInstancesByClass` is called with the default `buildHistogram=false`). All 8 were verified to
+  FAIL when the implementation is reverted — three separate negative controls.
+  **What ONLY a real game can prove:** that the flag ever fires. It needs a class with **>256 live
+  instances** where a Force hold is meaningful — projectiles, crowd NPCs, destructible props are the
+  likely candidates; most gameplay classes never reach the cap, which is exactly why this went
+  unnoticed. Acceptance: hold a field on such a class → the strip row shows `⚠ capped` next to
+  `(256 held)` and the status line ends "cap reached, more exist unheld"; hold on a small class →
+  neither appears. **No grep-able log marker** — the DLL logs nothing on truncation; the evidence is
+  the badge and the status text. Secondary check: with the pool capped, `RemoveForce` must still
+  restore cleanly (the base-prune guard is skipped while truncated — L4), so verify no field is left
+  stuck at the forced value after Reset.
+  ⬜ unverified.
+
 - **Copy CE Field drills object-pointer arrays — leaf + GWorld-path spine + dup-crumb dedup — DONE +
   MERGED (PR #323, builds 1364-1379).** LEAF (`SpawnedAttributes[2]` → `CharacterAttributeSet` →
   `HealthPoint`), SPINE 2b (`PathStepToBreadcrumbs` splits a Locate-in-GWorld `PlayerArray[0]` hop into

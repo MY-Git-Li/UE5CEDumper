@@ -460,6 +460,35 @@ public class TeleportViewModelTests
         Assert.Equal("numeric", fake.LastForceKind);
         Assert.Equal(0.0, fake.LastForceValue);
         Assert.Equal("Holding @0", vm.StealthState);
+        // Uncapped pool → the unqualified claim is honest and must survive.
+        Assert.Contains("you are minimal to detection", vm.StatusText);
+        Assert.DoesNotContain("UNHELD", vm.StatusText);
+    }
+
+    // "You are minimal to detection" is FALSE for every instance past the cap, so a
+    // truncated pool must withdraw the claim rather than qualify it quietly. This is the
+    // strongest wording in the app that a capped pool can invalidate.
+    [Fact]
+    public async Task HoldStealth_capped_pool_withdraws_the_undetectable_claim()
+    {
+        var fake = new FakeDumpService
+        {
+            NextStealthCandidates = new List<StealthCandidate>
+            {
+                new() { ClassName = "BP_Guard_C", FieldName = "Awareness" },
+            },
+            NextForce = new() { Held = 256, Resolved = true, Truncated = true },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.DetectStealthMeterCommand.ExecuteAsync(null);
+        await vm.HoldStealthCommand.ExecuteAsync(null);
+
+        Assert.DoesNotContain("you are minimal to detection", vm.StatusText);
+        Assert.Contains("UNHELD", vm.StatusText);
+        Assert.Contains("BP_Guard_C", vm.StatusText);
+        Assert.Equal("Holding @0", vm.StealthState);   // the hold itself still succeeded
     }
 
     // Regression for audit #3 M9: turning the experimental gate OFF force-disabled

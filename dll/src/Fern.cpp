@@ -4901,6 +4901,20 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 data["held"]     = (held < 0) ? 0 : held;   // live "N held" count
                 data["resolved"] = (held > 0);
                 data["code"]     = (held < 0) ? held : 0;
+                // Was the instance pool capped? AddForce's int32_t return is fully spoken
+                // for (negative = ForceResult, non-negative = held count — see audit L2,
+                // do not overload it), so read the flag back off the job instead.
+                if (held > 0) {
+                    std::vector<Solide::ForcedFieldInfo> st;
+                    if (Solide::GetState(st) == Solide::FR_OK) {
+                        for (const auto& f : st) {
+                            if (f.className == className && f.fieldName == fieldName) {
+                                data["truncated"] = f.poolTruncated;
+                                break;
+                            }
+                        }
+                    }
+                }
                 return Renge::MakeResponse(id, data).dump();
             }
             if (cmd == Renge::CMD_RESET_FIELD) {
@@ -4931,6 +4945,7 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                     j["kind"]       = kindStr(f.kind);
                     j["value"]      = f.value;
                     j["held"]       = f.held;
+                    j["truncated"]  = f.poolTruncated;  // held is a floor, not a total
                     if (f.sampleOwner && f.sampleOffset >= 0) {
                         j["owner_addr"]   = Renge::AddrToStr(f.sampleOwner);
                         j["field_offset"] = f.sampleOffset;

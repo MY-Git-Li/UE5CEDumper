@@ -19,6 +19,14 @@ public sealed class ForcedFieldInfo
     /// <summary>One live owner address (Locate-in-GWorld handoff), "" if none.</summary>
     public string OwnerAddr { get; init; } = "";
     public int FieldOffset { get; init; } = -1;
+    /// <summary>
+    /// The DLL's instance pool hit its cap, so <see cref="Held"/> is a FLOOR, not a total —
+    /// more live instances of this class exist and are NOT held. Without this, "resolved
+    /// nothing" and "resolved more than the cap and discarded the rest" look identical.
+    /// There is deliberately no true total: counting past the cap would cost a full
+    /// GObjects walk on every re-assert tick.
+    /// </summary>
+    public bool Truncated { get; init; }
 }
 
 /// <summary>
@@ -31,6 +39,11 @@ public sealed class ForceFieldResult
     public bool Resolved { get; init; }
     /// <summary>Solide::ForceResult (0 = OK, negative = error).</summary>
     public int Code { get; init; }
+    /// <summary>
+    /// The instance pool hit the DLL's cap — <see cref="Held"/> is a floor, more live
+    /// instances exist unheld. See <see cref="ForcedFieldInfo.Truncated"/>.
+    /// </summary>
+    public bool Truncated { get; init; }
 }
 
 /// <summary>

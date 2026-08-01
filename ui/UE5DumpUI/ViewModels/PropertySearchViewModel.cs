@@ -370,7 +370,12 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
                 var what = kind == "bool" ? (on ? "ON" : "OFF")
                          : kind == "object_null" ? "null"
                          : value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                StatusText = $"✓ Holding {m.ClassName}::{m.PropName} = {what} on {r.Held} instance(s).";
+                // A capped pool makes Held a floor, not a total. Say so — otherwise
+                // "on 256 instance(s)" reads as "all of them" when it means "the first
+                // 256 we walked, in ascending GObjects order, and there are more".
+                StatusText = r.Truncated
+                    ? $"✓ Holding {m.ClassName}::{m.PropName} = {what} on {r.Held} instance(s) — cap reached, more exist unheld."
+                    : $"✓ Holding {m.ClassName}::{m.PropName} = {what} on {r.Held} instance(s).";
             }
             await RefreshForcedFieldsAsync();
         }

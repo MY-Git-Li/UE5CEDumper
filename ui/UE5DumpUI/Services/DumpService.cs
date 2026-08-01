@@ -3139,9 +3139,11 @@ public sealed class DumpService : IDumpService
         CheckResponse(res);
         return new ForceFieldResult
         {
-            Held     = res["held"]?.GetValue<int>() ?? 0,
-            Resolved = res["resolved"]?.GetValue<bool>() ?? false,
-            Code     = res["code"]?.GetValue<int>() ?? 0,
+            Held      = res["held"]?.GetValue<int>() ?? 0,
+            Resolved  = res["resolved"]?.GetValue<bool>() ?? false,
+            Code      = res["code"]?.GetValue<int>() ?? 0,
+            // Absent on an older DLL (and on held<=0, where the DLL omits it) → false.
+            Truncated = res["truncated"]?.GetValue<bool>() ?? false,
         };
     }
 
@@ -3186,6 +3188,7 @@ public sealed class DumpService : IDumpService
                     Held        = f["held"]?.GetValue<int>() ?? 0,
                     OwnerAddr   = f["owner_addr"]?.GetValue<string>() ?? "",
                     FieldOffset = f["field_offset"]?.GetValue<int>() ?? -1,
+                    Truncated   = f["truncated"]?.GetValue<bool>() ?? false,
                 });
             }
         }
