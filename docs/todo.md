@@ -38,19 +38,34 @@ figure is the same whether or not a Ghidra JVM is running alongside it.
 Ghidra is still required to **author** a new AOB (decompiler, xrefs, symbols). Only the replay
 moved.
 
-### What still has to happen before a `.rep` is deleted
+### The re-import rule is now SATISFIED — and still does not license deleting anything
 
-Unchanged, and this is the part the acceptance test does **not** cover: *"the inputs exist"* is not
-*"a re-import reproduces the `.rep`"*, and that has still never been demonstrated once.
-`corpus_relocate.py` proves the inputs are present (57/57); `check_pe_memory.py` now proves the
-*sweep* does not need the `.rep`; neither proves a `.rep` can be rebuilt. **Demonstrate one
-re-import end-to-end before deleting anything.**
+`py tools/ghidra/reimport_verify.py` rebuilds a project from the archived binary and grades it on
+the executable hashes, a **SHA-256 over the whole symbol table**, the block map with per-block MD5,
+and byte-identical sweep output. Measured 2026-08-01: `UE4.10-Game` (`-noanalysis`)
+**REBUILT-IDENTICAL** in 95 s; `FactoryGame-CoreUObject` (4.2 MB, 684,805 instructions, full PDB +
+analysis) **REBUILT-IDENTICAL** in 422 s. Two `--analyze` rebuilds of one input came out
+field-for-field identical, so Ghidra's analysis is deterministic here. Full write-up in
+[corpus-preservation.md](corpus-preservation.md) §0b/§0c and [dev-log.md](dev-log.md).
 
-Two things worth knowing when that day comes:
+**What is still missing is a BACKUP, not a proof.** The corpus is single-copy: `X:` no longer
+exists and `X:\Ghidra_Projs_Backup` never produced a file. A demonstration that rebuilds work is
+not a second copy, and a rebuild costs minutes per binary for the 42 PDB-loaded, disassembled
+programs.
 
-* `ES2-0517` re-runs a **language-version upgrade on every open** (`-readOnly` discards it), and
-  that upgrade — not the scan — dominates its runtime; it was the last row to finish in all three
-  Ghidra runs by a wide margin.
+Four things to keep in view when the deletion decision is actually made:
+
+* **`ES2-0517` is the only project created by Ghidra 11.3.2**; the other 72 programs are 12.1.2.
+  That is the cause of its language-version upgrade on every open (`-readOnly` discards it, so it
+  re-runs every time and dominates that row's runtime), and it is the one project whose original
+  toolchain a rebuild on the installed Ghidra cannot reproduce.
+* **18 patterns have exactly one program where they resolve correctly** — Satisfactory 7 across
+  four DLLs, UE4.22-Satisfactory 4, Solarpunk 4, Everspace 2. That reads as a reason to keep those
+  `.rep`s and is not: `pe_sweep.py` reads binaries, so the risk attaches to the **binary**, and all
+  **11 sole-source programs have an archived binary** (0 missing).
+* The 74 **identity fingerprints are committed** ([`tools/ghidra/identity/`](../tools/ghidra/identity/),
+  163 KB). They are what outlives a `.rep` — delete a project without one and there is nothing left
+  to verify a future rebuild against.
 * Four projects hold a **stub re-import** beside the real program (image base `0000:0000`, ~1 KB of
   DOS header mapped as code). They are pure Ghidra artifacts, and their scan output is noise.
 
