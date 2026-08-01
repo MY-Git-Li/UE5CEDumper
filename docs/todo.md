@@ -344,7 +344,9 @@ answers the question that actually blocks authoring:
    ([reference-builds.md](reference-builds.md)). Offline, corpus machine.
 2. Commit the index.
 3. `tools/pe/aob_specificity.py` — AOB in; bound + limiting window + the run-<4 verdict out. Stdlib
-   only; **runs on the bare second machine and in CI.**
+   only, so it **could** run on the bare second machine and in CI — ⚠️ **but it does not, and nothing
+   in the repo calls it** (audited 2026-08-01; zero references from `dll/`, `ui/`, `scripts/`,
+   `build.ps1`, both workflows). Advisory tool, human-invoked only.
 4. ~~Does a one-version index generalise?~~ **ANSWERED — see §6 of the eval.** Cross-*version* is
    fine (4.27-only index vs the 5.4 binary: 0 violations / 113). Cross-*codebase* is not: on the 58
    binaries the index never saw, `CLEAR` violates at **0.20%** with a real tail (`GNAM_UD2` bounds
@@ -356,7 +358,26 @@ answers the question that actually blocks authoring:
    automated check `Himmel.h`'s patterns have ever had. Asserts *resolution*, not just matching:
    perturbing one pattern's displacement `adj` by 8 still matches but fails 15 blocks.
 
-**All 5 steps are complete.** What remains is optional and should wait for a real need:
+**4 of 5 steps are complete — step 5 was substituted, not done.** The eval's own build order
+([aob-block-library-eval.md](aob-block-library-eval.md) "Build order") ends with
+*"5. Gate authoring on it: a candidate clears the pre-filter before it earns a sweep."* The list
+above quietly replaced that with the §4 block work (which is genuinely done and genuinely in CI) and
+then declared the set complete. **Gating was never built**, which is exactly why nothing reads the
+n-gram index. Two honest options, and picking one is the open decision:
+
+* **Wire it up** — add `aob_specificity.py --tsv` to the CI step beside `blocktest.py` and fail on a
+  regression in the CLEAR set. Cheap; makes the artifact load-bearing and its accuracy worth tuning.
+* **Or retire the claim** — keep the tool as a human-run triage aid and stop describing it as part of
+  a completed pipeline. Also legitimate; it is a good tool that simply is not a gate.
+
+Do NOT tune the index's threshold before choosing: a knob nobody reads cannot be evaluated.
+Measured 2026-08-01: **every `CLEAR` verdict comes from the threshold FLOOR (limiting window absent),
+never from a stored bucket — CLEAR-absent 47 / CLEAR-present 0.** So `CLEAR` means "we have never
+seen this window", and a higher CLEAR count indicates a *worse-covered* index, not a quieter pattern
+set. (Reductio: AOBMaker's x86 index, which contains zero x64 code, certifies 109 of our x64
+patterns CLEAR.)
+
+What remains is optional and should wait for a real need:
 * Re-extract blocks whenever a pattern is added/renamed — `blocktest.py` reports `skipped N` when a
   recorded `found_by` no longer exists in `Himmel.h`, so drift is visible rather than silent.
 * Rebuild the n-gram index when new self-built Shipping oracles land (it only ever needs to grow).

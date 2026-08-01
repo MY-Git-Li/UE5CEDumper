@@ -4,8 +4,16 @@
     py tools/pe/aob_specificity.py --tsv out/sweep/patterns.tsv        # score the whole DB
 
 STDLIB ONLY, ON PURPOSE. Building the index needs numpy and the 200 GB corpus; querying it needs
-neither, so this runs on a bare second machine and in CI. That portability is the entire point —
+neither, so this CAN run on a bare second machine and in CI. That portability is the entire point —
 see docs/aob-block-library-eval.md §6.
+
+⚠ IT IS NOT ACTUALLY WIRED INTO CI, AND NOTHING ELSE READS IT EITHER (audited 2026-08-01).
+.github/workflows/ci.yml runs extract_patterns.py --check, blocktest.py and
+check_live_verification.py — not this. Repo-wide there are ZERO callers in dll/, ui/, scripts/ or
+build.ps1; the only invocation path is a human typing the command above. Step 5 of the eval's own
+build order ("gate authoring on it: a candidate clears the pre-filter before it earns a sweep"),
+which is what would make it load-bearing, was never built. Read every number below as describing a
+tool that is currently advisory only.
 
 WHAT THE NUMBER MEANS. Every occurrence of the whole pattern must contain each of its literal
 windows, so the frequency of the RAREST window is an UPPER BOUND on the pattern's hit count *in the
@@ -14,7 +22,7 @@ do — so read it as "at most this many", never as an estimate.
 
 ⚠ THE BOUND IS A PROOF ONLY ON THE INDEX'S OWN SOURCES, AND A PRIOR EVERYWHERE ELSE. Measured:
 
-    on the 12 source binaries      0 violations / 1,017 pairs      (proof)
+    on the 11 source binaries      0 violations / 1,017 pairs      (proof)
     on 58 binaries never indexed   27 violations / 7,345  (0.37%)  (prior)
       of which CLEAR-verdict        6 violations / 3,055  (0.20%)  median 0, 99th pct 10, MAX 932
 
@@ -135,7 +143,7 @@ def score(idx, pat):
 def verdict(bound, longest, lit, floor):
     """THE GUARANTEE IS ONE-DIRECTIONAL: this can CERTIFY a pattern quiet, and cannot CONDEMN one.
 
-    Measured over 151 patterns x 12 source binaries (worst hits per pattern):
+    Measured over 151 patterns x 11 source binaries (worst hits per pattern):
 
         CLEAR (bound <= floor)  n=47  median 0   90th  2   MAX   13
         UNPROVEN (bound > floor)      median 1   90th 33   MAX 3302

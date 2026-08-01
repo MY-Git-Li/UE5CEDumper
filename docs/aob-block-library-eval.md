@@ -311,7 +311,7 @@ unsound. Stock engine code is similar enough across versions that version covera
 
 | group | pairs | violations | rate |
 |---|---|---|---|
-| the 12 source binaries | 1,017 | **0** | 0.00% |
+| the 11 source binaries | 1,017 | **0** | 0.00% |
 | 58 binaries never indexed | 7,345 | **27** | 0.37% |
 | …of those, `CLEAR`-verdict | 3,055 | **6** | **0.20%** — median 0, 99th pct 10, **MAX 932** |
 
@@ -336,7 +336,9 @@ numbers, so a user on another machine reads the caveat without finding this file
    in [reference-builds.md](reference-builds.md). Runs on the corpus machine, offline.
 2. Commit the index (one artifact, regenerated rarely).
 3. `tools/pe/aob_specificity.py` — AOB string in; bound, limiting window, and the run-<4 verdict out.
-   **Stdlib only, no corpus, no Ghidra — runs on the bare second machine and in CI.**
+   **Stdlib only, no corpus, no Ghidra — so it CAN run on the bare second machine and in CI.**
+   ⚠️ As of 2026-08-01 it does neither: nothing in the repo calls it and CI does not run it. That is
+   a direct consequence of step 5 below never being built.
 4. Answer the generalisation question and record the divergence here.
 5. Gate authoring on it: a candidate clears the pre-filter before it earns a sweep.
 
