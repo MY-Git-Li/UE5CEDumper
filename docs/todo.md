@@ -26,10 +26,13 @@ header counts (**70 programs / 55 oracles**, UE **4.10–5.8**) and this file al
 `preflight.py` returns **`GO (exit 0)`** — the manifest was regenerated and covers exactly the 57
 sweep tags. Nothing is stale or blocked. Matrix: **162 ✅ / 59 ⚠️ / 2 ❌**.
 
-⏱ **The full sweep costs ~4m40s, not the ~30–50 min the docs claimed for months.** Measured: 4m38s
-for 57 rows vs 4m34s for 54. Those old figures were never taken — they date from the pre-script era
-of hand-running each project *with* Auto Analyze, and one was even "updated" by scaling the wrong
-number with the row count. **So never reach for a tag filter to save time**; use one only to
+⏱ **The full sweep costs minutes, not the ~30–50 min the docs claimed for months — but WHICH minutes
+depends on the machine.** Measured at `SWEEP_JOBS=3`: **4m38s on the desktop** (9950X3D, 57 rows) and
+**14m32s on the laptop** (9955HX3D, 57 rows / 74 programs, corpus on internal NVMe) — a **3.1×**
+spread, so never quote one without the other; `GROUND-TRUTH.md` carries the table. Those *old*
+~30–50 min figures were never taken at all — they date from the pre-script era of hand-running each
+project *with* Auto Analyze, and one was even "updated" by scaling the wrong number with the row
+count. **So never reach for a tag filter to save time**; use one only to
 isolate a row while debugging. The correctness argument for always running the full sweep (a
 filtered run leaves `REPORT.md` describing a corpus that no longer exists) now costs nothing.
 
@@ -344,7 +347,9 @@ answers the question that actually blocks authoring:
    ([reference-builds.md](reference-builds.md)). Offline, corpus machine.
 2. Commit the index.
 3. `tools/pe/aob_specificity.py` — AOB in; bound + limiting window + the run-<4 verdict out. Stdlib
-   only; **runs on the bare second machine and in CI.**
+   only, so it **could** run on the bare second machine and in CI — ⚠️ **but it does not, and nothing
+   in the repo calls it** (audited 2026-08-01; zero references from `dll/`, `ui/`, `scripts/`,
+   `build.ps1`, both workflows). Advisory tool, human-invoked only.
 4. ~~Does a one-version index generalise?~~ **ANSWERED — see §6 of the eval.** Cross-*version* is
    fine (4.27-only index vs the 5.4 binary: 0 violations / 113). Cross-*codebase* is not: on the 58
    binaries the index never saw, `CLEAR` violates at **0.20%** with a real tail (`GNAM_UD2` bounds
@@ -356,7 +361,26 @@ answers the question that actually blocks authoring:
    automated check `Himmel.h`'s patterns have ever had. Asserts *resolution*, not just matching:
    perturbing one pattern's displacement `adj` by 8 still matches but fails 15 blocks.
 
-**All 5 steps are complete.** What remains is optional and should wait for a real need:
+**4 of 5 steps are complete — step 5 was substituted, not done.** The eval's own build order
+([aob-block-library-eval.md](aob-block-library-eval.md) "Build order") ends with
+*"5. Gate authoring on it: a candidate clears the pre-filter before it earns a sweep."* The list
+above quietly replaced that with the §4 block work (which is genuinely done and genuinely in CI) and
+then declared the set complete. **Gating was never built**, which is exactly why nothing reads the
+n-gram index. Two honest options, and picking one is the open decision:
+
+* **Wire it up** — add `aob_specificity.py --tsv` to the CI step beside `blocktest.py` and fail on a
+  regression in the CLEAR set. Cheap; makes the artifact load-bearing and its accuracy worth tuning.
+* **Or retire the claim** — keep the tool as a human-run triage aid and stop describing it as part of
+  a completed pipeline. Also legitimate; it is a good tool that simply is not a gate.
+
+Do NOT tune the index's threshold before choosing: a knob nobody reads cannot be evaluated.
+Measured 2026-08-01: **every `CLEAR` verdict comes from the threshold FLOOR (limiting window absent),
+never from a stored bucket — CLEAR-absent 47 / CLEAR-present 0.** So `CLEAR` means "we have never
+seen this window", and a higher CLEAR count indicates a *worse-covered* index, not a quieter pattern
+set. (Reductio: AOBMaker's x86 index, which contains zero x64 code, certifies 109 of our x64
+patterns CLEAR.)
+
+What remains is optional and should wait for a real need:
 * Re-extract blocks whenever a pattern is added/renamed — `blocktest.py` reports `skipped N` when a
   recorded `found_by` no longer exists in `Himmel.h`, so drift is visible rather than silent.
 * Rebuild the n-gram index when new self-built Shipping oracles land (it only ever needs to grow).

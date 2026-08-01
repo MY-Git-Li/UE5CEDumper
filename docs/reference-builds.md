@@ -127,7 +127,8 @@ in `Himmel.h`'s corpus block and GROUND-TRUTH.md §"Settled facts".
 4. **Import raw**: `analyzeHeadless <projs> <Name> -import <exe> -noanalysis`. The sweep reads only
    raw bytes; Auto Analyze is ~88% of a `.rep` and buys nothing here.
 5. **Add the row to `sweep.sh`** with a comment saying what the row is *for*, then run the full
-   sweep — it costs ~4m40s, so never use a tag filter to save time.
+   sweep — it costs 4m38s on the desktop, 14m32s on the laptop (`GROUND-TRUTH.md` has both, with
+   the machine each was measured on), so never use a tag filter to save time.
 6. **The engine install is transient.** Package, import, then delete the engine (~100+ GB). What
    stays is ~3 GB of packages + PDBs; mirror it to `X:` like the rest of the corpus.
 

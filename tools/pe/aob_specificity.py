@@ -4,8 +4,16 @@
     py tools/pe/aob_specificity.py --tsv out/sweep/patterns.tsv        # score the whole DB
 
 STDLIB ONLY, ON PURPOSE. Building the index needs numpy and the 200 GB corpus; querying it needs
-neither, so this runs on a bare second machine and in CI. That portability is the entire point —
+neither, so this CAN run on a bare second machine and in CI. That portability is the entire point —
 see docs/aob-block-library-eval.md §6.
+
+⚠ IT IS NOT ACTUALLY WIRED INTO CI, AND NOTHING ELSE READS IT EITHER (audited 2026-08-01).
+.github/workflows/ci.yml runs extract_patterns.py --check, blocktest.py and
+check_live_verification.py — not this. Repo-wide there are ZERO callers in dll/, ui/, scripts/ or
+build.ps1; the only invocation path is a human typing the command above. Step 5 of the eval's own
+build order ("gate authoring on it: a candidate clears the pre-filter before it earns a sweep"),
+which is what would make it load-bearing, was never built. Read every number below as describing a
+tool that is currently advisory only.
 
 WHAT THE NUMBER MEANS. Every occurrence of the whole pattern must contain each of its literal
 windows, so the frequency of the RAREST window is an UPPER BOUND on the pattern's hit count *in the
@@ -14,7 +22,7 @@ do — so read it as "at most this many", never as an estimate.
 
 ⚠ THE BOUND IS A PROOF ONLY ON THE INDEX'S OWN SOURCES, AND A PRIOR EVERYWHERE ELSE. Measured:
 
-    on the 12 source binaries      0 violations / 1,017 pairs      (proof)
+    on the 11 source binaries      0 violations / 1,017 pairs      (proof)
     on 58 binaries never indexed   27 violations / 7,345  (0.37%)  (prior)
       of which CLEAR-verdict        6 violations / 3,055  (0.20%)  median 0, 99th pct 10, MAX 932
 
@@ -135,7 +143,7 @@ def score(idx, pat):
 def verdict(bound, longest, lit, floor):
     """THE GUARANTEE IS ONE-DIRECTIONAL: this can CERTIFY a pattern quiet, and cannot CONDEMN one.
 
-    Measured over 151 patterns x 12 source binaries (worst hits per pattern):
+    Measured over 151 patterns x 11 source binaries (worst hits per pattern):
 
         CLEAR (bound <= floor)  n=47  median 0   90th  2   MAX   13
         UNPROVEN (bound > floor)      median 1   90th 33   MAX 3302
@@ -199,18 +207,94 @@ def main():
 
     if "--tsv" in args:
         tsv = args[args.index("--tsv") + 1]
+        baseline = None
+        if "--baseline" in args:
+            baseline = args[args.index("--baseline") + 1]
+        do_update = "--update-baseline" in args
+        do_check = "--check" in args
+
         rows = [l.rstrip("\n").split("\t") for l in open(tsv, encoding="utf-8")]
         hdr, rows = rows[0], rows[1:]
         ix = {k: i for i, k in enumerate(hdr)}
         tally = {}
+        computed = {}
         print(f"\n{'pattern':<18} {'tgt':<16} {'bound':>10}  verdict")
         for r in sorted(rows, key=lambda r: r[ix["id"]]):
             b, _n, _w, lg, lt = score(idx, r[ix["pattern"]])
             v, _ = verdict(b, lg, lt, idx.threshold - 1)
             tally[v] = tally.get(v, 0) + 1
-            print(f"  {r[ix['id']]:<16} {r[ix['target']]:<16} "
+            pid = r[ix["id"]]
+            computed[pid] = (r[ix["target"]], "-" if b is None else str(b), v)
+            print(f"  {pid:<16} {r[ix['target']]:<16} "
                   f"{('—' if b is None else b):>10}  {v}")
         print("\n  " + "   ".join(f"{k}={n}" for k, n in sorted(tally.items())))
+
+        if not (do_update or do_check):
+            return 0
+        if not baseline:
+            print("\n--check / --update-baseline need --baseline <path>")
+            return 2
+
+        if do_update:
+            with open(baseline, "w", encoding="utf-8", newline="\n") as f:
+                f.write("# AOB specificity baseline — regenerate with:\n"
+                        "#   py tools/pe/aob_specificity.py --tsv out/sweep/patterns.tsv \\\n"
+                        "#      --baseline tools/pe/aob-specificity-baseline.tsv --update-baseline\n"
+                        "# A DIFF HERE IS THE POINT. It means a pattern's noise profile changed, or a\n"
+                        "# new pattern landed without anyone looking at its specificity. Both deserve a\n"
+                        "# human. Never regenerate to make CI green without reading the diff first —\n"
+                        "# `bound` rising is a pattern getting noisier.\n"
+                        "# NOTE: `verdict` CLEAR means \"this window is ABSENT from the index\", i.e.\n"
+                        "# never observed — NOT \"measured to be rare\". See aob-block-library-eval.md §7.\n"
+                        "id\ttarget\tbound\tverdict\n")
+                for pid in sorted(computed):
+                    t, b, v = computed[pid]
+                    f.write(f"{pid}\t{t}\t{b}\t{v}\n")
+            print(f"\nbaseline written: {baseline}  ({len(computed)} patterns)")
+            return 0
+
+        # --check: golden-file compare. Any difference fails; the message says how to refresh.
+        if not os.path.exists(baseline):
+            print(f"\nCHECK FAILED: baseline not found: {baseline}")
+            return 1
+        recorded = {}
+        with open(baseline, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("#") or line.startswith("id\t") or not line.strip():
+                    continue
+                p = line.rstrip("\n").split("\t")
+                if len(p) >= 4:
+                    recorded[p[0]] = (p[1], p[2], p[3])
+        problems = []
+        for pid in sorted(set(computed) | set(recorded)):
+            c, r = computed.get(pid), recorded.get(pid)
+            if r is None:
+                problems.append(f"NEW pattern {pid} ({c[0]}) scores bound={c[1]} {c[2]} — record it")
+            elif c is None:
+                problems.append(f"GONE from Himmel.h: {pid} — stale baseline row")
+            elif c[1:] != r[1:]:
+                worse = ""
+                try:
+                    if c[1] != "-" and r[1] != "-" and int(c[1]) > int(r[1]):
+                        worse = "  <-- BOUND ROSE: the pattern got noisier"
+                except ValueError:
+                    pass
+                if r[2] == "CLEAR" and c[2] != "CLEAR":
+                    worse += "  <-- lost CLEAR"
+                problems.append(f"CHANGED {pid}: bound {r[1]}->{c[1]}  verdict {r[2]}->{c[2]}{worse}")
+        if problems:
+            print("\nCHECK FAILED — specificity differs from the recorded baseline:\n")
+            for p in problems:
+                print("  *", p)
+            print("\nThis is the authoring gate (aob-block-library-eval.md build order, step 5).")
+            print("Read the diff, then if it is intended:")
+            print("  py tools/pe/aob_specificity.py --tsv out/sweep/patterns.tsv \\")
+            print(f"     --baseline {baseline} --update-baseline")
+            print("\nA rising `bound` means the pattern matches more of the indexed corpus.")
+            print("A verdict moving CLEAR->UNPROVEN can ALSO mean the index improved — CLEAR only")
+            print("ever means \"never seen\" (eval §7), so check which changed before assuming fault.")
+            return 1
+        print(f"\nCHECK OK: {len(computed)} patterns match the recorded specificity baseline")
         return 0
 
     if not args:

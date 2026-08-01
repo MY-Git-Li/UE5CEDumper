@@ -7,14 +7,33 @@ Every address below was resolved from a real PDB symbol (or, where noted, from a
 **The sweep is scripted — do not hand-run `analyzeHeadless` per project:**
 
 ```bash
-bash tools/ghidra/sweep.sh                      # everything, MEASURED ~4m40s at SWEEP_JOBS=3
+bash tools/ghidra/sweep.sh                      # everything; 4m38s desktop / 14m32s laptop @ JOBS=3
 ```
 
-**The full sweep is CHEAP — always run it, never a filtered subset "to save time".** Measured
-2026-07-29 on 57 rows / 70 programs: **4m38s**, against **4m34s** for the 54-row run half an hour
-earlier. It does not scale the way the row count suggests, and it never did: `-noanalysis
+**The full sweep is CHEAP relative to what it buys — always run it, never a filtered subset "to
+save time".** It does not scale the way the row count suggests, and never did: `-noanalysis
 -readOnly` has been in the runner since the first scripted sweep (`f70fa66`), so `scan_patterns`
 only ever reads raw bytes.
+
+### ⏱ A SWEEP TIME WITHOUT ITS MACHINE IS NOT A MEASUREMENT
+
+Both rows below are correct. They differ by **3.1×** because they are different computers — which
+is not a footnote, it is the whole point: the same mistake as writing one machine's disk path into
+the repo. **Never quote a sweep duration without saying which machine produced it.**
+
+| machine | CPU | corpus on | rows / programs | `SWEEP_JOBS=3` | date |
+|---|---|---|---|---|---|
+| desktop | Ryzen 9 **9950X3D**, 64 GB | — | 57 / 70 | **4m38s** (278 s) | 2026-07-29 |
+| laptop (MSI Raider A18) | Ryzen 9 **9955HX3D** 16C/32T, base 2.5 GHz, 61.6 GB | internal NVMe (CT2000T500SSD8) | 57 / 74 | **14m32s** (872 s) | 2026-08-01 |
+
+The laptop run: shipped defaults (`SWEEP_JOBS=3`, `SWEEP_XMX=14G`), 57/57 rows `exit=0`, 74 scan
+TSVs, 0 failures. An independently instrumented run on the same laptop measured 850.5 s — 2.5% from
+872 s, so the figure is stable, not noise. The 54-row comparison (`4m34s`) belongs to the desktop
+row; do not read it against the laptop.
+
+Practical consequence: **on the laptop this is a ~15-minute job, not a 5-minute one.** That does not
+change the advice below (3→8 jobs saves ~12.6%, and the downside is the corpus), but it does change
+how you plan a session — budget a quarter of an hour and do something else, rather than waiting.
 
 ⚠ The `~30 min` / `~40 min` / `~50 min` figures this file and `tools/README.md` carried for months
 were **never measured** — they were inherited from the pre-script era when each project was
@@ -33,12 +52,49 @@ is the explanation. Env knobs: `GHIDRA_HOME`, `GHIDRA_PROJS`, `SWEEP_OUT`, `SWEE
 `SWEEP_JOBS`.
 
 > **`GHIDRA_PROJS` is machine-specific — set it before running anything here.** The corpus root
-> does not follow a clone. `sweep.sh:19` falls back to `D:/Tools/GHIDRA_Projs` only because that
-> is where the machine which wrote that line kept it; the corpus also lives at `E:\GHIDRA_Projs`
-> on external USB. Every `$GHIDRA_PROJS` in the commands below means *yours*. Run
-> `py tools/ghidra/preflight.py` first — it reports which projects it actually found, instead of
-> failing on a path written on someone else's disk. Recovery procedure and the full
-> keep/drop analysis: [docs/corpus-preservation.md](../../docs/corpus-preservation.md).
+> does not follow a clone. `sweep.sh:19` falls back to `D:/Tools/GHIDRA_Projs`, which is also where
+> it currently lives (internal NVMe, 63 `.rep` / 182.3 GB). Every `$GHIDRA_PROJS` in the commands
+> below means *yours*. Run `py tools/ghidra/preflight.py` first — it reports which projects it
+> actually found, instead of failing on a path written on someone else's disk. Recovery procedure
+> and the full keep/drop analysis: [docs/corpus-preservation.md](../../docs/corpus-preservation.md).
+
+> ### ⚠ `SWEEP_JOBS`: 3 is the default and raising it is not free — MEASURED 2026-08-01
+>
+> A run at `SWEEP_JOBS=16 SWEEP_XMX=2G`, with the corpus then on an **external USB SSD**, knocked
+> the drive off the bus mid-write: `disk` Event 51 ×12, NTFS unable to flush its transaction log,
+> **delayed-write failure on `$Mft` ("data has been lost")**, one Ghidra project `.db` caught
+> mid-write, and the volume re-enumerated (`HarddiskVolume9` → `12`). The Ghidra JVMs then wedged
+> in unkillable kernel I/O waits; only a reboot cleared it.
+>
+> **RAM was never the limit** — 16 × 2 GB = 32 GB on a 61.6 GB machine. The **storage transport**
+> was. So "use half the cores" is the wrong formula: the binding constraint is what the corpus
+> sits on.
+>
+> Weigh it against the measured cost, using the row for the machine you are actually on (see the
+> timing table above — 4m38s desktop, 14m32s laptop). On the laptop, 3→8 jobs saves **108.8 s
+> (12.6%)**: real, but set against corrupting the artifact of record, and §"Never drop" lists
+> projects whose `.rep` is the last copy in existence.
+>
+> Guidance: **USB / removable → 2–3, or don't run it there at all. Internal NVMe → the shipped
+> default of 3 is safe; 8 was measured to work and to save ~12%.** `SWEEP_JOBS` is deliberately
+> left as an un-clamped env var so a deliberate benchmark stays possible; this note is the warning,
+> not a guard rail.
+>
+> ⚠ **One formula written here on 2026-08-01 is withdrawn.**
+>
+> 1. **A `cores/4` ÷ `SWEEP_XMX` formula was briefly written here and is withdrawn** — it is
+>    self-inconsistent with the shipped default: 35.84 GB free ÷ 14 GB = 2, which forbids
+>    `sweep.sh:442`'s `JOBS=3`. `-Xmx` is a *reservation ceiling*, not a working set, so budgeting
+>    on it is wrong; but it is not free either — measured per-job commit was 2.15 GB at 8 jobs/14G
+>    vs 1.07 GB at 16 jobs/2G, and **system commit peaked at 60.64 GB of a 65.51 GB limit (92.6%)
+>    at 8 jobs/14G**. Lowering `SWEEP_XMX` is the real lever; raising `SWEEP_JOBS` without doing so
+>    walks into the commit limit.
+>
+> ⚠ **`one_project()` always exits 0.** Its last statement is
+> `echo "   done $TAG (exit=$?)"` — `$?` is expanded *before* `echo` runs, so the printed text is
+> correct, but the function then returns `echo`'s status. Every backgrounded job therefore succeeds
+> as far as `wait` and the script's own exit code are concerned. Counting `grep -c "exit=0"` over
+> the OUTPUT works; trusting the exit status does not.
 
 ## Read this first if you are going to CHANGE a pattern
 
