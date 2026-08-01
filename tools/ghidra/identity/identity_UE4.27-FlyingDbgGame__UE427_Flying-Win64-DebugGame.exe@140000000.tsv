@@ -1,0 +1,60 @@
+program	UE427_Flying-Win64-DebugGame.exe
+tag	UE4.27-FlyingDbgGame
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	168803108
+meta.# of Data Type Categories	40683
+meta.# of Data Types	322609
+meta.# of Defined Data	2943496
+meta.# of Functions	570525
+meta.# of Instructions	28278640
+meta.# of Memory Blocks	14
+meta.# of Symbols	4820797
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 08:42:34 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/4.27.2/DebugGame/Win64/UE427_Flying-Win64-DebugGame.exe
+meta.Executable MD5	01d316835ae389f6d514dd54f50f44c3
+meta.Executable SHA256	8b82b0814bb5ea9b815ba3c4d4b3a5ac68f825dbf8238a722956ebeee0ba39e0
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/4.27.2/DebugGame/Win64/UE427_Flying-Win64-DebugGame.exe?MD5=01d316835ae389f6d514dd54f50f44c3
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	UE427_Flying-Win64-DebugGame.pdb
+meta.PDB GUID	a87f9a7c-2047-411f-aaea-929cdac03d0b
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UE4
+meta.PE Property[InternalName]	UE427_Flying
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	UE427_Flying-Win64-DebugGame.exe
+meta.PE Property[ProductName]	UE4
+meta.PE Property[ProductVersion]	++UE4+Release-4.27-CL-18319896
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	UE427_Flying-Win64-DebugGame.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	570525
+instructions	28278640
+defined_data	2943496
+datatypes	322609
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	4693993
+symbols_global	4098492
+symbols_sha256	d598fbbd2dfdbdcf2b24f345f81a7e657201fa619cde16887bfe9f9e75e07793
+symbols_source.ANALYSIS	815255
+symbols_source.DEFAULT	3094620
+symbols_source.IMPORTED	784118

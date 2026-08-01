@@ -1,0 +1,60 @@
+program	ff7remake_.exe
+tag	UE4.18-FF7R
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	99584464
+meta.# of Data Type Categories	64
+meta.# of Data Types	1928
+meta.# of Defined Data	2014675
+meta.# of Functions	149734
+meta.# of Instructions	15200034
+meta.# of Memory Blocks	10
+meta.# of Symbols	1113687
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 10:28:54 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/SteamLibrary/steamapps/common/FINAL FANTASY VII REMAKE/End/Binaries/Win64/ff7remake_.exe
+meta.Executable MD5	3ea9092f78c168a8a2e165f28c72bb93
+meta.Executable SHA256	25b54c345c94ee9f6c6876b9c7537a69e6b0eef25f322207c32a8ddcee816635
+meta.FSRL	file:///D:/SteamLibrary/steamapps/common/FINAL FANTASY VII REMAKE/End/Binaries/Win64/ff7remake_.exe?MD5=3ea9092f78c168a8a2e165f28c72bb93
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	End-Win64-Shipping.pdb
+meta.PDB GUID	277b8a8f-70be-49fe-991b-5a48bf4279e0
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	SQUARE ENIX CO., LTD.
+meta.PE Property[FileDescription]	FINAL FANTASY VII REMAKE
+meta.PE Property[InternalName]	ff7remake
+meta.PE Property[LegalCopyright]	(C)1997, 2021 SQUARE ENIX CO., LTD. All Rights Reserved.
+meta.PE Property[OriginalFilename]	ff7remake_.exe
+meta.PE Property[ProductName]	FINAL FANTASY VII REMAKE
+meta.PE Property[ProductVersion]	1.0.0.7
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	ff7remake_.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	149734
+instructions	15200034
+defined_data	2014675
+datatypes	1928
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	2400083
+symbols_global	2346921
+symbols_sha256	2d707310da0ba2860e6f90a3eb32393f84991cb475dc71d3dfc1854bd7aef86f
+symbols_source.ANALYSIS	49277
+symbols_source.DEFAULT	2343899
+symbols_source.IMPORTED	6907

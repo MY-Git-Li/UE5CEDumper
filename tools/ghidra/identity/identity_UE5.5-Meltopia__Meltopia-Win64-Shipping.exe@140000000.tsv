@@ -1,0 +1,62 @@
+program	Meltopia-Win64-Shipping.exe
+tag	UE5.5-Meltopia
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	177601796
+meta.# of Data Type Categories	34778
+meta.# of Data Types	206948
+meta.# of Defined Data	3606815
+meta.# of Functions	365632
+meta.# of Instructions	29588050
+meta.# of Memory Blocks	11
+meta.# of Symbols	4438483
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 15:20:52 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Meltopia/Meltopia/Binaries/Win64/Meltopia-Win64-Shipping.exe
+meta.Executable MD5	bed6161f888a2f91ccc5d9d1284339f9
+meta.Executable SHA256	f3683db255ddec5fac5e701d1fbeb97ff00afd5dfba8b74643ad91a8fa408f7f
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Meltopia/Meltopia/Binaries/Win64/Meltopia-Win64-Shipping.exe?MD5=bed6161f888a2f91ccc5d9d1284339f9
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	Meltopia-Win64-Shipping.pdb
+meta.PDB GUID	021de3c2-ad16-c967-d0f7-91668208ae13
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UnrealGame
+meta.PE Property[FileVersion]	++UE5+Release-5.5-CL-40574608
+meta.PE Property[InternalName]	Meltopia
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	Meltopia-Win64-Shipping.exe
+meta.PE Property[ProductName]	UnrealGame
+meta.PE Property[ProductVersion]	++UE5+Release-5.5-CL-40574608
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	Meltopia-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	365632
+instructions	29588050
+defined_data	3606815
+datatypes	206948
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	4578385
+symbols_global	4036972
+symbols_sha256	2a708e35b239b8dd6ea1ecb3767e0b0dd823d0bde18d18491123daff338437f8
+symbols_source.ANALYSIS	741124
+symbols_source.DEFAULT	2795811
+symbols_source.IMPORTED	1041450

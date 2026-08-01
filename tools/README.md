@@ -39,6 +39,18 @@ py tools/ghidra/pe_sweep.py                                    # -> out/pe-sweep
 py tools/ghidra/compare_sweeps.py out/sweep out/pe-sweep       # the acceptance test
 ```
 
+### Can a deleted `.rep` be rebuilt?
+
+Yes — demonstrated, not assumed. `reimport_verify.py` rebuilds a project from the archived binary
+and grades the result on the symbol-table digest, the block map and the sweep output. Run
+`dump_identity.java` over the corpus first so there is an original to compare against:
+
+```sh
+SWEEP_SCRIPT=dump_identity.java SWEEP_OUT=$PWD/out/identity bash tools/ghidra/sweep.sh   # once
+py tools/ghidra/reimport_verify.py UE4.10-Game                        # cheap: -noanalysis
+py tools/ghidra/reimport_verify.py UE4.26-Satisfactory --program CoreUObject --analyze
+```
+
 | Script | Lang | What it does |
 |--------|------|--------------|
 | `sweep.sh` | bash | **The whole regression sweep.** Extracts `Himmel.h` → TSV, then replays it against every project in its table with that project's `GS_TRUE`, N projects at a time (a Ghidra project takes an *exclusive* lock, so parallelism is safe across projects and never within one). The truth table lives here in executable form so it cannot drift from the docs. |
@@ -48,6 +60,8 @@ py tools/ghidra/compare_sweeps.py out/sweep out/pe-sweep       # the acceptance 
 | `find_callers.java` | Java | For each function VA arg, lists call sites and the `LEA/MOV RCX` (`this`) set before each call — recovers a static global a method is invoked on (e.g. `LEA RCX,[GUObjectArray]; call`). |
 | `dump_global_xref_aob.java` | Java | **PDB-shipping games.** Resolves UE global symbols by name (`GWorld`, `GUObjectArray`, `NamePoolData`, `SparseDelegates`, `GEngine`, …) and, for every code xref, dumps the raw byte window + a disp-masked AOB candidate + read/write kind + containing function. Turns a symbol-rich binary into `Himmel.h` material in one pass. Filters out variable symbols (they lazy-load the whole datatype list → OOM). |
 | `scan_patterns.java` | Java | **The engine `sweep.sh` drives.** Mass-scans a **TSV** of signatures against every executable section and resolves each hit exactly like `Genau::TryResolveMatch`, reporting `hits / ok / decoy` plus a verdict: `UNIQUE-OK`, `OK-FIRST`, `OK-BEHIND` (**a decoy scans first**), `DECOY-ONLY`, `MISS`, `NO-TRUTH`. Also emits a per-pattern hotspot TSV and a **consensus** file — which VA the most *independent* patterns agree on, the only correctness signal available on a symbol-less binary — plus a *priority walk* showing what the runtime would land on there. Understands nibble wildcards. Env: `GS_TSV`, `GS_OUT`, `GS_TAG`, `GS_TRUE` (entries may carry a `programNameSubstring:` prefix, which is **required** for modular builds — their DLLs share image base `0x180000000` so their ranges overlap). Outputs are keyed by tag + program + image base; program name alone is not unique across projects. |
+| `reimport_verify.py` | py3 | **Rebuilds a `.rep` from the archived binary and proves the rebuild is the same project.** Compares three things that fail independently: Ghidra's recorded executable MD5/SHA256 + a **SHA-256 over every (address, name, type, scope, source) in the symbol table**; the block map with per-block MD5; and byte-identical sweep output under the row's own `GS_TRUE`. Matching symbol *counts* would pass a rebuild that put the right number of symbols at the wrong addresses — which is exactly what a same-named-but-different PDB produces. `--analyze` does the expensive PDB+analysis rebuild; `--program` targets one DLL of a modular row. Verdicts are graded, not boolean: `REBUILT-IDENTICAL` / `REBUILT-EQUIVALENT` (only Ghidra's own datatype/symbol totals differ) / `REBUILT-MODULO-ANALYSIS` (the original was disassembled and this run did not regenerate that) / `MISMATCH`. |
+| `dump_identity.java` | Java | Everything that distinguishes one program from another, in one small TSV: Ghidra's provenance metadata (executable MD5/SHA256, **`Created With Ghidra Version`**, PDB GUID/Age), analysis state, and the symbol-table digest. The discriminator that matters is **instructions, not functions** — applying a PDB creates functions and data without disassembling anything, so a project can show 195,451 functions with `Analyzed=false` and zero instructions. `.rep` size says the same thing and is likewise not an analysis signal. |
 | `dump_blocks.java` | Java | Emits a program's **complete memory model** — image base, every block (start/size/exec/init/read/write) and an **MD5 per initialized block** — as a few KB of TSV. The oracle for "does a PE reader see what Ghidra sees": matching starts and sizes prove only the layout agrees, the digest proves the *bytes* do. Driven by `sweep.sh` via `SWEEP_SCRIPT` so it reuses the same ROWS table. |
 | `pe_memory.py` | py3 | Ghidra's memory model of a PE, rebuilt from the PE alone: the block map plus `getBlock`/`contains`/`getLong` with Ghidra's semantics. The non-obvious rule is that a section's initialized block is **`max(SizeOfRawData, VirtualSize)`**, zero-padded — raw alone fits 28 of 29 corpus programs and breaks on the packed DQ7R build. |
 | `pe_scan_patterns.py` | py3 | `scan_patterns.java` with no Ghidra, output byte-for-byte identical: same signed-64-bit arithmetic, same Java `HALF_UP` `%f` rounding, same CRLF. Prefilters each pattern on its longest literal run instead of sweeping an anchor-bucket map (equivalent match set, tractable in CPython). |

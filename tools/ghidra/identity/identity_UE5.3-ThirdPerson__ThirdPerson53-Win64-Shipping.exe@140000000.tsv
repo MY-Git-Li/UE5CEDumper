@@ -1,0 +1,58 @@
+program	ThirdPerson53-Win64-Shipping.exe
+tag	UE5.3-ThirdPerson
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	117986244
+meta.# of Data Type Categories	4
+meta.# of Data Types	100
+meta.# of Defined Data	1359175
+meta.# of Functions	213815
+meta.# of Instructions	0
+meta.# of Memory Blocks	10
+meta.# of Symbols	215437
+meta.Address Size	64
+meta.Analyzed	false
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 19:13:20 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/5.3/Shipping/Windows/ThirdPerson53/Binaries/Win64/ThirdPerson53-Win64-Shipping.exe
+meta.Executable MD5	a78b9aaa7fad9945f023b019729d09db
+meta.Executable SHA256	187c7f1b67a3b3909ffc1e060b1e8cf44657b6ede8cf30da70403f7bd408b3bd
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/5.3/Shipping/Windows/ThirdPerson53/Binaries/Win64/ThirdPerson53-Win64-Shipping.exe?MD5=a78b9aaa7fad9945f023b019729d09db
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	1470893ff
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	ThirdPerson53-Win64-Shipping.pdb
+meta.PDB GUID	9b71385c-b6a4-de7a-9dc0-7f7936d7e988
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	Third Person Game Template
+meta.PE Property[InternalName]	ThirdPerson53
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	ThirdPerson53-Win64-Shipping.exe
+meta.PE Property[ProductName]	Third Person Game Template
+meta.PE Property[ProductVersion]	++UE5+Release-5.3-CL-29314046
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	ThirdPerson53-Win64-Shipping.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	true
+functions	213815
+instructions	0
+defined_data	1359175
+datatypes	100
+has_pdb_applied	yes
+analysis_state	NOT-DISASSEMBLED
+symbols	540855
+symbols_global	539806
+symbols_sha256	481645780e14fe3acb12e5526548987ab3b151394e50b6c7ab7848938d33bab8
+symbols_source.DEFAULT	539033
+symbols_source.IMPORTED	1822

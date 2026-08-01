@@ -1,0 +1,60 @@
+program	Avowed-Win64-Shipping.exe
+tag	UE5.3-Avowed
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	clangwindows
+meta.# of Bytes	199207297
+meta.# of Data Type Categories	80
+meta.# of Data Types	2488
+meta.# of Defined Data	3118634
+meta.# of Functions	262782
+meta.# of Instructions	31198054
+meta.# of Memory Blocks	17
+meta.# of Symbols	1486866
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	clang:unknown
+meta.Compiler ID	clangwindows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jun 17 08:29:14 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Avowed/Alabama/Binaries/Win64/Avowed-Win64-Shipping.exe
+meta.Executable MD5	b20a14f7dffbbaf3b7bfdce54efc345c
+meta.Executable SHA256	5d99df74bff2c825a8d621730210b4e08442a94ee1b8c6ef0bc88e92cea91c01
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Avowed/Alabama/Binaries/Win64/Avowed-Win64-Shipping.exe?MD5=b20a14f7dffbbaf3b7bfdce54efc345c
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	Avowed-Win64-Shipping.pdb
+meta.PDB GUID	811d1549-cee6-d8cb-4c4c-44205044422e
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Microsoft Studios
+meta.PE Property[FileDescription]	Avowed
+meta.PE Property[InternalName]	Alabama
+meta.PE Property[LegalCopyright]	Confidential Information. Copyright (C) 2018-2024, Obsidian Entertainment, Inc. All rights reserved.
+meta.PE Property[OriginalFilename]	Avowed-Win64-Shipping.exe
+meta.PE Property[ProductName]	Avowed
+meta.PE Property[ProductVersion]	Alabama-CL-2586997
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	Avowed-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	262782
+instructions	31198054
+defined_data	3118634
+datatypes	2488
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	3971950
+symbols_global	3900148
+symbols_sha256	f6322b8b6ebabec709d9a94240d650ad4ad66159fdac7956150fafc98b47c61a
+symbols_source.ANALYSIS	71938
+symbols_source.DEFAULT	3891319
+symbols_source.IMPORTED	8693

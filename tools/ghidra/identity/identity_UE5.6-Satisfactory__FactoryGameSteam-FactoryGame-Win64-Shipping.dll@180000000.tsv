@@ -1,0 +1,62 @@
+program	FactoryGameSteam-FactoryGame-Win64-Shipping.dll
+tag	UE5.6-Satisfactory
+image_base	180000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	29214512
+meta.# of Data Type Categories	157282
+meta.# of Data Types	835651
+meta.# of Defined Data	1070882
+meta.# of Functions	89593
+meta.# of Instructions	3557403
+meta.# of Memory Blocks	10
+meta.# of Symbols	925234
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sat Jul 25 20:43:08 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Satisfactory/FactoryGame/Binaries/Win64/FactoryGameSteam-FactoryGame-Win64-Shipping.dll
+meta.Executable MD5	013693d99417ca0079421986c7e33bda
+meta.Executable SHA256	dd8dfa4b5dd6dfc89a0d9b1f2509a1900bc99f2565733195163345ce2dc4b385
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Satisfactory/FactoryGame/Binaries/Win64/FactoryGameSteam-FactoryGame-Win64-Shipping.dll?MD5=013693d99417ca0079421986c7e33bda
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	180000000
+meta.PDB Age	1
+meta.PDB File	FactoryGameSteam-FactoryGame-Win64-Shipping.pdb
+meta.PDB GUID	bf984452-1bf6-707f-f4d5-1dacd89a718c
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Coffee Stain Studios AB
+meta.PE Property[FileDescription]	Satisfactory
+meta.PE Property[FileVersion]	++FactoryGame+rel-main-1.2.0-CL-495413
+meta.PE Property[InternalName]	FactoryGame
+meta.PE Property[LegalCopyright]	Copyright Coffee Stain Studios. All Rights Reserved.
+meta.PE Property[OriginalFilename]	FactoryGameSteam-FactoryGame-Win64-Shipping.dll
+meta.PE Property[ProductName]	Satisfactory
+meta.PE Property[ProductVersion]	++FactoryGame+rel-main-1.2.0-CL-495413
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	FactoryGameSteam-FactoryGame-Win64-Shipping.dll
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	89593
+instructions	3557403
+defined_data	1070882
+datatypes	835651
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	857869
+symbols_global	699038
+symbols_sha256	9a3456438e258318accc361bf277a2da13c0d5dfcd38cb9e29626e455a75dc2d
+symbols_source.ANALYSIS	50651
+symbols_source.DEFAULT	373606
+symbols_source.IMPORTED	433612

@@ -1,0 +1,60 @@
+program	Octopath_Traveler-Win64-Shipping.exe
+tag	UE4.18-Octopath
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	51159744
+meta.# of Data Type Categories	65
+meta.# of Data Types	1917
+meta.# of Defined Data	1081151
+meta.# of Functions	102654
+meta.# of Instructions	6740220
+meta.# of Memory Blocks	11
+meta.# of Symbols	601515
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 08:09:59 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/SteamLibrary/steamapps/common/OCTOPATH TRAVELER/Octopath_Traveler/Binaries/Win64/Octopath_Traveler-Win64-Shipping.exe
+meta.Executable MD5	d3d3c619c91aa2a357a4392c5d87c446
+meta.Executable SHA256	41852d88b8f56b575b95edfa4d7049330b496bdccd079a75d9d4afc556e79fc9
+meta.FSRL	file:///D:/SteamLibrary/steamapps/common/OCTOPATH TRAVELER/Octopath_Traveler/Binaries/Win64/Octopath_Traveler-Win64-Shipping.exe?MD5=d3d3c619c91aa2a357a4392c5d87c446
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	Octopath_Traveler-Win64-Shipping.pdb
+meta.PDB GUID	a8c89d81-a3c5-410f-ab4d-08b8a4006846
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	SQUARE ENIX CO., LTD.
+meta.PE Property[FileDescription]	OCTOPATH TRAVELER
+meta.PE Property[InternalName]	Octopath_Traveler
+meta.PE Property[LegalCopyright]	©2018-2020 SQUARE ENIX CO., LTD. All Rights Reserved.
+meta.PE Property[OriginalFilename]	Octopath_Traveler-Win64-Shipping.exe
+meta.PE Property[ProductName]	OCTOPATH TRAVELER
+meta.PE Property[ProductVersion]	1.0.0.1
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	Octopath_Traveler-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	102654
+instructions	6740220
+defined_data	1081151
+datatypes	1917
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	916327
+symbols_global	887845
+symbols_sha256	d9441810a0afb9d8724f77c4aafd3079443e9a760050dec4847d6920f5830137
+symbols_source.ANALYSIS	26888
+symbols_source.DEFAULT	885089
+symbols_source.IMPORTED	4350

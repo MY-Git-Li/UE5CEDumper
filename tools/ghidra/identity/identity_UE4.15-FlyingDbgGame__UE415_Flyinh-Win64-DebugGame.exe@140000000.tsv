@@ -1,0 +1,57 @@
+program	UE415_Flyinh-Win64-DebugGame.exe
+tag	UE4.15-FlyingDbgGame
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	96329984
+meta.# of Data Type Categories	4
+meta.# of Data Types	134
+meta.# of Defined Data	864639
+meta.# of Functions	177900
+meta.# of Instructions	0
+meta.# of Memory Blocks	8
+meta.# of Symbols	179205
+meta.Address Size	64
+meta.Analyzed	false
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 19:18:25 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/4.15.3/DebugGame/UE415_Flyinh-Win64-DebugGame.exe
+meta.Executable MD5	c3c4842132114e846d2b26988a6ca90a
+meta.Executable SHA256	08f75fce5c07c4576535572d3acff7e5790f0167252ceee26a89164dddf9c05f
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/4.15.3/DebugGame/UE415_Flyinh-Win64-DebugGame.exe?MD5=c3c4842132114e846d2b26988a6ca90a
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	145be0dff
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	UE415_Flyinh-Win64-DebugGame.pdb
+meta.PDB GUID	2541b4ea-6737-4046-8e4d-63f3807f11e0
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UE4Game
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	UE4-Launch.lib
+meta.PE Property[ProductName]	UE4Game
+meta.PE Property[ProductVersion]	++UE4+Release-4.15-CL-3450819
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	UE415_Flyinh-Win64-DebugGame.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	true
+functions	177900
+instructions	0
+defined_data	864639
+datatypes	134
+analysis_state	ANALYSED
+symbols	515884
+symbols_global	514816
+symbols_sha256	e2c5e39273e10c07206f123f395d10a477aaea76116a2dfc1813967324acb070
+symbols_source.DEFAULT	514332
+symbols_source.IMPORTED	1552

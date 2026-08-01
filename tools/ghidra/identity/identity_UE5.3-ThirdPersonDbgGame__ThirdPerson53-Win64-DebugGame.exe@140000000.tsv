@@ -1,0 +1,58 @@
+program	ThirdPerson53-Win64-DebugGame.exe
+tag	UE5.3-ThirdPersonDbgGame
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	259096468
+meta.# of Data Type Categories	4
+meta.# of Data Types	100
+meta.# of Defined Data	2954593
+meta.# of Functions	546771
+meta.# of Instructions	0
+meta.# of Memory Blocks	11
+meta.# of Symbols	548608
+meta.Address Size	64
+meta.Analyzed	false
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 19:16:02 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/5.3/DebugGame/Windows/ThirdPerson53/Binaries/Win64/ThirdPerson53-Win64-DebugGame.exe
+meta.Executable MD5	5c101fc56c6e4dbb3a86f758d93ec46e
+meta.Executable SHA256	d5e450efd1cfe2750d5281564a128ef3781e41243fcc9c11fc7f35c35f39386d
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/5.3/DebugGame/Windows/ThirdPerson53/Binaries/Win64/ThirdPerson53-Win64-DebugGame.exe?MD5=5c101fc56c6e4dbb3a86f758d93ec46e
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	14f71e5ff
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	ThirdPerson53-Win64-DebugGame.pdb
+meta.PDB GUID	7bb780b3-e6bd-49ac-b116-daec15b72699
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	Third Person Game Template
+meta.PE Property[InternalName]	ThirdPerson53
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	ThirdPerson53-Win64-DebugGame.exe
+meta.PE Property[ProductName]	Third Person Game Template
+meta.PE Property[ProductVersion]	++UE5+Release-5.3-CL-29314046
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	ThirdPerson53-Win64-DebugGame.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	true
+functions	546771
+instructions	0
+defined_data	2954593
+datatypes	100
+has_pdb_applied	yes
+analysis_state	NOT-DISASSEMBLED
+symbols	1700179
+symbols_global	1698935
+symbols_sha256	f6354620f394cafa7a24a0edde56dd4aeea1d7ea6616b16c01b71a3b17bb5426
+symbols_source.DEFAULT	1698103
+symbols_source.IMPORTED	2076

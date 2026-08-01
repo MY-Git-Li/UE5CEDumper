@@ -20,6 +20,72 @@ builds ≤696 in
 
 -----
 
+## 2026-08-01 - A deleted `.rep` can be rebuilt: demonstrated, graded on a symbol-table digest (build 2545)
+
+`docs/todo.md` carried a standing rule — no `.rep` may be deleted until a re-import is demonstrated
+end to end, because *"the inputs exist"* is not *"a re-import reproduces the `.rep`"*.
+`tools/ghidra/reimport_verify.py` now does it.
+
+### The bar, and why counts are not it
+
+A rebuild is graded on three things that fail independently: Ghidra's recorded executable
+MD5/SHA256, a **SHA-256 over every `(address, name, type, scope, source)` in the symbol table**, the
+block map with a per-block MD5, and byte-identical sweep output under the row's own `GS_TRUE`.
+Matching symbol *counts* would pass a rebuild that put the right number of symbols at the wrong
+addresses — precisely what a same-named-but-different PDB produces, and the failure this corpus is
+most exposed to.
+
+| rebuild | original | result | wall |
+|---|---|---|---|
+| `UE4.10-Game`, `-noanalysis` | raw import, no PDB | **REBUILT-IDENTICAL** | 95 s |
+| `AudioMixerCore` (0.1 MB), `--analyze` | PDB + disassembled | **REBUILT-EQUIVALENT** | 98 s |
+| `FactoryGame-CoreUObject` (4.2 MB, 684,805 instr.), `--analyze` | PDB + disassembled | **REBUILT-IDENTICAL** | 422 s |
+
+### Determinism was measured, not assumed — which is what made the one anomaly readable
+
+`AudioMixerCore`'s rebuild matched its original on the symbol digest and on every function /
+instruction / defined-data count, and differed by **+1 data type and +7 in `# of Symbols`**. Two
+readings were available: Ghidra's analysis is non-deterministic, or the original carries history.
+Running the rebuild **twice** settled it — the two rebuilds were **field-for-field identical, 0
+differing fields** — so it is the original that is unusual, not the method. It did not recur on the
+40x larger CoreUObject, where every field including `# of Symbols` (159,554) matched exactly.
+
+### What the corpus actually contains, and the discriminator that is not `.rep` size
+
+`dump_identity.java` over all 57 rows / 74 programs. **The discriminator is instructions, not
+functions** — applying a PDB creates functions and defined data without disassembling anything, so
+`UE4.10-GameDev` shows 195,451 functions, 840,853 defined data and `Analyzed=false` with **zero
+instructions**. A `.rep`'s size says the same thing and is likewise not an analysis signal.
+
+| PDB loaded | disassembled | programs |
+|---|---|---|
+| yes | yes | **42** |
+| no | yes | 18 |
+| no | no | 13 (includes the 4 broken stubs) |
+
+A raw import's symbols are **not PDB symbols**: `UE4.10-Game` has 184,438 `DEFAULT` (auto-named off
+the `.pdata` function table) plus 1,233 `IMPORTED` (the PE export/import table). GROUND-TRUTH's note
+that `-noanalysis` skips PDB application is correct; a PDB-loaded project looks different
+(`UE4.20-Everspace`: 445,962 `IMPORTED`).
+
+### Two findings that change the deletion calculus
+
+**`ES2-0517` is the only project created by Ghidra 11.3.2** — the other 72 programs are 12.1.2. That
+is the cause of its language-version upgrade on every open, and it is the one project whose original
+toolchain a rebuild cannot reproduce.
+
+**18 patterns have exactly one program where they resolve correctly** (Satisfactory 7 across four
+DLLs, UE4.22-Satisfactory 4, Solarpunk 4, Everspace 2). That reads as a reason to keep those `.rep`s
+and is not: now that `pe_sweep.py` reads binaries, the risk attaches to the **binary**. All **11
+sole-source programs have an archived binary** — 0 missing.
+
+### Still not licensed
+
+Deleting anything. The corpus is **single-copy** — `X:` no longer exists and
+`X:\Ghidra_Projs_Backup` never produced a file. A demonstration that rebuilds work is not a backup.
+
+-----
+
 ## 2026-08-01 - The AOB sweep no longer needs Ghidra: 210/210 files byte-identical from the PEs (build 2545)
 
 `scan_patterns.java` calls **four** Ghidra APIs and **zero** analysis APIs — `getImageBase`,

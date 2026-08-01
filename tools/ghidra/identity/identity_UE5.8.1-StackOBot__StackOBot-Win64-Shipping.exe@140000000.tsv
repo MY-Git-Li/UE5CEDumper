@@ -1,0 +1,61 @@
+program	StackOBot-Win64-Shipping.exe
+tag	UE5.8.1-StackOBot
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	173263764
+meta.# of Data Type Categories	21363
+meta.# of Data Types	154703
+meta.# of Defined Data	3474405
+meta.# of Functions	364362
+meta.# of Instructions	28313752
+meta.# of Memory Blocks	11
+meta.# of Symbols	4293037
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 14:26:51 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/5.8/Stack_O_Bot/Shipping_581/Windows/StackOBot/Binaries/Win64/StackOBot-Win64-Shipping.exe
+meta.Executable MD5	a906f263eccb07543b0894ff9aea47f5
+meta.Executable SHA256	f833e88ceb4edd9837bd45e78ebae59255d8a01f89a046acf552aa15a4b33976
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/5.8/Stack_O_Bot/Shipping_581/Windows/StackOBot/Binaries/Win64/StackOBot-Win64-Shipping.exe?MD5=a906f263eccb07543b0894ff9aea47f5
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	StackOBot-Win64-Shipping.pdb
+meta.PDB GUID	0c6ed065-8cb7-53f6-cf38-1acd22400488
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UnrealGame
+meta.PE Property[FileVersion]	++UE5+Release-5.8-CL-56057345
+meta.PE Property[InternalName]	StackOBot
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	StackOBot-Win64-Shipping.exe
+meta.PE Property[ProductName]	UnrealGame
+meta.PE Property[ProductVersion]	++UE5+Release-5.8-CL-56057345
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	StackOBot-Win64-Shipping.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	364362
+instructions	28313752
+defined_data	3474405
+datatypes	154703
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	4306947
+symbols_global	3764645
+symbols_sha256	6d74943626e80f9af3db128f57f8146d7ba8d12b795dbecd053a08caa3d470fe
+symbols_source.ANALYSIS	768297
+symbols_source.DEFAULT	2641700
+symbols_source.IMPORTED	896950

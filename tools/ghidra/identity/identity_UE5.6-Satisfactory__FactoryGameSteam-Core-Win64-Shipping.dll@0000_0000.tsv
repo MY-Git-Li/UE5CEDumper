@@ -1,0 +1,44 @@
+program	FactoryGameSteam-Core-Win64-Shipping.dll
+tag	UE5.6-Satisfactory
+image_base	0000:0000
+language	x86:LE:16:Real Mode
+language_version	4
+compiler_spec	default
+meta.# of Bytes	1168
+meta.# of Data Type Categories	2
+meta.# of Data Types	5
+meta.# of Defined Data	4
+meta.# of Functions	1
+meta.# of Instructions	90
+meta.# of Memory Blocks	2
+meta.# of Symbols	1
+meta.Address Size	21
+meta.Analyzed	true
+meta.Compiler	unknown
+meta.Compiler ID	default
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sat Jul 25 20:48:40 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Old-style DOS Executable (MZ)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Satisfactory/Engine/Binaries/Win64/FactoryGameSteam-Core-Win64-Shipping.dll
+meta.Executable MD5	f9fe8df78638fe1e39d4df7fdba9c498
+meta.Executable SHA256	7d0517ad42b571563eac6583118fffa9a75b041e1abd717cb246b68adaef9af4
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Satisfactory/Engine/Binaries/Win64/FactoryGameSteam-Core-Win64-Shipping.dll?MD5=f9fe8df78638fe1e39d4df7fdba9c498
+meta.Language ID	x86:LE:16:Real Mode (4.7)
+meta.Maximum Address	HEADER::0000003f
+meta.Minimum Address	1000:0000
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	FactoryGameSteam-Core-Win64-Shipping.dll
+meta.Should Ask To Analyze	false
+functions	1
+instructions	90
+defined_data	4
+datatypes	5
+has_pdb_applied	no
+analysis_state	DISASSEMBLED
+symbols	5
+symbols_global	5
+symbols_sha256	8ab2015e3399d8720758e9f8a851b83b880ce3508c1f6825a0c901a28c9071ae
+symbols_source.DEFAULT	4
+symbols_source.IMPORTED	1

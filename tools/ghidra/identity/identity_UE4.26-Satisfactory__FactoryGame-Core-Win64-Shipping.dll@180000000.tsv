@@ -1,0 +1,61 @@
+program	FactoryGame-Core-Win64-Shipping.dll
+tag	UE4.26-Satisfactory
+image_base	180000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	7265564
+meta.# of Data Type Categories	34252
+meta.# of Data Types	102901
+meta.# of Defined Data	111519
+meta.# of Functions	18798
+meta.# of Instructions	1056042
+meta.# of Memory Blocks	10
+meta.# of Symbols	190787
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 08:06:14 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/tmp/Game archive/Satisfactory/UE4.26.2/Engine/Binaries/Win64/FactoryGame-Core-Win64-Shipping.dll
+meta.Executable MD5	1fd90d385eab7156f61ff4245e61bdaf
+meta.Executable SHA256	ea421f83620628492d8b2c0d80cbeab3568e65db47b0d4867179f2e6e29ba355
+meta.FSRL	file:///D:/tmp/Game archive/Satisfactory/UE4.26.2/Engine/Binaries/Win64/FactoryGame-Core-Win64-Shipping.dll?MD5=1fd90d385eab7156f61ff4245e61bdaf
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	180000000
+meta.PDB Age	1
+meta.PDB File	FactoryGame-Core-Win64-Shipping.pdb
+meta.PDB GUID	2024af64-7eb7-4e27-aaf6-7d9a656d918e
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	Satisfactory
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	FactoryGame-Core-Win64-Shipping.dll
+meta.PE Property[ProductName]	FactoryGame
+meta.PE Property[ProductVersion]	++FactoryGame+rel-main-0.6.0-CL-200661
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	FactoryGame-Core-Win64-Shipping.dll
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	18798
+instructions	1056042
+defined_data	111519
+datatypes	102901
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	208911
+symbols_global	180512
+symbols_sha256	3141eee36f37948ad4fe0025449dc3a1beb8d5c86808593fc8a095be22f27dbd
+symbols_source.ANALYSIS	19876
+symbols_source.DEFAULT	129207
+symbols_source.IMPORTED	59828

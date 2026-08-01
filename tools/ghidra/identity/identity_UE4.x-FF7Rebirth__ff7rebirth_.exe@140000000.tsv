@@ -1,0 +1,60 @@
+program	ff7rebirth_.exe
+tag	UE4.x-FF7Rebirth
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	161305988
+meta.# of Data Type Categories	65
+meta.# of Data Types	2224
+meta.# of Defined Data	3140322
+meta.# of Functions	377000
+meta.# of Instructions	20390167
+meta.# of Memory Blocks	11
+meta.# of Symbols	1706815
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 15:19:51 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/SteamLibrary/steamapps/common/FINAL FANTASY VII REBIRTH/End/Binaries/Win64/ff7rebirth_.exe
+meta.Executable MD5	e44e4213e47037b8a497a832e41d2398
+meta.Executable SHA256	752807180c4ed919667ff0ec163046410187e873888dd75248e78aaa72e363dc
+meta.FSRL	file:///D:/SteamLibrary/steamapps/common/FINAL FANTASY VII REBIRTH/End/Binaries/Win64/ff7rebirth_.exe?MD5=e44e4213e47037b8a497a832e41d2398
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	End-Win64-Shipping.pdb
+meta.PDB GUID	c15dfa6f-3ffe-4690-a431-7e53284f2533
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	SQUARE ENIX CO., LTD.
+meta.PE Property[FileDescription]	FINAL FANTASY VII REBIRTH
+meta.PE Property[InternalName]	End
+meta.PE Property[LegalCopyright]	Copyright(c) SQUARE ENIX
+meta.PE Property[OriginalFilename]	ff7rebirth_.exe
+meta.PE Property[ProductName]	FINAL FANTASY VII REBIRTH
+meta.PE Property[ProductVersion]	1.0.0.5
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	ff7rebirth_.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	377000
+instructions	20390167
+defined_data	3140322
+datatypes	2224
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	2558382
+symbols_global	2534596
+symbols_sha256	a3897ae259225b4c3a7a0a69c3da1a20d24542fa886589f88103c87eb66a097f
+symbols_source.ANALYSIS	18776
+symbols_source.DEFAULT	2530418
+symbols_source.IMPORTED	9188

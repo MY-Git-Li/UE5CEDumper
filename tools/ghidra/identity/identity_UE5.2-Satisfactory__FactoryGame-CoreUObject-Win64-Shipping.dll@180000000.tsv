@@ -1,0 +1,61 @@
+program	FactoryGame-CoreUObject-Win64-Shipping.dll
+tag	UE5.2-Satisfactory
+image_base	180000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	4573888
+meta.# of Data Type Categories	41805
+meta.# of Data Types	133718
+meta.# of Defined Data	98921
+meta.# of Functions	11796
+meta.# of Instructions	660714
+meta.# of Memory Blocks	9
+meta.# of Symbols	166878
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 13:07:16 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/tmp/Game archive/Satisfactory/UE5.2.1/Engine/Binaries/Win64/FactoryGame-CoreUObject-Win64-Shipping.dll
+meta.Executable MD5	3fcc1ef529cf51cc466dd4521c507252
+meta.Executable SHA256	67288047f97c0bb0ab634be31cab3a173ded217beb539f31324f15e9a1d3fa45
+meta.FSRL	file:///D:/tmp/Game archive/Satisfactory/UE5.2.1/Engine/Binaries/Win64/FactoryGame-CoreUObject-Win64-Shipping.dll?MD5=3fcc1ef529cf51cc466dd4521c507252
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	180000000
+meta.PDB Age	1
+meta.PDB File	FactoryGame-CoreUObject-Win64-Shipping.pdb
+meta.PDB GUID	f79a9163-fa0a-4ad8-b077-09dd1b937d94
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	FactoryGame
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	FactoryGame-CoreUObject-Win64-Shipping.dll
+meta.PE Property[ProductName]	FactoryGame
+meta.PE Property[ProductVersion]	++FactoryGame+rel-main-0.8.0-CL-264901
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	FactoryGame-CoreUObject-Win64-Shipping.dll
+meta.RTTI Found	false
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	11796
+instructions	660714
+defined_data	98921
+datatypes	133718
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	132633
+symbols_global	112478
+symbols_sha256	1998f3b2b7d3931ce5be114733770fc21505062abc61ef2fdd7011c9baf694fc
+symbols_source.ANALYSIS	7148
+symbols_source.DEFAULT	71911
+symbols_source.IMPORTED	53574

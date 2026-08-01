@@ -1,0 +1,59 @@
+program	Titan-Win64-DebugGame.exe
+tag	UE5.8-TitanDbgGame
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	362080836
+meta.# of Data Type Categories	4
+meta.# of Data Types	100
+meta.# of Defined Data	4279175
+meta.# of Functions	699058
+meta.# of Instructions	0
+meta.# of Memory Blocks	13
+meta.# of Symbols	700869
+meta.Address Size	64
+meta.Analyzed	false
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 15:15:27 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/5.8/Binaries_DebugGame/Win64/Titan-Win64-DebugGame.exe
+meta.Executable MD5	4d168828d77a545998f42b536989458e
+meta.Executable SHA256	97c755df71185a96c52fc6ef6dfecb23f5f1bbe40b21027028a3aeb0e89f7d2e
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/5.8/Binaries_DebugGame/Win64/Titan-Win64-DebugGame.exe?MD5=4d168828d77a545998f42b536989458e
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	155954fff
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	Titan-Win64-DebugGame.pdb
+meta.PDB GUID	cde227d4-d019-4feb-a180-0d441b73468d
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UnrealGame
+meta.PE Property[FileVersion]	5.8.0
+meta.PE Property[InternalName]	ProjectTitan
+meta.PE Property[LegalCopyright]	Copyright Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	Titan-Win64-DebugGame.exe
+meta.PE Property[ProductName]	UnrealGame
+meta.PE Property[ProductVersion]	5.8.0
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	Titan-Win64-DebugGame.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	true
+functions	699058
+instructions	0
+defined_data	4279175
+datatypes	100
+has_pdb_applied	yes
+analysis_state	NOT-DISASSEMBLED
+symbols	2238591
+symbols_global	2237271
+symbols_sha256	9050b5f48433ac8762ad7c77f6d1a63317b2af8453c038075b6aae5212b9da3d
+symbols_source.DEFAULT	2236580
+symbols_source.IMPORTED	2011

@@ -1,0 +1,57 @@
+program	UE4Game-Win64-Shipping.exe
+tag	UE4.10-Game
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	40103440
+meta.# of Data Type Categories	4
+meta.# of Data Types	134
+meta.# of Defined Data	384093
+meta.# of Functions	68210
+meta.# of Instructions	0
+meta.# of Memory Blocks	9
+meta.# of Symbols	69272
+meta.Address Size	64
+meta.Analyzed	false
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 20:01:01 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/4.10/Shipping/UE4Game-Win64-Shipping.exe
+meta.Executable MD5	b1bed34e908406426fe10691db6b5635
+meta.Executable SHA256	67496a3180c07e0d3f80a1eb0f799018ae70b25f7dd881463920b93c12f8ee7e
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/4.10/Shipping/UE4Game-Win64-Shipping.exe?MD5=b1bed34e908406426fe10691db6b5635
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	142641dff
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	UE4Game-Win64-Shipping.pdb
+meta.PDB GUID	becaf881-fc2f-4845-bec1-4b415b2b4cbc
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	Unreal Engine
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	UE4-Launch-Win64-Shipping.lib
+meta.PE Property[ProductName]	Unreal Engine
+meta.PE Property[ProductVersion]	4.10.4-2872498+++depot+UE4-Releases+4.10
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	UE4Game-Win64-Shipping.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	true
+functions	68210
+instructions	0
+defined_data	384093
+datatypes	134
+analysis_state	ANALYSED
+symbols	185671
+symbols_global	184801
+symbols_sha256	c06311a69f6d1ca548935783ad648c44298bf4c9b714a8be796be0691f4d381d
+symbols_source.DEFAULT	184438
+symbols_source.IMPORTED	1233

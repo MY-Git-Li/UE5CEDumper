@@ -1,0 +1,59 @@
+program	FreudGate-Win64-Shipping.exe
+tag	UE4.21-FreudGate
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	54105136
+meta.# of Data Type Categories	12
+meta.# of Data Types	470
+meta.# of Defined Data	1155160
+meta.# of Functions	111705
+meta.# of Instructions	7770042
+meta.# of Memory Blocks	10
+meta.# of Symbols	637873
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Mon Jul 27 17:39:48 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Freud Gate/FreudGate/Binaries/Win64/FreudGate-Win64-Shipping.exe
+meta.Executable MD5	edb68a5521a225845ec889468b5efcfd
+meta.Executable SHA256	5a1304fd5c6de45004dd1b84e38e5aceeaf08d3187640bfa4b9956fbd335cf95
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Freud Gate/FreudGate/Binaries/Win64/FreudGate-Win64-Shipping.exe?MD5=edb68a5521a225845ec889468b5efcfd
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	2
+meta.PDB File	FreudGate-Win64-Shipping.pdb
+meta.PDB GUID	afee050d-9b16-45e6-863c-448be956874b
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UE4Game
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright 1998-2018 Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	UE4Game-Win64-Shipping.exe
+meta.PE Property[ProductName]	UE4Game
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	FreudGate-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	111705
+instructions	7770042
+defined_data	1155160
+datatypes	470
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	1032856
+symbols_global	1005939
+symbols_sha256	8be8e499929d3fb5eac99789adbd2fa9118cf507a1afe8e5bc826f6102e0b00b
+symbols_source.ANALYSIS	25682
+symbols_source.DEFAULT	1002793
+symbols_source.IMPORTED	4381

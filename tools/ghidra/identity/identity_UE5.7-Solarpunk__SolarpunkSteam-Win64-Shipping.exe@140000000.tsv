@@ -1,0 +1,62 @@
+program	SolarpunkSteam-Win64-Shipping.exe
+tag	UE5.7-Solarpunk
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	135376084
+meta.# of Data Type Categories	1023420
+meta.# of Data Types	4476417
+meta.# of Defined Data	2453587
+meta.# of Functions	346236
+meta.# of Instructions	22474060
+meta.# of Memory Blocks	11
+meta.# of Symbols	4574328
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sat Jul 25 15:01:19 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Solarpunk/Solarpunk/Binaries/Win64/SolarpunkSteam-Win64-Shipping.exe
+meta.Executable MD5	0183b6d7c5545c71d3c48fba527e01f9
+meta.Executable SHA256	32aecc7de5b3ca57aa5d71b472a1992a5469470d66d1c0ecff1706f7e005bd0d
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Solarpunk/Solarpunk/Binaries/Win64/SolarpunkSteam-Win64-Shipping.exe?MD5=0183b6d7c5545c71d3c48fba527e01f9
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	SolarpunkSteam-Win64-Shipping.pdb
+meta.PDB GUID	5a4a3e72-7c97-2601-ba9a-d8b2d3c1047b
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	rokaplay GmbH
+meta.PE Property[FileDescription]	Solarpunk
+meta.PE Property[FileVersion]	UE5-CL-0
+meta.PE Property[InternalName]	Solarpunk
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	SolarpunkSteam-Win64-Shipping.exe
+meta.PE Property[ProductName]	Solarpunk
+meta.PE Property[ProductVersion]	UE5-CL-0
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	SolarpunkSteam-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	346236
+instructions	22474060
+defined_data	2453587
+datatypes	4476417
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	3636965
+symbols_global	2967589
+symbols_sha256	09ea9f1b1b2fce3a989a2e2e758900d25a24a5a13ddaec71842f10979dd08c9f
+symbols_source.ANALYSIS	222300
+symbols_source.DEFAULT	1813590
+symbols_source.IMPORTED	1601075

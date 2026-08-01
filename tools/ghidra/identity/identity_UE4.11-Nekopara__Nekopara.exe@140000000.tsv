@@ -1,0 +1,60 @@
+program	Nekopara.exe
+tag	UE4.11-Nekopara
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	40656384
+meta.# of Data Type Categories	15
+meta.# of Data Types	449
+meta.# of Defined Data	703743
+meta.# of Functions	77620
+meta.# of Instructions	6495031
+meta.# of Memory Blocks	10
+meta.# of Symbols	509815
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Mon Jul 27 20:06:46 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/NEKOPALIVE/Package/Nekopara/Binaries/Win64/Nekopara.exe
+meta.Executable MD5	cfdcb9522f1d6b7cd80deb6dde31f279
+meta.Executable SHA256	d9a6a83666bf8740af5e564e98114bcc4297aaa40ec40f4181e44958cd5da1b5
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/NEKOPALIVE/Package/Nekopara/Binaries/Win64/Nekopara.exe?MD5=cfdcb9522f1d6b7cd80deb6dde31f279
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	Nekopara-Win64-Shipping.pdb
+meta.PDB GUID	6ae1bd10-87d5-44c3-9c54-925d5ab29d28
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	Unreal Engine
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	Nekopara-Win64-Shipping.exe
+meta.PE Property[ProductName]	Unreal Engine
+meta.PE Property[ProductVersion]	4.11.0-0+UE4
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	Nekopara.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	77620
+instructions	6495031
+defined_data	703743
+datatypes	449
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	801082
+symbols_global	780606
+symbols_sha256	4024f05adaa09ff5218623bd7d197c95fd019ad2c3538f3181cfe0e4ac9c97ea
+symbols_source.ANALYSIS	18955
+symbols_source.DEFAULT	778252
+symbols_source.IMPORTED	3875

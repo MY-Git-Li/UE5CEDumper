@@ -1,0 +1,61 @@
+program	DropIn.exe
+tag	UE4.27-DropIn
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	182810596
+meta.# of Data Type Categories	116443
+meta.# of Data Types	550957
+meta.# of Defined Data	3356323
+meta.# of Functions	657098
+meta.# of Instructions	30404184
+meta.# of Memory Blocks	14
+meta.# of Symbols	5382527
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sat Jul 25 15:56:47 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Drop In - VR Battle Royale/DropIn/Binaries/Win64/DropIn.exe
+meta.Executable MD5	a3418669177c263dc6bc61c754612287
+meta.Executable SHA256	fc2684d7248c93674e92fbdd634a407b12c8627bca783576002a27531b880400
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Drop In - VR Battle Royale/DropIn/Binaries/Win64/DropIn.exe?MD5=a3418669177c263dc6bc61c754612287
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	DropIn.pdb
+meta.PDB GUID	e7fecf7f-40cf-4224-a667-4f8780651b48
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	Drop In VR F2P
+meta.PE Property[InternalName]	DropIn
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	DropIn.exe
+meta.PE Property[ProductName]	Drop In VR F2P
+meta.PE Property[ProductVersion]	++UE4+Release-4.27-CL-18319896
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	DropIn.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	657098
+instructions	30404184
+defined_data	3356323
+datatypes	550957
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	5180408
+symbols_global	4483405
+symbols_sha256	2ad4e91ca7559f616838741421ee7961aeb8fc17d795761cee6bf5307122f74f
+symbols_source.ANALYSIS	879088
+symbols_source.DEFAULT	3327187
+symbols_source.IMPORTED	974133

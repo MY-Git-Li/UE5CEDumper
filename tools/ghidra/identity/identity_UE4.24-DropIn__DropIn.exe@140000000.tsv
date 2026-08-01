@@ -1,0 +1,61 @@
+program	DropIn.exe
+tag	UE4.24-DropIn
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	127582328
+meta.# of Data Type Categories	92746
+meta.# of Data Types	440496
+meta.# of Defined Data	2542031
+meta.# of Functions	477185
+meta.# of Instructions	20646865
+meta.# of Memory Blocks	11
+meta.# of Symbols	3710646
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 14:01:30 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/tmp/Game archive/DropIn/UE4.24/DropIn/Binaries/Win64/DropIn.exe
+meta.Executable MD5	2f640ff0d11784a430a1edb845743e1f
+meta.Executable SHA256	dbd9a78d9aae4b5003d3730258c8a17f1fabf1b5f5007f225457be7c9daaad3e
+meta.FSRL	file:///D:/tmp/Game archive/DropIn/UE4.24/DropIn/Binaries/Win64/DropIn.exe?MD5=2f640ff0d11784a430a1edb845743e1f
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	DropIn.pdb
+meta.PDB GUID	96b8150a-1c67-47d9-b70d-e380b387d6c7
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	Drop In VR F2P
+meta.PE Property[InternalName]	DropIn
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	DropIn.exe
+meta.PE Property[ProductName]	Drop In VR F2P
+meta.PE Property[ProductVersion]	++UE4+Release-4.24-CL-11590370
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	DropIn.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	477185
+instructions	20646865
+defined_data	2542031
+datatypes	440496
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	3637580
+symbols_global	3155945
+symbols_sha256	8b515f913429030b3fad174af17404513922e40997f6937a7d3621fd7d07a150
+symbols_source.ANALYSIS	627377
+symbols_source.DEFAULT	2279469
+symbols_source.IMPORTED	730734

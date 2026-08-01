@@ -1,0 +1,61 @@
+program	OBF-Win64-Shipping.exe
+tag	UE4.27-Breeders
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	79568940
+meta.# of Data Type Categories	497997
+meta.# of Data Types	2022875
+meta.# of Defined Data	1655279
+meta.# of Functions	186318
+meta.# of Instructions	12476970
+meta.# of Memory Blocks	10
+meta.# of Symbols	2406573
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Mon Jul 27 15:57:53 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Breeders of the Nephelym/OBF/Binaries/Win64/OBF-Win64-Shipping.exe
+meta.Executable MD5	b2747cfcc9d56e1ea52717ca1c1958d1
+meta.Executable SHA256	8321f7108c45164dbf24cd2ca9ba2b25715de86339adf3bfef61e9b7f9932597
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Breeders of the Nephelym/OBF/Binaries/Win64/OBF-Win64-Shipping.exe?MD5=b2747cfcc9d56e1ea52717ca1c1958d1
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	OBF-Win64-Shipping.pdb
+meta.PDB GUID	7850f817-6967-4d2e-8688-6ed2be69362b
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	DerelictHelmsman
+meta.PE Property[FileDescription]	OBF
+meta.PE Property[InternalName]	OBF
+meta.PE Property[LegalCopyright]	DerelictHelmsman
+meta.PE Property[OriginalFilename]	OBF-Win64-Shipping.exe
+meta.PE Property[ProductName]	OBF
+meta.PE Property[ProductVersion]	++UE4+Release-4.27-CL-0
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	OBF-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	186318
+instructions	12476970
+defined_data	1655279
+datatypes	2022875
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	2351782
+symbols_global	1903118
+symbols_sha256	f4522f2830513fdd66e9221528c4ea965c99fb7297c346cab57329e73c8ae3fb
+symbols_source.ANALYSIS	145358
+symbols_source.DEFAULT	1197024
+symbols_source.IMPORTED	1009400
