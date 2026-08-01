@@ -97,7 +97,11 @@ helper + a single `OnLastClientGone()` reset registry) rather than each site in 
 L2/L3/L4 (`408fd2d`); DLL LOWs L1/L5/L8/L10/L12 (`7f3898f`); adversarial-verify followups (`3362636`: L4
 prune-guard + L10 GFW-hook race). Two adversarial-verify passes (DLL M-cluster + DLL LOW batch) each caught a
 real bug that was fixed. **Remaining = only the 7 optional/cosmetic downgrades (L6 dropped; L7/L9/L11/L18/L19/L20/L21).**
-DLL fixes (M1–M5 + L1–L12) await in-game verification.
+DLL fixes (M1–M5 + the DLL/Solide LOWs) await in-game verification. **Status lives in ONE place** —
+[todo.md § Pending live-game verification](todo.md#pending-live-game-verification-verify-only--no-code),
+which carries a per-item row with its acceptance test. Do not track a second status here: this
+sentence said "await in-game verification" for 13 fixes at once, so nothing could ever be ticked off
+individually and no one could tell which had actually been exercised.
 
 ---
 

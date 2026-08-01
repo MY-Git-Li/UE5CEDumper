@@ -78,6 +78,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "extract_patterns.py --check FAILED ($LASTEXITCODE) - Himmel.h's header counts disagree with its tables, or a constant is dead/unresolved" }
           & $py tools/ghidra/blocktest.py
           if ($LASTEXITCODE -ne 0) { throw "blocktest FAILED ($LASTEXITCODE) - a pattern no longer resolves to its recorded address" }
+          # The live-verification register had SIX competing spellings across 14 files and was
+          # missing items roadmap.md had carried a caveat for since build 796. A doc convention
+          # nobody enforces survives about one commit, so this one is enforced (build 2543).
+          & $py tools/check_live_verification.py
+          if ($LASTEXITCODE -ne 0) { throw "check_live_verification.py FAILED ($LASTEXITCODE) - a roadmap 'In-game verification pending' caveat is untagged or untracked in todo.md's register" }
 
       - name: Build + test + AOT publish (the gate)
         shell: pwsh
