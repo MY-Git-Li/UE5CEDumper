@@ -1623,6 +1623,26 @@ Shipped + unit-tests-pass but unproven on real games:
   review confirmed Map/Set/Set offsets correct + reachable; accepted nits: struct-nested dotted base name
   doesn't re-hydrate (pre-existing, affects arrays too, CE math still correct) + int32 element-offset
   arithmetic (theoretical, `FieldOffset` is int by design).
+- **Genau RIP decode: `Macht::IsRipRelativeModRM` (mod=00 half restored at 3 of 5 sites)**
+  (build 2544+; DLL only). Three hand-rolled decode loops tested `(b & 0x07) == 0x05` and
+  omitted the `mod == 00` half, so `mov rcx,[rbp-8]` / `lea rax,[rbp+0x20]` / `mov rax,rbp`
+  were decoded as RIP-relative and the int32 read at `instr+3` was a disp8 plus the next
+  instruction's bytes. All five sites now share one named predicate.
+  **What offline already settled — do not spend live time on it:** the predicate itself
+  (13 assertions incl. an exhaustive "exactly 8 of 256 ModR/M bytes qualify", verified to
+  FAIL — 6 reds — when reverted to the r/m-only form). Also settled: this is **NOT** a
+  wrong-answer bug at `ScanFunctionBodyForRipRef`, whose every caller is a GNames path gated
+  by `ValidateGNamesAny` (it must decode the literal string `"None"` through a two-level
+  pointer chain). Treat it as a correctness + scan-cost cleanup, not a fix.
+  **What ONLY a real game can prove, and `sweep.sh` CANNOT:** `scan_patterns.java:137` skips
+  every `Symbol*`/`CallFollow` signature (`GROUND-TRUTH.md` says so), and the two data scans
+  are runtime-only and absent from the pattern harness — **a clean sweep diff here would mean
+  "not measured", not "no regression".** The only evidence is the DLL's own scan log, same
+  game, before vs after: the candidate/probe counts should go DOWN while **every resolved
+  GObjects / GNames / GWorld address stays byte-identical**. The second half is the real
+  acceptance criterion; a changed address is a regression, a lower count is the win.
+  Passive — needs no special in-game action, just one injection each side. ⬜ unverified.
+
 - **Audit #3 DLL fixes — M1–M5 + the DLL/Solide LOWs** ([audit-2026-07-14-findings.md](audit-2026-07-14-findings.md)).
   Shipped on `dev` (`408fd2d`, `7f3898f`, `3362636`); this section is their SINGLE owner — the audit
   doc and the Audit-#3 block above point here rather than each asserting a status of their own.

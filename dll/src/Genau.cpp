@@ -521,8 +521,9 @@ static void DataScanGObjectsCandidates(std::vector<uintptr_t>& out, uintptr_t av
         if (!Macht::ReadSafe(scan + 1, b1)) continue;
         if (b1 != 0x8B && b1 != 0x8D) continue;  // MOV or LEA
         if (!Macht::ReadSafe(scan + 2, b2)) continue;
-        // ModR/M byte: mod=00, r/m=101 (RIP-relative) => lower 3 bits = 5
-        if ((b2 & 0x07) != 0x05) continue;
+        // ModR/M must be the RIP-relative form — mod=00 AND r/m=101. Testing r/m alone
+        // also accepts mov rcx,[rbp-8] / mov rax,rbp; see Macht::IsRipRelativeModRM.
+        if (!Macht::IsRipRelativeModRM(b2)) continue;
 
         // Inline RIP resolution (avoids Macht::ResolveRIP's per-call DEBUG logging
         // which produces ~98K lines and causes log rotation overflow)
@@ -696,7 +697,7 @@ uintptr_t FindGObjectsStaticStruct(int* outItemStride) {
         if (!Macht::ReadSafe(scan + 1, b1)) continue;
         if (b1 != 0x8B && b1 != 0x8D) continue;        // MOV / LEA
         if (!Macht::ReadSafe(scan + 2, b2)) continue;
-        if ((b2 & 0x07) != 0x05) continue;             // RIP-relative ModR/M
+        if (!Macht::IsRipRelativeModRM(b2)) continue;   // mod=00 AND r/m=101
         int32_t rel = 0;
         if (!Macht::ReadSafe<int32_t>(scan + 3, rel)) continue;
         uintptr_t tgt = scan + 7 + rel;
@@ -819,7 +820,7 @@ static uintptr_t ScanFunctionBodyForRipRef(
         if (!Macht::ReadSafe(funcAddr + off + 1, b1)) break;
         if (b1 != 0x8B && b1 != 0x8D) continue;
         if (!Macht::ReadSafe(funcAddr + off + 2, b2)) break;
-        if ((b2 & 0x07) != 0x05) continue; // RIP-relative addressing
+        if (!Macht::IsRipRelativeModRM(b2)) continue; // mod=00 AND r/m=101
 
         uintptr_t target = Macht::ResolveRIP(funcAddr + off, 3, 7);
         if (!target) continue;
@@ -2017,8 +2018,7 @@ static uintptr_t FindGNamesByStringRef() {
                 if (!Macht::ReadSafe(cs + 1, b1)) continue;
                 if (b1 != 0x8D) continue;
                 if (!Macht::ReadSafe(cs + 2, b2)) continue;
-                if ((b2 & 0x07) != 0x05) continue;  // RIP-relative
-                if ((b2 & 0xC0) != 0x00) continue;
+                if (!Macht::IsRipRelativeModRM(b2)) continue;  // RIP-relative
 
                 int32_t disp = 0;
                 if (!Macht::ReadSafe(cs + 3, disp)) continue;
@@ -2043,8 +2043,7 @@ static uintptr_t FindGNamesByStringRef() {
                     if (!Macht::ReadSafe(ns + 1, n1)) continue;
                     if (n1 != 0x8D) continue;
                     if (!Macht::ReadSafe(ns + 2, n2)) continue;
-                    if ((n2 & 0x07) != 0x05) continue;
-                    if ((n2 & 0xC0) != 0x00) continue;
+                    if (!Macht::IsRipRelativeModRM(n2)) continue;
 
                     int32_t ndisp = 0;
                     if (!Macht::ReadSafe(ns + 3, ndisp)) continue;
