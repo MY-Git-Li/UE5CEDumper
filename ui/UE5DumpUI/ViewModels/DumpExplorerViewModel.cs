@@ -37,6 +37,17 @@ public partial class DumpExplorerViewModel : ViewModelBase
     // a filtered, capped slice rebuilt on every search/category change).
     private readonly List<DumpEntry> _all = new();
 
+    /// <summary>
+    /// The loaded file's own "meta" line — which GAME and which BUILD it came from.
+    /// Retained (not just formatted into the header and dropped) because the live match
+    /// joins on bare class NAMES, and engine class names — Object, Actor, Pawn,
+    /// PlayerController — are identical in every UE title. Without an identity check,
+    /// loading game A's dump while game B is connected marks those rows "in current game"
+    /// with a live address from B, and Jump opens B's object under A's label. Null until
+    /// a file is loaded.
+    /// </summary>
+    private DumpMetaLine? _loadedMeta;
+
     [ObservableProperty] private string _filePath = "";
     [ObservableProperty] private string _searchText = "";
     /// <summary>0 = All, 1 = Class, 2 = Property, 3 = Function.</summary>
@@ -173,6 +184,7 @@ public partial class DumpExplorerViewModel : ViewModelBase
             FilePath = path;
             StatusText = "Parsing dump…";
             _all.Clear();
+            _loadedMeta = null;
             Matched = new ObservableCollection<DumpEntry>();
             Unmatched = new ObservableCollection<DumpEntry>();
 
@@ -183,6 +195,7 @@ public partial class DumpExplorerViewModel : ViewModelBase
             ct.ThrowIfCancellationRequested();
 
             _all.AddRange(model.Entries);
+            _loadedMeta = model.Meta;
             HeaderText = BuildHeader(model);
             HasFile = _all.Count > 0;
 
@@ -336,6 +349,65 @@ public partial class DumpExplorerViewModel : ViewModelBase
             return;
         }
 
+        // Identity gate. The join below is on bare class NAMES, and every UE title has an
+        // Object / Actor / Pawn / PlayerController, so a cross-game match is not a rare
+        // edge — it is the guaranteed outcome of loading the wrong file, and it looks like
+        // a successful match. Read the live identity HERE rather than fanning EngineState
+        // into the VM: SetConnected(true) can fire before an EngineState exists, and that
+        // ordering window is the known wrong-game bleed (todo.md C2) — a gate that races
+        // its own input would be the bug it is meant to prevent.
+        string liveModule = "", livePeHash = "";
+        try
+        {
+            var state = await _dump.GetPointersAsync(ct);
+            liveModule = state.ModuleName ?? "";
+            livePeHash = state.PeHash ?? "";
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // Can't establish identity → don't match. Declining is honest; matching anyway
+            // is the silent mislabel this gate exists to stop.
+            _log.Error("DumpExplorer live-match identity probe failed", ex);
+            StatusText = "Could not read the connected game's identity — live match skipped. Re-check to retry.";
+            return;
+        }
+
+        var fileModule = _loadedMeta?.Module ?? "";
+        var filePeHash = _loadedMeta?.PeHash ?? "";
+
+        // Tier 1 — different GAME. Refuse outright; nothing here is transferable.
+        if (fileModule.Length > 0 && liveModule.Length > 0 &&
+            !string.Equals(fileModule, liveModule, StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var e in _all) { e.IsMatched = false; e.LiveAddr = ""; }
+            LiveChecked = false;
+            ApplyFilter();
+            StatusText = $"Live match refused: this dump is from {fileModule}, but the connected game is {liveModule}.";
+            _log.Warn($"DumpExplorer live match refused: dump module '{fileModule}' != live module '{liveModule}'");
+            return;
+        }
+
+        // Tier 2 — same game, different BUILD. Class names survive a patch; addresses and
+        // offsets need not. Worth matching, not worth asserting silently. Deliberately NOT
+        // a refusal: pe_hash is per-build, so refusing here would also reject a dump the
+        // user took of this very game last week, which is the feature's normal use.
+        string caveat = "";
+        if (fileModule.Length > 0 && liveModule.Length > 0)
+        {
+            if (filePeHash.Length > 0 && livePeHash.Length > 0 &&
+                !string.Equals(filePeHash, livePeHash, StringComparison.OrdinalIgnoreCase))
+                caveat = "Different build of the same game — offsets may have moved. ";
+            else if (filePeHash.Length == 0 || livePeHash.Length == 0)
+                caveat = "Build identity unknown (no pe_hash) — matched on module name only. ";
+        }
+        else
+        {
+            // Pre-pe_hash / hand-made file, or a DLL that reported no module: match, but
+            // never let the absence of the field read as a positive identity check.
+            caveat = "Dump carries no game identity — could not confirm it is this game. ";
+        }
+
         StatusText = "Scanning the live game's classes…";
         var index = await BuildLiveClassIndexAsync(ct);
         ct.ThrowIfCancellationRequested();
@@ -356,7 +428,8 @@ public partial class DumpExplorerViewModel : ViewModelBase
 
         LiveChecked = true;
         ApplyFilter();
-        StatusText = $"Live match: {liveClasses:N0} class(es) in the current game " +
+        StatusText = caveat +
+                     $"Live match: {liveClasses:N0} class(es) in the current game " +
                      $"({matched:N0} of {_all.Count:N0} rows matched).";
     }
 

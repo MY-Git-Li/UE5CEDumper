@@ -62,7 +62,9 @@ public class StubDumpService : IDumpService
 
     // Unused stubs — throw NotImplementedException to catch unexpected calls
     public Task<EngineState> InitAsync(CancellationToken ct = default) => throw new NotImplementedException();
-    public Task<EngineState> GetPointersAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    // virtual: DumpExplorer's cross-game match gate reads the live identity through this,
+    // so its tests must be able to supply one. Non-overriding stubs keep throwing.
+    public virtual Task<EngineState> GetPointersAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<TrainerOffsets> GetTrainerOffsetsAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<EngineState> SetUeVersionOverrideAsync(int version, bool persist = true, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<EngineState> SetInvokeTimeoutAsync(int timeoutMs, bool persist = true, CancellationToken ct = default) => throw new NotImplementedException();

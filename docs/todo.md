@@ -1547,6 +1547,29 @@ Pick up when the active plan finishes or when blocked.
 
 Shipped + unit-tests-pass but unproven on real games:
 
+- **Dump Explorer cross-game identity gate** (build 2538+; UI/C#-only, no DLL or pipe change).
+  The live match joins on bare class NAMES, and every UE title has `Object` / `Actor` / `Pawn` /
+  `PlayerController`, so loading game A's `.jsonl` against game B did not fail — it "succeeded",
+  marked those rows **in current game**, and Jump opened B's object under A's label. Now two-tier:
+  different `module` → refuse and name both sides; same module + different `pe_hash` → still match
+  (a pre-patch dump of this game is the normal use) but say "Different build — offsets may have
+  moved"; missing `pe_hash` → match but never claim identity was checked. Identity is read at match
+  time via `GetPointersAsync`, deliberately NOT fanned into the VM — `SetConnected(true)` can fire
+  before an `EngineState` exists, and that window is the wrong-game bleed in C2 above.
+  **What offline already settled — do not spend live time on it:** all four arms plus the
+  probe-throws path (`DumpExplorerTests` ×5, both directions), and the refusal was verified to FAIL
+  when the module comparison is neutered.
+  **What ONLY a real game can prove:** that `EngineState.ModuleName` and the dump's `meta.module`
+  actually agree on the SAME game — they come from different producers (live DLL vs
+  `DumpAllService` at export time), and if one carries a path or different casing the gate would
+  refuse a legitimate same-game match. Acceptance: (1) export a Dump All from game X, keep X
+  connected, Re-check → matches with NO caveat; (2) load that file with game Y connected → refused,
+  status names X and Y, every row unmatched, Jump offers nothing; (3) load an OLD dump of X after
+  an X patch → matches WITH the "Different build" caveat. Case (1) is the regression risk — a false
+  refusal there breaks the feature for its main use. **No log marker** for the pass; the refusal
+  logs `DumpExplorer live match refused: dump module '…' != live module '…'`.
+  ⬜ unverified.
+
 - **Solide pool-truncation badge — `⚠ capped` / "cap reached, more exist unheld"** (build 2531+;
   DLL `Solide`/`Fern` + Property Search + Teleport Stealth card). `Aura` already computed
   `rset.truncated` and `Solide` was dropping it, so "0 live instances matched" and "matched more
