@@ -14,7 +14,7 @@
 frequently-hit **hotspots**, per-game **occasional/unique** sites, and **decoy noise** — commit them
 to the repo, and add a fast pre-test script. When a new game's AOBs miss, compare against these
 blocks first instead of reaching for the sweep (which needs the corpus + Ghidra, and costs 4m38s
-on the desktop / 14m32s on the laptop — the "40-minute" figure this doc used to quote was never
+on the desktop / 12-15 min on the laptop — the "40-minute" figure this doc used to quote was never
 measured; see GROUND-TRUTH.md).
 
 **Why it matters more than it looks.** The sweep needs the Ghidra corpus root (`$GHIDRA_PROJS`,
@@ -146,7 +146,7 @@ tools/ghidra/blocks/<target>/<id>.json
 * `tools/ghidra/blocktest.py` runs every `Himmel.h` pattern against every block and asserts the
   `expect` sets. Milliseconds, no Ghidra, no corpus — **runs in CI and on the bare second machine.**
 * The repo currently has **no pattern regression test at all** between `extract_patterns.py`'s
-  dead-constant check and the full sweep (corpus + Ghidra; 4m38s desktop / 14m32s laptop). This
+  dead-constant check and the full sweep (corpus + Ghidra; 4m38s desktop / 12-15 min laptop). This
   would fill that gap, which is arguably a bigger
   win than the second-machine diagnostic.
 

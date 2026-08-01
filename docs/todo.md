@@ -19,6 +19,58 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## ▶ NEXT UP — drop Ghidra from the sweep (measured 2026-08-01, NOT started)
+
+**Read this first if you are picking the corpus work back up.** The premise is verified; only the
+implementation is missing.
+
+### The finding
+
+`tools/ghidra/scan_patterns.java` (398 lines) touches **four** Ghidra APIs and **zero** analysis
+APIs — no `FunctionManager`, `Listing`, `SymbolTable`, `ReferenceManager`, Decompiler or
+`DataTypeManager`:
+
+```
+currentProgram x4    getImageBase x2    getMemory x1    getBlocks x1
+per block: isExecute() / isInitialized() / getBytes() / getStart()
+```
+
+So a 181.2 GB Ghidra corpus is, *for the sweep*, a container holding **image base + section table +
+executable bytes**. Measured from the scan TSVs' own `exec_mb` column: **5.93 GB across 69
+programs** (mean 88 MB, max 414 MB) — a **31x** container overhead, ~**1.7 GB** compressed.
+
+### Plan
+
+1. **Ghidra export script, run ONCE per project** — emit `(image base, FULL block map, exec bytes)`
+   per program. The block map must be **complete, not just the executable blocks**:
+   `scan_patterns.java` calls `mem.getBlock(va).isExecute()` to *reject* a resolved target that
+   lands in a non-executable block, so start/end/isExecute/isInitialized are needed for every block.
+2. **Pure-Python sweep** over those blobs, replacing the `analyzeHeadless` invocation.
+   `tools/ghidra/replay_patterns.py` already does the no-Ghidra scan **from a PE**; the new part is
+   reading a blob instead.
+3. **ACCEPTANCE: the scan TSVs must be byte-identical to a Ghidra run.** Nothing less counts.
+
+⚠ **A reference run has to be produced first — the one from 2026-08-01 was deleted.**
+`bash tools/ghidra/sweep.sh` at shipped defaults, ~12-15 min on the laptop, and keep `SWEEP_OUT`.
+
+### What it buys, and what it does NOT
+
+Buys: no JVM, no Ghidra install (the second machine has neither), no 12-15 min wall time, and no
+GB-scale transient writes — `-readOnly` does **not** mean no writes; measured, the JVMs wrote
+~1 GB each into `.rep`-local temp DB files that are created and deleted, which is why a file-scan
+shows 0 MB changed while the write counters climb. That is also the real cause of the USB incident.
+
+Does NOT buy: anything for **authoring** a new AOB, which needs the decompiler, xrefs and symbols.
+That is the only remaining reason to keep a `.rep`, and the decision can wait until after step 3.
+
+### Do NOT delete any `.rep` before step 3 passes
+
+"The inputs exist" is not "a re-import reproduces the .rep", and that has never been demonstrated
+once. `corpus_relocate.py` proves the *inputs* are all present (57/57); it says nothing about
+reconstruction.
+
+-----
+
 ## ▶ Corpus state as of 2026-07-29 (build 2505) — the sweep is CURRENT
 
 `sweep.sh` is at **57 rows**. A full sweep ran 2026-07-29 and `out/sweep/REPORT.md`, `Himmel.h`'s
@@ -28,7 +80,7 @@ sweep tags. Nothing is stale or blocked. Matrix: **162 ✅ / 59 ⚠️ / 2 ❌**
 
 ⏱ **The full sweep costs minutes, not the ~30–50 min the docs claimed for months — but WHICH minutes
 depends on the machine.** Measured at `SWEEP_JOBS=3`: **4m38s on the desktop** (9950X3D, 57 rows) and
-**14m32s on the laptop** (9955HX3D, 57 rows / 74 programs, corpus on internal NVMe) — a **3.1×**
+**12-15 min on the laptop** (9955HX3D, 57 rows / 74 programs, internal NVMe; the spread is cache state) — a **2.6-3.1×**
 spread, so never quote one without the other; `GROUND-TRUTH.md` carries the table. Those *old*
 ~30–50 min figures were never taken at all — they date from the pre-script era of hand-running each
 project *with* Auto Analyze, and one was even "updated" by scaling the wrong number with the row
