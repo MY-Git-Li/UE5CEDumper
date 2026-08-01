@@ -22,11 +22,34 @@ they fail independently, and any one alone would pass a rebuild that had lost so
   3. SWEEP (`scan_patterns.java`) — byte-identical scan/consensus output under the row's own
      `GS_TRUE`, so the rebuild is graded on the answers the corpus actually exists to give.
 
-WHAT IT DOES NOT PROVE. It rebuilds with `-noanalysis`, which is how the corpus's own rows are
-imported. A project that was additionally **disassembled** (`Analyzed=true`, non-zero instruction
-count — `dump_identity.java` reports this) carries analysis output that this does not attempt to
-reproduce, and analysis is the expensive, version-sensitive part. Check `analysis_state` on the
-ORIGINAL before concluding anything about that project.
+WHAT IT DOES NOT PROVE. By default it rebuilds with `-noanalysis`, which is how some of the
+corpus's rows are imported. A project that was additionally **disassembled** (`Analyzed=true`,
+non-zero instruction count — `dump_identity.java` reports this) carries analysis output that a
+default run does not attempt to reproduce; `--analyze` does, at minutes per binary. It also says
+nothing about decompiler output or the xref index, for which no digest exists.
+
+PROVE IT CAN FAIL BEFORE TRUSTING A PASS. Two negative controls, both verified 2026-08-01:
+
+    # N1 — a same-named binary from a DIFFERENT build must be rejected. Point a row at its
+    # sibling build and re-run; expect MISMATCH on the executable hash, the symbol digest, the
+    # PDB GUID and the block map.
+    py - <<'P'
+    import io
+    o = io.open("out/pe-corpus-map.tsv", encoding="utf-8").read()
+    io.open("out/nc-map.tsv", "w", encoding="utf-8", newline="").write(
+        o.replace(r"\ES2\5.5-0517 (4415922863161237626)\\", r"\ES2\5.5 (735055807809773736)\\"))
+    P
+    py tools/ghidra/reimport_verify.py UE5.5-Everspace2 --map out/nc-map.tsv \
+        --projs D:/Tools/GHIDRA_NC --out out/re-N1
+
+    # N2 — a truncated baseline must fail CLOSED, not compare equal on absent fields.
+    mkdir -p out/nc-identity && cp out/identity/identity_*.tsv out/nc-identity/
+    : > "out/nc-identity/identity_UE4.10-Game__UE4Game-Win64-Shipping.exe@140000000.tsv"
+    py tools/ghidra/reimport_verify.py UE4.10-Game --orig-identity out/nc-identity --out out/re-N2
+
+N1 is the one that earns the pass — it is the only check that distinguishes "this binary rebuilds"
+from "some binary with the right name rebuilds". It also found the parenthesis bug in
+`stage_for_import`, which no amount of reading the code would have.
 """
 import argparse
 import collections
@@ -95,6 +118,39 @@ def sanitize(n):
     return "".join(c if (c.isascii() and (c.isalnum() or c in "._-")) else "_" for c in n)
 
 
+def stage_for_import(path, staging):
+    """-> a path `analyzeHeadless.bat` can actually open.
+
+    FOUND BY A NEGATIVE CONTROL, not by reasoning. `analyzeHeadless.bat` is a cmd batch file, and
+    cmd's parser breaks on `(` / `)` in an argument even inside double quotes — it fails the same
+    way from bash, from `subprocess`, and from a plain shell, so it is the launcher, not the caller.
+    Both ES2 rows live under `…\\ES2\\5.5 (735055807809773736)\\`, so they could not be re-imported
+    at all. The parentheses are NEW: `meta.Executable Location` shows both projects were originally
+    imported from a Steam path without them, so the archive's own folder naming introduced a
+    blocker that no amount of care in this script would have avoided.
+
+    8.3 short names are the textbook workaround and are DISABLED on this volume (the short path
+    comes back identical to the long one), so the fix is to hardlink into a clean directory —
+    instant and free on the same NTFS volume, unlike a copy of a 169 MB binary. The PDB is linked
+    too: analysis finds it by sitting beside the executable, and staging only the exe would produce
+    a rebuild silently missing its symbols."""
+    if not any(c in path for c in "()"):
+        return path
+    os.makedirs(staging, exist_ok=True)
+    dst = os.path.join(staging, os.path.basename(path))
+    for src, out in ((path, dst),
+                     (os.path.splitext(path)[0] + ".pdb", os.path.splitext(dst)[0] + ".pdb")):
+        if not os.path.exists(src):
+            continue
+        if os.path.exists(out):
+            os.remove(out)
+        try:
+            os.link(src, out)                      # same volume: instant, no extra space
+        except OSError:
+            shutil.copy2(src, out)                 # different volume, or links unavailable
+    return dst
+
+
 def compare_identity(orig, new):
     """-> (dict of per-dimension verdicts, [messages]).
 
@@ -107,6 +163,18 @@ def compare_identity(orig, new):
     """
     a, b = load_kv(orig), load_kv(new)
     msgs, v = [], {}
+
+    # FAIL CLOSED ON AN EMPTY BASELINE. `dump_identity.java` opens its writer before it does any
+    # work, so a JVM killed mid-run leaves a correctly-named 0-byte file. That parses to {}, and
+    # every comparison below is `a.get(k) == b.get(k)` — which on a missing key compares None to
+    # None and PASSES. A truncated baseline would silently grade as a perfect rebuild, so the one
+    # field that must always be present is checked first and refuses instead.
+    for label, d, p in (("original", a, orig), ("rebuild", b, new)):
+        if not d.get("symbols_sha256"):
+            return ({"input": False}, ["%s identity record has no symbols_sha256 — truncated or "
+                                       "0-byte, nothing can be compared against it: %s"
+                                       % (label, p)])
+
     orig_analysed = (a.get("instructions") or "0") != "0"
 
     def eq(*keys):
@@ -299,7 +367,10 @@ def main():
         failed = False
         for prog, ib, path in progs:
             log = os.path.join(args.out, "log_import_%s_%s.txt" % (sanitize(tag), sanitize(prog)))
-            cmd = [HL, args.projs, proj, "-import", path]
+            src = stage_for_import(path, os.path.join(args.projs, "_staging"))
+            if src != path:
+                print("   staged %-46s (path has parentheses; see stage_for_import)" % prog)
+            cmd = [HL, args.projs, proj, "-import", src]
             if not args.analyze:
                 cmd.append("-noanalysis")
             rc = run(cmd, log)
