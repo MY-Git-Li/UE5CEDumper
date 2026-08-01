@@ -51,13 +51,35 @@ is the explanation. Env knobs: `GHIDRA_HOME`, `GHIDRA_PROJS`, `SWEEP_OUT`, `SWEE
 > was. So "use half the cores" is the wrong formula: the binding constraint is what the corpus
 > sits on.
 >
-> And weigh it against the measured cost. The full sweep is **4m38s**. Parallelism past a handful
-> buys seconds on a job already under five minutes, against the risk of corrupting the artifact of
-> record — and §"Never drop" lists projects whose `.rep` is the last copy in existence.
+> Weigh it against the measured cost — but see the ⚠ below, the cost is disputed. Parallelism past
+> a handful buys minutes at most, against the risk of corrupting the artifact of record, and
+> §"Never drop" lists projects whose `.rep` is the last copy in existence.
 >
-> Guidance: **internal NVMe → up to `cores/4`, bounded by free RAM ÷ `SWEEP_XMX`. USB / removable →
-> 2–3, or don't run it there at all.** `SWEEP_JOBS` is deliberately left as an un-clamped env var
-> so a deliberate benchmark stays possible; this note is the warning, not a guard rail.
+> Guidance: **USB / removable → 2–3, or don't run it there at all. Internal NVMe → the shipped
+> default of 3 is safe; 8 was measured to work and to save ~12%.** `SWEEP_JOBS` is deliberately
+> left as an un-clamped env var so a deliberate benchmark stays possible; this note is the warning,
+> not a guard rail.
+>
+> ⚠ **Two numbers in this file are under dispute — do not quote either until re-measured (2026-08-01).**
+>
+> 1. **The 4m38s above.** An instrumented re-run measured the FULL sweep at **850.5 s at
+>    `SWEEP_JOBS=3`** (cold), 863.1 s warm, 754.3 s at 8 jobs — i.e. ~14 min, not ~4.5 min, and
+>    3→8 saves **108.8 s (12.6%)**, not "seconds". The 4m38s row is dated 2026-07-29 and the corpus
+>    has since moved drives and grown; one of the two measurements is measuring something the other
+>    is not. **Re-time it before either figure is used to justify a concurrency change.**
+> 2. **A `cores/4` ÷ `SWEEP_XMX` formula was briefly written here and is withdrawn** — it is
+>    self-inconsistent with the shipped default: 35.84 GB free ÷ 14 GB = 2, which forbids
+>    `sweep.sh:442`'s `JOBS=3`. `-Xmx` is a *reservation ceiling*, not a working set, so budgeting
+>    on it is wrong; but it is not free either — measured per-job commit was 2.15 GB at 8 jobs/14G
+>    vs 1.07 GB at 16 jobs/2G, and **system commit peaked at 60.64 GB of a 65.51 GB limit (92.6%)
+>    at 8 jobs/14G**. Lowering `SWEEP_XMX` is the real lever; raising `SWEEP_JOBS` without doing so
+>    walks into the commit limit.
+>
+> ⚠ **`one_project()` always exits 0.** Its last statement is
+> `echo "   done $TAG (exit=$?)"` — `$?` is expanded *before* `echo` runs, so the printed text is
+> correct, but the function then returns `echo`'s status. Every backgrounded job therefore succeeds
+> as far as `wait` and the script's own exit code are concerned. Counting `grep -c "exit=0"` over
+> the OUTPUT works; trusting the exit status does not.
 
 ## Read this first if you are going to CHANGE a pattern
 
