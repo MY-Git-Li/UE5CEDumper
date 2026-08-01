@@ -1,7 +1,8 @@
 # AOB corpus preservation — what to keep, what to reinstall, what to drop
 
 > **Read this before deleting anything under `$GHIDRA_PROJS` (the Ghidra corpus root),
-> `D:\tmp\Game archive`, `X:\UE_Analyze_Data`, or before uninstalling a corpus Steam title.**
+> `D:\UE_Analyze_data\Game archive`, `D:\UE_Analyze_data\Game Binary backup`, or before
+> uninstalling a corpus Steam title.**
 >
 > Companion to [tools/ghidra/GROUND-TRUTH.md](../tools/ghidra/GROUND-TRUTH.md) (which patterns
 > are proven by which binary) and [tools/ghidra/sweep.sh](../tools/ghidra/sweep.sh) (the corpus
@@ -311,9 +312,9 @@ header note. The corpus has since moved (external USB → internal NVMe, 2026-08
 | `C:\Program Files\Epic Games\UE_*` (5) | **280.89 GB** | biggest single item on the machine |
 | Steam corpus payload (26 installed apps) | **558.47 GB** | 1 not installed (FF7R) |
 | `D:\Unreal Projects` | 83.57 GB | only **22.47 GB** is corpus (ProjectTitan 61.11 GB is not) |
-| `D:\tmp\Game archive` | **20.95 GB** / 1354 files | already pruned to Binaries trees |
-| `X:\UE_Analyze_Data\Game archive` | **20.95 GB** / 1354 files | mirror of the above, same file count |
-| `X:\UE_Analyze_Data\Varies Version builds` | 7.28 GB | the self-built oracle packages |
+| `D:\UE_Analyze_data\Game archive` | **1.6 GB** / 678 binaries | MOVED from `D:\tmp\` and pruned; re-measured 2026-08-01 |
+| `D:\UE_Analyze_data\Game Binary backup` | **10.2 GB** / 33 exe + 9 pdb | 24 hash-verified as corpus builds |
+| `D:\UE_Analyze_data\Varies Version builds` | 7.28 GB | the self-built oracle packages (root moved X: -> D:) |
 | Self-built oracle exe+pdb only | **897.0 MB** | the backup that matters most |
 
 Free space at 00:18: C 980.3 · D 2362.1 · E 258.2 · F 801.2 · G 931.3 · H 636.2 · X 1670.1 GB.
@@ -479,26 +480,54 @@ UE5.2-SatGameDLL, UE5.6-Satisfactory}` = 12.47 GB across 5 projects, and is the 
 truth for **13 patterns**. A single "I'll clear out the Satisfactory stuff" is the most damaging
 action available on this disk.
 
-### Unrecoverable
+### Recoverability — RE-MEASURED 2026-08-01. Nothing is unrecoverable.
 
-* **`UE5.5-Everspace2` / `ES2-0517.rep` (11.38 GB, the largest project).** The file at its recorded
-  path hashes `85daf780…`, which is exactly `UE5.5-Everspace2b`'s recorded MD5 — a game update
-  overwrote the 05-17 build in place, **and its PDB with it**. Steam serves only the current build,
-  so **no reinstall restores it**. Searched: all four Steam libraries, both archive roots, and
-  drives D/E/F/G/H/X — no copy exists. Its `.rep` is the last copy of that analysis, and `sweep.sh`
-  calls the ES2 pair the corpus's *only* same-game cross-build control — the only thing that can
-  answer *"does a pattern survive a game update?"*. **Never delete it. Back it up first.**
-  ⚠ Caveat: in the last sweep both ES2 rows resolved **identically** on all five targets, so its
-  present differential signal is a null result. The value is in retaining the control, not in a
-  disagreement it currently shows.
-* **`UE4.18-FF7R`** — binary gone. Reinstallable (`steam://install/1462040`, ~100 GB), but a
-  reinstall yields *today's* build; whether that reproduces MD5 `3ea9092f…` is **UNVERIFIED**.
-  There is also a 91.64 GB depot-cache backup under `X:\SteamLibrary backup\FINAL FANTASY VII
-  REMAKE INTERGRADE` (depot 1462041, `.csd`/`.csm`) — a local restore path nobody has tested.
+This section previously said ES2-0517 and FF7R were unrecoverable. **Both claims were wrong**, and
+the reasoning error is worth keeping because it is easy to repeat:
+
+> *"Steam serves only the current build, so no reinstall restores it."*
+> True for `steam://install`. **False for `DepotDownloader -manifest <id>`**, which fetches a
+> specific historical manifest. That one sentence is what made the whole tier look hopeless.
+
+Measured by hashing every `.exe`/`.dll` under both archive roots and matching against
+`corpus-manifest.json`'s recorded `binary_sha256` / `binary_md5` — **a matching filename proves
+nothing, a matching hash proves everything**:
+
+| tier | rows | `.rep` GB | route |
+|---|---|---|---|
+| **A1** source still at its recorded path | 22 | 64.8 | re-import now |
+| **A2** in a backup root, **hash-verified** | 28 | 75.4 | re-import now |
+| **A3** self-built | 5 | 14.1 | rebuild from the installed engine |
+| **A total** | **55** | **154.2 (90%)** | **already on this machine** |
+| **B1** `depot:manifest` recorded | 2 | 18.0 | `DepotDownloader`, IDs already known |
+| **B2/B3/C** | **0** | **0** | — |
+
+**Nothing requires a SteamDB lookup.** The two B1 rows are the ES2 pair:
+
+```
+UE5.5-Everspace2   1128920:1128921:4415922863161237626    (SteamDB: seen 16 May 2025)
+UE5.5-Everspace2b  1128920:1128921:735055807809773736     (SteamDB: seen 17 Jun 2025)
+```
+
+⚠ **Still unverified:** that Valve is *currently serving* those two manifests. SteamDB listing a
+manifest means it was seen, not that the CDN still has it. Recorded ID + listed ≠ downloaded —
+**try it before relying on it**, and verify the result against the recorded hash.
+
+`UE4.18-FF7R` needed no download at all: `ff7remake_.exe` is present in the backup root and its hash
+matches the corpus build. The 91.64 GB depot-cache restore path is moot.
+
+What remains true about ES2: `sweep.sh` calls the pair the corpus's *only* same-game cross-build
+control — the only thing that can answer *"does a pattern survive a game update?"* — so keep it.
+⚠ Caveat unchanged: in the last sweep both ES2 rows resolved **identically** on all five targets, so
+the differential signal is currently a null result. The value is in retaining the control.
+
+> **Method, reusable.** `binary_sha256` is deliberately NULLED on a drifted row; `binary_md5` never
+> is (§1). A recoverability check that only compares SHA-256 therefore under-reports — it silently
+> lost 4 rows here until the MD5 fallback was added. Always try both.
 
 ### Cheap hedges worth knowing
 
-* `D:\tmp\Game archive\DropIn` already holds an **unimported second 4.24 build**
+* `D:\UE_Analyze_data\Game archive\DropIn` already holds an **unimported second 4.24 build**
   (`UE4.24.2`, MD5 `3D245058…`, distinct from `UE4.24`'s `2F640FF0…`). Importing it creates a
   second same-game cross-build pair for ~1.9 h of analysis — the cheapest available hedge against
   ever losing the ES2 pair.
