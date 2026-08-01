@@ -2,11 +2,22 @@
 """Extract every AOB signature from dll/src/Himmel.h into a TSV the Ghidra
 verifier can consume:  id \t target \t resolve \t pattern \t io \t opc \t tot \t adj \t pri \t src
 Symbol-export / symbol-call-follow entries are emitted with pattern kind SYMBOL.
+
+With --check, ALSO assert that Himmel.h's own header summary agrees with what was
+parsed, and exit non-zero if it does not. Without the flag the exit code is always 0
+(printing a discrepancy is not detecting one) — which is exactly how the counts in
+CLAUDE.md / roadmap.md / Features.md / dll-spec.md / architecture.md drifted to four
+different wrong values while Himmel.h's header stayed right. Machine-check the one copy
+that has authority; the derived prose is regenerated from it by hand, and this is what
+tells you to do that.
 """
 import re, sys, os
 
-HIMMEL = sys.argv[1] if len(sys.argv) > 1 else r"D:\Github\UE5CEDumper\dll\src\Himmel.h"
-OUT = sys.argv[2] if len(sys.argv) > 2 else "patterns.tsv"
+_argv = [a for a in sys.argv[1:] if a != "--check"]
+CHECK = "--check" in sys.argv[1:]
+
+HIMMEL = _argv[0] if len(_argv) > 0 else r"D:\Github\UE5CEDumper\dll\src\Himmel.h"
+OUT = _argv[1] if len(_argv) > 1 else "patterns.tsv"
 
 src = open(HIMMEL, encoding="utf-8").read()
 
@@ -206,3 +217,55 @@ if dead:
     for d in dead:
         print("   ", d)
 print("->", os.path.abspath(OUT))
+
+# ── --check: assert Himmel.h's header summary against what we actually parsed ──────────────
+# Read from `src`, NOT `clean` — the summary lives in the comment block that `clean` strips.
+if CHECK:
+    failures = []
+
+    aob = sum(1 for r in uniq if r["resolve"] in ("RipBoth", "RipDirect"))
+    callfollow = sum(1 for r in uniq if r["resolve"] == "CallFollow")
+    symbols = sum(1 for r in uniq if r["resolve"] in ("SymbolExport", "SymbolCallFollow"))
+    srctags = len({r["src"] for r in uniq})
+    actual = dict(aob=aob, callfollow=callfollow, symbols=symbols,
+                  total=len(uniq), srctags=srctags)
+
+    # "= 151 AOB + 1 CallFollow + 6 symbol exports = 158 entries, over 31 distinct `source` tags"
+    m = re.search(r"=\s*(\d+)\s*AOB\s*\+\s*(\d+)\s*CallFollow\s*\+\s*(\d+)\s*symbol\s+exports"
+                  r"\s*=\s*(\d+)\s*entries,\s*over\s*(\d+)\s*distinct", src)
+    if not m:
+        # A reworded header is NOT a pass. Silently stopping the comparison is the failure
+        # mode this flag exists to prevent.
+        failures.append("could not find the '= N AOB + N CallFollow + N symbol exports = N "
+                        "entries, over N distinct `source` tags' summary in Himmel.h — if you "
+                        "reworded it, update this regex in the same commit")
+    else:
+        claimed = dict(zip(("aob", "callfollow", "symbols", "total", "srctags"),
+                           (int(g) for g in m.groups())))
+        for k in ("aob", "callfollow", "symbols", "total", "srctags"):
+            if claimed[k] != actual[k]:
+                failures.append("header says %s=%d, parsed %d" % (k, claimed[k], actual[k]))
+
+    # "Signatures: the AOB pattern database — 158 entries over FIVE targets"
+    m2 = re.search(r"AOB pattern database\s*[—\-–]\s*(\d+)\s*entries", src)
+    if not m2:
+        failures.append("could not find the 'AOB pattern database — N entries' line in Himmel.h")
+    elif int(m2.group(1)) != len(uniq):
+        failures.append("header intro says %s entries, parsed %d" % (m2.group(1), len(uniq)))
+
+    # CLAUDE.md claims "no dead constants (extract_patterns.py checks)" — make that true.
+    if bad:
+        failures.append("%d signature(s) reference an unresolved constant: %s" % (len(bad), bad))
+    if dead:
+        failures.append("%d dead AOB constant(s) in no PATTERNS[] array: %s" % (len(dead), dead))
+
+    if failures:
+        print("\nCHECK FAILED:")
+        for f in failures:
+            print("  *", f)
+        print("\nHimmel.h's header is the ONE authoritative copy of these counts. Fix it first,")
+        print("then regenerate the derived prose in CLAUDE.md / docs/roadmap.md / docs/Features.md")
+        print("/ docs/dll-spec.md / docs/architecture.md (dev-log.md is append-only — leave it).")
+        sys.exit(1)
+    print("CHECK OK: %d AOB + %d CallFollow + %d symbol exports = %d entries, %d source tags"
+          % (aob, callfollow, symbols, len(uniq), srctags))

@@ -32,6 +32,14 @@ py tools/ghidra/aggregate_sweep.py out/sweep    # -> out/sweep/REPORT.md
 is the explanation. Env knobs: `GHIDRA_HOME`, `GHIDRA_PROJS`, `SWEEP_OUT`, `SWEEP_XMX`,
 `SWEEP_JOBS`.
 
+> **`GHIDRA_PROJS` is machine-specific — set it before running anything here.** The corpus root
+> does not follow a clone. `sweep.sh:19` falls back to `D:/Tools/GHIDRA_Projs` only because that
+> is where the machine which wrote that line kept it; the corpus also lives at `E:\GHIDRA_Projs`
+> on external USB. Every `$GHIDRA_PROJS` in the commands below means *yours*. Run
+> `py tools/ghidra/preflight.py` first — it reports which projects it actually found, instead of
+> failing on a path written on someone else's disk. Recovery procedure and the full
+> keep/drop analysis: [docs/corpus-preservation.md](../../docs/corpus-preservation.md).
+
 ## Read this first if you are going to CHANGE a pattern
 
 This file is the **operations** manual — how to re-run the sweep and how to add a game. The
@@ -260,7 +268,7 @@ Each cost at least one headless run to establish. Recorded so nobody spends anot
   -readOnly`. A *huge* non-Shipping build (a 300 MB Development EXE with a `.uedbg` section) can
   take hours to auto-analyze and it buys the sweep **nothing**. Import with analysis off:
   ```bash
-  analyzeHeadless D:/Tools/GHIDRA_Projs <ProjectName> -import "<path>\<file>.exe" -noanalysis
+  analyzeHeadless "$GHIDRA_PROJS" <ProjectName> -import "<path>\<file>.exe" -noanalysis
   ```
   One at a time — a Ghidra project takes an exclusive lock, so concurrent imports into the same
   project fail with `LockException` and only the first gets in.
@@ -438,7 +446,7 @@ All addresses are **image-based VAs** as Ghidra shows them (preferred base, not 
 
 ## The sweep
 
-| Tag | Project (`D:\Tools\GHIDRA_Projs\*.rep`) | UE | Symbols | Notes |
+| Tag | Project (`$GHIDRA_PROJS\*.rep`) | UE | Symbols | Notes |
 |---|---|---|---|---|
 | UE4.18-FF7R | `FF7R` | 4.18+ | ❌ none | GObjects+GEngine truth **derived by disassembly** — see below |
 | UE4.11-Nekopara | `NEKOPALIVE_UE411` | 4.11.0-pre7 | ❌ none | **oldest in the corpus.** FLAT array at the BASE anchor, `FUObjectItem` = **16 B** |
@@ -537,7 +545,7 @@ Fixed by importing the real files into a **separate** project so the original st
 
 ```bash
 for M in CoreUObject Core Engine; do
-  analyzeHeadless D:/Tools/GHIDRA_Projs SF521_pdb \
+  analyzeHeadless "$GHIDRA_PROJS" SF521_pdb \
     -import "D:/tmp/Game archive/Satisfactory/UE5.2.1/Engine/Binaries/Win64/FactoryGame-$M-Win64-Shipping.dll"
 done
 ```

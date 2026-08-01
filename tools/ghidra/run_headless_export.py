@@ -26,7 +26,11 @@ from ghidra.app.script import GhidraState
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-PROJECT_DIR = r"D:\Tools\GHIDRA_Projs"
+# The corpus root is PER-MACHINE — it does not follow a clone, and on at least one machine it
+# lives on an external USB drive. `GHIDRA_PROJS` is the same env var sweep.sh:19,
+# preflight.py:797 and build_corpus_manifest.py:423 already honour; the literal below is only a
+# fallback for whichever machine happened to write this line, not a property of this repo.
+PROJECT_DIR = os.environ.get("GHIDRA_PROJS", r"D:\Tools\GHIDRA_Projs")
 PROJECT_NAME = "My Game"
 BINARY_NAME = "My_Game-Win64-Shipping.exe"
 SCRIPT_PATH = os.path.join(SCRIPT_DIR, "ExportUESymbols.ghidra.py")
