@@ -22,7 +22,7 @@ UE5CEDumper/
 │       ├── Methode.cpp             ← CEPlugin — CE plugin Type 5 main menu
 │       ├── BuildStamp.cpp / .h     ← build/version metadata accessors (only TU that includes generated BuildInfo.h), build 1817
 │       ├── Grimoire.h              ← Constants — magic strings, pipe name, UObject offsets, DynOff namespace
-│       ├── Himmel.h                ← Signatures — 128 AOB patterns + 5 symbol exports (14 sources)
+│       ├── Himmel.h                ← Signatures — 151 AOB + 1 CallFollow + 6 symbol exports = 158 (31 sources)
 │       ├── BuildInfo.h.in          ← Template → BuildInfo.h (version, git hash)
 │       ├── version.rc              ← Win32 PE VERSIONINFO resource
 │       │
@@ -221,7 +221,7 @@ UE5CEDumper/
 Game Process
   └── UE5Dumper.dll (injected via CE Lua injectDLL(), version/dinput8/dxgi proxy, or CreateRemoteThread inject)
         ├── AutoStartThreadProc — 1s delay, detects CE plugin vs game
-        ├── Genau (OffsetFinder)    — 128 AOB patterns + 5 symbol exports, GObjects / GNames / GWorld / GameEngine
+        ├── Genau (OffsetFinder)    — 158 signature entries, GObjects / GNames / GWorld / SparseDelegates / GEngine
         ├── Serie (FNamePool)       — string resolution (3 modes; + Neu UE5.6+ enum FNameData)
         ├── Aura (ObjectArray)      — UObject enumeration (chunked + flat + packed) + Find Refs / FindInContainers /
         │                             FindByAddress / ScanForValue (Radar/Orden) / FindObjectGraphPath / GetRelatedObjects (Edel)
