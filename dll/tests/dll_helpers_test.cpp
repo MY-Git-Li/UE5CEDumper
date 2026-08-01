@@ -1773,6 +1773,41 @@ static void Test_ValueScan_OrderedViewScale() {
     EXPECT("scale: filter under 5s", filtMs < 5000.0);
 }
 
+// Macht::IsRipRelativeModRM — the x64 `[rip+disp32]` ModR/M test.
+//
+// Three of Genau's five hand-rolled RIP decode loops tested `(b & 0x07) == 0x05` only,
+// omitting the mod=00 half, so ordinary RBP/R13 addressing was decoded as RIP-relative and
+// the int32 read at instr+3 was a disp8 plus the NEXT instruction's bytes. The bytes below
+// are real encodings, and the REJECT cases are exactly the ones that used to slip through —
+// a test that only asserts the accept case would have passed before the fix too.
+static void Test_Macht_IsRipRelativeModRM() {
+    // ACCEPT — mod=00, r/m=101. reg field (bits 5:3) is the destination and must not matter.
+    EXPECT("48 8D 0D  lea rcx,[rip+d32]  modrm=0x0D", Macht::IsRipRelativeModRM(0x0D));
+    EXPECT("48 8B 05  mov rax,[rip+d32]  modrm=0x05", Macht::IsRipRelativeModRM(0x05));
+    EXPECT("4C 8B 25  mov r12,[rip+d32]  modrm=0x25", Macht::IsRipRelativeModRM(0x25));
+    EXPECT("reg=111 still accepted        modrm=0x3D", Macht::IsRipRelativeModRM(0x3D));
+
+    // REJECT — r/m=101 but mod!=00. These are the regression cases.
+    EXPECT("48 8B 4D F8  mov rcx,[rbp-8]   mod=01", !Macht::IsRipRelativeModRM(0x4D));
+    EXPECT("48 8D 45 20  lea rax,[rbp+20]  mod=01", !Macht::IsRipRelativeModRM(0x45));
+    EXPECT("mov rcx,[rbp+disp32]           mod=10", !Macht::IsRipRelativeModRM(0x8D));
+    EXPECT("48 8B C5  mov rax,rbp (reg dir) mod=11", !Macht::IsRipRelativeModRM(0xC5));
+    EXPECT("mod=11 r/m=101 high reg        modrm=0xFD", !Macht::IsRipRelativeModRM(0xFD));
+
+    // REJECT — mod=00 but r/m!=101 (never RIP-relative).
+    EXPECT("mod=00 r/m=100 -> SIB, [rsp+X] modrm=0x04", !Macht::IsRipRelativeModRM(0x04));
+    EXPECT("mod=00 r/m=000 -> [rax]        modrm=0x00", !Macht::IsRipRelativeModRM(0x00));
+    EXPECT("mod=00 r/m=011 -> [rbx]        modrm=0x03", !Macht::IsRipRelativeModRM(0x03));
+
+    // Exhaustive: exactly 8 of the 256 ModR/M bytes are RIP-relative — mod=00, r/m=101,
+    // reg free across its 8 values. A count pins the predicate against any future rewrite
+    // far better than the hand-picked cases above.
+    int n = 0;
+    for (int b = 0; b < 256; ++b)
+        if (Macht::IsRipRelativeModRM(static_cast<uint8_t>(b))) ++n;
+    EXPECT("exactly 8/256 ModR/M bytes are RIP-relative", n == 8);
+}
+
 // V1a — TSet / TMap sparse-container element geometry. ComputeSetElementStride
 // accounts for the TSetElement hash overhead (HashNextId + HashIndex, value
 // aligned to 4); ComputeMapValueOffset aligns the TPair value to its natural
@@ -3212,6 +3247,7 @@ int main() {
     Test_NumericFamily_Filter();
     Test_GroupScan_ExcludeAndHistogram();
     Test_ValueScan_OrderedViewScale();
+    Test_Macht_IsRipRelativeModRM();
     Test_ValueScan_SparseContainerGeometry();
 
     // Path 2 — native x64 disassembly (Denken decoder core)

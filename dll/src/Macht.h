@@ -198,6 +198,28 @@ std::vector<uintptr_t> AOBScanAllModules(const char* pattern);
 // totalLen:  total instruction length (for RIP base calculation)
 uintptr_t ResolveRIP(uintptr_t instrAddr, int opcodeLen = 3, int totalLen = 7);
 
+// Is this ModR/M byte the x64 RIP-relative form, i.e. `[rip+disp32]`?
+//
+// BOTH halves must be tested and three of Genau's five hand-rolled decode loops tested only
+// one of them for years. mod is bits 7:6 and r/m is bits 2:0; ONLY mod=00 makes r/m=101 mean
+// RIP-relative. With r/m=101 the other three mods are ordinary RBP/R13 forms:
+//
+//   mod=01   48 8B 4D F8   mov rcx,[rbp-8]        (disp8, not disp32)
+//   mod=10   48 8B 8D ..   mov rcx,[rbp+disp32]   (base register, not RIP)
+//   mod=11   48 8B C5      mov rax,rbp            (register direct — no memory operand)
+//
+// A caller that accepts those and then reads an int32 at instr+3 is reading a disp8 plus the
+// next instruction's bytes (mod=01), or a register operand (mod=11), and calling the result a
+// RIP target. `[rsp+X]` is r/m=100 (SIB) so it never passed the r/m test either way — only
+// RBP/R13-as-r/m misfired, which is why this went unnoticed.
+//
+// Named, single-definition and pure so it can be unit-tested (dll_helpers_test) instead of
+// living as five copies of a two-line idiom inside scan loops.
+constexpr bool IsRipRelativeModRM(uint8_t modrm) {
+    return (modrm & 0x07) == 0x05     // r/m = 101
+        && (modrm & 0xC0) == 0x00;    // mod = 00
+}
+
 // --- TArray<T> reading utilities ---
 // UE5 TArray layout: { T* Data +0x00, int32 Count +0x08, int32 Max +0x0C }
 struct TArrayView {
