@@ -7,14 +7,33 @@ Every address below was resolved from a real PDB symbol (or, where noted, from a
 **The sweep is scripted — do not hand-run `analyzeHeadless` per project:**
 
 ```bash
-bash tools/ghidra/sweep.sh                      # everything, MEASURED ~4m40s at SWEEP_JOBS=3
+bash tools/ghidra/sweep.sh                      # everything; 4m38s desktop / 14m32s laptop @ JOBS=3
 ```
 
-**The full sweep is CHEAP — always run it, never a filtered subset "to save time".** Measured
-2026-07-29 on 57 rows / 70 programs: **4m38s**, against **4m34s** for the 54-row run half an hour
-earlier. It does not scale the way the row count suggests, and it never did: `-noanalysis
+**The full sweep is CHEAP relative to what it buys — always run it, never a filtered subset "to
+save time".** It does not scale the way the row count suggests, and never did: `-noanalysis
 -readOnly` has been in the runner since the first scripted sweep (`f70fa66`), so `scan_patterns`
 only ever reads raw bytes.
+
+### ⏱ A SWEEP TIME WITHOUT ITS MACHINE IS NOT A MEASUREMENT
+
+Both rows below are correct. They differ by **3.1×** because they are different computers — which
+is not a footnote, it is the whole point: the same mistake as writing one machine's disk path into
+the repo. **Never quote a sweep duration without saying which machine produced it.**
+
+| machine | CPU | corpus on | rows / programs | `SWEEP_JOBS=3` | date |
+|---|---|---|---|---|---|
+| desktop | Ryzen 9 **9950X3D**, 64 GB | — | 57 / 70 | **4m38s** (278 s) | 2026-07-29 |
+| laptop (MSI Raider A18) | Ryzen 9 **9955HX3D** 16C/32T, base 2.5 GHz, 61.6 GB | internal NVMe (CT2000T500SSD8) | 57 / 74 | **14m32s** (872 s) | 2026-08-01 |
+
+The laptop run: shipped defaults (`SWEEP_JOBS=3`, `SWEEP_XMX=14G`), 57/57 rows `exit=0`, 74 scan
+TSVs, 0 failures. An independently instrumented run on the same laptop measured 850.5 s — 2.5% from
+872 s, so the figure is stable, not noise. The 54-row comparison (`4m34s`) belongs to the desktop
+row; do not read it against the laptop.
+
+Practical consequence: **on the laptop this is a ~15-minute job, not a 5-minute one.** That does not
+change the advice below (3→8 jobs saves ~12.6%, and the downside is the corpus), but it does change
+how you plan a session — budget a quarter of an hour and do something else, rather than waiting.
 
 ⚠ The `~30 min` / `~40 min` / `~50 min` figures this file and `tools/README.md` carried for months
 were **never measured** — they were inherited from the pre-script era when each project was
@@ -51,23 +70,19 @@ is the explanation. Env knobs: `GHIDRA_HOME`, `GHIDRA_PROJS`, `SWEEP_OUT`, `SWEE
 > was. So "use half the cores" is the wrong formula: the binding constraint is what the corpus
 > sits on.
 >
-> Weigh it against the measured cost — but see the ⚠ below, the cost is disputed. Parallelism past
-> a handful buys minutes at most, against the risk of corrupting the artifact of record, and
-> §"Never drop" lists projects whose `.rep` is the last copy in existence.
+> Weigh it against the measured cost, using the row for the machine you are actually on (see the
+> timing table above — 4m38s desktop, 14m32s laptop). On the laptop, 3→8 jobs saves **108.8 s
+> (12.6%)**: real, but set against corrupting the artifact of record, and §"Never drop" lists
+> projects whose `.rep` is the last copy in existence.
 >
 > Guidance: **USB / removable → 2–3, or don't run it there at all. Internal NVMe → the shipped
 > default of 3 is safe; 8 was measured to work and to save ~12%.** `SWEEP_JOBS` is deliberately
 > left as an un-clamped env var so a deliberate benchmark stays possible; this note is the warning,
 > not a guard rail.
 >
-> ⚠ **Two numbers in this file are under dispute — do not quote either until re-measured (2026-08-01).**
+> ⚠ **One formula written here on 2026-08-01 is withdrawn.**
 >
-> 1. **The 4m38s above.** An instrumented re-run measured the FULL sweep at **850.5 s at
->    `SWEEP_JOBS=3`** (cold), 863.1 s warm, 754.3 s at 8 jobs — i.e. ~14 min, not ~4.5 min, and
->    3→8 saves **108.8 s (12.6%)**, not "seconds". The 4m38s row is dated 2026-07-29 and the corpus
->    has since moved drives and grown; one of the two measurements is measuring something the other
->    is not. **Re-time it before either figure is used to justify a concurrency change.**
-> 2. **A `cores/4` ÷ `SWEEP_XMX` formula was briefly written here and is withdrawn** — it is
+> 1. **A `cores/4` ÷ `SWEEP_XMX` formula was briefly written here and is withdrawn** — it is
 >    self-inconsistent with the shipped default: 35.84 GB free ÷ 14 GB = 2, which forbids
 >    `sweep.sh:442`'s `JOBS=3`. `-Xmx` is a *reservation ceiling*, not a working set, so budgeting
 >    on it is wrong; but it is not free either — measured per-job commit was 2.15 GB at 8 jobs/14G

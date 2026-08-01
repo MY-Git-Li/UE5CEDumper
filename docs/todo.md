@@ -26,10 +26,13 @@ header counts (**70 programs / 55 oracles**, UE **4.10–5.8**) and this file al
 `preflight.py` returns **`GO (exit 0)`** — the manifest was regenerated and covers exactly the 57
 sweep tags. Nothing is stale or blocked. Matrix: **162 ✅ / 59 ⚠️ / 2 ❌**.
 
-⏱ **The full sweep costs ~4m40s, not the ~30–50 min the docs claimed for months.** Measured: 4m38s
-for 57 rows vs 4m34s for 54. Those old figures were never taken — they date from the pre-script era
-of hand-running each project *with* Auto Analyze, and one was even "updated" by scaling the wrong
-number with the row count. **So never reach for a tag filter to save time**; use one only to
+⏱ **The full sweep costs minutes, not the ~30–50 min the docs claimed for months — but WHICH minutes
+depends on the machine.** Measured at `SWEEP_JOBS=3`: **4m38s on the desktop** (9950X3D, 57 rows) and
+**14m32s on the laptop** (9955HX3D, 57 rows / 74 programs, corpus on internal NVMe) — a **3.1×**
+spread, so never quote one without the other; `GROUND-TRUTH.md` carries the table. Those *old*
+~30–50 min figures were never taken at all — they date from the pre-script era of hand-running each
+project *with* Auto Analyze, and one was even "updated" by scaling the wrong number with the row
+count. **So never reach for a tag filter to save time**; use one only to
 isolate a row while debugging. The correctness argument for always running the full sweep (a
 filtered run leaves `REPORT.md` describing a corpus that no longer exists) now costs nothing.
 

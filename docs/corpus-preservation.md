@@ -48,7 +48,9 @@
 > 1. **Internal storage only.** §0 says a `.rep` is the artifact of record; putting the artifact of
 >    record behind a connector that can drop under load is not a trade-off, it is a bug.
 > 2. **If it must be on USB, cap `SWEEP_JOBS` at 2–3.** Not for speed — the full sweep is
->    ~4m38s (`GROUND-TRUTH.md`), so parallelism beyond that buys seconds and risks the corpus.
+>    4m38s on the desktop / 14m32s on the laptop (`GROUND-TRUTH.md` carries both, with the machines
+>    — a sweep time without its machine is not a measurement). Parallelism beyond a handful buys
+>    ~12% and risks the corpus.
 > 3. **After ANY surprise disconnect, verify before trusting.** "The volume reports Healthy" is a
 >    statement about the *re-mounted* volume, not about the data. Run `preflight.py`, and check
 >    that every `sweep.sh` project still has a `.rep` on disk.
