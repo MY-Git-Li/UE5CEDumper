@@ -210,10 +210,29 @@ def compare_identity(orig, new):
     for k in sorted(set(a) | set(b)):
         if k in IGNORE_EXACT or k.startswith(IGNORE_PREFIX) or a.get(k) == b.get(k):
             continue
+        # Ghidra's metadata map is inconsistent about unset values: some keys are omitted, some
+        # are present with an empty string, and which one you get varies between program states.
+        # `meta.Preferred Root Namespace Category` reported as differing with BOTH sides shown as
+        # '' for exactly this reason. Absent and empty both mean unset.
+        if k.startswith("meta.") and not a.get(k) and not b.get(k):
+            continue
         if analysis_gap and (k in derived or k.startswith("symbols_source.")
                              or k.startswith("meta.# of")):
             continue
-        other.append("%s: orig=%r rebuild=%r" % (k, (a.get(k) or "")[:50], (b.get(k) or "")[:50]))
+        # A `meta.*` key the analysed ORIGINAL has and the -noanalysis rebuild does not AT ALL is
+        # analysis output by construction — an analyzer wrote it and none ran here. Detecting that
+        # by ASYMMETRY rather than by name is the point: the hand-maintained `derived` list above
+        # missed `meta.MinGW Relocations`, which graded DQ7R a MISMATCH while every equivalent row
+        # graded MODULO-ANALYSIS, and enumerating one more name would only defer the next miss.
+        # Keys present on BOTH sides and differing still fail, so this cannot hide a real change.
+        if analysis_gap and k.startswith("meta.") and a.get(k) and not b.get(k):
+            continue
+        # `(x or "")` would render an ABSENT key and an EMPTY one both as '', which is how a
+        # both-sides-'' line got reported as a difference and cost a round of confusion. Show
+        # absence as absence.
+        def shown(d):
+            return "<absent>" if k not in d else repr(d[k][:50])
+        other.append("%s: orig=%s rebuild=%s" % (k, shown(a), shown(b)))
     # BOOKKEEPING TOTALS. Measured on a full --analyze rebuild of
     # FactoryGameSteam-AudioMixerCore: the rebuild matched the original on the symbol-table DIGEST
     # and on every function / instruction / defined-data count, and differed only by +1 data type
