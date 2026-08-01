@@ -56,6 +56,56 @@
 >    statement about the *re-mounted* volume, not about the data. Run `preflight.py`, and check
 >    that every `sweep.sh` project still has a `.rep` on disk.
 
+> ### ✅ `D:\UE_Analyze_data` IS SELF-SUFFICIENT — measured 2026-08-01
+>
+> ```
+> py tools/ghidra/corpus_relocate.py            # 57/57 rows -> exit 0
+> ```
+>
+> `corpus_relocate.py` answers "is this folder set enough to rebuild the whole corpus?" by HASH,
+> not by path — because `binary_last_seen` records where a binary WAS at import time, and 21 of 57
+> of those paths had rotted (`D:\tmp\...`, `X:\...`, moved Steam libraries).
+> `build_corpus_manifest.py` cannot fix that: it re-derives the same recorded path, so it can only
+> re-confirm "gone", and `preflight.py` then calls those rows BLOCKING while the file sits on disk
+> under another name.
+>
+> | | |
+> |---|---|
+> | 39 rows | exe hash-matched **and** a PDB paired by CodeView GUID+Age |
+> | 18 rows | no PDB needed |
+> | **0 rows** | missing |
+>
+> **59.4 GB of source carries what 181.2 GB of `.rep` was holding** — and it is the
+> regenerable-*from* form, not the derived one. Two traps it refuses to fall into: a matching
+> FILENAME is not a match (and a SHA-256-only check under-reports, because `binary_sha256` is
+> nulled on drifted rows while `binary_md5` never is — measured, it silently lost 4 rows), and a
+> PDB beside the exe is not its PDB.
+
+> ### 💾 Compression: LZX on the ARCHIVE, never on the `.rep`
+>
+> Measured 2026-08-01 with `compact /c /exe:lzx` on copies:
+>
+> | sample | ratio |
+> |---|---|
+> | `ES2-Win64-Shipping.pdb` (1801 MB) | **4.0 : 1** |
+> | `Titan-Win64-DebugGame.exe` | 2.9 : 1 |
+> | `Elliot-Win64-Shipping.exe` (Shipping) | 1.7 : 1 |
+> | `.pak` | 1.7 : 1 |
+>
+> `.pdb` is 34.73 GB of the 59.4 GB *and* compresses best, so projected: **59.4 -> ~21 GB**, or
+> **~16 GB** after deleting the `.ucas` / `.pak` (9.2 GB the corpus never reads).
+>
+> **Use `/exe:lzx`, NOT the Explorer checkbox** — that is legacy `compact /c` (LZNT1, 64 KB blocks):
+> far worse ratio and it fragments badly. LZX is built for write-once/read-rarely, which is exactly
+> this archive; compression is slow one-time, decompression is fast.
+>
+> ⚠ **Do NOT compress `$GHIDRA_PROJS`.** The archive is COLD (read at import only); the `.rep` is
+> the sweep's HOT path, read in full on every run. Compressing it adds CPU to the slowest operation
+> on the machine. The rule is read-frequency, not file type.
+>
+> ⚠ An LZX file that gets MODIFIED is decompressed and stays that way — re-run `compact` after
+> adding anything to the archive.
+
 Every number in this document is **measured**, not estimated, and carries the date it was
 measured. Free space and archive sizes move; re-measure with `preflight.py --sizes` before acting.
 
