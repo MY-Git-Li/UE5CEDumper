@@ -179,6 +179,37 @@ the wrong addresses — which is exactly what a same-named-but-different PDB pro
 defined-data / datatype counts, same `PDB Loaded` and `RTTI Found`, same block map, same scan and
 consensus files.
 
+**Breadth: 17 rows / 22 programs re-imported**, chosen to cover the axes (raw vs analysed original,
+PDB vs none, monolithic vs modular, well-behaved vs packed, store-supplied vs self-built):
+
+| verdict | rows | meaning |
+|---|---|---|
+| `REBUILT-IDENTICAL` | 3 | the raw, no-PDB originals — nothing left over |
+| `REBUILT-MODULO-ANALYSIS` | 13 | binary, memory image and sweep answers reproduce; the original also carried disassembly this run did not regenerate |
+| `MISMATCH` | 1 | `ES2-0517`, and correctly so — see §0c |
+
+**Across all of it: 23 block maps and 69 sweep files compared, ZERO differences.** Every row's
+memory image and every scan/consensus answer is reproducible from the archived binary, including
+the packed DQ7R and Avowed builds and the four-DLL modular Satisfactory rows. 34 Ghidra-synthesized
+`tdb` blocks were accepted by the computed reachability rule (non-executable, outside any RIP
+displacement), each one listed.
+
+### The controls — because a test that has never failed is not evidence
+
+Two negative controls, and one of them bit:
+
+* **A same-named binary from a DIFFERENT build must be rejected.** Pointing the ES2 row at its
+  sibling build is refused on the executable hash, the symbol digest, the **PDB GUID** and the
+  block map. Getting that control to run at all exposed a real blocker: `analyzeHeadless.bat` is a
+  cmd batch file whose parser breaks on `(` / `)` **even inside quotes**, and both ES2 binaries sit
+  under `…\ES2\5.5 (735055807809773736)\`. The parentheses are NEW — `meta.Executable Location`
+  shows both projects were imported from a Steam path without them — so **the archive's own folder
+  naming had made those two rows unrebuildable**, and 8.3 short names are disabled on that volume.
+  `reimport_verify.py` now hardlinks the exe *and its PDB* into a clean directory.
+* **A truncated baseline must fail closed.** It does. But the fail-open this was meant to fix
+  **did not exist** — tested against the pre-guard code, an empty baseline already failed on the
+  input and symbol legs. The guard is kept for the error message, not for correctness.
+
 **Ghidra's analysis is deterministic here, and that was measured rather than assumed.** Two
 independent `--analyze` rebuilds of the same input were **field-for-field identical (0 differing
 fields)**. That is what makes the one anomaly interpretable: `AudioMixerCore`'s rebuild differed
@@ -208,6 +239,17 @@ note that `-noanalysis` skips PDB application is correct. A PDB-loaded project l
 **`ES2-0517` is the only project in the corpus created by Ghidra 11.3.2**; the other 72 programs
 are 12.1.2. That is the cause of its per-open language upgrade, and it is the one project whose
 original toolchain a rebuild on the installed Ghidra cannot reproduce.
+
+That is not a theoretical caveat — it is the corpus's **only** `MISMATCH`. After the harness was
+tightened, `reimport_verify.py UE5.5-Everspace2` reduces to exactly one irreducible line:
+
+```
+meta.Created With Ghidra Version: orig='11.3.2' rebuild='12.1.2'
+```
+
+Its block map and all three sweep files still match. So the row is *functionally* rebuildable and
+*provenance-wise* is not, and only that one project. If 11.3.2 matters, keep that `.rep` or keep
+an 11.3.2 install; nothing else in the corpus has the problem.
 
 -----
 
