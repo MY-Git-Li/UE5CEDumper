@@ -33,12 +33,31 @@ is the explanation. Env knobs: `GHIDRA_HOME`, `GHIDRA_PROJS`, `SWEEP_OUT`, `SWEE
 `SWEEP_JOBS`.
 
 > **`GHIDRA_PROJS` is machine-specific — set it before running anything here.** The corpus root
-> does not follow a clone. `sweep.sh:19` falls back to `D:/Tools/GHIDRA_Projs` only because that
-> is where the machine which wrote that line kept it; the corpus also lives at `E:\GHIDRA_Projs`
-> on external USB. Every `$GHIDRA_PROJS` in the commands below means *yours*. Run
-> `py tools/ghidra/preflight.py` first — it reports which projects it actually found, instead of
-> failing on a path written on someone else's disk. Recovery procedure and the full
-> keep/drop analysis: [docs/corpus-preservation.md](../../docs/corpus-preservation.md).
+> does not follow a clone. `sweep.sh:19` falls back to `D:/Tools/GHIDRA_Projs`, which is also where
+> it currently lives (internal NVMe, 63 `.rep` / 182.3 GB). Every `$GHIDRA_PROJS` in the commands
+> below means *yours*. Run `py tools/ghidra/preflight.py` first — it reports which projects it
+> actually found, instead of failing on a path written on someone else's disk. Recovery procedure
+> and the full keep/drop analysis: [docs/corpus-preservation.md](../../docs/corpus-preservation.md).
+
+> ### ⚠ `SWEEP_JOBS`: 3 is the default and raising it is not free — MEASURED 2026-08-01
+>
+> A run at `SWEEP_JOBS=16 SWEEP_XMX=2G`, with the corpus then on an **external USB SSD**, knocked
+> the drive off the bus mid-write: `disk` Event 51 ×12, NTFS unable to flush its transaction log,
+> **delayed-write failure on `$Mft` ("data has been lost")**, one Ghidra project `.db` caught
+> mid-write, and the volume re-enumerated (`HarddiskVolume9` → `12`). The Ghidra JVMs then wedged
+> in unkillable kernel I/O waits; only a reboot cleared it.
+>
+> **RAM was never the limit** — 16 × 2 GB = 32 GB on a 61.6 GB machine. The **storage transport**
+> was. So "use half the cores" is the wrong formula: the binding constraint is what the corpus
+> sits on.
+>
+> And weigh it against the measured cost. The full sweep is **4m38s**. Parallelism past a handful
+> buys seconds on a job already under five minutes, against the risk of corrupting the artifact of
+> record — and §"Never drop" lists projects whose `.rep` is the last copy in existence.
+>
+> Guidance: **internal NVMe → up to `cores/4`, bounded by free RAM ÷ `SWEEP_XMX`. USB / removable →
+> 2–3, or don't run it there at all.** `SWEEP_JOBS` is deliberately left as an un-clamped env var
+> so a deliberate benchmark stays possible; this note is the warning, not a guard rail.
 
 ## Read this first if you are going to CHANGE a pattern
 

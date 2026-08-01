@@ -8,8 +8,9 @@ It never runs Ghidra and never touches a project. Everything it reports is read
 off disk:
 
   * sweep.sh                    — the TAG|PROJECT|GLOB|GS_TRUE table (THE source of truth)
-  * $GHIDRA_PROJS/*.rep (machine-specific; default D:/Tools/GHIDRA_Projs, also seen at
-    E:/GHIDRA_Projs on external USB) — which projects exist, whether they are locked,
+  * $GHIDRA_PROJS/*.rep (machine-specific; default D:/Tools/GHIDRA_Projs, which is also
+    where it currently lives — internal NVMe. Do NOT host it on USB: see
+    docs/corpus-preservation.md) — which projects exist, whether they are locked,
                                   and which PROGRAM NAMES each one holds
                                   (from .rep/idata/**/*.prp, plain XML)
   * Steam's libraryfolders.vdf + steamapps/appmanifest_*.acf — what this machine

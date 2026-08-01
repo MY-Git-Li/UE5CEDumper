@@ -16,12 +16,42 @@
 > [`run_all_aob_export.py`](../tools/ghidra/run_all_aob_export.py) — falling back to
 > `D:\Tools\GHIDRA_Projs` only because that is where the machine which wrote these lines kept it.
 >
-> **Known locations so far:** `D:\Tools\GHIDRA_Projs` (internal) · `E:\GHIDRA_Projs` (external USB).
+> **Current location:** `D:\Tools\GHIDRA_Projs` (internal NVMe) — 63 `.rep`, 182.3 GB, verified
+> 2026-08-01 (all 57 `sweep.sh`-referenced projects present).
 >
 > Set `GHIDRA_PROJS` before running anything here, and read every literal `D:\Tools\GHIDRA_Projs`
 > below as "wherever yours is". A path written on a different machine is the single most common
 > reason a documented command fails for the next person — run `py tools/ghidra/preflight.py`
 > first, which reports what it actually found rather than what this file assumes.
+
+> ### 🔥 DO NOT HOST THE CORPUS ON REMOVABLE / USB MEDIA — measured 2026-08-01
+>
+> The corpus lived on an external USB SSD (Plextor EX1) for a while. A sweep run at
+> `SWEEP_JOBS=16 SWEEP_XMX=2G` knocked the drive **off the bus mid-write**. RAM was never the
+> constraint — 16 × 2 GB = 32 GB on a 61.6 GB machine. The storage TRANSPORT was.
+>
+> ```
+> disk  / Event 51  ×12+   paging-operation error on \Device\Harddisk2\DR2
+> Ntfs  / Event 140        cannot flush the transaction log; "corruption may have occurred, VolumeId: E:"
+> Ntfs  / Event 50         delayed-write FAILED on \$Mft — "data has been lost"
+> Ntfs  / Event 50         delayed-write FAILED on GHIDRA_Projs\<proj>\idata\00\~00000000.db\tmp…
+> volume re-enumerated     HarddiskVolume9 → HarddiskVolume12  (surprise removal + re-attach)
+> ```
+>
+> **Lost `$Mft` writes with a Ghidra project mid-write** is precisely the shape that silently
+> corrupts a `.rep`. The Ghidra processes then wedged in unkillable kernel I/O waits —
+> `Stop-Process` reported "no such process" while WMI still listed them, and enumerating them
+> hung. Only a reboot cleared it.
+>
+> This corpus survived (verified above). It did not have to. Three rules follow:
+>
+> 1. **Internal storage only.** §0 says a `.rep` is the artifact of record; putting the artifact of
+>    record behind a connector that can drop under load is not a trade-off, it is a bug.
+> 2. **If it must be on USB, cap `SWEEP_JOBS` at 2–3.** Not for speed — the full sweep is
+>    ~4m38s (`GROUND-TRUTH.md`), so parallelism beyond that buys seconds and risks the corpus.
+> 3. **After ANY surprise disconnect, verify before trusting.** "The volume reports Healthy" is a
+>    statement about the *re-mounted* volume, not about the data. Run `preflight.py`, and check
+>    that every `sweep.sh` project still has a `.rep` on disk.
 
 Every number in this document is **measured**, not estimated, and carries the date it was
 measured. Free space and archive sizes move; re-measure with `preflight.py --sizes` before acting.
@@ -267,7 +297,8 @@ The rule the tooling implements, and the rule to follow by hand:
 ## 4. Footprint (measured 2026-07-29 00:20–00:45 local)
 
 Measured on the `D:`-rooted machine. Sizes are a property of that disk, not of the repo — see the
-header note; the corpus also exists at `E:\GHIDRA_Projs` on external USB. Re-measure with
+header note. The corpus has since moved (external USB → internal NVMe, 2026-08-01) and grew to
+63 `.rep` / 182.3 GB, so the row below is a 2026-07-29 snapshot, not current. Re-measure with
 `preflight.py --sizes` on whichever machine you are on.
 
 | Asset | Size | Notes |
