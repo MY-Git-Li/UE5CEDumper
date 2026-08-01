@@ -1537,6 +1537,13 @@ Pick up when the active plan finishes or when blocked.
 
 ## Pending live-game verification (verify only — no code)
 
+> **Procedure lives in [log-verification-checklist.md](log-verification-checklist.md)** — where to
+> grep, which file each marker lands in, and which items need a deliberate in-game action versus
+> which are free evidence from any ordinary session. THIS section is the status (⬜ / ✅); that one
+> is the how. Two things worth knowing before you open a log: **there is no log level, nothing is
+> filtered** (so `[DEBUG]` lines count), and **See-Through / Foreground-Lock evidence lands in
+> `init-0.log`**, not `walk`/`pipe`, because their categories fall through `ResolveFile`.
+
 - **Flaky: `SnapshotViewModelTests.GroupMatch_MissingValue_ShowsErrorNoCandidates`** — failed ONCE
   in a full parallel run on 2026-07-23 (build 2318), then passed 25/25 three times in isolation and
   green on an immediate full re-run. Unrelated to the winmm/proxy work that was in flight. This test
