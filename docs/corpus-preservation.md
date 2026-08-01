@@ -1,11 +1,27 @@
 # AOB corpus preservation — what to keep, what to reinstall, what to drop
 
-> **Read this before deleting anything under `D:\Tools\GHIDRA_Projs`, `D:\tmp\Game archive`,
-> `X:\UE_Analyze_Data`, or before uninstalling a corpus Steam title.**
+> **Read this before deleting anything under `$GHIDRA_PROJS` (the Ghidra corpus root),
+> `D:\tmp\Game archive`, `X:\UE_Analyze_Data`, or before uninstalling a corpus Steam title.**
 >
 > Companion to [tools/ghidra/GROUND-TRUTH.md](../tools/ghidra/GROUND-TRUTH.md) (which patterns
 > are proven by which binary) and [tools/ghidra/sweep.sh](../tools/ghidra/sweep.sh) (the corpus
 > list itself, and the source of truth for it).
+
+> ### ⚠ THE PATHS IN THIS DOCUMENT ARE ONE MACHINE'S — not a property of this repo
+>
+> The corpus root does **not** follow a clone. Every tool resolves it from the `GHIDRA_PROJS`
+> environment variable — [`sweep.sh:19`](../tools/ghidra/sweep.sh), [`preflight.py:797`](../tools/ghidra/preflight.py),
+> [`build_corpus_manifest.py:423`](../tools/ghidra/build_corpus_manifest.py),
+> [`run_headless_export.py`](../tools/ghidra/run_headless_export.py),
+> [`run_all_aob_export.py`](../tools/ghidra/run_all_aob_export.py) — falling back to
+> `D:\Tools\GHIDRA_Projs` only because that is where the machine which wrote these lines kept it.
+>
+> **Known locations so far:** `D:\Tools\GHIDRA_Projs` (internal) · `E:\GHIDRA_Projs` (external USB).
+>
+> Set `GHIDRA_PROJS` before running anything here, and read every literal `D:\Tools\GHIDRA_Projs`
+> below as "wherever yours is". A path written on a different machine is the single most common
+> reason a documented command fails for the next person — run `py tools/ghidra/preflight.py`
+> first, which reports what it actually found rather than what this file assumes.
 
 Every number in this document is **measured**, not estimated, and carries the date it was
 measured. Free space and archive sizes move; re-measure with `preflight.py --sizes` before acting.
@@ -250,9 +266,13 @@ The rule the tooling implements, and the rule to follow by hand:
 
 ## 4. Footprint (measured 2026-07-29 00:20–00:45 local)
 
+Measured on the `D:`-rooted machine. Sizes are a property of that disk, not of the repo — see the
+header note; the corpus also exists at `E:\GHIDRA_Projs` on external USB. Re-measure with
+`preflight.py --sizes` on whichever machine you are on.
+
 | Asset | Size | Notes |
 |-------|------|-------|
-| `D:\Tools\GHIDRA_Projs` (43 `.rep`) | **120.94 GB** | 38 referenced by `sweep.sh` = 113.51; 5 orphans = 7.43 |
+| `$GHIDRA_PROJS` (43 `.rep`, measured at `D:\Tools\GHIDRA_Projs`) | **120.94 GB** | 38 referenced by `sweep.sh` = 113.51; 5 orphans = 7.43 |
 | — of which ORACLE projects (29 tags) | 92.60 GB | `sweep.sh` supplies `GS_TRUE` |
 | — of which NOISE-PROBE projects (9 tags) | 20.93 GB | no truth; they only prove a pattern still fires |
 | `C:\Program Files\Epic Games\UE_*` (5) | **280.89 GB** | biggest single item on the machine |
@@ -365,7 +385,7 @@ Corroborating the ratio at scale: the two mid-analysis `*_UE581` projects sit at
 size while every finished project sits at 26–30×.
 
 ```bash
-analyzeHeadless D:/Tools/GHIDRA_Projs <Name> -import "<path>\<file>.exe" -noanalysis
+analyzeHeadless "$GHIDRA_PROJS" <Name> -import "<path>\<file>.exe" -noanalysis
 ```
 
 **Three caveats, all load-bearing:**

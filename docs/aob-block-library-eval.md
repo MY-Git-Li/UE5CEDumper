@@ -15,7 +15,9 @@ frequently-hit **hotspots**, per-game **occasional/unique** sites, and **decoy n
 to the repo, and add a fast pre-test script. When a new game's AOBs miss, compare against these
 blocks first instead of reaching for the 40-minute sweep.
 
-**Why it matters more than it looks.** The sweep needs `D:\Tools\GHIDRA_Projs` (120.94 GB) and a
+**Why it matters more than it looks.** The sweep needs the Ghidra corpus root (`$GHIDRA_PROJS`,
+120.94 GB — machine-specific; `D:\Tools\GHIDRA_Projs` internal or `E:\GHIDRA_Projs` on external
+USB, see [corpus-preservation.md](corpus-preservation.md)) and a
 Ghidra install. **The maintainer's second machine has neither**, plus only 1–2 UE games installed —
 and Auto Analyze is 3–4 hours per project there. So on that machine the sweep does not exist, and a
 committed block library would be the *only* diagnostic available. That, not speed, is the case for
