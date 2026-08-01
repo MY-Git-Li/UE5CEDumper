@@ -22,9 +22,15 @@ do — so read it as "at most this many", never as an estimate.
 
 ⚠ THE BOUND IS A PROOF ONLY ON THE INDEX'S OWN SOURCES, AND A PRIOR EVERYWHERE ELSE. Measured:
 
-    on the 11 source binaries      0 violations / 1,017 pairs      (proof)
-    on 58 binaries never indexed   27 violations / 7,345  (0.37%)  (prior)
+    on the 11 source binaries      0 violations / 1,243 pairs      (proof)   [re-measured 2026-08-01]
+    on 58 binaries never indexed   27 violations / 7,345  (0.37%)  (prior)   [NOT re-measured]
       of which CLEAR-verdict        6 violations / 3,055  (0.20%)  median 0, 99th pct 10, MAX 932
+
+Re-derive the first line with `py tools/pe/verify_ngram_bound.py` — it was hand-measured once, and
+the zero is the part that matters: it still holds. A PAIR is (scoreable pattern x distinct source
+binary), which is 113 x 11 = 1,243 exactly; the earlier "1,017" carried no written definition and
+is not a product of anything (1,017/11 = 92.45). The second and third lines are from the original
+hand measurement and have NOT been re-derived — there is no script for them yet.
 
 The failures are NOT a version problem — a 4.27-only index bounds a 5.4 binary with 0 violations
 in 113. They are a CODE-COVERAGE problem: the index is built from content-free stock templates, so
@@ -143,10 +149,18 @@ def score(idx, pat):
 def verdict(bound, longest, lit, floor):
     """THE GUARANTEE IS ONE-DIRECTIONAL: this can CERTIFY a pattern quiet, and cannot CONDEMN one.
 
-    Measured over 151 patterns x 11 source binaries (worst hits per pattern):
+    Worst hits per pattern over 151 patterns x 11 source binaries
+    (re-measured 2026-08-01 by `tools/pe/verify_ngram_bound.py`):
 
-        CLEAR (bound <= floor)  n=47  median 0   90th  2   MAX   13
-        UNPROVEN (bound > floor)      median 1   90th 33   MAX 3302
+        CLEAR (bound <= floor)   n=47  median 0   90th  2   99th  13   MAX   13
+        UNPROVEN (bound > floor) n=66  median 1   90th 16   99th 554   MAX 1366
+        NO-ANCHOR                n=38  median 1   90th 33   99th 3302  MAX 3302
+
+    The CLEAR row reproduced exactly. The other one did not: this used to be a single "UNPROVEN"
+    row reading `median 1 / 90th 33 / MAX 3302`, and those are the **NO-ANCHOR** numbers — the old
+    measurement lumped every non-CLEAR pattern together, so the alarming 3,302 belonged to a
+    pattern with no 4-byte literal run at all, not to one the index had scored and failed to
+    certify. Split out, UNPROVEN tops out at 1,366.
 
     So CLEAR is tight and trustworthy. Above the floor the bound is far too loose to mean anything:
     the buckets an earlier version called NOISY and VERY NOISY had MEDIANS of 0 and 2 — quieter than
@@ -166,7 +180,7 @@ def verdict(bound, longest, lit, floor):
         return ("UNSCOREABLE", "no window the index can size. NOT the same as 'rare' — unknown.")
     if bound <= floor:
         return ("CLEAR", f"quiet in STOCK ENGINE CODE — under {floor + 1} occurrences of its rarest "
-                         "window in every source binary (proven there: 0 violations / 1,017 pairs). "
+                         "window in every source binary (proven there: 0 violations / 1,243 pairs). "
                          "On a real game it is a STRONG PRIOR, not a proof: 0.20% violation rate "
                          "over 3,055 unseen pairs, median 0 and 99th pct 10 hits, but the tail is "
                          "real — GNAM_UD2 bounds at 15 and takes 932 on FF7 Remake.")
@@ -202,8 +216,16 @@ def main():
         return 2
     idx = Index(idxpath)
     src = idx.meta.get("sources", [])
+    # DISTINCT, not len(src). The index records 12 entries but 11 binaries:
+    # UE423_Flying-Win64-Shipping.exe exists twice under the 4.23.1 tree and build_ngram_index.py's
+    # pick_sources() globs `**/*.exe`, so it was indexed twice. Printing the entry count made this
+    # line disagree with the docstring's "11 source binaries" — and the DOCSTRING was right. The
+    # data is unaffected: merge_max() takes the MAX bucket per key, so a repeat is a no-op.
+    distinct = {(s.get("binary"), s.get("engine"), s.get("config"), s.get("exec_mb")) for s in src}
+    dupes = len(src) - len(distinct)
     print(f"index: {os.path.basename(idxpath)}  threshold {idx.threshold}  n={idx.ns}  "
-          f"{len(src)} source binaries")
+          f"{len(distinct)} source binaries"
+          + (f" ({len(src)} entries, {dupes} duplicate)" if dupes else ""))
 
     if "--tsv" in args:
         tsv = args[args.index("--tsv") + 1]
