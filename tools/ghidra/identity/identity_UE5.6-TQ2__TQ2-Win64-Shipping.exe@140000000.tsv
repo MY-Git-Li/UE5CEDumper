@@ -1,0 +1,61 @@
+program	TQ2-Win64-Shipping.exe
+tag	UE5.6-TQ2
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	186789600
+meta.# of Data Type Categories	74
+meta.# of Data Types	2502
+meta.# of Defined Data	4077391
+meta.# of Functions	383274
+meta.# of Instructions	29355102
+meta.# of Memory Blocks	11
+meta.# of Symbols	2566973
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 08:08:56 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Titan Quest II/TQ2/Binaries/Win64/TQ2-Win64-Shipping.exe
+meta.Executable MD5	7cbd74e9e9569013ec9e0477081c762c
+meta.Executable SHA256	b232ba42057decd67ff65d2669aa944b73e22b6e5f68a2243ad4aa532a0ba82a
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Titan Quest II/TQ2/Binaries/Win64/TQ2-Win64-Shipping.exe?MD5=7cbd74e9e9569013ec9e0477081c762c
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	TQ2-Win64-Shipping.pdb
+meta.PDB GUID	d37a058e-8110-da82-cc87-49719acba23d
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Grimlore Games
+meta.PE Property[FileDescription]	Titan Quest 2
+meta.PE Property[FileVersion]	TQ2-CL-133316
+meta.PE Property[InternalName]	TQ2
+meta.PE Property[LegalCopyright]	Copyright by Grimlore Games & THQ Nordic
+meta.PE Property[OriginalFilename]	TQ2-Win64-Shipping.exe
+meta.PE Property[ProductName]	Titan Quest 2
+meta.PE Property[ProductVersion]	TQ2-CL-133316
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	TQ2-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	383274
+instructions	29355102
+defined_data	4077391
+datatypes	2502
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	3723913
+symbols_global	3608208
+symbols_sha256	cc8bf6f8f40af7c43cfa7cf5e05c7f10591d7bf18542466521792448ea360fcb
+symbols_source.ANALYSIS	102049
+symbols_source.DEFAULT	3604872
+symbols_source.IMPORTED	16992

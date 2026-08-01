@@ -1,0 +1,60 @@
+program	Elliot-Win64-Shipping.exe
+tag	UE5.4-Elliot
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	496070656
+meta.# of Data Type Categories	4
+meta.# of Data Types	109
+meta.# of Defined Data	2273376
+meta.# of Functions	352218
+meta.# of Instructions	43887379
+meta.# of Memory Blocks	15
+meta.# of Symbols	440306
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	borland:c++
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 21:53:25 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/The Adventures of Elliot_The Millennium Tales/Elliot/Binaries/Win64/Elliot-Win64-Shipping.exe
+meta.Executable MD5	793b10b0b6411aa6788d8057d66c4e03
+meta.Executable SHA256	d8c9280a129b5f08a0c4259557acde4bd3195a779e2198ca9095981e0baade3c
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/The Adventures of Elliot_The Millennium Tales/Elliot/Binaries/Win64/Elliot-Win64-Shipping.exe?MD5=793b10b0b6411aa6788d8057d66c4e03
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	15d91a5ff
+meta.Minimum Address	140000000
+meta.PDB Age	4
+meta.PDB File	Elliot-Win64-Shipping.pdb
+meta.PDB GUID	603ae784-60db-4dad-8cda-c564f2467962
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	SQUARE ENIX CO., LTD.
+meta.PE Property[FileDescription]	The Adventures of Elliot_The Millennium Tales
+meta.PE Property[FileVersion]	1.2.0.0
+meta.PE Property[InternalName]	The Adventures of Elliot_The Millennium Tales
+meta.PE Property[LegalCopyright]	© SQUARE ENIX
+meta.PE Property[OriginalFilename]	Elliot.exe
+meta.PE Property[ProductName]	The Adventures of Elliot_The Millennium Tales
+meta.PE Property[ProductVersion]	1.2.0.0
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	Elliot-Win64-Shipping.exe
+meta.Relocatable	false
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	352218
+instructions	43887379
+defined_data	2273376
+datatypes	109
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	4089219
+symbols_global	4002816
+symbols_sha256	1489b47393f3ee57e546c715348c5899e29ccc3d2b27daa8053db8180ce9f7c3
+symbols_source.ANALYSIS	85251
+symbols_source.DEFAULT	4002414
+symbols_source.IMPORTED	1554

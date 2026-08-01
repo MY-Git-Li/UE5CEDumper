@@ -1,0 +1,61 @@
+program	MaelstromV2-Win64-Shipping.exe
+tag	UE4.27-Maelstrom
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	103436716
+meta.# of Data Type Categories	602138
+meta.# of Data Types	2262286
+meta.# of Defined Data	2271720
+meta.# of Functions	251717
+meta.# of Instructions	16257400
+meta.# of Memory Blocks	11
+meta.# of Symbols	3311056
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Mon Jul 27 16:44:32 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Maelstrom/MaelstromV2/Binaries/Win64/MaelstromV2-Win64-Shipping.exe
+meta.Executable MD5	1a66f1a9356ccae85a463179a8b1b678
+meta.Executable SHA256	96decad4c5fb592fec3ed84b53cbee9bb2b4f235d69524dcde3784165f293fdd
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Maelstrom/MaelstromV2/Binaries/Win64/MaelstromV2-Win64-Shipping.exe?MD5=1a66f1a9356ccae85a463179a8b1b678
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	MaelstromV2-Win64-Shipping.pdb
+meta.PDB GUID	3389d41b-c95e-4ae0-88b4-3407f6811eac
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	MaelstromV2
+meta.PE Property[InternalName]	MaelstromV2
+meta.PE Property[LegalCopyright]	Copyright Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	MaelstromV2.exe
+meta.PE Property[ProductName]	Unreal Engine
+meta.PE Property[ProductVersion]	4.27.2
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	MaelstromV2-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	251717
+instructions	16257400
+defined_data	2271720
+datatypes	2262286
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	3208708
+symbols_global	2566787
+symbols_sha256	96e6324a18ba16544600b88f79c3aa27b2f23b5615a45603540aa4f82bf83b1f
+symbols_source.ANALYSIS	194274
+symbols_source.DEFAULT	1531496
+symbols_source.IMPORTED	1482938

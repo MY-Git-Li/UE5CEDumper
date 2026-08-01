@@ -1,0 +1,61 @@
+program	ES2-Win64-Shipping.exe
+tag	UE5.5-Everspace2
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	175840512
+meta.# of Data Type Categories	283420
+meta.# of Data Types	2681401
+meta.# of Defined Data	2081895
+meta.# of Functions	507555
+meta.# of Instructions	28635821
+meta.# of Memory Blocks	11
+meta.# of Symbols	5844699
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	11.3.2
+meta.Date Created	Sat May 17 11:32:12 GMT+08:00 2025
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/SteamLibrary/steamapps/common/EVERSPACE™ 2/ES2/Binaries/Win64/ES2-Win64-Shipping.exe
+meta.Executable MD5	1a1b0ede76b80a173969343683579129
+meta.Executable SHA256	389c62629593456281b5051644bd7974bda01045ec4271e326a081438c13d89d
+meta.FSRL	file:///D:/SteamLibrary/steamapps/common/EVERSPACE%E2%84%A2 2/ES2/Binaries/Win64/ES2-Win64-Shipping.exe?MD5=1a1b0ede76b80a173969343683579129
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	ES2-Win64-Shipping.pdb
+meta.PDB GUID	9b8b6d40-212c-b241-ea5f-23f5f29fa441
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	EVERSPACE 2
+meta.PE Property[FileVersion]	UE5-CL-0
+meta.PE Property[InternalName]	ES2
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	ES2-Win64-Shipping.exe
+meta.PE Property[ProductName]	EVERSPACE 2
+meta.PE Property[ProductVersion]	UE5-CL-0
+meta.PE Property[Translation]	4b00409
+meta.Processor	x86
+meta.Program Name	ES2-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	507555
+instructions	28635821
+defined_data	2081895
+datatypes	2681401
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	5298149
+symbols_global	4387100
+symbols_sha256	74c73a422f5c7d2ff587c8022f4d49d07934baae0221331e692ed44c94f76d16
+symbols_source.ANALYSIS	271086
+symbols_source.DEFAULT	2651767
+symbols_source.IMPORTED	2375296

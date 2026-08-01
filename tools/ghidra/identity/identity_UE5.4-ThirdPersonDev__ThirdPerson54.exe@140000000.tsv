@@ -1,0 +1,61 @@
+program	ThirdPerson54.exe
+tag	UE5.4-ThirdPersonDev
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	282877948
+meta.# of Data Type Categories	72317
+meta.# of Data Types	456319
+meta.# of Defined Data	5082005
+meta.# of Functions	786973
+meta.# of Instructions	48838264
+meta.# of Memory Blocks	12
+meta.# of Symbols	7069923
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 20:54:46 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/5.4/Development/Windows/ThirdPerson54/Binaries/Win64/ThirdPerson54.exe
+meta.Executable MD5	9f2258f6e85da3f48b52e732942ce4fa
+meta.Executable SHA256	100d5af9d485eeacb7893bcd4b59594734feaaafaf706e9e85fddc0147b0ddc5
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/5.4/Development/Windows/ThirdPerson54/Binaries/Win64/ThirdPerson54.exe?MD5=9f2258f6e85da3f48b52e732942ce4fa
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	ThirdPerson54.pdb
+meta.PDB GUID	0749d9e4-3e3c-4839-8f6c-fba9b8bdbd36
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	Third Person Game Template
+meta.PE Property[InternalName]	ThirdPerson54
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	ThirdPerson54.exe
+meta.PE Property[ProductName]	Third Person Game Template
+meta.PE Property[ProductVersion]	5.4.4
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	ThirdPerson54.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	786973
+instructions	48838264
+defined_data	5082005
+datatypes	456319
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	7360840
+symbols_global	6435838
+symbols_sha256	51a7c78d8203ca2ec6b356db53b6f9c35833c611ce8f98f4ded55df058f44013
+symbols_source.ANALYSIS	1212442
+symbols_source.DEFAULT	4959147
+symbols_source.IMPORTED	1189251

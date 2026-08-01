@@ -1,0 +1,60 @@
+program	RSG-Win64-Shipping.exe
+tag	UE4.20-Everspace
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	56621672
+meta.# of Data Type Categories	269789
+meta.# of Data Types	1040744
+meta.# of Defined Data	1262283
+meta.# of Functions	128657
+meta.# of Instructions	7942690
+meta.# of Memory Blocks	9
+meta.# of Symbols	1411120
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sat Jul 25 22:05:08 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/EVERSPACE/RSG/Binaries/Win64/RSG-Win64-Shipping.exe
+meta.Executable MD5	d6e8511c9a6c18bae3377f6584ea5e74
+meta.Executable SHA256	7b2479e78db93781a0c7eb84180e4cb82fc079f57d7dac148b7c8b6f33ff154c
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/EVERSPACE/RSG/Binaries/Win64/RSG-Win64-Shipping.exe?MD5=d6e8511c9a6c18bae3377f6584ea5e74
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	RSG-Win64-Shipping.pdb
+meta.PDB GUID	ac90b78c-5124-45f6-9b33-96ac3a197461
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	RSG
+meta.PE Property[InternalName]	RSG
+meta.PE Property[LegalCopyright]	Copyright 1998-2018 Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	RSG.exe
+meta.PE Property[ProductName]	Unreal Engine
+meta.PE Property[ProductVersion]	4.20.2
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	RSG-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	128657
+instructions	7942690
+defined_data	1262283
+datatypes	1040744
+analysis_state	ANALYSED
+symbols	1447361
+symbols_global	1210888
+symbols_sha256	2321ff6c5b81b891f8772da5bd2939352899fc406372ad8e26b4766a78d5cfb5
+symbols_source.ANALYSIS	132694
+symbols_source.DEFAULT	868705
+symbols_source.IMPORTED	445962

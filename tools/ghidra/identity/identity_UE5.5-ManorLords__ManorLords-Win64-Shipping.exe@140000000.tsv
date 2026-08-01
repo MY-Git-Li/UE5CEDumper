@@ -1,0 +1,61 @@
+program	ManorLords-Win64-Shipping.exe
+tag	UE5.5-ManorLords
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	165034908
+meta.# of Data Type Categories	69
+meta.# of Data Types	2314
+meta.# of Defined Data	3409812
+meta.# of Functions	315398
+meta.# of Instructions	26899040
+meta.# of Memory Blocks	11
+meta.# of Symbols	2286550
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 08:36:02 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/SteamLibrary/steamapps/common/Manor Lords/ManorLords/Binaries/Win64/ManorLords-Win64-Shipping.exe
+meta.Executable MD5	1337fa1f6d488ef2ce12bafc2a201405
+meta.Executable SHA256	42a14f8b66050553027ac8f644e32e74cea00da4cb90057bdfc190bca36f6f1d
+meta.FSRL	file:///D:/SteamLibrary/steamapps/common/Manor Lords/ManorLords/Binaries/Win64/ManorLords-Win64-Shipping.exe?MD5=1337fa1f6d488ef2ce12bafc2a201405
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	ManorLords-Win64-Shipping.pdb
+meta.PDB GUID	16d78531-67b2-6998-f61b-97082a67d545
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Hooded Horse
+meta.PE Property[FileDescription]	ManorLords
+meta.PE Property[FileVersion]	++UE5+Release-5.5-CL-40574608
+meta.PE Property[InternalName]	ManorLords
+meta.PE Property[LegalCopyright]	Copyright Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	ManorLords-Win64-Shipping.exe
+meta.PE Property[ProductName]	ManorLords
+meta.PE Property[ProductVersion]	++UE5+Release-5.5-CL-40574608
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	ManorLords-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	315398
+instructions	26899040
+defined_data	3409812
+datatypes	2314
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	3224718
+symbols_global	3137071
+symbols_sha256	9102c3cc563e0965cfc89b4410ad60973ad0493994376d787417413bda903c2d
+symbols_source.ANALYSIS	83935
+symbols_source.DEFAULT	3133026
+symbols_source.IMPORTED	7757

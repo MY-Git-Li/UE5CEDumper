@@ -1,0 +1,61 @@
+program	UE423_Flying-Win64-DebugGame.exe
+tag	UE4.23-FlyingDbgGame
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	110217632
+meta.# of Data Type Categories	34478
+meta.# of Data Types	237536
+meta.# of Defined Data	2121963
+meta.# of Functions	396276
+meta.# of Instructions	18200002
+meta.# of Memory Blocks	11
+meta.# of Symbols	3162656
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Tue Jul 28 07:52:40 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/Unreal Projects/UE423_Flying/Binaries/Win64/UE423_Flying-Win64-DebugGame.exe
+meta.Executable MD5	e63689ff80433145b9fec8baa4780259
+meta.Executable SHA256	465b8acfa0fc213bc08e391a089c308709a7ac4fc70824e0123fe6d922ae8e05
+meta.FSRL	file:///D:/Unreal Projects/UE423_Flying/Binaries/Win64/UE423_Flying-Win64-DebugGame.exe?MD5=e63689ff80433145b9fec8baa4780259
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	UE423_Flying-Win64-DebugGame.pdb
+meta.PDB GUID	2c417517-c945-42ac-8a3d-dba1d96ca3c0
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UE4
+meta.PE Property[InternalName]	UE423_Flying
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	UE423_Flying-Win64-DebugGame.exe
+meta.PE Property[ProductName]	UE4
+meta.PE Property[ProductVersion]	++UE4+Release-4.23-CL-9631420
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	UE423_Flying-Win64-DebugGame.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	396276
+instructions	18200002
+defined_data	2121963
+datatypes	237536
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	3099400
+symbols_global	2709030
+symbols_sha256	9d584be2fe80f70ae7b21eec8b83025bd3d4715563d6af5c45cad47321cca710
+symbols_source.ANALYSIS	550902
+symbols_source.DEFAULT	1982666
+symbols_source.IMPORTED	565832

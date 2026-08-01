@@ -1,0 +1,60 @@
+program	UE427_Flying.exe
+tag	UE4.27-FlyingDev
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	168793316
+meta.# of Data Type Categories	40664
+meta.# of Data Types	322834
+meta.# of Defined Data	2943251
+meta.# of Functions	570512
+meta.# of Instructions	28277584
+meta.# of Memory Blocks	14
+meta.# of Symbols	4820416
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 08:40:28 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/4.27.2/Development/Win64/UE427_Flying.exe
+meta.Executable MD5	7b5b1128513d9db23ce83b7b76b1c091
+meta.Executable SHA256	36353cb90ecbc4d703b7b92955765bb31483a27c8e07e25e2f886362808470a0
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/4.27.2/Development/Win64/UE427_Flying.exe?MD5=7b5b1128513d9db23ce83b7b76b1c091
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	UE427_Flying.pdb
+meta.PDB GUID	29ccec29-c8ea-4fb1-908f-4d87ec4a9db7
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UE4
+meta.PE Property[InternalName]	UE427_Flying
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	UE427_Flying.exe
+meta.PE Property[ProductName]	UE4
+meta.PE Property[ProductVersion]	++UE4+Release-4.27-CL-18319896
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	UE427_Flying.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	570512
+instructions	28277584
+defined_data	2943251
+datatypes	322834
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	4693919
+symbols_global	4098436
+symbols_sha256	bd6e689f77445082f09a028514ba0f47132f8179d954e0d7ea6f351529592c40
+symbols_source.ANALYSIS	815260
+symbols_source.DEFAULT	3094563
+symbols_source.IMPORTED	784096

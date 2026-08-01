@@ -1,0 +1,61 @@
+program	StackOBot.exe
+tag	UE5.8.1-StackOBotDev
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	340899124
+meta.# of Data Type Categories	58383
+meta.# of Data Types	283930
+meta.# of Defined Data	6152353
+meta.# of Functions	883847
+meta.# of Instructions	57645206
+meta.# of Memory Blocks	14
+meta.# of Symbols	4297070
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 13:58:08 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/5.8/Stack_O_Bot/Development/Windows/StackOBot/Binaries/Win64/StackOBot.exe
+meta.Executable MD5	5b131ac706d63fbeb233fbc1f46f4758
+meta.Executable SHA256	72c3dc75d7c05e9627876512af060574946f57f6d70d2758a5373f5cdbe67db1
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/5.8/Stack_O_Bot/Development/Windows/StackOBot/Binaries/Win64/StackOBot.exe?MD5=5b131ac706d63fbeb233fbc1f46f4758
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	StackOBot.pdb
+meta.PDB GUID	fe6dfeee-bf0d-4fea-a79f-3d3b6a5dacf9
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UnrealGame
+meta.PE Property[FileVersion]	5.8.1
+meta.PE Property[InternalName]	StackOBot
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	StackOBot.exe
+meta.PE Property[ProductName]	UnrealGame
+meta.PE Property[ProductVersion]	5.8.1
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	StackOBot.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	883847
+instructions	57645206
+defined_data	6152353
+datatypes	283930
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	8695415
+symbols_global	7611589
+symbols_sha256	93378b87b80713c0714f8026e03bcff9f6f4a28960939989471cfa8d9f4b1cf3
+symbols_source.ANALYSIS	1494084
+symbols_source.DEFAULT	5748967
+symbols_source.IMPORTED	1452364

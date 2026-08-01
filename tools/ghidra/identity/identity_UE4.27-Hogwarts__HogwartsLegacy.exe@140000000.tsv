@@ -1,0 +1,59 @@
+program	HogwartsLegacy.exe
+tag	UE4.27-Hogwarts
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	466345552
+meta.# of Data Type Categories	4
+meta.# of Data Types	127
+meta.# of Defined Data	2773764
+meta.# of Functions	366872
+meta.# of Instructions	65635915
+meta.# of Memory Blocks	19
+meta.# of Symbols	444900
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Mon Jul 27 17:03:06 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Hogwarts Legacy/Phoenix/Binaries/Win64/HogwartsLegacy.exe
+meta.Executable MD5	fd1ab9ddf069ba2b25e1fbc2cf516d7a
+meta.Executable SHA256	b713e88e0034cb23562b7ffeba6febe5d6a679578215cb595e1644cfc56245a1
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Hogwarts Legacy/Phoenix/Binaries/Win64/HogwartsLegacy.exe?MD5=fd1ab9ddf069ba2b25e1fbc2cf516d7a
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	2
+meta.PDB File	HogwartsLegacy_prot.pdb
+meta.PDB GUID	5e907f04-bcbd-48dd-8b7d-04dcc889d10f
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Warner Bros. Interactive
+meta.PE Property[FileDescription]	Hogwarts Legacy
+meta.PE Property[InternalName]	Phoenix
+meta.PE Property[LegalCopyright]	Copyright (C) 2025 WB Games, Inc.
+meta.PE Property[OriginalFilename]	HogwartsLegacy.exe
+meta.PE Property[ProductName]	Hogwarts Legacy
+meta.PE Property[ProductVersion]	1.0.1569535
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	HogwartsLegacy.exe
+meta.Relocatable	false
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	366872
+instructions	65635915
+defined_data	2773764
+datatypes	127
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	5023465
+symbols_global	4947635
+symbols_sha256	97476fe1d92c89cefa8add8ece514e86898b9ff9d178580cf6ea90473098d291
+symbols_source.ANALYSIS	74682
+symbols_source.DEFAULT	4945720
+symbols_source.IMPORTED	3063

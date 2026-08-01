@@ -1,0 +1,57 @@
+program	UE415_Flyinh.exe
+tag	UE4.15-FlyingDev
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	96316032
+meta.# of Data Type Categories	4
+meta.# of Data Types	134
+meta.# of Defined Data	864555
+meta.# of Functions	177823
+meta.# of Instructions	0
+meta.# of Memory Blocks	8
+meta.# of Symbols	179128
+meta.Address Size	64
+meta.Analyzed	false
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 19:17:36 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/4.15.3/Development/UE415_Flyinh.exe
+meta.Executable MD5	cb8a4a2f8767ca12a1582e941fa572e3
+meta.Executable SHA256	074f6b1951cfdf4202ed6c202ef5d9e47496b3b26057c277a7e22e7a6b889cb7
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/4.15.3/Development/UE415_Flyinh.exe?MD5=cb8a4a2f8767ca12a1582e941fa572e3
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	145bdddff
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	UE415_Flyinh.pdb
+meta.PDB GUID	935c117c-6ef6-451c-81bb-105d3803f2b3
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UE4Game
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	UE4-Launch.lib
+meta.PE Property[ProductName]	UE4Game
+meta.PE Property[ProductVersion]	++UE4+Release-4.15-CL-3450819
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	UE415_Flyinh.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	true
+functions	177823
+instructions	0
+defined_data	864555
+datatypes	134
+analysis_state	ANALYSED
+symbols	515790
+symbols_global	514722
+symbols_sha256	f11b7b56c57f3ebb13eb0e6def8ae2373bbff036d06b720244ba0c1925d4933e
+symbols_source.DEFAULT	514238
+symbols_source.IMPORTED	1552

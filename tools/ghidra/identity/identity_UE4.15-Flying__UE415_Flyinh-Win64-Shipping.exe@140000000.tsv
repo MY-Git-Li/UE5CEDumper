@@ -1,0 +1,59 @@
+program	UE415_Flyinh-Win64-Shipping.exe
+tag	UE4.15-Flying
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	50552072
+meta.# of Data Type Categories	28811
+meta.# of Data Types	171026
+meta.# of Defined Data	815074
+meta.# of Functions	109476
+meta.# of Instructions	7725247
+meta.# of Memory Blocks	9
+meta.# of Symbols	1232392
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Tue Jul 28 19:27:47 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/X:/UE_Analyze_Data/Varies Version builds/4.15.3/Shipping/WindowsNoEditor/UE415_Flyinh/Binaries/Win64/UE415_Flyinh-Win64-Shipping.exe
+meta.Executable MD5	2f94653fdbe932fba33e687eff58d516
+meta.Executable SHA256	97489755b1f98c52ebc53d513b7d25c474eda807116df180f531584ab805aaa5
+meta.FSRL	file:///X:/UE_Analyze_Data/Varies Version builds/4.15.3/Shipping/WindowsNoEditor/UE415_Flyinh/Binaries/Win64/UE415_Flyinh-Win64-Shipping.exe?MD5=2f94653fdbe932fba33e687eff58d516
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	UE415_Flyinh-Win64-Shipping.pdb
+meta.PDB GUID	08e9d65f-2426-4fb2-80b4-d71cf0f82fbd
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UE4Game
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	UE4-Launch-Win64-Shipping.lib
+meta.PE Property[ProductName]	UE4Game
+meta.PE Property[ProductVersion]	++UE4+Release-4.15-CL-3450819
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	UE415_Flyinh-Win64-Shipping.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	109476
+instructions	7725247
+defined_data	815074
+datatypes	171026
+analysis_state	ANALYSED
+symbols	1124792
+symbols_global	1016471
+symbols_sha256	bb2b10e0a2ff85c6d1288111fdd2929d6c24634d1b9ce2cda783957a01c612e6
+symbols_source.ANALYSIS	134243
+symbols_source.DEFAULT	777936
+symbols_source.IMPORTED	212613

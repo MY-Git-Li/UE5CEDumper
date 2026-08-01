@@ -440,7 +440,7 @@ one_project() {
   # GB_* are dump_blocks.java's env; harmless to scan_patterns.java and vice versa, so both
   # scripts can be driven from this one table without a per-script branch here.
   GS_OUT="$SWEEP_OUT" GS_TSV="$SWEEP_OUT/patterns.tsv" GS_TRUE="$TRUE" GS_TAG="$TAG" \
-  GB_OUT="$SWEEP_OUT" GB_TAG="$TAG" \
+  GB_OUT="$SWEEP_OUT" GB_TAG="$TAG" GI_OUT="$SWEEP_OUT" GI_TAG="$TAG" \
      "$HL" "$GHIDRA_PROJS" "$PROJ" "${PROC[@]}" -noanalysis -readOnly \
      -scriptPath "$REPO/tools/ghidra" -postScript "$SWEEP_SCRIPT" > "$LOG" 2>&1
   local rc=$?

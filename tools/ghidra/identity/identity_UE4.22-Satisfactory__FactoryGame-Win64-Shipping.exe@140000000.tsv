@@ -1,0 +1,60 @@
+program	FactoryGame-Win64-Shipping.exe
+tag	UE4.22-Satisfactory
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	72339496
+meta.# of Data Type Categories	575621
+meta.# of Data Types	1602667
+meta.# of Defined Data	1610078
+meta.# of Functions	181345
+meta.# of Instructions	10990340
+meta.# of Memory Blocks	11
+meta.# of Symbols	2663724
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sat Jul 25 23:52:16 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/tmp/Game archive/Satisfactory/UE4.2.2/FactoryGame/Binaries/Win64/FactoryGame-Win64-Shipping.exe
+meta.Executable MD5	a1df9f191f8978e6c05d7919237be565
+meta.Executable SHA256	c7377816a6472120ac67920b2b3bbf1356c814cd6dbcf15076cf9219e629e1d4
+meta.FSRL	file:///D:/tmp/Game archive/Satisfactory/UE4.2.2/FactoryGame/Binaries/Win64/FactoryGame-Win64-Shipping.exe?MD5=a1df9f191f8978e6c05d7919237be565
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	FactoryGame-Win64-Shipping.pdb
+meta.PDB GUID	f6407ce1-5c4a-401c-b155-d98583951ce4
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Coffee Stain Studios AB
+meta.PE Property[FileDescription]	Satisfactory
+meta.PE Property[InternalName]	FactoryGame
+meta.PE Property[LegalCopyright]	Copyright 2016-2020 Coffee Stain Studios. All Rights Reserved.
+meta.PE Property[OriginalFilename]	FactoryGame-Win64-Shipping.exe
+meta.PE Property[ProductName]	Satisfactory
+meta.PE Property[ProductVersion]	++FactoryGame+rel-main-0.3.5-CL-124233
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	FactoryGame-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	181345
+instructions	10990340
+defined_data	1610078
+datatypes	1602667
+analysis_state	ANALYSED
+symbols	2183616
+symbols_global	1776978
+symbols_sha256	c67423c8b845096ca5d3fa2fe210679bc8c0b063f45ebecbefc7d5301b3503cb
+symbols_source.ANALYSIS	138798
+symbols_source.DEFAULT	1046538
+symbols_source.IMPORTED	998280

@@ -1,0 +1,59 @@
+program	StackOBot-Win64-DebugGame.exe
+tag	UE5.7.4-StackOBotDbgGame
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	317818212
+meta.# of Data Type Categories	4
+meta.# of Data Types	103
+meta.# of Defined Data	3738269
+meta.# of Functions	634459
+meta.# of Instructions	0
+meta.# of Memory Blocks	11
+meta.# of Symbols	636087
+meta.Address Size	64
+meta.Analyzed	false
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Wed Jul 29 15:10:48 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/UE_Analyze_Data/Varies Version builds/5.7/Stack_O_Bot/DebugGame/Windows/StackOBot/Binaries/Win64/StackOBot-Win64-DebugGame.exe
+meta.Executable MD5	062eb252c6e81a6f1ea2779e996e0264
+meta.Executable SHA256	ae1ac50ac90642204b424b11db932d9c1f1be433902d46c86c974355cfca4f68
+meta.FSRL	file:///D:/UE_Analyze_Data/Varies Version builds/5.7/Stack_O_Bot/DebugGame/Windows/StackOBot/Binaries/Win64/StackOBot-Win64-DebugGame.exe?MD5=062eb252c6e81a6f1ea2779e996e0264
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	152f1c7ff
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	StackOBot-Win64-DebugGame.pdb
+meta.PDB GUID	f758921c-2745-4dd6-a195-ec9c83930a1b
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UnrealGame
+meta.PE Property[FileVersion]	5.7.4
+meta.PE Property[InternalName]	StackOBot
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	StackOBot-Win64-DebugGame.exe
+meta.PE Property[ProductName]	UnrealGame
+meta.PE Property[ProductVersion]	5.7.4
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	StackOBot-Win64-DebugGame.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	true
+functions	634459
+instructions	0
+defined_data	3738269
+datatypes	103
+has_pdb_applied	yes
+analysis_state	NOT-DISASSEMBLED
+symbols	1971734
+symbols_global	1970413
+symbols_sha256	99efd980839931ae2adcc11a4d9c33ec764d4749c8e4a24fe06837912fc1c0ab
+symbols_source.DEFAULT	1969986
+symbols_source.IMPORTED	1748

@@ -1,0 +1,62 @@
+program	ES2-Win64-Shipping.exe
+tag	UE5.5-Everspace2b
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	175825472
+meta.# of Data Type Categories	939335
+meta.# of Data Types	4426063
+meta.# of Defined Data	3137051
+meta.# of Functions	510167
+meta.# of Instructions	28573945
+meta.# of Memory Blocks	11
+meta.# of Symbols	5936820
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 13:11:19 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/SteamLibrary/steamapps/common/EVERSPACE™ 2/ES2/Binaries/Win64/ES2-Win64-Shipping.exe
+meta.Executable MD5	85daf780d2b1cdf6ffb0ca017d0ba3b2
+meta.Executable SHA256	cb44e9c0a2a30630881f0c5b79d78f389b092d618cbcb8d6eedc6522ba8a9d7c
+meta.FSRL	file:///D:/SteamLibrary/steamapps/common/EVERSPACE%E2%84%A2 2/ES2/Binaries/Win64/ES2-Win64-Shipping.exe?MD5=85daf780d2b1cdf6ffb0ca017d0ba3b2
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	ES2-Win64-Shipping.pdb
+meta.PDB GUID	b41ca0b1-33f1-5433-87c2-a6330121b028
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	EVERSPACE 2
+meta.PE Property[FileVersion]	UE5-CL-0
+meta.PE Property[InternalName]	ES2
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	ES2-Win64-Shipping.exe
+meta.PE Property[ProductName]	EVERSPACE 2
+meta.PE Property[ProductVersion]	UE5-CL-0
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	ES2-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	510167
+instructions	28573945
+defined_data	3137051
+datatypes	4426063
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	5036806
+symbols_global	4121800
+symbols_sha256	b7a503c17c623162e9bfd7b1b069f334b649205752689d171b67c7587554050e
+symbols_source.ANALYSIS	274958
+symbols_source.DEFAULT	2386454
+symbols_source.IMPORTED	2375394

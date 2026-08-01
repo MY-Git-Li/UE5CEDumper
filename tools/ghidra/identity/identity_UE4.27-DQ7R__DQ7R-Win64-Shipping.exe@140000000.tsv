@@ -1,0 +1,61 @@
+program	DQ7R-Win64-Shipping.exe
+tag	UE4.27-DQ7R
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	408568320
+meta.# of Data Type Categories	4
+meta.# of Data Types	136
+meta.# of Defined Data	1465593
+meta.# of Functions	234378
+meta.# of Instructions	25992316
+meta.# of Memory Blocks	20
+meta.# of Symbols	294802
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	gcc:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 21:30:50 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/SteamLibrary/steamapps/common/DQ7R/DQ7R/Binaries/Win64/DQ7R-Win64-Shipping.exe
+meta.Executable MD5	0258248483c4fce5b427e89d25780563
+meta.Executable SHA256	cad34f3a4be6f1a2e5980c59bb29eacb5f1c37870e5e46a1e5a3845a967390c1
+meta.FSRL	file:///D:/SteamLibrary/steamapps/common/DQ7R/DQ7R/Binaries/Win64/DQ7R-Win64-Shipping.exe?MD5=0258248483c4fce5b427e89d25780563
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	1585aa1ff
+meta.MinGW Relocations	Unsupported
+meta.Minimum Address	140000000
+meta.PDB Age	4
+meta.PDB File	DQ7R-protected.pdb
+meta.PDB GUID	0d080058-930d-40f2-8409-6d68a7d8534c
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	SQUARE ENIX
+meta.PE Property[FileDescription]	DRAGON QUEST VII Reimagined
+meta.PE Property[FileVersion]	1.0.1.0
+meta.PE Property[InternalName]	DRAGON QUEST VII Reimagined
+meta.PE Property[LegalCopyright]	© ARMOR PROJECT/BIRD STUDIO/SQUARE ENIX © SUGIYAMA KOBO Ⓟ SUGIYAMA KOBO
+meta.PE Property[OriginalFilename]	DQ7R.exe
+meta.PE Property[ProductName]	DRAGON QUEST VII Reimagined
+meta.PE Property[ProductVersion]	1.0.1.0
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	DQ7R-Win64-Shipping.exe
+meta.Relocatable	false
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	234378
+instructions	25992316
+defined_data	1465593
+datatypes	136
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	2532472
+symbols_global	2473384
+symbols_sha256	61bcc9bde537fb4adc486ac63c979d4fd1f2e6100d66009c9fb4c3b2774d9cf0
+symbols_source.ANALYSIS	57956
+symbols_source.DEFAULT	2472509
+symbols_source.IMPORTED	2007

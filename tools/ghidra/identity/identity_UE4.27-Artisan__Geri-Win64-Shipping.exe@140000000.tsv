@@ -1,0 +1,60 @@
+program	Geri-Win64-Shipping.exe
+tag	UE4.27-Artisan
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	82312404
+meta.# of Data Type Categories	68
+meta.# of Data Types	2244
+meta.# of Defined Data	1626599
+meta.# of Functions	157259
+meta.# of Instructions	12596231
+meta.# of Memory Blocks	11
+meta.# of Symbols	1064045
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 10:38:39 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/The Artisan of Glimmith/Geri/Binaries/Win64/Geri-Win64-Shipping.exe
+meta.Executable MD5	1425c04e00c05ad8a29450070f131415
+meta.Executable SHA256	ce4d1ed01245664d4dcec81a21198f8217584fa9ec46dad14d1c19a0bb16f5f7
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/The Artisan of Glimmith/Geri/Binaries/Win64/Geri-Win64-Shipping.exe?MD5=1425c04e00c05ad8a29450070f131415
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	Geri-Win64-Shipping.pdb
+meta.PDB GUID	72e059e2-fd2e-4451-a91d-8b497e5cd81f
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Lunarch Studios Inc.
+meta.PE Property[FileDescription]	The Artisan of Glimmith
+meta.PE Property[InternalName]	Geri
+meta.PE Property[LegalCopyright]	Copyright © Lunarch Studios Inc. 2024-2026
+meta.PE Property[OriginalFilename]	Geri-Win64-Shipping.exe
+meta.PE Property[ProductName]	The Artisan of Glimmith
+meta.PE Property[ProductVersion]	++UE4+Release-4.27-CL-17735300
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	Geri-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	157259
+instructions	12596231
+defined_data	1626599
+datatypes	2244
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	1597690
+symbols_global	1543799
+symbols_sha256	0abdecd153034b987a01eeb65217af76c93c013f794fdae09ec1af15eb4db498
+symbols_source.ANALYSIS	52343
+symbols_source.DEFAULT	1539641
+symbols_source.IMPORTED	5706

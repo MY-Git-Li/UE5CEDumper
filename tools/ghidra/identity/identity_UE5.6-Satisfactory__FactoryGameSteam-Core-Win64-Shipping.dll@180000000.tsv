@@ -1,0 +1,62 @@
+program	FactoryGameSteam-Core-Win64-Shipping.dll
+tag	UE5.6-Satisfactory
+image_base	180000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	9974948
+meta.# of Data Type Categories	30124
+meta.# of Data Types	146208
+meta.# of Defined Data	130178
+meta.# of Functions	20962
+meta.# of Instructions	1475419
+meta.# of Memory Blocks	10
+meta.# of Symbols	225505
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sat Jul 25 20:47:26 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Satisfactory/Engine/Binaries/Win64/FactoryGameSteam-Core-Win64-Shipping.dll
+meta.Executable MD5	f9fe8df78638fe1e39d4df7fdba9c498
+meta.Executable SHA256	7d0517ad42b571563eac6583118fffa9a75b041e1abd717cb246b68adaef9af4
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Satisfactory/Engine/Binaries/Win64/FactoryGameSteam-Core-Win64-Shipping.dll?MD5=f9fe8df78638fe1e39d4df7fdba9c498
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	180000000
+meta.PDB Age	1
+meta.PDB File	FactoryGameSteam-Core-Win64-Shipping.pdb
+meta.PDB GUID	bddc43c3-f080-d574-4ac2-3233a01d4219
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	FactoryGameSteam
+meta.PE Property[FileVersion]	++FactoryGame+rel-main-1.2.0-CL-495413
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	FactoryGameSteam-Core-Win64-Shipping.dll
+meta.PE Property[ProductName]	FactoryGameSteam
+meta.PE Property[ProductVersion]	++FactoryGame+rel-main-1.2.0-CL-495413
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	FactoryGameSteam-Core-Win64-Shipping.dll
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	20962
+instructions	1475419
+defined_data	130178
+datatypes	146208
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	254459
+symbols_global	223663
+symbols_sha256	8589be5aa604af8272f11a0d87ee1c38ba482aa616e10292bceabbe4172a576d
+symbols_source.ANALYSIS	25045
+symbols_source.DEFAULT	163325
+symbols_source.IMPORTED	66089

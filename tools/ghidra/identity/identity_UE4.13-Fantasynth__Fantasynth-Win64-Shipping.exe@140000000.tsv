@@ -1,0 +1,60 @@
+program	Fantasynth-Win64-Shipping.exe
+tag	UE4.13-Fantasynth
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	44886784
+meta.# of Data Type Categories	11
+meta.# of Data Types	451
+meta.# of Defined Data	756813
+meta.# of Functions	85551
+meta.# of Instructions	6972259
+meta.# of Memory Blocks	11
+meta.# of Symbols	563218
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Mon Jul 27 20:03:07 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Fantasynth/Fantasynth/Binaries/Win64/Fantasynth-Win64-Shipping.exe
+meta.Executable MD5	632c5330a066c96477b53809a82d6fb6
+meta.Executable SHA256	5380708aaf59992814912122afc3f71d6b18bd41062cde1a5e04fcec4e9f191b
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Fantasynth/Fantasynth/Binaries/Win64/Fantasynth-Win64-Shipping.exe?MD5=632c5330a066c96477b53809a82d6fb6
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	Fantasynth-Win64-Shipping.pdb
+meta.PDB GUID	64382a8d-7dee-424b-8a57-d9e91c8264cf
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	Unreal Engine
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	UE4-Launch-Win64-Shipping.lib
+meta.PE Property[ProductName]	Unreal Engine
+meta.PE Property[ProductVersion]	++UE4+Release-4.13-CL-3172292
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	Fantasynth-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	85551
+instructions	6972259
+defined_data	756813
+datatypes	451
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	872854
+symbols_global	848453
+symbols_sha256	ea1585f49f694216069c6964964720e8f0e7ccddf856d1b66b0816f0ef87afbc
+symbols_source.ANALYSIS	23126
+symbols_source.DEFAULT	845277
+symbols_source.IMPORTED	4451

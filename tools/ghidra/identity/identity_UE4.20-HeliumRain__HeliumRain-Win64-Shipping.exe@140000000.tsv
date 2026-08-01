@@ -1,0 +1,59 @@
+program	HeliumRain-Win64-Shipping.exe
+tag	UE4.20-HeliumRain
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	57115528
+meta.# of Data Type Categories	57435
+meta.# of Data Types	285720
+meta.# of Defined Data	1231120
+meta.# of Functions	130808
+meta.# of Instructions	8259529
+meta.# of Memory Blocks	9
+meta.# of Symbols	1320932
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Mon Jul 27 17:32:50 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/HeliumRain/HeliumRain/Binaries/Win64/HeliumRain-Win64-Shipping.exe
+meta.Executable MD5	4dd8b021b63fc97f9bd513321a5354cf
+meta.Executable SHA256	4ca37f52dfbf435809bd8639f04c171a18652548a809df3e81990bfdb4a60fb5
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/HeliumRain/HeliumRain/Binaries/Win64/HeliumRain-Win64-Shipping.exe?MD5=4dd8b021b63fc97f9bd513321a5354cf
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	HeliumRain-Win64-Shipping.pdb
+meta.PDB GUID	022ab3d8-f1c2-4278-8737-a89ee8e58b27
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	HeliumRain
+meta.PE Property[InternalName]	HeliumRain
+meta.PE Property[LegalCopyright]	Copyright 1998-2018 Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	HeliumRain.exe
+meta.PE Property[ProductName]	Unreal Engine
+meta.PE Property[ProductVersion]	4.20.3
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	HeliumRain-Win64-Shipping.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	130808
+instructions	8259529
+defined_data	1231120
+datatypes	285720
+analysis_state	ANALYSED
+symbols	1417007
+symbols_global	1237528
+symbols_sha256	d771ad1b4d76aa2b75c33565caeba33881152c8400d461a538a04929e6e3955f
+symbols_source.ANALYSIS	197496
+symbols_source.DEFAULT	897260
+symbols_source.IMPORTED	322251

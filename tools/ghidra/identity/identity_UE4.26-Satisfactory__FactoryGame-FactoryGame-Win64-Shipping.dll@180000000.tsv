@@ -1,0 +1,61 @@
+program	FactoryGame-FactoryGame-Win64-Shipping.dll
+tag	UE4.26-Satisfactory
+image_base	180000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	17280832
+meta.# of Data Type Categories	136067
+meta.# of Data Types	496113
+meta.# of Defined Data	688396
+meta.# of Functions	58030
+meta.# of Instructions	1948895
+meta.# of Memory Blocks	10
+meta.# of Symbols	668114
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sun Jul 26 08:04:20 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/tmp/Game archive/Satisfactory/UE4.26.2/FactoryGame/Binaries/Win64/FactoryGame-FactoryGame-Win64-Shipping.dll
+meta.Executable MD5	0568e292e032ee765a828da3cee43d6b
+meta.Executable SHA256	e89a6105be104dcde7336efd13219c16753096caa7d51f444b31e1f83b14978d
+meta.FSRL	file:///D:/tmp/Game archive/Satisfactory/UE4.26.2/FactoryGame/Binaries/Win64/FactoryGame-FactoryGame-Win64-Shipping.dll?MD5=0568e292e032ee765a828da3cee43d6b
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	180000000
+meta.PDB Age	1
+meta.PDB File	FactoryGame-FactoryGame-Win64-Shipping.pdb
+meta.PDB GUID	4f51768c-4a36-4667-b067-817e5ed35e82
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Coffee Stain Studios AB
+meta.PE Property[FileDescription]	Satisfactory
+meta.PE Property[InternalName]	FactoryGame
+meta.PE Property[LegalCopyright]	Copyright Coffee Stain Studios. All Rights Reserved.
+meta.PE Property[OriginalFilename]	FactoryGame-FactoryGame-Win64-Shipping.dll
+meta.PE Property[ProductName]	Satisfactory
+meta.PE Property[ProductVersion]	++FactoryGame+rel-main-0.6.0-CL-201145
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	FactoryGame-FactoryGame-Win64-Shipping.dll
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	58030
+instructions	1948895
+defined_data	688396
+datatypes	496113
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	563200
+symbols_global	446927
+symbols_sha256	cbdc765e391d32adc77d1e95950fc97c2c2842f30378beb975da1fa5c01f8521
+symbols_source.ANALYSIS	32679
+symbols_source.DEFAULT	214571
+symbols_source.IMPORTED	315950

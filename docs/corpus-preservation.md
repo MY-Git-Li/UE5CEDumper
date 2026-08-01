@@ -156,7 +156,58 @@ re-import has still never been demonstrated end to end. The rule in
 One practical consequence worth banking now: `ES2-0517` re-runs a **language-version upgrade on
 every open** (`-readOnly` discards it), and that upgrade — not the scan — dominates its runtime. It
 was the last row to finish in all three Ghidra runs on 2026-08-01, by a wide margin. If a future
-run looks hung on that project, it is probably not hung.
+run looks hung on that project, it is probably not hung. §0c explains why it is the only one.
+
+-----
+
+### 0b. A `.rep` CAN be rebuilt — demonstrated 2026-08-01
+
+The standing rule was "no `.rep` may be deleted until a re-import is demonstrated end to end".
+`tools/ghidra/reimport_verify.py` does it and grades the result on three things that fail
+independently: Ghidra's recorded executable MD5/SHA256, a **SHA-256 over every `(address, name,
+type, scope, source)` in the symbol table**, the block map with a per-block MD5, and byte-identical
+sweep output. Matching symbol *counts* would pass a rebuild that put the right number of symbols at
+the wrong addresses — which is exactly what a same-named-but-different PDB produces.
+
+| rebuild | original | result | wall |
+|---|---|---|---|
+| `UE4.10-Game`, `-noanalysis` | raw import, no PDB | **REBUILT-IDENTICAL** | 95 s |
+| `AudioMixerCore` (0.1 MB), `--analyze` | PDB + disassembled | **REBUILT-EQUIVALENT** | 98 s |
+| `FactoryGame-CoreUObject` (4.2 MB, 684,805 instructions), `--analyze` | PDB + disassembled | **REBUILT-IDENTICAL** | 422 s |
+
+"Identical" is literal: same executable hashes, same symbol digest, same function / instruction /
+defined-data / datatype counts, same `PDB Loaded` and `RTTI Found`, same block map, same scan and
+consensus files.
+
+**Ghidra's analysis is deterministic here, and that was measured rather than assumed.** Two
+independent `--analyze` rebuilds of the same input were **field-for-field identical (0 differing
+fields)**. That is what makes the one anomaly interpretable: `AudioMixerCore`'s rebuild differed
+from its original by **+1 data type and +7 in `# of Symbols`** while the symbol *digest* and every
+address-bearing count matched. Since rebuilds agree with each other, that delta is history the
+ORIGINAL carries, not rebuild noise — and it did not recur on the 40x larger CoreUObject, so it is
+specific to that project rather than a property of the method.
+
+### 0c. What the corpus actually contains, measured
+
+`dump_identity.java` over all 57 rows (74 programs). The discriminator is **instructions, not
+functions or `.rep` size**: applying a PDB creates functions and defined data without disassembling
+anything, so `UE4.10-GameDev` shows 195,451 functions, 840,853 defined data and `Analyzed=false`
+with **zero instructions**.
+
+| PDB loaded | disassembled | programs | rebuild cost |
+|---|---|---|---|
+| yes | yes | **42** | import + PDB + analysis (minutes) |
+| no | yes | 18 | import + analysis |
+| no | no | 13 | import only (~1 min); includes the 4 broken stubs |
+
+The raw imports' symbols are **not PDB symbols** — `UE4.10-Game` has 184,438 `DEFAULT` (auto-named,
+from the `.pdata` function table) plus 1,233 `IMPORTED` (the PE export/import table). GROUND-TRUTH's
+note that `-noanalysis` skips PDB application is correct. A PDB-loaded project looks different:
+`UE4.20-Everspace` carries 445,962 `IMPORTED` symbols.
+
+**`ES2-0517` is the only project in the corpus created by Ghidra 11.3.2**; the other 72 programs
+are 12.1.2. That is the cause of its per-open language upgrade, and it is the one project whose
+original toolchain a rebuild on the installed Ghidra cannot reproduce.
 
 -----
 

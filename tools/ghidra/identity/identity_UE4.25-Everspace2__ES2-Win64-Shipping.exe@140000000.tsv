@@ -1,0 +1,61 @@
+program	ES2-Win64-Shipping.exe
+tag	UE4.25-Everspace2
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	78006564
+meta.# of Data Type Categories	68128
+meta.# of Data Types	351915
+meta.# of Defined Data	1671660
+meta.# of Functions	192091
+meta.# of Instructions	11914686
+meta.# of Memory Blocks	11
+meta.# of Symbols	1967871
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sat Jul 25 23:06:15 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/tmp/Game archive/ES2/UE4.25.2/ES2/Binaries/Win64/ES2-Win64-Shipping.exe
+meta.Executable MD5	0588eacdee27ea0bf105727789727fd8
+meta.Executable SHA256	39923eeecbb2c38ccd3499b28b515b18168067727e1f206446a71959f7f7762c
+meta.FSRL	file:///D:/tmp/Game archive/ES2/UE4.25.2/ES2/Binaries/Win64/ES2-Win64-Shipping.exe?MD5=0588eacdee27ea0bf105727789727fd8
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	ES2-Win64-Shipping.pdb
+meta.PDB GUID	bcdee47d-df3d-4e97-9abd-648d645bd295
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	EVERSPACE 2
+meta.PE Property[InternalName]	ES2
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	ES2-Win64-Shipping.exe
+meta.PE Property[ProductName]	EVERSPACE 2
+meta.PE Property[ProductVersion]	++UE4+Release-4.25-CL-13908680
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	ES2-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	192091
+instructions	11914686
+defined_data	1671660
+datatypes	351915
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	2122284
+symbols_global	1870622
+symbols_sha256	6cc1e6c00689c86c00910c248d4c1fa7390b38ebf5b3f19e95627ed4840f95ea
+symbols_source.ANALYSIS	337734
+symbols_source.DEFAULT	1197778
+symbols_source.IMPORTED	586772

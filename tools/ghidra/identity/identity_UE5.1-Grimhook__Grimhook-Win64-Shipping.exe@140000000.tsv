@@ -1,0 +1,61 @@
+program	Grimhook-Win64-Shipping.exe
+tag	UE5.1-Grimhook
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	113046520
+meta.# of Data Type Categories	61977
+meta.# of Data Types	354358
+meta.# of Defined Data	2071536
+meta.# of Functions	232103
+meta.# of Instructions	18122486
+meta.# of Memory Blocks	11
+meta.# of Symbols	2712508
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Mon Jul 27 14:37:42 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Grimhook/Grimhook/Binaries/Win64/Grimhook-Win64-Shipping.exe
+meta.Executable MD5	aec276fa6110cb944d1be980b894b596
+meta.Executable SHA256	38344f6312b76db79817b04b39c73f9a5276353cb88dd1035d9f669eddc46131
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Grimhook/Grimhook/Binaries/Win64/Grimhook-Win64-Shipping.exe?MD5=aec276fa6110cb944d1be980b894b596
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	Grimhook-Win64-Shipping.pdb
+meta.PDB GUID	e4af3aca-5617-48f4-bcf3-548a8647b92b
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Unlimited Fries
+meta.PE Property[FileDescription]	Grimhook
+meta.PE Property[InternalName]	Grimhook
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	Grimhook-Win64-Shipping.exe
+meta.PE Property[ProductName]	Grimhook
+meta.PE Property[ProductVersion]	++UE5+Release-5.1-CL-23901901
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	Grimhook-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	232103
+instructions	18122486
+defined_data	2071536
+datatypes	354358
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	2842098
+symbols_global	2487004
+symbols_sha256	bf7ea700fc129d29634f3418f00f98f0808a896e4ea267a594a62854589f1e9e
+symbols_source.ANALYSIS	467896
+symbols_source.DEFAULT	1724461
+symbols_source.IMPORTED	649741

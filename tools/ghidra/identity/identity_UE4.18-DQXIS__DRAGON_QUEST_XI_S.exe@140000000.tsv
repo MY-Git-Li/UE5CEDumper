@@ -1,0 +1,60 @@
+program	DRAGON QUEST XI S.exe
+tag	UE4.18-DQXIS
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	108318200
+meta.# of Data Type Categories	62
+meta.# of Data Types	1815
+meta.# of Defined Data	2446202
+meta.# of Functions	180792
+meta.# of Instructions	12073621
+meta.# of Memory Blocks	11
+meta.# of Symbols	1233855
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Mon Jul 27 07:54:07 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/E:/SteamLibrary/steamapps/common/DRAGON QUEST XI S/Game/Binaries/Win64/DRAGON QUEST XI S.exe
+meta.Executable MD5	c19da2f7270cc82d790e2a084f2152bf
+meta.Executable SHA256	6c643291841429d1a507dc3ec256dcbb229c800310036641ed51dcab65e2f061
+meta.FSRL	file:///E:/SteamLibrary/steamapps/common/DRAGON QUEST XI S/Game/Binaries/Win64/DRAGON QUEST XI S.exe?MD5=c19da2f7270cc82d790e2a084f2152bf
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	2
+meta.PDB File	JackGameSteam-Win64-Shipping.pdb
+meta.PDB GUID	84837187-9b57-4ab8-bfd6-706531668f6e
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	SQUARE ENIX CO., LTD.
+meta.PE Property[FileDescription]	DRAGON QUEST XI S
+meta.PE Property[InternalName]	DRAGON QUEST XI S
+meta.PE Property[LegalCopyright]	© 2017, 2020 ARMOR PROJECT/BIRD STUDIO/SQUARE ENIX All Rights Reserved. © SUGIYAMA KOBO Ⓟ SUGIYAMA KOBO
+meta.PE Property[OriginalFilename]	DRAGON QUEST XI S.exe
+meta.PE Property[ProductName]	DRAGON QUEST XI S
+meta.PE Property[ProductVersion]	1.0.0.0
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	DRAGON QUEST XI S.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	180792
+instructions	12073621
+defined_data	2446202
+datatypes	1815
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	1805911
+symbols_global	1750975
+symbols_sha256	6451f5ac5055e0b3c99e0c898b473b72fc637f06e58b78193ed544d7171ed48b
+symbols_source.ANALYSIS	51624
+symbols_source.DEFAULT	1749294
+symbols_source.IMPORTED	4993

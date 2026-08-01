@@ -1,0 +1,62 @@
+program	FactoryGameSteam-CoreUObject-Win64-Shipping.dll
+tag	UE5.6-Satisfactory
+image_base	180000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	6220272
+meta.# of Data Type Categories	35437
+meta.# of Data Types	172291
+meta.# of Defined Data	108924
+meta.# of Functions	11491
+meta.# of Instructions	999102
+meta.# of Memory Blocks	9
+meta.# of Symbols	175687
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sat Jul 25 20:47:36 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Satisfactory/Engine/Binaries/Win64/FactoryGameSteam-CoreUObject-Win64-Shipping.dll
+meta.Executable MD5	c48c90e11e32f9f3ee0d9e716d523978
+meta.Executable SHA256	c92b4f1d00c1f05246a386581233b3f8e81fd9c7a15bf67b0ac6866853bd90df
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Satisfactory/Engine/Binaries/Win64/FactoryGameSteam-CoreUObject-Win64-Shipping.dll?MD5=c48c90e11e32f9f3ee0d9e716d523978
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	180000000
+meta.PDB Age	1
+meta.PDB File	FactoryGameSteam-CoreUObject-Win64-Shipping.pdb
+meta.PDB GUID	5d2fca85-2e6d-7360-e09c-e7dd0e8bb7fd
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	FactoryGameSteam
+meta.PE Property[FileVersion]	++FactoryGame+rel-main-1.2.0-CL-495413
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	FactoryGameSteam-CoreUObject-Win64-Shipping.dll
+meta.PE Property[ProductName]	FactoryGameSteam
+meta.PE Property[ProductVersion]	++FactoryGame+rel-main-1.2.0-CL-495413
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	FactoryGameSteam-CoreUObject-Win64-Shipping.dll
+meta.RTTI Found	false
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	11491
+instructions	999102
+defined_data	108924
+datatypes	172291
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	163528
+symbols_global	144021
+symbols_sha256	cd5f395d14aed3b30d550cf1774276772a549513334c101d041f12316edc6432
+symbols_source.ANALYSIS	10113
+symbols_source.DEFAULT	100850
+symbols_source.IMPORTED	52565

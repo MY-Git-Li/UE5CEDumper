@@ -1,0 +1,61 @@
+program	UE423_Flying-Win64-Shipping.exe
+tag	UE4.23-Flying
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	52963648
+meta.# of Data Type Categories	14289
+meta.# of Data Types	77933
+meta.# of Defined Data	1203251
+meta.# of Functions	126355
+meta.# of Instructions	8418917
+meta.# of Memory Blocks	10
+meta.# of Symbols	1376123
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Tue Jul 28 09:39:53 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/D:/Unreal Projects/UE423_Flying/Binaries_Shipping/Win64/UE423_Flying-Win64-Shipping.exe
+meta.Executable MD5	f61ec1be259922847178fe6a0a42817b
+meta.Executable SHA256	f50551723f2f48fc437275cad4af81d807ce95bb2ed508667798f37671a1c302
+meta.FSRL	file:///D:/Unreal Projects/UE423_Flying/Binaries_Shipping/Win64/UE423_Flying-Win64-Shipping.exe?MD5=f61ec1be259922847178fe6a0a42817b
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	UE423_Flying-Win64-Shipping.pdb
+meta.PDB GUID	5de2003c-9cc5-421f-8abb-06855a75d9e1
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UE4
+meta.PE Property[InternalName]	UE423_Flying
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	UE423_Flying-Win64-Shipping.exe
+meta.PE Property[ProductName]	UE4
+meta.PE Property[ProductVersion]	++UE4+Release-4.23-CL-9631420
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	UE423_Flying-Win64-Shipping.exe
+meta.RTTI Found	true
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	126355
+instructions	8418917
+defined_data	1203251
+datatypes	77933
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	1437942
+symbols_global	1265669
+symbols_sha256	77298b6c5195b7e92ab5a8b2491046f248ed40a99b9318698bfb2b295590e0ae
+symbols_source.ANALYSIS	253052
+symbols_source.DEFAULT	822106
+symbols_source.IMPORTED	362784

@@ -1,0 +1,61 @@
+program	StackOBot-Win64-Shipping.exe
+tag	UE5.8-StackOBot
+image_base	140000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	179482836
+meta.# of Data Type Categories	21388
+meta.# of Data Types	157282
+meta.# of Defined Data	3519920
+meta.# of Functions	371185
+meta.# of Instructions	29586793
+meta.# of Memory Blocks	11
+meta.# of Symbols	4452082
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Tue Jul 28 12:21:17 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/X:/UE_Analyze_Data/Varies Version builds/5.8/Stack_O_Bot/Shipping/Windows/StackOBot/Binaries/Win64/StackOBot-Win64-Shipping.exe
+meta.Executable MD5	03a2c57f56f617d6bdaf508d56a740bf
+meta.Executable SHA256	9f26de2d2968549bb90bbcea0a04a3afa48547ff6abc132b4219c756c500a635
+meta.FSRL	file:///X:/UE_Analyze_Data/Varies Version builds/5.8/Stack_O_Bot/Shipping/Windows/StackOBot/Binaries/Win64/StackOBot-Win64-Shipping.exe?MD5=03a2c57f56f617d6bdaf508d56a740bf
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	140000000
+meta.PDB Age	1
+meta.PDB File	StackOBot-Win64-Shipping.pdb
+meta.PDB GUID	de4b7293-9bd5-04f0-e898-4ad673bf2295
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	UnrealGame
+meta.PE Property[FileVersion]	++UE5+Release-5.8-CL-55116800
+meta.PE Property[InternalName]	StackOBot
+meta.PE Property[LegalCopyright]	Fill out your copyright notice in the Description page of Project Settings.
+meta.PE Property[OriginalFilename]	StackOBot-Win64-Shipping.exe
+meta.PE Property[ProductName]	UnrealGame
+meta.PE Property[ProductVersion]	++UE5+Release-5.8-CL-55116800
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	StackOBot-Win64-Shipping.exe
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	371185
+instructions	29586793
+defined_data	3519920
+datatypes	157282
+has_pdb_applied	yes
+analysis_state	DISASSEMBLED
+symbols	4447320
+symbols_global	3896965
+symbols_sha256	2967612902fb65799e27bb3db00046d6eb21a2bfc8641383caf4cd9b0f50bbb6
+symbols_source.ANALYSIS	778993
+symbols_source.DEFAULT	2750336
+symbols_source.IMPORTED	917991

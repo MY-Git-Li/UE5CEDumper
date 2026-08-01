@@ -1,0 +1,62 @@
+program	FactoryGameSteam-AudioMixerCore-Win64-Shipping.dll
+tag	UE5.6-Satisfactory
+image_base	180000000
+language	x86:LE:64:default
+language_version	4
+compiler_spec	windows
+meta.# of Bytes	128944
+meta.# of Data Type Categories	7781
+meta.# of Data Types	42204
+meta.# of Defined Data	1890
+meta.# of Functions	292
+meta.# of Instructions	6592
+meta.# of Memory Blocks	8
+meta.# of Symbols	7886
+meta.Address Size	64
+meta.Analyzed	true
+meta.Compiler	visualstudio:unknown
+meta.Compiler ID	windows
+meta.Created With Ghidra Version	12.1.2
+meta.Date Created	Sat Jul 25 21:01:21 GMT+08:00 2026
+meta.Endian	Little
+meta.Executable Format	Portable Executable (PE)
+meta.Executable Location	/H:/SteamLibrary/steamapps/common/Satisfactory/Engine/Binaries/Win64/FactoryGameSteam-AudioMixerCore-Win64-Shipping.dll
+meta.Executable MD5	f5c65b749617a0c773577c813753c807
+meta.Executable SHA256	b03ae7c5bdb6f5134dc5eb3b7ffb818e7e6224a4c6bc3ac99a5b366f37bc0d8d
+meta.FSRL	file:///H:/SteamLibrary/steamapps/common/Satisfactory/Engine/Binaries/Win64/FactoryGameSteam-AudioMixerCore-Win64-Shipping.dll?MD5=f5c65b749617a0c773577c813753c807
+meta.Language ID	x86:LE:64:default (4.7)
+meta.Maximum Address	ff0000184f
+meta.Minimum Address	180000000
+meta.PDB Age	1
+meta.PDB File	FactoryGameSteam-AudioMixerCore-Win64-Shipping.pdb
+meta.PDB GUID	0e7976aa-d241-8633-2505-c5050e351f42
+meta.PDB Loaded	true
+meta.PDB Version	RSDS
+meta.PE Property[CompanyName]	Epic Games, Inc.
+meta.PE Property[FileDescription]	FactoryGameSteam
+meta.PE Property[FileVersion]	++FactoryGame+rel-main-1.2.0-CL-495413
+meta.PE Property[InternalName]	UnrealEngine
+meta.PE Property[LegalCopyright]	Copyright Epic Games, Inc. All Rights Reserved.
+meta.PE Property[OriginalFilename]	FactoryGameSteam-AudioMixerCore-Win64-Shipping.dll
+meta.PE Property[ProductName]	FactoryGameSteam
+meta.PE Property[ProductVersion]	++FactoryGame+rel-main-1.2.0-CL-495413
+meta.PE Property[Translation]	4b00409
+meta.Preferred Root Namespace Category	
+meta.Processor	x86
+meta.Program Name	FactoryGameSteam-AudioMixerCore-Win64-Shipping.dll
+meta.RTTI Found	false
+meta.Relocatable	true
+meta.SectionAlignment	4096
+meta.Should Ask To Analyze	false
+functions	292
+instructions	6592
+defined_data	1890
+datatypes	42204
+has_pdb_applied	no
+analysis_state	DISASSEMBLED
+symbols	2150
+symbols_global	1825
+symbols_sha256	3bcfc3c58c0e4bdfa6890b1d7ff2862546ffd0cfe91a2809b71572a1a21679e7
+symbols_source.ANALYSIS	283
+symbols_source.DEFAULT	709
+symbols_source.IMPORTED	1158
