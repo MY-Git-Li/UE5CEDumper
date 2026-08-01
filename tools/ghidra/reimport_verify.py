@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild a corpus `.rep` from the archived binary and prove the rebuild is the same project.
+r"""Rebuild a corpus `.rep` from the archived binary and prove the rebuild is the same project.
 
     py tools/ghidra/reimport_verify.py UE4.10-Game UE4.26-Satisfactory
     py tools/ghidra/reimport_verify.py --all --keep
