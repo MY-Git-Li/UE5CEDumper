@@ -159,6 +159,28 @@ failures and are not:
 > `ue_version.py` still earned its place: it recovered Octopath Traveler as **4.18**, which the
 > sweep corpus had carried as "4.x, version stripped".
 
+## `check_live_verification.py` — docs consistency (runs in CI)
+
+Not a reversing tool; it lives here because CI runs it alongside `ghidra/extract_patterns.py --check`
+and `ghidra/blocktest.py`, and it needs no Ghidra, no corpus and no network.
+
+Enforces one mechanical invariant over `docs/`:
+
+```
+roadmap.md says "In-game verification pending"  ==>  it carries "(key: X)"
+                                                ==>  todo.md's "Pending live-game verification" mentions X
+```
+
+The caveat stays next to the capability it qualifies (a roadmap reader needs it there); the STATUS
+and the acceptance test live in exactly one place. Written because the repo had **six** competing
+spellings of "shipped but unproven on a real game" across 14 files, and the register was missing
+items `roadmap.md` had carried a caveat for since build 796. Renaming the register heading fails the
+check rather than silently disabling it.
+
+```bash
+py tools/check_live_verification.py
+```
+
 ## External (not vendored)
 
 - **[patternsleuth](https://github.com/trumank/patternsleuth)** (`cargo run -p patternsleuth_cli -- scan --path <exe> --resolver <name>`) — confirm whether the standard resolvers match, and get string-anchored candidate functions. Clone on demand; do not vendor (large + rebuilds).

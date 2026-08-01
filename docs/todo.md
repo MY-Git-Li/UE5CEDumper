@@ -469,9 +469,11 @@ the row here when it ships.
   > afterwards. This is exactly the H1 scenario, executed for real rather than simulated.
   *Delete this row after the audit batch is merged to main.* *Parent: audit-2026-07-14-findings §H1.*
 
-- **[✅ ALL MEDIUMs DONE — 1 HIGH + 10 MED shipped on `dev`; DLL M1–M5 await in-game verify]** — the entire
+- **[✅ ALL MEDIUMs DONE — 1 HIGH + 10 MED shipped on `dev`]** — the entire
   audit-#3 HIGH+MEDIUM set is fixed. Remaining audit work = the **13 LOW** batch (below) + optional/cosmetic
-  items. Done-notes for the DLL cluster:
+  items. **In-game verification status is NOT tracked here** — it lives per-item under
+  [§ Pending live-game verification](#pending-live-game-verification-verify-only--no-code); this block
+  is about what shipped, that one is about what has been proven. Done-notes for the DLL cluster:
   > **✅ DONE — M5 + M2 enable-recovery leak** (SHIPPED commit `61e1f7f`, build 2189, **needs in-game verify**).
   > `Tot::RequestShutdown()` at the TOP of `UE5_Shutdown` + every module's `StartWorker*` gated on
   > `Tot::ShutdownRequested()` (single spawn chokepoint) → no worker revives in the shutdown window; cleared
@@ -1621,7 +1623,50 @@ Shipped + unit-tests-pass but unproven on real games:
   review confirmed Map/Set/Set offsets correct + reachable; accepted nits: struct-nested dotted base name
   doesn't re-hydrate (pre-existing, affects arrays too, CE math still correct) + int32 element-offset
   arithmetic (theoretical, `FieldOffset` is int by design).
-- **Value Search `TOptional<T>` scan (V1c)** (build 942). Scan a known value held in a
+- **Audit #3 DLL fixes — M1–M5 + the DLL/Solide LOWs** ([audit-2026-07-14-findings.md](audit-2026-07-14-findings.md)).
+  Shipped on `dev` (`408fd2d`, `7f3898f`, `3362636`); this section is their SINGLE owner — the audit
+  doc and the Audit-#3 block above point here rather than each asserting a status of their own.
+  Every one is a **race or a lifecycle-ordering fix**, which is precisely the class a unit test
+  cannot reach: the bug needs a real game thread, a real disconnect, and real timing.
+  - **M1 / M2 / M3 — Schlacht restore-set** (disable↔Tick race repopulating `hiddenActors`; disable
+    while the game thread is stalled discarding the restore set; no un-hide on disconnect/shutdown).
+    Acceptance: enable See-Through, then (a) toggle off during motion, (b) toggle off while the game
+    is paused/stalled, (c) yank the UI connection and (d) close the game — in **all four** every
+    hidden actor must become visible again. A single actor left invisible is the failure, and it is
+    only visible on screen. ⬜
+  - **M4 — Tot latch zombifying a Solide hold** during the disconnect window. Acceptance: start a
+    force-field hold, disconnect the UI mid-hold, reconnect → `get_forced_fields` must still list the
+    hold AND the value must still be held (a zombie job lists but stops re-asserting, so checking the
+    list alone is not enough — read the value in CE). ⬜
+  - **M5 — `UE5_Shutdown` worker-join ordering** (joined hold workers before stopping the pipe, so a
+    mutator arriving in the window respawned an unjoined worker). Acceptance: with a hold active,
+    close the game while the UI is still connected → no hang, no crash on exit. Evidence is the
+    absence of a hang; there is no positive log line. ⬜
+  - **DLL LOWs L1 / L5 / L8 / L10 / L12** (Solitar worker start/stop under `s_workerMutex`;
+    Welford gap underflow on out-of-order PE timestamps; Grausam `GetWindowTextW` under `g_mutex`
+    hanging the pipe thread; Grausam post-enable windows + shutdown teardown; Fern `str_params`
+    malloc leak on a mid-loop JSON `type_error`). L8 and L12 are the ones with a user-visible
+    symptom (pipe stall / leak under repeated failed invokes). ⬜
+  - **Solide LOWs L2 / L3 / L4** (weak-ptr refusal no longer silent; substring class + fuzzy field
+    match tightened; per-instance restore bases instead of one representative). L4's prune guard was
+    touched again in build 2531 — see the Solide pool-truncation entry below, verify them together. ⬜
+
+- **Value Search `TSet<T>` / `TMap<K,V>` scan (key: V1a)** (build 927). Scan a known value held
+  in a `TSet<int>` / `TMap<K,int>` UPROPERTY → rows must render as `Set[idx]` / `Map.Key[idx]` /
+  `Map.Value[idx]`, and a Next Scan must prune. The sparse-walk geometry
+  (`Ubel::GetSetElementStride` / `GetMapPairLayout`) is shared with the container-aware Address
+  Finder and unit-tested; what is NOT provable offline is that live sets/maps hand back the slots
+  we expect. Specifically watch a **container reallocation between scans** — element addresses are
+  raw, so refine degrades exactly like `TArray` (the SEH-safe read drops the candidate); confirm it
+  degrades rather than reporting a wrong hit. ⬜ unverified.
+- **Value Search `NumericAll` (byte families included) (key: NumericAll)** (build 796-797). Select
+  NumericAll and scan a value that genuinely lives in an `Int8Property` / `ByteProperty` → confirm
+  the byte field is found, and that the orange result-volume warning
+  (`ValueSearchViewModel.DataTypeWarning`) appears. `BuildNumericTargets`' range gating is
+  unit-tested (`300` → no Int8/UInt8; `-5` → Int8 yes / UInt8 no); the live question is whether the
+  result volume for a small value (0/1/255) is *usable* or drowns the panel — that is a UX
+  judgement no test can make. ⬜ unverified.
+- **Value Search `TOptional<T>` scan (key: V1c)** (build 942). Scan a known value held in a
   `TOptional<int/float/FString>` UPROPERTY → confirm the row appears under the optional's
   field name and a Next Scan prunes; confirm an **unset** optional doesn't surface on a
   scan for `0` (the `bIsSet` gate). Layout helper is unit-tested; the field walk needs a
