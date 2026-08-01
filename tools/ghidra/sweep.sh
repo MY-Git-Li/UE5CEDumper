@@ -434,13 +434,35 @@ one_project() {
   GS_OUT="$SWEEP_OUT" GS_TSV="$SWEEP_OUT/patterns.tsv" GS_TRUE="$TRUE" GS_TAG="$TAG" \
      "$HL" "$GHIDRA_PROJS" "$PROJ" "${PROC[@]}" -noanalysis -readOnly \
      -scriptPath "$REPO/tools/ghidra" -postScript scan_patterns.java > "$LOG" 2>&1
-  echo "   done $TAG (exit=$?)  log: $LOG"
+  local rc=$?
+  echo "   done $TAG (exit=$rc)  log: $LOG"
+  # Record failures to a FILE, not a variable: each call runs in its own background
+  # subshell, so a counter incremented here would never reach the parent. The file also
+  # carries the TAG, which `wait -n` alone cannot tell you.
+  [ "$rc" -ne 0 ] && printf '%s\t%s\t%s\n' "$TAG" "$rc" "$LOG" >> "$SWEEP_OUT/_failures.tsv"
+  # Was `echo` — so the function returned ECHO's status and every job "succeeded", no
+  # matter what Ghidra did. The printed `(exit=N)` text was always right (`$?` is expanded
+  # before echo runs); only the function's own status was wrong.
+  return "$rc"
 }
 
 # Ghidra takes an EXCLUSIVE lock per project, so parallelism is safe ACROSS projects but never
 # within one. SWEEP_JOBS controls how many projects run at once.
 JOBS="${SWEEP_JOBS:-3}"
 running=0
+rm -f "$SWEEP_OUT/_failures.tsv"
+
+# Does this shell have `wait -n` (bash 4.3+)? Probe the VERSION, never the exit status.
+# The old code was `wait -n 2>/dev/null || wait`, which was safe only while one_project
+# always returned 0. Now that it propagates Ghidra's status, that idiom would read a
+# FAILED JOB as "wait -n is unsupported" and fall through to a bare `wait` — draining every
+# remaining job at once while `running` dropped by only 1, collapsing concurrency to 1 for
+# the rest of the sweep. A version probe cannot be fooled by a job's exit code.
+have_wait_n=0
+if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] ||
+   { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
+  have_wait_n=1
+fi
 for row in "${ROWS[@]}"; do
   TAG="${row%%|*}";  rest="${row#*|}"
   PROJ="${rest%%|*}"; rest="${rest#*|}"
@@ -452,10 +474,33 @@ for row in "${ROWS[@]}"; do
   echo "== launching $TAG   project=$PROJ   glob=$GLOB"
   one_project "$TAG" "$PROJ" "$GLOB" "$TRUE" &
   running=$((running + 1))
-  if [ "$running" -ge "$JOBS" ]; then wait -n 2>/dev/null || wait; running=$((running - 1)); fi
+  if [ "$running" -ge "$JOBS" ]; then
+    # `|| true` because a failing job now returns non-zero and we account for it via
+    # _failures.tsv, not here — reaping must not abort or change control flow.
+    if [ "$have_wait_n" -eq 1 ]; then
+      wait -n || true
+      running=$((running - 1))
+    else
+      wait || true          # no `wait -n`: this drains everything, so reset the counter
+      running=0
+    fi
+  fi
 done
 wait
+
+FAILED=0
+if [ -s "$SWEEP_OUT/_failures.tsv" ]; then
+  FAILED=$(wc -l < "$SWEEP_OUT/_failures.tsv" | tr -d ' ')
+  echo
+  echo "!! $FAILED project(s) FAILED — the sweep's results are INCOMPLETE:"
+  while IFS=$'\t' read -r ftag frc flog; do
+    echo "   $ftag  (exit=$frc)  $flog"
+  done < "$SWEEP_OUT/_failures.tsv"
+  echo "   A missing scan TSV silently becomes a missing ROW in REPORT.md, which reads as"
+  echo "   'that pattern was never tested' rather than 'that project did not run'."
+fi
 
 echo
 echo "== sweep complete. Aggregate with:"
 echo "   py tools/ghidra/aggregate_sweep.py \"$SWEEP_OUT\""
+[ "$FAILED" -eq 0 ] || exit 1
