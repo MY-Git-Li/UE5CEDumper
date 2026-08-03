@@ -48,17 +48,20 @@ analysis) **REBUILT-IDENTICAL** in 422 s. Two `--analyze` rebuilds of one input 
 field-for-field identical, so Ghidra's analysis is deterministic here. Full write-up in
 [corpus-preservation.md](corpus-preservation.md) §0b/§0c and [dev-log.md](dev-log.md).
 
-**What is still missing is a BACKUP, not a proof.** The corpus is single-copy: `X:` no longer
-exists and `X:\Ghidra_Projs_Backup` never produced a file. A demonstration that rebuilds work is
-not a second copy, and a rebuild costs minutes per binary for the 42 PDB-loaded, disassembled
-programs.
+**Backup status: `X:\Ghidra_Projs_Backup` lives on the OTHER machine, not this one.** An earlier
+draft of this section called the corpus "single-copy" on the strength of `X:` being absent *here* —
+that is a one-machine observation stated as a global fact, and it is withdrawn. What remains true
+is that a rebuild costs minutes per binary for the 42 PDB-loaded, disassembled programs, so
+rebuilding is a recovery path, not a substitute for the copy.
 
 Four things to keep in view when the deletion decision is actually made:
 
-* **`ES2-0517` is the only project created by Ghidra 11.3.2**; the other 72 programs are 12.1.2.
-  That is the cause of its language-version upgrade on every open (`-readOnly` discards it, so it
-  re-runs every time and dominates that row's runtime), and it is the one project whose original
-  toolchain a rebuild on the installed Ghidra cannot reproduce.
+* ~~`ES2-0517`'s per-open language upgrade~~ — **FIXED 2026-08-01.** Upgraded in place (one run
+  without `-readOnly`): **12 m 43 s once**, and the same scan went from **>10 min, not finishing**
+  to **30 s**. Behaviour-preserving — scan/consensus/blocks byte-identical, symbol digest and all
+  507,555 functions / 28,635,821 instructions unchanged. It was the only project needing it.
+  Upgrading beats re-importing: the migration keeps the analysis, a re-import would re-run it.
+  See [corpus-preservation.md](corpus-preservation.md) §0d.
 * **18 patterns have exactly one program where they resolve correctly** — Satisfactory 7 across
   four DLLs, UE4.22-Satisfactory 4, Solarpunk 4, Everspace 2. That reads as a reason to keep those
   `.rep`s and is not: `pe_sweep.py` reads binaries, so the risk attaches to the **binary**, and all

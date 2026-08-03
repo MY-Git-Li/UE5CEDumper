@@ -240,16 +240,55 @@ note that `-noanalysis` skips PDB application is correct. A PDB-loaded project l
 are 12.1.2. That is the cause of its per-open language upgrade, and it is the one project whose
 original toolchain a rebuild on the installed Ghidra cannot reproduce.
 
-That is not a theoretical caveat — it is the corpus's **only** `MISMATCH`. After the harness was
-tightened, `reimport_verify.py UE5.5-Everspace2` reduces to exactly one irreducible line:
+**Do NOT treat that as something to preserve.** For about an hour this document advised "keep that
+`.rep`, or keep an 11.3.2 install", because `reimport_verify.py` graded the version difference as a
+`MISMATCH`. That is backwards and it does not scale: on Ghidra 12.2 or 13.0, *every* project would
+suddenly read as "irreproducible" against a pinned original, and the corpus would be chasing a
+version it can never get back.
 
-```
-meta.Created With Ghidra Version: orig='11.3.2' rebuild='12.1.2'
+The strategy is the opposite one:
+
+> **Always rebuild on the installed Ghidra.** If a new release breaks something, stay on the
+> working version until it is fixed — do not pin an artifact's birth version as a requirement.
+
+`meta.Created With Ghidra Version` is therefore reported as an informational note and never as a
+failure, and `ES2-0517` grades `REBUILT-MODULO-ANALYSIS` like every other analysed row (block map
+and all three sweep files match). **17 of 17 rows verified, zero mismatches.**
+
+### 0d. UPGRADE the project, do not re-import it — done 2026-08-01, measured
+
+Re-importing from the archive would have cost a **full re-analysis** (hours for a 169 MB binary
+with 28.6 M instructions). The language-version upgrade is a **migration of the existing database**,
+not a re-analysis: it keeps every instruction, function and PDB symbol. So the fix is to let the
+upgrade PERSIST — run the project once **without `-readOnly`**, which `GROUND-TRUTH.md` has
+prescribed all along and which had never been done:
+
+```sh
+analyzeHeadless "$GHIDRA_PROJS" ES2-0517 -process -noanalysis     # NOTE: no -readOnly
 ```
 
-Its block map and all three sweep files still match. So the row is *functionally* rebuildable and
-*provenance-wise* is not, and only that one project. If 11.3.2 matters, keep that `.rep` or keep
-an 11.3.2 install; nothing else in the corpus has the problem.
+| | |
+|---|---|
+| one-time cost | **12 m 43 s** |
+| a scan BEFORE the upgrade | **>10 min — did not finish**; the whole window went into the upgrade, which `-readOnly` then discarded |
+| the same scan AFTER | **30 s**, zero `Updating language version` lines |
+| `.rep` size | 12 GB → 12 GB (unchanged) |
+
+It pays for itself on the **second** run, and only ONE project in the corpus needed it — the log
+line `Updating language version` appears for `ES2-0517` and for nothing else across every run.
+
+**It is behaviour-preserving, and that was checked rather than assumed.** Against the pre-upgrade
+baselines: `scan_*.txt`, `scan_*.tsv`, `consensus_*.txt` and `blocks_*.tsv` all **byte-identical**,
+symbol digest identical (5,298,149 symbols), 507,555 functions and 28,635,821 instructions
+unchanged, `PDB Loaded=true`. `meta.Created With Ghidra Version` stays `11.3.2` — that field records
+what CREATED the program and a migration does not rewrite it, which is fine because per §0c it is
+not a property worth preserving.
+
+⚠ **Killing a `-readOnly` run mid-upgrade leaves debris.** Taking a 12 GB safety copy first was
+right, but then timing a "before" run against that copy — and killing it at a 10-minute timeout —
+left **~6 GB of orphaned transient DB files** inside the backup's `idata` plus a stale
+`ES2-0517.lock` / `.lock~`. That is §0's "`-readOnly` does not mean no writes" happening in
+miniature. Delete the stale locks after confirming no `java.exe` holds the project.
 
 -----
 
@@ -701,9 +740,13 @@ the differential signal is currently a null result. The value is in retaining th
   ever losing the ES2 pair.
 * `X:\$RECYCLE.BIN` holds a complete `depot_1128921` ES2 4.25.2 tree (exe + 165.8 MB pdb).
   **"Empty recycle bin" silently deletes a corpus copy.**
-* `X:\Ghidra_Projs_Backup` **is empty**, while `X:\sync_Ghidra_Projs.PS1` and `X:\sync.cmd` exist.
-  A `.rep` backup was configured and has produced nothing. Given that the whole ~120 GB lives on
-  one machine, this is the single most actionable item in this document.
+* ⚠ **`X:` IS A DIFFERENT MACHINE.** `X:\Ghidra_Projs_Backup` / `sync_Ghidra_Projs.PS1` /
+  `sync.cmd` are not reachable from the laptop this doc is usually edited on, and the maintainer
+  confirms the backup lives on the other machine (2026-08-01). An earlier note here read
+  "`X:\Ghidra_Projs_Backup` **is empty** … the whole ~120 GB lives on one machine"; on 2026-08-01 I
+  compounded it by checking `X:` *from the laptop*, finding nothing, and writing "the corpus is
+  single-copy" into three documents. **A drive-letter check only reports the machine you ran it
+  on.** Backup state has to be asserted from the machine that holds it, with the machine named.
 
 -----
 
