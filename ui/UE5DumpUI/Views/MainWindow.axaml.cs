@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.ViewModels;
 
 namespace UE5DumpUI.Views;
@@ -96,6 +97,16 @@ public partial class MainWindow : Window
         // controls individually.
         AddHandler(InputElement.GotFocusEvent, OnGlobalGotFocus,
             RoutingStrategies.Bubble, handledEventsToo: true);
+        // Browser-style Live Walker history: Alt+Left / Alt+Right, the mouse's 4th /
+        // 5th buttons, and the dedicated BrowserBack / BrowserForward keys.
+        // At the window root and TUNNELLING, for two reasons: the field DataGrid
+        // claims Left/Right for cell navigation and would eat the arrows on the way
+        // up, and when focus sits on the tab header the Live Walker panel isn't even
+        // on the event route — a panel-level handler would simply never fire.
+        // Both gates (foreground window + Live Walker is the current tab) live in
+        // LiveWalkerNavShortcuts so they stay testable.
+        AddHandler(KeyDownEvent, OnNavShortcutKeyDown, RoutingStrategies.Tunnel);
+        AddHandler(PointerPressedEvent, OnNavShortcutPointerPressed, RoutingStrategies.Tunnel);
         // Seed the snapshot with the XAML-declared default so the very
         // first restore (without a prior maximize) still has something
         // sane to fall back to.
@@ -605,6 +616,51 @@ public partial class MainWindow : Window
             splitterColumn.Width = new GridLength(4);
             TreeSplitter.IsVisible = true;
         }
+    }
+
+    // ── Browser-style Live Walker history shortcuts ─────────────────────────
+    // Wired as tunnelling window-root handlers in the ctor. The decision of what a
+    // given key / mouse button means lives in LiveWalkerNavShortcuts (pure, tested);
+    // everything here is plumbing.
+
+    /// <summary>True when the Live Walker tab is the one on screen. Matched by
+    /// <c>TabItem.Tag</c>, never by index — MainTabIndex documents how those indices
+    /// silently drifted when tabs were inserted.</summary>
+    private bool IsLiveWalkerTabActive()
+        => (MainTabs.SelectedItem as TabItem)?.Tag as string == "LiveWalker";
+
+    private void OnNavShortcutKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (RunNavShortcut(LiveWalkerNavShortcuts.Resolve(
+                e.Key, e.KeyModifiers, IsLiveWalkerTabActive(), IsActive)))
+            e.Handled = true;
+    }
+
+    private void OnNavShortcutPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        var kind = e.GetCurrentPoint(this).Properties.PointerUpdateKind;
+        if (RunNavShortcut(LiveWalkerNavShortcuts.Resolve(
+                kind, IsLiveWalkerTabActive(), IsActive)))
+            e.Handled = true;
+    }
+
+    /// <summary>Run the resolved navigation. Returns true when the input belonged to
+    /// us and must not travel on — including when we deliberately swallowed it.</summary>
+    private bool RunNavShortcut(NavShortcut action)
+    {
+        if (action == NavShortcut.None) return false;
+        if (DataContext is not MainWindowViewModel vm) return false;
+        var walker = vm.LiveWalker;
+
+        // Auto-repeat guard. Avalonia 12 doesn't surface IsRepeat on KeyEventArgs, so
+        // a HELD Alt+Left would otherwise fire ~30x/second and queue that many pipe
+        // round-trips behind each other. One walk at a time — but still report the
+        // input as handled, so the swallowed repeats never reach the DataGrid either.
+        if (walker.IsLoading) return true;
+
+        var command = action == NavShortcut.Back ? walker.GoBackCommand : walker.GoForwardCommand;
+        if (command.CanExecute(null)) command.Execute(null);
+        return true;
     }
 
     private void MainTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)

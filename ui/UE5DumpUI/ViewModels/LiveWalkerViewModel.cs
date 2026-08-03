@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
@@ -38,6 +39,27 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
     // Navigation breadcrumb stack
     [ObservableProperty] private ObservableCollection<BreadcrumbItem> _breadcrumbs = new();
+
+    // ── Browser-style forward history ───────────────────────────────────────
+    // Breadcrumbs is a PATH, not a history: Back and a breadcrumb jump TRUNCATE
+    // it and the removed crumbs were previously dropped, so there was nothing to
+    // go forward to. They now land here (newest on top) until the next fresh
+    // navigation invalidates them, exactly like a browser drops its forward
+    // history when you follow a new link.
+    //
+    // Everything needed to re-render a level already lives on its BreadcrumbItem
+    // (that is how Back re-renders `prev`), so replaying one is just pushing the
+    // crumb back and rendering it — no extra state is captured here.
+    private readonly Stack<BreadcrumbItem> _forwardStack = new();
+
+    /// <summary>Set while <c>GoForwardAsync</c> re-pushes a crumb so the
+    /// CollectionChanged invalidation hook doesn't mistake that Add for a fresh
+    /// navigation and wipe the very stack we're walking.</summary>
+    private bool _replayingForward;
+
+    /// <summary>Drives the Forward button's IsEnabled. Kept as state rather than a
+    /// computed property because <see cref="_forwardStack"/> isn't observable.</summary>
+    [ObservableProperty] private bool _canGoForward;
     [ObservableProperty] private ObservableCollection<LiveFieldValue> _fields = new();
     [ObservableProperty] private bool _isLoading;
 
@@ -591,8 +613,21 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         // auto-disables whenever the walk root isn't GWorld (Start from
         // GameEngine / Open in Live Walker / etc.). Subscribing here covers every
         // mutation site (Clear/Add on navigate, RemoveAt on Back) at once.
-        Breadcrumbs.CollectionChanged += (_, _) =>
+        Breadcrumbs.CollectionChanged += (_, e) =>
+        {
             IsRootGWorld = Breadcrumbs.Count > 0 && Breadcrumbs[0].FieldName == "GWorld";
+
+            // Forward-history invalidation rides the same subscription for the same
+            // reason: there are 7 crumb-push sites and 6 Clear sites today, and a
+            // hand-placed ClearForwardStack() at each would silently miss the NEXT
+            // navigation path someone adds. Add/Reset = a fresh navigation, so any
+            // forward history is dead. Remove = Back / a breadcrumb jump, which
+            // PUSHES onto the stack and must not clear it.
+            if (_replayingForward) return;
+            if (e.Action is NotifyCollectionChangedAction.Add
+                         or NotifyCollectionChangedAction.Reset)
+                ClearForwardStack();
+        };
     }
 
     public void SetEngineState(EngineState state)
@@ -875,6 +910,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // Save the clicked field name on the current breadcrumb for scroll restoration on Back
             if (Breadcrumbs.Count > 0)
                 Breadcrumbs[^1].ScrollHintFieldName = field.Name;
+            // Full view state too (selection + scroll anchor) — the richer rung of
+            // the restore ladder. ScrollHintFieldName above stays as the fallback
+            // for crumbs that never get captured.
+            CaptureCrumbViewState(field);
 
             // CE/CSX chain offsets are relative to the parent's RESOLVED address.
             // When drilling a Map element's VALUE, the parent (the Map container
@@ -948,6 +987,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // Save scroll hint on current breadcrumb
             if (Breadcrumbs.Count > 0)
                 Breadcrumbs[^1].ScrollHintFieldName = field.Name;
+            CaptureCrumbViewState(field);
 
             if (field.DataTableRowCount > 0 && _cachedDataTableRows != null)
             {
@@ -1644,6 +1684,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         // Jumping to a breadcrumb shows different data — drop the field filter.
         ClearFieldSearchForNavigation();
 
+        // Snapshot the level being left while the grid still shows it, so Forward
+        // (and a later Back into it) can restore selection + scroll. Harmless when
+        // the jump turns out to be a no-op (clicking the deepest crumb).
+        CaptureCrumbViewState();
+
         try
         {
             ClearStatus();
@@ -1654,18 +1699,23 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             if (idx < 0) return;
 
             var removedCount = Breadcrumbs.Count - idx - 1;
+            // A breadcrumb jump is N Backs, so the truncated crumbs go onto the
+            // forward history deepest-LAST — that puts the nearest one on top, and
+            // repeated Forward walks back down the way we came.
             while (Breadcrumbs.Count > idx + 1)
+            {
+                var dropped = Breadcrumbs[^1];
                 Breadcrumbs.RemoveAt(Breadcrumbs.Count - 1);
+                PushForward(dropped);
+            }
 
             _log.Info($"NAV⇒BC[{idx}] {item.FieldName ?? item.Label} removed={removedCount} | BC={FormatBreadcrumbTrace()}");
-            var scrollHint = item.ScrollHintFieldName;
 
             // If navigating back to a container view, re-populate from saved field
             if (item.IsContainerView && item.ContainerField != null)
             {
                 RepopulateContainerView(item.ContainerField, item);
-                if (!string.IsNullOrEmpty(scrollHint))
-                    ScrollToFieldRequested?.Invoke(scrollHint);
+                RestoreCrumbView(item);
                 return;
             }
 
@@ -1675,8 +1725,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             if (item.IsContainerView && item.ContainerField == null
                 && await TryRepopulateSyntheticContainerAsync(item))
             {
-                if (!string.IsNullOrEmpty(scrollHint))
-                    ScrollToFieldRequested?.Invoke(scrollHint);
+                RestoreCrumbView(item);
                 return;
             }
 
@@ -1686,8 +1735,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             if (IsGWorldActorListRoot(item))
             {
                 PopulateFromWorld(_cachedWorld!);
-                if (!string.IsNullOrEmpty(scrollHint))
-                    ScrollToFieldRequested?.Invoke(scrollHint);
+                RestoreCrumbView(item);
                 return;
             }
 
@@ -1697,8 +1745,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             result = await AutoFillGapsRetryAsync(result, item.Address, classAddr);
             UpdateDisplay(result);
 
-            if (!string.IsNullOrEmpty(scrollHint))
-                ScrollToFieldRequested?.Invoke(scrollHint);
+            RestoreCrumbView(item);
         }
         catch (Exception ex)
         {
@@ -1708,6 +1755,94 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         {
             IsLoading = false;
         }
+    }
+
+    /// <summary>Drop the forward history (a fresh navigation happened).</summary>
+    private void ClearForwardStack()
+    {
+        if (_forwardStack.Count == 0) return;
+        _forwardStack.Clear();
+        CanGoForward = false;
+    }
+
+    /// <summary>Record a crumb that Back / a breadcrumb jump just removed, so
+    /// Forward can put it back.</summary>
+    private void PushForward(BreadcrumbItem crumb)
+    {
+        _forwardStack.Push(crumb);
+        CanGoForward = true;
+    }
+
+    /// <summary>
+    /// Snapshot what the user is looking at RIGHT NOW onto the current (deepest)
+    /// breadcrumb, so Back / Forward / a breadcrumb jump can put it back: the rows
+    /// they had selected (multi-select) and the topmost visible row as a scroll
+    /// anchor.
+    ///
+    /// MUST run while the grid still shows THIS level — i.e. before Fields is
+    /// repopulated. (IsLoading is safe to have flipped: it only shows a 2px
+    /// ProgressBar, the DataGrid rows stay realised.)
+    ///
+    /// Reuses the bookmark carrier — <see cref="CaptureViewAnchor"/> is raised
+    /// synchronously and the View fills <see cref="ViewAnchorRef.TopRow"/> before
+    /// returning, so the value is readable on the next line.
+    /// </summary>
+    /// <param name="drilledRow">The row whose →/{}/[] button started this navigation,
+    /// when there is one. Those are Buttons inside a DataGridTemplateColumn cell and
+    /// Avalonia's Button marks PointerPressed handled, so clicking one need not select
+    /// its row — without this the "highlight the row you drilled through on Back"
+    /// affordance would be lost whenever nothing else was selected. Only consulted
+    /// when the user had no selection of their own, which always wins.</param>
+    private void CaptureCrumbViewState(LiveFieldValue? drilledRow = null)
+    {
+        if (Breadcrumbs.Count == 0) return;
+        var crumb = Breadcrumbs[^1];
+
+        // Prefer the multi-select snapshot; fall back to the single SelectedField
+        // anchor, which the paths that set selection in code (match navigation,
+        // element auto-scroll) update without a grid SelectionChanged round-trip;
+        // then to the row that was drilled.
+        var selected = _selectedFieldsSnapshot
+            .Select(f => new BookmarkFieldRef(f.Name, f.Offset))
+            .ToList();
+        if (selected.Count == 0 && SelectedField != null)
+            selected.Add(new BookmarkFieldRef(SelectedField.Name, SelectedField.Offset));
+        if (selected.Count == 0 && drilledRow != null)
+            selected.Add(new BookmarkFieldRef(drilledRow.Name, drilledRow.Offset));
+        crumb.ViewSelectedFields = selected;
+
+        var anchor = new ViewAnchorRef();
+        CaptureViewAnchor?.Invoke(anchor);
+        crumb.ViewTopRow = anchor.TopRow;
+    }
+
+    /// <summary>
+    /// Put the grid back to what <paramref name="crumb"/> was showing when the user
+    /// left it. Three rungs, most-faithful first:
+    ///
+    /// <list type="number">
+    /// <item>A captured view state (multi-selection + top-row scroll anchor),
+    /// replayed through the bookmark restore path — it matches rows by name+offset
+    /// with a name-only fallback and silently skips rows that are no longer there.</item>
+    /// <item>The legacy <see cref="BreadcrumbItem.ScrollHintFieldName"/> (the row the
+    /// user clicked to drill in). Every crumb that predates a capture has only this:
+    /// the synthetic spines from Locate-in-GWorld and from bookmark re-resolution,
+    /// plus any crumb the user reached without leaving it through a captured path.</item>
+    /// <item>Nothing — no selection, grid stays at the top. Correct when the user had
+    /// nothing selected, and ALSO the automatic outcome when a Forward re-walk found
+    /// the object gone: rung 1 then matches no rows and degrades to this by itself.</item>
+    /// </list>
+    /// </summary>
+    private void RestoreCrumbView(BreadcrumbItem crumb)
+    {
+        if (crumb.ViewSelectedFields is { Count: > 0 } || crumb.ViewTopRow != null)
+        {
+            RestoreBookmarkView?.Invoke(
+                crumb.ViewSelectedFields ?? new List<BookmarkFieldRef>(), crumb.ViewTopRow);
+            return;
+        }
+        if (!string.IsNullOrEmpty(crumb.ScrollHintFieldName))
+            ScrollToFieldRequested?.Invoke(crumb.ScrollHintFieldName);
     }
 
     [RelayCommand]
@@ -1744,16 +1879,19 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     if (lastBc.IsContainerView && lastBc.ContainerField != null)
                     {
                         RepopulateContainerView(lastBc.ContainerField, lastBc);
+                        RestoreCrumbView(lastBc);
                         return;
                     }
                     if (lastBc.IsContainerView && lastBc.ContainerField == null
                         && await TryRepopulateSyntheticContainerAsync(lastBc))
                     {
+                        RestoreCrumbView(lastBc);
                         return;
                     }
                     if (IsGWorldActorListRoot(lastBc))
                     {
                         PopulateFromWorld(_cachedWorld!);
+                        RestoreCrumbView(lastBc);
                         return;
                     }
                     var classAddr = string.IsNullOrEmpty(lastBc.ClassAddr) ? null : lastBc.ClassAddr;
@@ -1762,6 +1900,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                         arrayLimit: ArrayLimit, previewLimit: PreviewLimit, fillGaps: FillGaps);
                     result = await AutoFillGapsRetryAsync(result, lastBc.Address, classAddr);
                     UpdateDisplay(result);
+                    RestoreCrumbView(lastBc);
                 }
 
                 StatusText = "Returned to pre-bookmark view";
@@ -1783,10 +1922,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         // Re-check AOBMaker CE Plugin availability (detects CE start/close, cooldown-throttled)
         TryCheckAobMaker();
 
+        // Snapshot the level we're leaving (grid still shows it) so Forward can
+        // restore its selection + scroll position, then hand the crumb to the
+        // forward history. RemoveAt raises a Remove, which the invalidation hook
+        // deliberately ignores.
+        CaptureCrumbViewState();
         var removed = Breadcrumbs[^1];
         Breadcrumbs.RemoveAt(Breadcrumbs.Count - 1);
+        PushForward(removed);
         var prev = Breadcrumbs[^1];
-        var scrollHint = prev.ScrollHintFieldName;
         _log.Info($"NAV←Back removed={removed.FieldName ?? removed.Label} | BC={FormatBreadcrumbTrace()}");
 
         try
@@ -1798,8 +1942,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             if (prev.IsContainerView && prev.ContainerField != null)
             {
                 RepopulateContainerView(prev.ContainerField, prev);
-                if (!string.IsNullOrEmpty(scrollHint))
-                    ScrollToFieldRequested?.Invoke(scrollHint);
+                RestoreCrumbView(prev);
                 return;
             }
 
@@ -1808,8 +1951,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             if (prev.IsContainerView && prev.ContainerField == null
                 && await TryRepopulateSyntheticContainerAsync(prev))
             {
-                if (!string.IsNullOrEmpty(scrollHint))
-                    ScrollToFieldRequested?.Invoke(scrollHint);
+                RestoreCrumbView(prev);
                 return;
             }
 
@@ -1819,8 +1961,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             if (IsGWorldActorListRoot(prev))
             {
                 PopulateFromWorld(_cachedWorld!);
-                if (!string.IsNullOrEmpty(scrollHint))
-                    ScrollToFieldRequested?.Invoke(scrollHint);
+                RestoreCrumbView(prev);
                 return;
             }
 
@@ -1829,11 +1970,125 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             result = await AutoFillGapsRetryAsync(result, prev.Address, classAddr);
             UpdateDisplay(result);
 
-            if (!string.IsNullOrEmpty(scrollHint))
-                ScrollToFieldRequested?.Invoke(scrollHint);
+            RestoreCrumbView(prev);
         }
         catch (Exception ex)
         {
+            SetError(ex);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Browser-style Forward: re-enter the level Back (or a breadcrumb jump) just
+    /// left. The crumb carries everything needed to re-render it, so this pushes it
+    /// back onto the spine and renders it through the same four cases Back uses.
+    ///
+    /// Unlike Back, this re-READS the object from the game, so the level may have
+    /// changed underneath us — UE can free or recycle a UObject while the user is
+    /// elsewhere. That degrades in two layers: a class-name mismatch is reported and
+    /// the (now meaningless) selection is dropped, and a merely-changed field list is
+    /// absorbed by the restore ladder, which skips rows it can't match. Container
+    /// levels re-render from cached element data and never re-read memory at all.
+    /// </summary>
+    [RelayCommand]
+    private async Task GoForwardAsync()
+    {
+        if (_forwardStack.Count == 0) return;
+
+        // Cancel bookmark save mode on any navigation (mirrors Back).
+        IsBookmarkSaveMode = false;
+
+        // Forward shows different (next) data — drop the field-search filter.
+        ClearFieldSearchForNavigation();
+
+        // Re-check AOBMaker CE Plugin availability (detects CE start/close, cooldown-throttled)
+        TryCheckAobMaker();
+
+        // Snapshot the level we're leaving so an immediate Back returns to it intact.
+        CaptureCrumbViewState();
+
+        var next = _forwardStack.Pop();
+        CanGoForward = _forwardStack.Count > 0;
+
+        // Re-pushing a crumb is a replay, not a fresh navigation — suppress the
+        // CollectionChanged invalidation hook so the REST of the forward history
+        // survives and the user can keep going forward.
+        _replayingForward = true;
+        try { Breadcrumbs.Add(next); }
+        finally { _replayingForward = false; }
+
+        _log.Info($"NAV→Fwd {next.FieldName ?? next.Label} left={_forwardStack.Count} | BC={FormatBreadcrumbTrace()}");
+
+        try
+        {
+            ClearStatus();
+            IsLoading = true;
+
+            // Container view with a live field: re-render from the cached elements
+            // (no memory re-read, so this case cannot go stale).
+            if (next.IsContainerView && next.ContainerField != null)
+            {
+                RepopulateContainerView(next.ContainerField, next);
+                RestoreCrumbView(next);
+                return;
+            }
+
+            // Path-synthetic container crumb: re-hydrate from a live parent walk.
+            if (next.IsContainerView && next.ContainerField == null
+                && await TryRepopulateSyntheticContainerAsync(next))
+            {
+                RestoreCrumbView(next);
+                return;
+            }
+
+            if (IsGWorldActorListRoot(next))
+            {
+                PopulateFromWorld(_cachedWorld!);
+                RestoreCrumbView(next);
+                return;
+            }
+
+            var classAddr = string.IsNullOrEmpty(next.ClassAddr) ? null : next.ClassAddr;
+            var result = await _dump.WalkInstanceAsync(next.Address, classAddr,
+                arrayLimit: ArrayLimit, previewLimit: PreviewLimit, fillGaps: FillGaps);
+            result = await AutoFillGapsRetryAsync(result, next.Address, classAddr);
+            UpdateDisplay(result);
+
+            // Honest degrade (same check the bookmark load path uses): a class-name
+            // mismatch means the address now holds a DIFFERENT object, so restoring
+            // the old selection would dress up wrong data as a successful return.
+            // TargetClassName is empty on crumbs pushed before the class was known,
+            // so only compare when we actually have one.
+            if (!string.IsNullOrEmpty(next.TargetClassName)
+                && !string.Equals(CurrentClassName, next.TargetClassName, StringComparison.Ordinal))
+            {
+                StatusText = "Forward: object changed — selection not restored";
+                _log.Warn($"NAV→Fwd class mismatch at {next.Address}: " +
+                          $"expected {next.TargetClassName}, got {CurrentClassName}");
+                return;
+            }
+
+            RestoreCrumbView(next);
+        }
+        catch (Exception ex)
+        {
+            // Undo the optimistic push. Back can afford to leave its spine truncated
+            // on failure — that spine is still CONSISTENT — but Forward would leave a
+            // level sitting on the spine that never rendered. Put the user back where
+            // they pressed the button, with the crumb still available to retry.
+            // (Remove doesn't trip the invalidation hook; the re-push is guarded for
+            // symmetry with the Add above.)
+            if (Breadcrumbs.Count > 0 && ReferenceEquals(Breadcrumbs[^1], next))
+            {
+                _replayingForward = true;
+                try { Breadcrumbs.RemoveAt(Breadcrumbs.Count - 1); }
+                finally { _replayingForward = false; }
+                PushForward(next);
+            }
             SetError(ex);
         }
         finally
@@ -1849,6 +2104,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
         // Parent (Outer) is a different object — drop the field-search filter.
         ClearFieldSearchForNavigation();
+
+        // Snapshot the level being left so a Back from the parent restores the
+        // selection + scroll position instead of landing on a blank grid.
+        CaptureCrumbViewState();
 
         try
         {
@@ -2916,6 +3175,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // Save current state for Back-after-bookmark
             if (Breadcrumbs.Count > 0)
             {
+                // Snapshot the view too, so the Back that restores this trail also
+                // restores what was on screen. The list copy is shallow, so the
+                // capture lands on the same crumb objects the restore will read.
+                CaptureCrumbViewState();
                 _preBookmarkBreadcrumbs = Breadcrumbs.ToList();
                 _preBookmarkAddress = CurrentAddress;
                 _preBookmarkCachedWorld = _cachedWorld;
@@ -5712,6 +5975,23 @@ public sealed class BreadcrumbItem
 
     /// <summary>Field name the user was looking at before drilling in. Used to restore scroll position on Back.</summary>
     public string? ScrollHintFieldName { get; set; }
+
+    /// <summary>
+    /// Rows that were SELECTED when the user last left this level (multi-select),
+    /// replayed by Back / Forward / a breadcrumb jump. Stored as name+offset
+    /// records rather than <see cref="LiveFieldValue"/> references: the forward
+    /// stack can hold several levels at once and must not pin their field lists
+    /// alive. Null when never captured — crumbs built by Locate-in-GWorld or a
+    /// bookmark spine re-resolution only ever have <see cref="ScrollHintFieldName"/>,
+    /// and the restore ladder falls back to that.
+    /// </summary>
+    public List<BookmarkFieldRef>? ViewSelectedFields { get; set; }
+
+    /// <summary>Topmost visible row when the user last left this level — the scroll
+    /// anchor (the Avalonia DataGrid exposes no pixel-offset API, so the position is
+    /// restored by scrolling this row back into view). Null when never captured, or
+    /// when the grid had no realised rows.</summary>
+    public BookmarkFieldRef? ViewTopRow { get; set; }
 
     /// <summary>True if this breadcrumb represents a container element view (Array/Map/Set/DataTable).</summary>
     public bool IsContainerView { get; init; }

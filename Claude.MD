@@ -155,7 +155,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- ObjectTreePanel           <- UObject hierarchy    |
 |      +-- ClassStructPanel          <- Property Grid        |
 |      +-- PointerPanel              <- GObjects/GNames addr |
-|      +-- LiveWalkerPanel           <- Instance drill-down  |
+|      +-- LiveWalkerPanel           <- Instance drill-down (+ browser-style Back/**Forward** history: crumbs popped by Back/breadcrumb-jump go on a forward stack invalidated via `Breadcrumbs.CollectionChanged`; each crumb carries the view state — multi-selection + top-row scroll anchor, reusing the bookmark `CaptureViewAnchor`/`RestoreBookmarkView` pair — restored by a 3-rung ladder (view state → `ScrollHintFieldName` → nothing); `Alt+←/→` + mouse buttons 4/5 + BrowserBack/Forward, gated on foreground + `TabItem.Tag=="LiveWalker"` via pure `Helpers/LiveWalkerNavShortcuts`, 2550) |
 |      +-- InstanceFinderPanel       <- Class instance search (+ "Newest first" opt-in: scan GObjects high-index end for just-spawned instances, 1325; + server-side class-noise exclude-before-cap re-run + full-pool class_histogram + configurable Max cap + client keyword filter, 1444) |
 |      +-- PropertySearchPanel       <- Search by name (build 610+ dedupe + Freeze button; finder btn + opt-in Deep struct/container descent 1222; + row context "Force" submenu (Solide: Force ON/OFF/→null/value… hold across live instances) + "Forced fields (N held)" strip, experimental-gated, build 2168) |
 |      +-- InterestingFunctionsPanel <- Scored UFunctions; 📦 batch CT (build 760) |

@@ -48,6 +48,15 @@ folder are a **mirror that only starts at connect** — everything before that (
 injection) exists only under `Logs\UE5DumpUI\`. The two folders can also be from different
 sessions; check timestamps before correlating.
 
+> ⚠ **The mirror also STOPS early — never read it as "the UI did nothing".** Measured on Elliot
+> 2026-08-03: `ui-view-0.log` carried the connect-time lines (`Bookmarks loaded`, `SnapshotStore:
+> active DB`) at 20:10:31 and then **nothing at all**, while `Logs\UE5DumpUI\view-0.log` held a
+> full 40-second Live-Walker navigation trace from 20:10:41 to 20:11:07. Same for `ui-pipe-0.log`,
+> which ended at the connect handshake while the DLL's own `pipe-0.log` went on receiving
+> `walk_instance` commands. Reading only the game folder makes an active session look idle.
+> **`Logs\UE5DumpUI\` is the source of truth for every UI-side claim** — the mirror is a
+> convenience copy, not evidence of absence.
+
 ### ⚠ The classification below assumes CE / manual injection
 
 Under **proxy-DLL deployment** the DLL starts the pipe server and does **not** scan:
