@@ -20,6 +20,151 @@ builds ≤696 in
 
 -----
 
+## 2026-08-03 - Log retention had a hole exactly the size of a renamed category (build 2553)
+
+Found while reading a real session's logs to verify the entry below. `Logs\UE5DumpUI\` still
+held `walk-0.log`…`walk-3.log` and `ui-view-1.log` dated **2026-03-04** — five months past a
+21-day retention window that the docs describe as age-based and absolute.
+
+The cause is structural, not a missed edge case. `PruneAgedLogs` globs `{prefix}-*.log` for each
+prefix in the CURRENT category list, so **the day a category is renamed or retired, its files
+stop matching any glob and become immortal**. `walk` had been a UI category once; the `ui-`
+mirror prefix only ever belongs in a game folder, never in the UI's own. Both then also slipped
+past that method's `-0.log` live-file guard, which reads a retired category's live file as
+untouchable forever. `CleanupOldDailyLogs` covers a different (daily-format) legacy shape and
+`CleanupOldLogFolders` only removes folders wholesale, so nothing else caught them either.
+
+New `PurgeOrphanedLogs` runs at UI startup as a third, widest pass and matches on **age alone**.
+That is the point rather than a shortcut: knowing nothing about categories is exactly what lets
+it also sweep the DLL-written per-game folders, whose category list the UI does not track and
+should not have to. A file being actively written has an mtime of NOW, so it can never be older
+than the window — a running game's live `-0.log` files protect themselves, *including categories
+the UI has never heard of*. An explicit live-name set is kept as a belt for the handles the UI
+process itself is about to hold, covering the one case age cannot: a category that stays silent
+past the window while the session keeps running.
+
+**Second bug, found on the way in:** `CleanupOldLogFolders` was called from the constructor at a
+point where `_initLogger` was still `null` — its `"Deleted old log folder"` line dereferenced
+null and threw straight into the adjacent best-effort `catch`. The folders were being deleted
+correctly, but the record of it had never once been written. Both retention passes now run after
+the loggers exist, and the purge reports its count.
+
+4 tests: a retired-category sweep (the exact `walk-0.log` / `ui-view-1.log` shape), age being
+the only rule, the named-live-file guard, and non-`.log` files left alone. UI-only — no DLL
+change, so the existing DLL logs are cleaned by the UI's startup pass rather than by `Sein`.
+
+-----
+
+## 2026-08-03 - Live Walker grows a Forward button, and Back finally puts the view back (build 2550)
+
+The Live Walker had a `Back` and no `Next`, and the reason was structural rather than an
+oversight: `Breadcrumbs` is a **path**, not a history. `GoBackAsync` and a breadcrumb jump
+both *truncate* it and the removed crumbs were dropped on the floor, so there was nothing to
+go forward to.
+
+What made this cheap is that a `BreadcrumbItem` already carries everything needed to
+re-render its level — that is precisely how Back re-renders `prev`. So Forward is "push the
+crumb back and render it", and the four render cases (live container / path-synthetic
+container / GWorld actor-list root / ordinary re-walk) are the same four Back has always had.
+
+**Invalidation rides `Breadcrumbs.CollectionChanged`**, next to the `IsRootGWorld` hook that
+already lived there for the same reason. There are 7 crumb-push sites and 6 `Clear()` sites
+today; a hand-placed `ClearForwardStack()` at each would have silently missed the *next*
+navigation path someone adds. `Add`/`Reset` = a fresh navigation, so the forward history is
+dead; `Remove` = Back / a breadcrumb jump, which *pushes* and must not clear. A
+`_replayingForward` flag exempts Forward's own re-push, so multi-level forward works.
+
+**The view state is the other half, and it was already written.** Bookmarks have captured
+"what was on screen" since build ~1100 — the multi-select snapshot plus a top-visible-row
+scroll anchor pulled from the View through the synchronous `CaptureViewAnchor` /
+`ViewAnchorRef` carrier, restored by `RestoreBookmarkView`, which matches rows by
+name+offset with a name-only fallback and silently skips rows that are gone. That is exactly
+the semantics Back/Forward needed, so `BreadcrumbItem` gained `ViewSelectedFields` +
+`ViewTopRow` (name+offset records, not `LiveFieldValue` refs — the forward stack holds
+several levels and must not pin their field lists) and both events are reused verbatim. **Zero
+new View code.**
+
+Restore is a three-rung ladder so nothing regresses: a captured view state wins; otherwise the
+legacy `ScrollHintFieldName` (all that Locate-in-GWorld and bookmark-re-resolution spines ever
+have); otherwise nothing — no selection, grid at the top. That last rung is also the automatic
+outcome when a Forward re-walk finds the object gone: rung 1 matches no rows and degrades into
+it by itself. A *class-name* mismatch is louder, reusing the bookmark load path's check —
+"object changed — selection not restored" — because restoring a stale selection onto a
+different object would dress up wrong data as a successful return.
+
+Back also got the upgrade for free (it previously restored only the single clicked row, matched
+by name alone, and only scrolled that row into view rather than restoring the position).
+
+**Shortcuts, browser-mapped.** `Alt+Left` / `Alt+Right`, mouse buttons 4/5, and the dedicated
+`BrowserBack` / `BrowserForward` keys — all three routes, because gaming-mouse drivers are
+often configured to emit the keystrokes instead of a true XButton, and handling one route means
+"the side buttons do nothing" for some users. Verified through Avalonia 12.1: the Win32 backend
+maps `WM_XBUTTONDOWN` → `RawPointerEventType.XButton1Down` → `MouseDown` → an ordinary
+`PointerPressed` carrying `PointerUpdateKind.XButton1Pressed`, and `WM_SYSKEYDOWN` becomes a
+normal `KeyDown` with `SC_KEYMENU` swallowed and `WM_MENUCHAR` muted, so `Alt+Arrow` neither
+opens the system menu nor beeps.
+
+Handlers sit at the **window root, tunnelling**: the field DataGrid claims Left/Right for cell
+navigation and would eat the arrows, and when focus is on the tab header the Live Walker panel
+is not even on the event route. Gated on foreground window **and** `TabItem.Tag == "LiveWalker"`
+(by Tag, never by index — `MainTabIndex` documents how those drifted). Both gates live in the
+pure `Helpers/LiveWalkerNavShortcuts`, because a physical 4th mouse button cannot be simulated
+headlessly but the decision it feeds can. Avalonia 12 exposes no `IsRepeat`, so a held
+`Alt+Left` would fire ~30x/second; the plumbing swallows repeats while `IsLoading`.
+
+Forward rolls its optimistic push back if the walk throws — Back can leave a truncated spine
+because that spine is still *consistent*, but Forward would strand a dead level on it.
+
+`BreadcrumbItem` is flattened into the separate `PersistedCrumb` DTO for bookmark persistence,
+so the two new fields **do not touch the on-disk schema** — no JSON context change, no migration.
+
+24 new tests (forward-stack mechanics, invalidation through the collection hook, view-state
+capture incl. the empty-selection case, class-mismatch reporting, walk-failure rollback,
+shortcut policy incl. both gates). 3105 total, all green. UI-only: no DLL, pipe, or persistence
+change.
+
+**LIVE-VERIFIED on The Adventures of Elliot (UE 5.4), 2026-08-03 20:10–20:11.** From
+`Logs/UE5DumpUI/view-0.log` — note the UI's own per-process folder, NOT the `ui-*.log` mirror in
+the game's folder, which stops after the connect handshake and shows none of this:
+
+```
+20:10:46 NAV←Back removed=OwningWorld
+20:10:47 NAV→Fwd OwningWorld left=0
+20:10:52 NAV→ AISystem                  <- fresh drill while a crumb sat on the forward stack
+20:10:54 NAV←Back removed=AISystem
+20:10:58 NAV→ GameState                 <- and another
+20:11:01 NAV→Struct PrimaryActorTick
+20:11:05 NAV←Back removed=PrimaryActorTick
+20:11:06 NAV←Back removed=GameState
+20:11:07 NAV→Fwd GameState left=1
+20:11:07 NAV→Fwd PrimaryActorTick left=0
+```
+
+Three things that log proves, none of which a unit test reaches:
+
+- **The `_replayingForward` guard holds.** `left=1` on the first Forward is the whole ballgame —
+  without the guard its own `Breadcrumbs.Add` would have raised `Add`, the hook would have wiped
+  the stack, `left` would read 0, and the second Forward could not have happened.
+- **Invalidation fires on the real drill-down path.** The two Forwards recovered GameState and
+  PrimaryActorTick, *not* the AISystem crumb that a Back had put on the stack at 20:10:54 — the
+  fresh drill at 20:10:58 correctly killed it. The `left` counter agrees: 2 entries, not 3.
+- **A StructProperty crumb survives the round trip.** PrimaryActorTick carries the `S` flag, and
+  the DLL's `pipe-0.log` shows the replay walk went out as
+  `walk_instance addr=0xE1BEAC8 class_addr=0x7FF4DE1E45C0 id=210` — the crumb's `ClassAddr` came
+  back intact. That same log line also confirms Forward genuinely re-READS from the game rather
+  than re-showing cached data.
+
+**The input route was the mouse side buttons** (maintainer-confirmed; the log itself cannot tell
+a button click from `Alt+←` from mouse button 4). So the XButton path is proven end to end —
+`WM_XBUTTONDOWN` → `PointerUpdateKind.XButton1Pressed` → the tunnelling window-root handler → the
+command — which was the route with the most moving parts under it.
+
+Still unproven: `Alt+←/→` and the dedicated `BrowserBack`/`BrowserForward` keys; the view-state
+restore (entirely View-side, logs nothing); and the class-mismatch degrade, the tab/foreground
+gates, and the walk-failure rollback, none of which were hit (no mismatch, no failure occurred).
+
+-----
+
 ## 2026-08-01 - `ES2-0517` upgraded in place: 12m43s once, and a scan goes from >10 min to 30 s (build 2545)
 
 The follow-through from the entry below, and the maintainer corrected the *method* too: the answer

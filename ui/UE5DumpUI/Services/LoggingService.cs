@@ -21,6 +21,13 @@ namespace UE5DumpUI.Services;
 /// count could not express "keep 15 days": rotation runs on every startup, so a few
 /// restarts discarded everything before them regardless of date. Mirrors
 /// Grimoire::LOG_RETENTION_DAYS in the DLL's Sein logger.
+///
+/// Startup housekeeping runs in three passes, widening as it goes:
+///   1. per-category archive + prune of THIS folder  (ArchivePreviousLog / PruneAgedLogs)
+///   2. whole per-game folders untouched past the window (CleanupOldLogFolders)
+///   3. an age-only sweep of every remaining *.log, here AND in the per-game folders
+///      (PurgeOrphanedLogs) — the backstop for files pass 1 cannot see at all,
+///      because its globs are keyed on the categories that exist TODAY.
 /// </summary>
 public sealed class LoggingService : ILoggingService, IDisposable
 {
@@ -65,9 +72,6 @@ public sealed class LoggingService : ILoggingService, IDisposable
         // Also clean root for leftover old-format files
         CleanupOldDailyLogs(logDirectory, "UE5DumpUI");
 
-        // Delete log folders older than 15 days
-        CleanupOldLogFolders(Constants.LogMaxAgeDays);
-
         // Per-startup: archive the previous session, then age out old archives.
         foreach (var cat in CategoryNames)
         {
@@ -85,6 +89,17 @@ public sealed class LoggingService : ILoggingService, IDisposable
             .MinimumLevel.Debug()
             .WriteTo.Console(outputTemplate: "[{Level:u4}] {Message:lj}{NewLine}")
             .CreateLogger();
+
+        // Retention, in cheapest-first order: whole aged-out folders, then the
+        // per-file orphan sweep over whatever survived.
+        //
+        // These run AFTER the loggers exist so they can report what they did.
+        // CleanupOldLogFolders used to run before _initLogger was assigned, so its
+        // "Deleted old log folder" line dereferenced null, threw into the adjacent
+        // best-effort catch, and was never once written — the folders were being
+        // deleted silently.
+        CleanupOldLogFolders(Constants.LogMaxAgeDays);
+        PurgeOrphanedLogs(Constants.LogMaxAgeDays);
 
         _initLogger.Information("LoggingService initialized, log dir: {LogDir}", _moduleDir);
     }
@@ -333,6 +348,91 @@ public sealed class LoggingService : ILoggingService, IDisposable
         {
             // Best effort
         }
+    }
+
+    /// <summary>
+    /// Age out every <c>*.log</c> the per-category sweeps structurally cannot see,
+    /// across the UI's own folder and every per-game folder.
+    ///
+    /// <para><b>Why this is needed.</b> <see cref="PruneAgedLogs"/> globs
+    /// <c>{prefix}-*.log</c> for each prefix in the CURRENT category list, so the
+    /// moment a category is renamed or retired its files stop matching any glob and
+    /// live forever. Observed in the wild: the UI folder still held
+    /// <c>walk-0.log</c>…<c>walk-3.log</c> and <c>ui-view-1.log</c> from a 2026-03
+    /// build five months later — <c>walk</c> is no longer a UI category, and the
+    /// <c>ui-</c> mirror prefix is only ever a GAME-folder shape. Being named
+    /// <c>-0.log</c>, they also slipped past that method's live-file guard.</para>
+    ///
+    /// <para><b>Why age alone is the right (and safe) rule.</b> This deliberately
+    /// knows nothing about categories, which is what lets it sweep the DLL-written
+    /// game folders too — the UI does not track <c>Sein</c>'s category list and
+    /// should not have to. A file that is being actively written has an mtime of
+    /// NOW, so it can never be older than the retention window: a running game's
+    /// live <c>-0.log</c> files protect themselves, including categories the UI has
+    /// never heard of. The explicit live-name guard below is only a belt for the
+    /// handles THIS process is about to hold open.</para>
+    /// </summary>
+    private void PurgeOrphanedLogs(int maxAgeDays)
+    {
+        // The files this process is about to write. Serilog holds them open (so a
+        // delete would fail anyway) but naming them keeps the intent explicit.
+        var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cat in CategoryNames) live.Add($"{cat}-0.log");
+
+        int deleted = PruneOrphanedLogs(_moduleDir, maxAgeDays, live);
+
+        try
+        {
+            foreach (var dir in Directory.GetDirectories(_logDirectory))
+            {
+                // The UI's own folder was just swept above, with its live files named.
+                if (string.Equals(Path.GetFileName(dir), Constants.LogSubfolderName,
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+                deleted += PruneOrphanedLogs(dir, maxAgeDays);
+            }
+        }
+        catch { /* best effort — never block startup on housekeeping */ }
+
+        if (deleted > 0)
+            _initLogger.Information(
+                "Purged {Count} orphaned log file(s) older than {MaxAge}d " +
+                "(retired categories / legacy generation names)", deleted, maxAgeDays);
+    }
+
+    /// <summary>
+    /// Delete every <c>*.log</c> in <paramref name="directory"/> whose mtime is past
+    /// the retention window. Returns how many went, so startup can report it.
+    /// See <see cref="PurgeOrphanedLogs"/> for why matching on age alone is correct.
+    /// </summary>
+    /// <param name="liveFileNames">Names to never touch regardless of age.</param>
+    internal static int PruneOrphanedLogs(string directory, int maxAgeDays,
+                                         ISet<string>? liveFileNames = null)
+    {
+        int deleted = 0;
+        try
+        {
+            var cutoff = DateTime.Now.AddDays(-maxAgeDays);
+            foreach (var file in Directory.GetFiles(directory, "*.log"))
+            {
+                if (liveFileNames?.Contains(Path.GetFileName(file)) == true) continue;
+                try
+                {
+                    if (File.GetLastWriteTime(file) >= cutoff) continue;
+                    File.Delete(file);
+                    deleted++;
+                }
+                catch
+                {
+                    // Locked — a running game's DLL still owns it. Retry next startup.
+                }
+            }
+        }
+        catch
+        {
+            // Best effort
+        }
+        return deleted;
     }
 
     /// <summary>

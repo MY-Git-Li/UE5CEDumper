@@ -38,6 +38,13 @@
               Command="{Binding GoBackCommand}"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.Back}"
               Padding="8,4"/>
+      <!-- Forward: re-enter the level Back just left. Disabled (rather than hidden)
+           when the forward history is empty, so the pair reads like a browser. -->
+      <Button Content="{StaticResource str.LiveWalker.Forward}"
+              Command="{Binding GoForwardCommand}"
+              IsEnabled="{Binding CanGoForward}"
+              ToolTip.Tip="{StaticResource str.Tip.LiveWalker.Forward}"
+              Padding="8,4"/>
       <Button Content="{StaticResource str.LiveWalker.Parent}"
               Command="{Binding GoToParentCommand}"
               IsVisible="{Binding HasParent}"

@@ -172,6 +172,78 @@ public sealed class LogRetentionTests : IDisposable
             Names());
     }
 
+    // ── the orphan sweep ─────────────────────────────────────────────────
+    //
+    // PruneAgedLogs globs "{prefix}-*.log" for the categories that exist TODAY, so
+    // a renamed or retired category's files match no glob and never age out. The UI
+    // folder really did still hold walk-0..3.log and ui-view-1.log from a 2026-03
+    // build five months later. PruneOrphanedLogs is the age-only backstop.
+
+    [Fact]
+    public void PruneOrphanedLogs_SweepsRetiredCategories_ThatThePerCategoryPruneCannotSee()
+    {
+        var old = DateTime.Now.AddDays(-150);
+        Touch("walk-0.log", old);       // retired UI category — and a "-0" name, so
+        Touch("walk-3.log", old);       // PruneAgedLogs' live-file guard shielded it too
+        Touch("ui-view-1.log", old);    // mirror prefix, which only belongs in a GAME folder
+        Touch("view-0.log", DateTime.Now);
+
+        // The reason this was needed: the per-category prune leaves all of it.
+        LoggingService.PruneAgedLogs(_dir, "view", 21);
+        Assert.Equal(4, Names().Length);
+
+        var deleted = LoggingService.PruneOrphanedLogs(_dir, 21);
+
+        Assert.Equal(3, deleted);
+        Assert.Equal(new[] { "view-0.log" }, Names());
+    }
+
+    [Fact]
+    public void PruneOrphanedLogs_KeepsAnythingInsideTheWindow_WhateverItIsCalled()
+    {
+        // Age is the ONLY rule, which is what makes it safe to point at the
+        // DLL-written game folders whose category list the UI doesn't track.
+        Touch("some-future-dll-category-0.log", DateTime.Now);
+        Touch("scan-20260801-120000.log", DateTime.Now.AddDays(-2));
+        Touch("scan-20260101-120000.log", DateTime.Now.AddDays(-150));
+
+        var deleted = LoggingService.PruneOrphanedLogs(_dir, 21);
+
+        Assert.Equal(1, deleted);
+        Assert.Equal(
+            new[] { "scan-20260801-120000.log", "some-future-dll-category-0.log" },
+            Names());
+    }
+
+    [Fact]
+    public void PruneOrphanedLogs_NeverTouchesANamedLiveFile_EvenWhenItLooksAncient()
+    {
+        // A live file's mtime is NOW, so age alone already protects it. This guards
+        // the one case age can't: a category that stayed silent past the window
+        // while the session kept running.
+        Touch("view-0.log", DateTime.Now.AddDays(-150));
+        Touch("view-20260101-120000.log", DateTime.Now.AddDays(-150));
+
+        var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "view-0.log" };
+        var deleted = LoggingService.PruneOrphanedLogs(_dir, 21, live);
+
+        Assert.Equal(1, deleted);
+        Assert.Equal(new[] { "view-0.log" }, Names());
+    }
+
+    [Fact]
+    public void PruneOrphanedLogs_IgnoresNonLogFiles()
+    {
+        var old = DateTime.Now.AddDays(-150);
+        Touch("walk-0.log", old);
+        Touch("notes.txt", old);
+        Touch("snapshot.db", old);
+
+        LoggingService.PruneOrphanedLogs(_dir, 21);
+
+        Assert.Equal(new[] { "notes.txt", "snapshot.db" }, Names());
+    }
+
     // ── round trip ───────────────────────────────────────────────────────
 
     [Fact]

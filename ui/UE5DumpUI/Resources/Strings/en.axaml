@@ -239,6 +239,7 @@
     <sys:String x:Key="str.LiveWalker.StartWorld">Start from GWorld</sys:String>
     <sys:String x:Key="str.LiveWalker.StartGameEngine">Start from GameEngine</sys:String>
     <sys:String x:Key="str.LiveWalker.Back">Back</sys:String>
+    <sys:String x:Key="str.LiveWalker.Forward">Forward</sys:String>
     <sys:String x:Key="str.LiveWalker.Parent">Parent &#x2191;</sys:String>
     <sys:String x:Key="str.LiveWalker.FindRefs">Find Refs</sys:String>
     <sys:String x:Key="str.LiveWalker.Refresh">Refresh</sys:String>
@@ -1412,7 +1413,8 @@
     <!-- Tooltips: Live Walker -->
     <sys:String x:Key="str.Tip.LiveWalker.StartWorld">Navigate to GWorld and list top-level objects</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.StartGameEngine">Root the walker on the live GameEngine (UEngine) object — drill GameInstance / GameViewport / World. Found by reflected member, not class name. AOB export is unavailable from this root (direct address only).</sys:String>
-    <sys:String x:Key="str.Tip.LiveWalker.Back">Go back to previous object</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.Back">Go back to the previous object, restoring the rows you had selected and the scroll position. Shortcut: Alt+Left, mouse button 4, or the Browser Back key (only while this tab is on screen).</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.Forward">Return to the object Back just left, restoring the rows you had selected and the scroll position. Shortcut: Alt+Right, mouse button 5, or the Browser Forward key (only while this tab is on screen). Forward re-reads the object from the game: if it was freed or recycled meanwhile, the selection is dropped and that is reported. Navigating anywhere new clears the forward history, exactly like a browser.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.Refresh">Re-read current object fields from memory</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.FindRefs">Find UObjects that hold a pointer to this one (true logical owner — Outer/Parent often only gives the naming-hierarchy package)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.AddressInput">Address to navigate to. Accepts plain hex (0x7FF… or 7FF…) or a CE module+offset such as Game.exe+1A2B3C. A CE-copied, quoted form like &quot;Game.exe&quot;+1A2B is accepted too — the surrounding quotes are stripped and module names containing spaces work. Press Enter or click Go.</sys:String>
