@@ -1665,6 +1665,51 @@ Pick up when the active plan finishes or when blocked.
 > filtered** (so `[DEBUG]` lines count), and **See-Through / Foreground-Lock evidence lands in
 > `init-0.log`**, not `walk`/`pipe`, because their categories fall through `ResolveFile`.
 
+### 🔎 Audit #4 items — split by HOW they can be verified
+
+> **The rule, set 2026-08-04:** every audit-#4 fix is filed here classified into one of the two
+> groups below **at the time it ships**. An item with no group is an item nobody can act on.
+>
+> **① Log-derivable** — provable by reading `%LOCALAPPDATA%\UE5CEDumper\Logs` after an ordinary
+> session, or after one where a log line was *added for the purpose*. Prefer this: it needs no
+> special skill and it leaves evidence. If an added line is heavy (per-object, per-tick), the commit
+> that adds it must say so and mark it for removal once the item is ticked.
+> Grep by **format string, never line number** — see
+> [log-verification-checklist.md](log-verification-checklist.md).
+>
+> **② Manual-only** — needs a human at the keyboard doing something no log can cause (a click
+> sequence, a specific game, a specific third-party install). Each of these carries its exact steps
+> and the PASS/FAIL observation.
+
+#### ① Log-derivable
+
+- ⬜ **`Fern::Stop` no longer waits for a client that may never come** (build 2569, B49).
+  **Already instrumented** — the fix shipped with per-phase logging precisely so this needs no
+  special run. Play normally with the UI connected, then disconnect the UI and untick the CE record.
+  Grep `pipe-0.log` for `PipeServer: Stop entry` and the phase lines that follow it.
+  **PASS** = `PipeServer: Stopped` appears within ~100 ms of `Stop entry`, and `Stop conn drain`
+  says `satisfied`. **FAIL** = no `Stopped` line at all (the old unbounded hang), or a phase line
+  showing seconds. The old behaviour logged *only* `Stopped`, so the presence of `Stop entry` also
+  confirms you are on the new build.
+
+- ⬜ **CE-plugin double-inject guard rejects a foreign wrapper** (build 2577, B29) — *log half.*
+  Any session where CE's plugin menu is used: grep `init-0.log` for
+  `is loaded but is not ours`. That line only exists in the new code, and it fires for the exact
+  case that used to be misread. **PASS** = the line names the foreign module and injection proceeds.
+  (The manual half — actually installing a wrapper — is in ② below.)
+
+- ⬜ **UI log rolls at 8 MB instead of stopping** (build 2585, B31). Free from any long session:
+  `ls %LOCALAPPDATA%\UE5CEDumper\Logs\UE5DumpUI\`. **PASS** = files named `pipe-0_001.log` (or
+  similar) exist alongside `pipe-0.log` once a category passes 8 MB, and the newest file's last line
+  is recent. **FAIL** = a single `pipe-0.log` sitting at exactly ~8 MB with a stale last line — that
+  is the silent-stop signature. Fastest way to reach it: Teleport → Auto refresh, left running.
+
+- ⬜ **Leftover-proxy reports land inside the app folder** (build 2585, B38). Run a proxy-cleanup
+  Report. **PASS** = the file appears under `%LOCALAPPDATA%\UE5CEDumper\Reports\`. **FAIL** = it
+  appears in `%LOCALAPPDATA%\Reports\`. (Files written before 2585 stay in the old place by design.)
+
+#### ② Manual-only
+
 - ⬜ **Symbol-export GWorld no longer claims to have an AOB** (build 2581, audit #4 B2). The gate is
   unit-tested against the shipped pattern tables, but needs a game whose GWorld actually resolves
   through a symbol export — **Satisfactory** (`?GWorld@@3VUWorldProxy@@A`, see

@@ -19,6 +19,83 @@
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
 **Progress: 12 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577), B2 + B3 (2581), B31 + B37 + B38 (2585) — 40 open.**
+
+---
+
+## ▶ Continuation plan — read this first if you are picking the work back up
+
+Written 2026-08-04 at build 2587, `dev` 13 commits ahead of `main`, tree clean, 3161 C# + 929 C++
+green. The goal is **finish every open item**, then verify. Batches below are ordered so each one is a
+coherent commit; the *within-batch* order matters where noted.
+
+### Batch A — the two DLL concurrency defects (do first)
+**B5** is the prerequisite for trusting any offset-related bug report, so it leads.
+- **B5** `Frieren.cpp:490` — dedicated mutex around the `UE5_Init` body + an in-progress flag so a
+  second caller waits and returns the first result. Today the latch is set *after* a multi-second scan.
+- **B4** `Mimic.cpp:194` — **do NOT just call `Tot::MarkBackgroundWorker()`.** That same flag is read by
+  `Tot::IsBackgroundWorker()` at `Frieren.cpp:1579` to refuse (-8) the off-game-thread invoke fallback,
+  a policy deliberately scoped to *repeating* workers; blanket-marking the poller would start refusing
+  user one-shot CE invokes. Add a separate per-command-cancel-immunity flag, or mark only around the
+  resolve calls.
+
+### Batch B — Dunste + the worker-guard structure
+- **B8** `Dunste.cpp:453/577` — set `collisionOff/collisionPawn` from the invoke's **actual result**;
+  when the invoke is skipped, KEEP the record and start the Schlacht-style deferred restore
+  (`Schlacht.cpp:635-658` + `PendingRestoreLoop` is the shipped precedent). Join the worker before
+  snapshotting. **Out of scope:** the `Fern.cpp:779` disconnect half — holds persisting across
+  disconnect is the deliberate family policy that sank audit #3's M6.
+- **B14 + R5 together** (symptom + structure) — one `RunTickGuarded` helper wrapping the five unguarded
+  thread procs (`Schlacht.cpp:507` `PendingRestoreLoop`, `Solide.cpp:330`, `Hemmung.cpp:284`,
+  `Laufen.cpp:358`, `Solitar.cpp:312`), plus one `ReassertWorker` helper for the six hold modules and
+  `Grimoire::WORKER_SLEEP_SLICE_MS = 25` replacing the 8 bare literals.
+- **B10** `Ubel.cpp:885` — add `s_walkClassExCache`, return `const ClassInfo&`. **Prerequisite:**
+  `Ubel.cpp:813` is `s_walkClassCache[addr] = info;` — an assign-over-existing. Two threads racing the
+  same uncached class would reallocate a vector already handed out by reference (use-after-free).
+  **Change it to `try_emplace` FIRST.** Fixing the four `// cached` comments is a zero-risk standalone step.
+
+### Batch C — Utf8Helpers (needs design thought, do not rush)
+- **B28** `Utf8Helpers.h:239` — the obvious ratio-scoring fix **does not work**: `第1章` / `中A文` both
+  score 0 bad, and scoring can regress the STVoyager UTF-8 case whenever the adjacent heap tail happens
+  to be zero. The discriminator must be **structural** (e.g. an interior-UTF-16-null check, preferring a
+  clean UTF-16 decode when one exists). Add `"中文一二"` and `"第1章"` as regression buffers.
+
+### Batch D — the small-fix sweep (all S/low, independent, one commit each or one big one)
+B7, B9, B11, B12, B15, B16, B17, B18, B19, B20, B22, B23, B24, B32, B33, B34, B35, B36, B42, B44
+(comment only), B45, B46, B47, B48.
+Two carry corrections that must not be lost:
+- **B9** — **ADD** `_ = CheckForCompetingDumperHostsAsync(state);` at `MainWindowViewModel.cs:2611`
+  and **KEEP** the existing call at `:694`. Do **not** move it: `RescanApplied` is a duplicated
+  hand-rolled fan-out that never reaches `ApplyEngineState`, so moving deletes the one path that works.
+  Also add `MultipleDumperHostsWarning = "";` at `:1997` and capture `int epoch = _sessionEpoch;` at entry.
+- **B15** — a bare `return` is **wrong**; it would strand the record ticked. Use
+  `then hadError = true; showMessage(...); break end` and declare `hadError` in `GenerateClearAll`.
+
+### Batch E — refactor
+R1, R2, R3, R4, R6, R7 (R5 lands with B14 in Batch B; R8 is "later"). **R4: measure first** — the
+current code lower-cases once at parse time and compares Ordinal; if per-field `OrdinalIgnoreCase`
+regresses on a large `.jsonl`, keep the parse-time lowercase and store the four fields separately.
+
+### Needs a decision from the maintainer before coding
+**B13/B41** (which volume-recycler API), **B21** (the `AllowThousands` tradeoff — removing it rejects
+Excel's `"67,162.398"`), **B25** (should the version refusal ever fire on an uncorroborated signal),
+**B26** (should duplicate CE records be deduped at push), **B43** (remove the SRWLOCK — and **reject**
+the spin-until-resolved option, it deadlocks deterministically).
+
+### The DO-NOT list, carried forward
+Do not raise the CE-side timeout. Do not add `CancelSynchronousIo` without re-measuring first. Do not
+add a mailbox `shutdownState` field. Do not extract the 8-copy player chain *and* "fix" Schlacht's
+missing fallback (its omission is deliberate — the fallback is a 486K full-pool scan on a 10 Hz timer).
+Do not split `Aura.cpp` beyond steps 1–2. Do not build `MovementKnobCardViewModel`.
+
+### Verification, in the two halves the maintainer asked for
+Every fix lands with its verification classified **at the time it ships**, into
+[todo.md § Pending live-game verification](todo.md#pending-live-game-verification-verify-only--no-code):
+1. **Log-derivable** — provable from an ordinary session's logs, or from logs *added for the purpose*.
+   Prefer this. If an added log is heavy (per-object, per-tick), say so in its commit and mark it for
+   removal once the item is verified.
+2. **Manual-only** — needs a human at the keyboard doing something a log cannot cause. These go in the
+   manual section with the exact click sequence and the PASS/FAIL observation.
+Never file an item without saying which half it is in.
 **+1 found by in-game verification** (B49), which is why 51 became 52.
 
 > ### ✅ Verification discipline
