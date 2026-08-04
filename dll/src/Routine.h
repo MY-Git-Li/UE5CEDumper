@@ -33,6 +33,57 @@
 
 namespace Routine {
 
+// ============================================================
+// SafeThread — a std::thread whose destructor DETACHES instead of terminating.
+// ============================================================
+//
+// `~std::thread()` on a still-joinable thread calls std::terminate() **directly** — no
+// exception is thrown, so no `catch` anywhere can help. Same for move-assigning over a
+// joinable thread. That is the real cause of the DQ7R fast-fails of 2026-08-04
+// (0xC0000409 param[0]=7 = FATAL_APP_EXIT), which survived TWO generations of exception
+// guards precisely because there was never an exception to catch:
+//
+//   * `UE5_Shutdown` is NOT called when the user closes a game — `DllMain(DETACH)` is a
+//     deliberate no-op (joining a thread from DllMain deadlocks on the loader lock), and
+//     there is no proxy graceful-exit hook. Verified: zero `UE5_Shutdown: Cleaning up`
+//     lines in a whole session's log.
+//   * So at process exit every feature worker is still joinable, its static destructor
+//     runs, and the FIRST one to destruct kills the process.
+//   * Which is exactly why it only ever reproduced with features switched ON.
+//
+// Fixing it by detaching from DllMain would have worked and would have been another
+// hand-maintained LIST — the same shape that made B14 and B34 fail their first in-game
+// check. This makes it a property of the TYPE instead: declare the thread as a
+// SafeThread and the failure cannot occur, including in a module nobody has written yet.
+//
+// Detaching is the correct action at exit, not a cop-out: on process exit Windows has
+// already terminated every other thread before DETACH runs, so there is nothing left to
+// wait for — only a handle to release. Deliberate teardown still goes through each
+// module's StopWorker(), which joins properly while the loader lock is free.
+class SafeThread {
+public:
+    SafeThread() = default;
+    SafeThread(const SafeThread&) = delete;
+    SafeThread& operator=(const SafeThread&) = delete;
+
+    /// Adopt a freshly-spawned thread. If one is somehow already running, detach it
+    /// rather than terminate — std::thread's own move-assign would terminate here.
+    SafeThread& operator=(std::thread&& t) noexcept {
+        if (m_t.joinable()) m_t.detach();
+        m_t = std::move(t);
+        return *this;
+    }
+
+    ~SafeThread() { if (m_t.joinable()) m_t.detach(); }
+
+    bool joinable() const noexcept { return m_t.joinable(); }
+    void join()   { m_t.join(); }
+    void detach() { m_t.detach(); }
+
+private:
+    std::thread m_t;
+};
+
 // Run one worker tick with the guard a thread entry must have. `warnedOnce` is the
 // caller's loop-local latch so a game tearing down for several seconds logs one line,
 // not one per tick.

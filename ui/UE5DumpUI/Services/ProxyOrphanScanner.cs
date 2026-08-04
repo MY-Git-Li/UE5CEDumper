@@ -499,8 +499,13 @@ internal static class ProxyOrphanScanner
     /// <para><paramref name="generatedAt"/> is passed in rather than read from the clock so the output
     /// is deterministic under test.</para>
     /// </summary>
+    /// <param name="foldersExamined">How many folders the scan looked at. Reported so an EMPTY
+    /// report is evidence rather than an assertion — "0 found" and "never looked" have to be
+    /// distinguishable, and a week later the file is the only thing left to tell them apart.
+    /// Pass -1 when the count is unknown (older callers / tests) and the line is omitted.</param>
     internal static string BuildReport(
-        IReadOnlyList<OrphanProxy> rows, string generatedAt, string appVersion)
+        IReadOnlyList<OrphanProxy> rows, string generatedAt, string appVersion,
+        int foldersExamined = -1)
     {
         var sb = new StringBuilder();
         void Line(string s = "") => sb.Append(s).Append("\r\n");
@@ -528,6 +533,13 @@ internal static class ProxyOrphanScanner
         if (rows.Count == 0)
         {
             Line("No leftover proxy DLLs were found.");
+            if (foldersExamined >= 0)
+            {
+                Line();
+                Line($"{foldersExamined} folder(s) were examined. This file is the record that the");
+                Line("scan ran and covered them — a clean result and a scan that never happened look");
+                Line("identical without it.");
+            }
             return sb.ToString();
         }
 

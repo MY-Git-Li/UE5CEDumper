@@ -63,7 +63,7 @@ struct Job {
 std::vector<Job> s_jobs;
 
 std::mutex        s_mutex;        // serializes ops (pipe thread + worker)
-std::thread       s_worker;
+Routine::SafeThread       s_worker;   // detaches at process exit, never terminates
 std::mutex        s_workerMutex;  // guards start/stop join (never held with s_mutex)
 std::atomic<bool> s_workerStop{false};
 

@@ -483,6 +483,9 @@ public partial class ProxyDeployViewModel : ViewModelBase
     public ObservableCollection<OrphanProxy> Orphans { get; } = new();
 
     [ObservableProperty] private bool _orphanScanRan;
+    /// <summary>Folders the last orphan scan examined. An empty report must be able to say
+    /// what it LOOKED AT, or it is indistinguishable from a scan that never ran.</summary>
+    private int _orphanFoldersExamined;
 
     /// <summary>Only say "none found" after a scan has actually run — before that, silence.</summary>
     public bool ShowNoOrphansFound => OrphanScanRan && Orphans.Count == 0;
@@ -552,8 +555,13 @@ public partial class ProxyDeployViewModel : ViewModelBase
             LastOperationResult = null;
 
             // Constructed on the UI thread → the callback marshals back to it.
-            var progress = new Progress<OrphanScanProgress>(p =>
-                StatusText = $"Checking {p.Examined} folder(s) — {p.Found} leftover(s) found");
+            // Keep the last examined count: an empty report has to be able to say what it
+            // LOOKED AT, or it proves nothing.
+            int examined = 0;
+            var progress = new Progress<OrphanScanProgress>(p => {
+                examined = p.Examined;
+                StatusText = $"Checking {p.Examined} folder(s) — {p.Found} leftover(s) found";
+            });
 
             var found = await _deploy.FindOrphanProxiesAsync(
                 OrphanScanSources.SteamShapeScan | OrphanScanSources.DeployLog | OrphanScanSources.DllLoadLog,
@@ -570,6 +578,9 @@ public partial class ProxyDeployViewModel : ViewModelBase
                 Orphans.Add(o);
             }
             OrphanScanRan = true;
+            _orphanFoldersExamined = examined;
+            OnPropertyChanged(nameof(CanWriteOrphanReport));
+            WriteOrphanReportCommand.NotifyCanExecuteChanged();
             NotifyOrphanSelectionChanged();
 
             SetOperationResult(
@@ -596,8 +607,15 @@ public partial class ProxyDeployViewModel : ViewModelBase
         }
     }
 
-    /// <summary>True once a scan has produced rows, so Report has something to write.</summary>
-    public bool CanWriteOrphanReport => Orphans.Count > 0;
+    /// <summary>True once a scan has RUN — not once it has found something.
+    ///
+    /// <para>A clean scan must still be able to write a report, and that is not a nicety: with no
+    /// artifact, "scanned everything and found nothing" and "the scan never ran / looked in the
+    /// wrong place / failed silently" are indistinguishable a week later. The report is the only
+    /// durable record that the sweep happened and what it covered. <c>BuildReport</c> has always
+    /// handled the empty case ("No leftover proxy DLLs were found."); it was this gate that made
+    /// that text unreachable.</para></summary>
+    public bool CanWriteOrphanReport => OrphanScanRan;
 
     /// <summary>
     /// Binaries folders of games we already know are installed. Passed to BOTH the scan and the
@@ -621,7 +639,8 @@ public partial class ProxyDeployViewModel : ViewModelBase
     [RelayCommand]
     private async Task WriteOrphanReportAsync()
     {
-        if (Orphans.Count == 0) { LastOperationResult = "Nothing to report — run the scan first"; return; }
+        // Gate on "a scan has run", not on "it found something" — see CanWriteOrphanReport.
+        if (!OrphanScanRan) { LastOperationResult = "Nothing to report — run the scan first"; return; }
         if (_platform == null) { LastOperationResult = "Report unavailable on this platform"; return; }
 
         try
@@ -645,7 +664,8 @@ public partial class ProxyDeployViewModel : ViewModelBase
             string text = Services.ProxyOrphanScanner.BuildReport(
                 Orphans.ToList(),
                 DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                build > 0 ? build.ToString() : "unknown");
+                build > 0 ? build.ToString() : "unknown",
+                _orphanFoldersExamined);
 
             await File.WriteAllTextAsync(file, text);
             PruneAgedReports(dir);

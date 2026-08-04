@@ -15,6 +15,7 @@
 // ============================================================
 
 #include <Windows.h>
+#include "Routine.h"   // Routine::SafeThread — ~std::thread on a joinable thread terminates (B14)
 #include <string>
 #include <thread>
 #include <atomic>
@@ -47,7 +48,7 @@ private:
         std::atomic<bool>  closed{false};     // CloseHandle done exactly once
     };
 
-    std::thread        m_acceptThread;
+    Routine::SafeThread        m_acceptThread;
     std::atomic<bool>  m_running{false};
     // True for the duration of Stop(). m_running goes false on Stop()'s first
     // line, so it cannot tell Start() "a teardown is still unwinding" — and
@@ -72,7 +73,7 @@ private:
     // bails. It peeks ONLY while a connection's inFlight flag is set (the thread
     // is then CPU-bound in DispatchCommand, not in ReadFile/WriteFile), so there
     // is no concurrent read/write on the handle.
-    std::thread          m_monitorThread;
+    Routine::SafeThread          m_monitorThread;
     void MonitorLoop();
 
     // Watch entries — per-connection. A watch's event is written to the
@@ -84,7 +85,7 @@ private:
         uint32_t            size;
         uint32_t            interval_ms;
         Connection*         owner{nullptr};
-        std::thread         watchThread;
+        Routine::SafeThread         watchThread;
         std::atomic<bool>   active{true};
     };
     std::unordered_map<uintptr_t, std::unique_ptr<WatchEntry>> m_watches;
@@ -96,7 +97,7 @@ private:
         std::atomic<int>  phase{0};       // 0=idle, 1..6=scanning, 7=complete
         std::string       statusText;
         std::mutex        statusMutex;
-        std::thread       scanThread;
+        Routine::SafeThread       scanThread;
         bool              completed = false;
     };
     ScanState m_scan;
@@ -112,7 +113,7 @@ private:
         uintptr_t         foundGWorld   = 0;
         const char*       gobjectsMethod = "not_found";
         const char*       gworldMethod   = "not_found";
-        std::thread       scanThread;
+        Routine::SafeThread       scanThread;
     };
     RescanState m_rescan;
     void RunRescan(bool scanGObjects, bool scanGWorld);

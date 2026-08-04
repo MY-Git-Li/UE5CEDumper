@@ -84,7 +84,7 @@ std::mutex s_mutex;
 
 // Fly worker — separate control mutex so StopWorker()'s join() never runs while
 // s_mutex is held (the worker locks s_mutex per tick → would deadlock).
-std::thread       s_worker;
+Routine::SafeThread       s_worker;   // detaches at process exit, never terminates
 std::mutex        s_workerMutex;
 std::atomic<bool> s_workerStop{false};
 
@@ -559,7 +559,7 @@ void StopWorkerLocked() {
 // it. A ghosted pawn then falls through the world with nothing tracking it. Poll for the
 // thread to come back and restore the moment it does, i.e. the instant the user clicks
 // back into the game. Same shape as Schlacht::PendingRestoreLoop.
-std::thread       s_pendingWorker;
+Routine::SafeThread       s_pendingWorker;   // detaches at process exit, never terminates
 std::atomic<bool> s_pendingStop{false};
 std::atomic<bool> s_pendingRunning{false};
 

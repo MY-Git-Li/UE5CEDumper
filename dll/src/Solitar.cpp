@@ -57,7 +57,7 @@ std::mutex s_mutex;
 
 // Re-assert worker — separate control mutex so StopWorker()'s join() never runs
 // while s_mutex is held (the worker locks s_mutex per tick → would deadlock).
-std::thread       s_worker;
+Routine::SafeThread       s_worker;   // detaches at process exit, never terminates
 std::mutex        s_workerMutex;
 std::atomic<bool> s_workerStop{false};
 

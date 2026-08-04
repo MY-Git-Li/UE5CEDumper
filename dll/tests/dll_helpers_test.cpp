@@ -35,6 +35,7 @@
 #include "../src/Ubel.h"        // Native-C scan P0: ComputeHoles / ComputeClassHoles / NormalizeGuessedTypeToProperty (inline, pure)
 #include "../src/Aura.h"        // IsEnginePackage (header-inline, pure) — engine/game package gate
 #include "../src/Tot.h"         // Cancellation flags: cancel-immunity vs background-worker (B4)
+#include "../src/Routine.h"    // SafeThread — detaching-on-destroy thread wrapper
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
@@ -3059,6 +3060,66 @@ static bool PatMatchAt(const Macht::ParsedPattern& pat,
     return true;
 }
 
+// Routine::SafeThread — the fix for the fast-fail that TWO generations of exception
+// guards could not touch, because there was never an exception: `~std::thread()` on a
+// still-joinable thread calls std::terminate() DIRECTLY.
+//
+// This test is its own negative control. Swap SafeThread back to std::thread and the
+// test EXECUTABLE dies with 0xC0000409 instead of failing an assertion — the same
+// fast-fail the game was taking. Verified that way before shipping.
+static void Test_Routine_SafeThread() {
+    std::printf("Test_Routine_SafeThread\n");
+
+    std::atomic<int> ran{0};
+
+    // 1. Destructed while STILL RUNNING. This is the game-close case: the worker is
+    //    mid-tick, nothing joined it, and the static destructor runs.
+    {
+        Routine::SafeThread t;
+        t = std::thread([&] {
+            for (int i = 0; i < 50 && ran.load() < 1000; ++i) {
+                ran.fetch_add(1);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        });
+        EXPECT("running thread is joinable", t.joinable());
+    }   // <-- std::thread would terminate() here
+    EXPECT("survived destruction of a running thread", true);
+
+    // 2. Destructed after the thread FINISHED but was never joined. Still joinable —
+    //    the object holds an id — so std::thread terminates here too. This is the more
+    //    common shape at process exit, where Windows has already killed the thread.
+    {
+        Routine::SafeThread t;
+        t = std::thread([] {});
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        EXPECT("finished-but-unjoined is still joinable", t.joinable());
+    }
+    EXPECT("survived destruction of a finished thread", true);
+
+    // 3. Move-assigned OVER a live thread. std::thread's own move-assign terminates
+    //    when the target is joinable — the exact shape Fern's m_stopping flag was
+    //    added to dodge by hand.
+    {
+        Routine::SafeThread t;
+        t = std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(30)); });
+        t = std::thread([] {});   // <-- std::thread would terminate() here
+        EXPECT("survived move-assign over a live thread", true);
+    }
+
+    // 4. The ordinary path still works: joinable, join, then no longer joinable.
+    {
+        Routine::SafeThread t;
+        std::atomic<bool> done{false};
+        t = std::thread([&] { done.store(true); });
+        t.join();
+        EXPECT("join() ran the body", done.load());
+        EXPECT("not joinable after join", !t.joinable());
+    }   // destructor on a joined thread is a no-op for both types
+
+    EXPECT("the running thread actually started", ran.load() > 0);
+}
+
 // B34 — Cheat Engine must never be auto-scanned as if it were the game.
 //
 // The first version of this guard was an exact-name list and shipped "verified". A live
@@ -3472,6 +3533,9 @@ int main() {
 
     // Tot — per-command cancel immunity is independent of "is a background worker"
     Test_Tot_CancelImmunityVsBackgroundWorker();
+
+    // Routine — SafeThread: ~std::thread on a joinable thread terminates the process
+    Test_Routine_SafeThread();
 
     // Grimoire — Cheat Engine host detection (prefix, not an exact-name list)
     Test_Grimoire_IsCheatEngineExeName();

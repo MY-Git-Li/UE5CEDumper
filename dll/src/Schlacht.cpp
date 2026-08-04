@@ -399,7 +399,7 @@ struct State {
 State s_state;
 std::mutex s_mutex;
 
-std::thread       s_worker;
+Routine::SafeThread       s_worker;   // detaches at process exit, never terminates
 std::mutex        s_workerMutex;
 std::atomic<bool> s_workerStop{false};
 
@@ -501,7 +501,7 @@ void StopWorkerLocked() {
 // So instead of leaving the record for a hypothetical later enable, poll for the
 // game thread to come back and restore the moment it does — which is the instant
 // the user clicks back into the game, i.e. exactly when they would notice.
-std::thread       s_pendingWorker;
+Routine::SafeThread       s_pendingWorker;   // detaches at process exit, never terminates
 std::atomic<bool> s_pendingStop{false};
 std::atomic<bool> s_pendingRunning{false};
 

@@ -785,4 +785,32 @@ public class ProxyOrphanScannerTests
 
     private static IReadOnlySet<string> Empty()
         => new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A CLEAN scan must still produce a report. Without the file, "scanned everything and
+    /// found nothing" and "the scan never ran, or looked in the wrong place, or failed
+    /// silently" are indistinguishable a week later — and the VM used to make the empty text
+    /// unreachable by gating Report on `Orphans.Count > 0`.
+    /// </summary>
+    [Fact]
+    public void BuildReport_EmptyScanStillReportsWhatItExamined()
+    {
+        string txt = ProxyOrphanScanner.BuildReport(
+            Array.Empty<OrphanProxy>(), "2026-08-04 22:00:00", "2633", foldersExamined: 1487);
+
+        Assert.Contains("No leftover proxy DLLs were found.", txt, StringComparison.Ordinal);
+        // The evidence half: it has to say what it LOOKED AT.
+        Assert.Contains("1487 folder(s) were examined", txt, StringComparison.Ordinal);
+        Assert.Contains("DRY RUN", txt, StringComparison.Ordinal);
+    }
+
+    /// <summary>Unknown count (-1) omits the line rather than printing a misleading "0".</summary>
+    [Fact]
+    public void BuildReport_UnknownExaminedCountOmitsTheLine()
+    {
+        string txt = ProxyOrphanScanner.BuildReport(
+            Array.Empty<OrphanProxy>(), "t", "1");
+        Assert.Contains("No leftover proxy DLLs were found.", txt, StringComparison.Ordinal);
+        Assert.DoesNotContain("folder(s) were examined", txt, StringComparison.Ordinal);
+    }
 }
