@@ -62,6 +62,46 @@ public class CeLuaHygieneTests
         Assert.Equal("synchronize(function() getLuaEngine().Close() end)", CeLuaHygiene.CloseCall);
     }
 
+    /// <summary>
+    /// R2 — there is ONE Lua escape table. Three copies existed, one of them (Invoke's)
+    /// silently weaker: it handled backslash / quote / newline only, so CR, TAB and — the
+    /// one that matters — a closing long bracket passed through verbatim. AOBMaker wraps
+    /// the WHOLE script in <c>[==[ … ]==]</c>, so that byte sequence must not appear
+    /// anywhere in the emitted text. The public names remain as forwarders; this pins
+    /// that they really do forward.
+    /// </summary>
+    [Theory]
+    [InlineData(@"plain")]
+    [InlineData(@"it's")]
+    [InlineData("line\nbreak")]
+    [InlineData("carriage\rreturn")]
+    [InlineData("tab\there")]
+    [InlineData(@"back\slash")]
+    [InlineData("close]]bracket")]
+    [InlineData("close]==]bracket")]
+    [InlineData("中文 with 標點，")]
+    public void All_lua_escapers_agree_with_the_shared_one(string input)
+    {
+        var canonical = CeLuaHygiene.EscapeLuaString(input);
+        Assert.Equal(canonical, BakedScriptGenerator.EscapeLua(input));
+        Assert.Equal(canonical, FreezeScriptGenerator.EscapeLua(input));
+    }
+
+    /// <summary>The property that made the divergence dangerous: no escaped output may
+    /// contain a closing long bracket of any level.</summary>
+    [Theory]
+    [InlineData("]]")]
+    [InlineData("]=]")]
+    [InlineData("]==]")]
+    [InlineData("a]]b]==]c")]
+    public void Escaped_output_never_contains_a_closing_long_bracket(string input)
+    {
+        var s = CeLuaHygiene.EscapeLuaString(input);
+        Assert.DoesNotContain("]]", s, StringComparison.Ordinal);
+        Assert.DoesNotContain("]=]", s, StringComparison.Ordinal);
+        Assert.DoesNotContain("]==]", s, StringComparison.Ordinal);
+    }
+
     // ==================================================================
     // Every self-contained generator carries the convention
     // ==================================================================

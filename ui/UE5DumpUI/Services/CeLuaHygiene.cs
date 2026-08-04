@@ -81,6 +81,34 @@ public static class CeLuaHygiene
     }
 
     /// <summary>
+    /// Emit the bounded "wait for the mailbox to go IDLE" preamble of a round-trip.
+    ///
+    /// <para>A SINGLE sample of <c>cmd</c> is wrong, and not for a rare-race reason:
+    /// <c>SetDone</c>/<c>SetError</c> publish <c>status = DONE</c> <b>before</b> clearing
+    /// <c>cmd</c> (deliberately — see Mimic.cpp), so a script that issues two round-trips
+    /// back to back exits its status poll and can still observe the PREVIOUS command in
+    /// <c>cmd</c>. One read then reports "busy" and abandons a query that would have
+    /// worked 1 ms later. <see cref="CeMailboxLayout.MailboxIdleWaitMs"/> is far more
+    /// than that window and still fails fast when CE really is mid-command.</para>
+    ///
+    /// <para><paramref name="onBusy"/> is the Lua statement to run on timeout — the
+    /// callers differ (a <c>return nil, msg</c> inside a helper vs. setting
+    /// <c>hadError</c> in a flat block), so the emitter does not assume one. (R3)</para>
+    /// </summary>
+    public static void AppendIdleWait(StringBuilder sb, string mbExpr, string onBusy,
+                                      string indent = "")
+    {
+        Line(sb, indent, "-- Bounded wait for IDLE, not a single sample: the DLL publishes status=DONE");
+        Line(sb, indent, "-- BEFORE clearing cmd, so a second back-to-back command can still see the");
+        Line(sb, indent, "-- previous one for an instant and would spuriously report 'busy'.");
+        Line(sb, indent, "local idleWaited = 0");
+        Line(sb, indent, $"while readInteger({mbExpr} + {CeMailboxLayout.OffCmd}) ~= 0 do");
+        Line(sb, indent, "  sleep(1); idleWaited = idleWaited + 1");
+        Line(sb, indent, $"  if idleWaited >= {CeMailboxLayout.MailboxIdleWaitMs} then {onBusy} end");
+        Line(sb, indent, "end");
+    }
+
+    /// <summary>
     /// Timeout in ms for a synchronous <c>executeCodeEx</c> DLL call. Finite on
     /// purpose: <c>nil</c>/<c>-1</c> means wait forever, which hangs CE's whole UI
     /// if the game thread is stalled, and <c>0</c> means "don't wait" AND leaks the

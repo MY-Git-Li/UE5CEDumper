@@ -7,13 +7,22 @@ STDLIB ONLY, ON PURPOSE. Building the index needs numpy and the 200 GB corpus; q
 neither, so this CAN run on a bare second machine and in CI. That portability is the entire point —
 see docs/aob-block-library-eval.md §6.
 
-⚠ IT IS NOT ACTUALLY WIRED INTO CI, AND NOTHING ELSE READS IT EITHER (audited 2026-08-01).
-.github/workflows/ci.yml runs extract_patterns.py --check, blocktest.py and
-check_live_verification.py — not this. Repo-wide there are ZERO callers in dll/, ui/, scripts/ or
-build.ps1; the only invocation path is a human typing the command above. Step 5 of the eval's own
-build order ("gate authoring on it: a candidate clears the pre-filter before it earns a sweep"),
-which is what would make it load-bearing, was never built. Read every number below as describing a
-tool that is currently advisory only.
+✅ WIRED INTO CI AS A BLOCKING GATE (`6f594fa`, 2026-08-01). `.github/workflows/ci.yml` runs
+`--tsv out/sweep/patterns.tsv --baseline tools/pe/aob-specificity-baseline.tsv --check` and throws on
+a non-zero exit. **So `--update-baseline` is not a routine step.** The golden file exists to force a
+human to notice when a pattern's upper bound RISES — i.e. when a pattern got noisier — and
+regenerating it to make CI green discards exactly the signal the gate was built to deliver. Read the
+diff first; if the rise is intended, say why in the commit.
+
+(This paragraph used to say the opposite — "NOT ACTUALLY WIRED INTO CI, AND NOTHING ELSE READS IT
+EITHER" — written three days before the gate landed and never updated. A maintainer reading it would
+have concluded the baseline was scratch. Audit #4 R7.)
+
+Still true, and the reason the claim was plausible: there are no callers in `dll/`, `ui/`, `scripts/`
+or `build.ps1`. The invocation paths are CI and a human typing the command above. Step 5 of the
+eval's build order ("gate authoring on it: a candidate clears the pre-filter before it earns a
+sweep") is still unbuilt — the gate guards REGRESSIONS in shipped patterns, it does not yet gate new
+ones.
 
 WHAT THE NUMBER MEANS. Every occurrence of the whole pattern must contain each of its literal
 windows, so the frequency of the RAREST window is an UPPER BOUND on the pattern's hit count *in the

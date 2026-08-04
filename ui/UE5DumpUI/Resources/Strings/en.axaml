@@ -183,16 +183,13 @@
     <sys:String x:Key="str.VS.Group.NewScan">New Group Scan</sys:String>
     <sys:String x:Key="str.VS.Group.FilterWatermark">Filter matched objects (server-side) — class / instance / field / value…</sys:String>
     <sys:String x:Key="str.Tip.VS.Group.FirstScan">Scan every object for one that simultaneously holds all of the entered values at distinct numeric-property offsets (in any order). Each value defaults to NumericNoByte (matches int16/int32/int64/float/double widths). Use Group Next Scan with the new values to narrow and lock each field's offset.</sys:String>
-    <sys:String x:Key="str.VS.Group.LockedField">Located field</sys:String>
     <sys:String x:Key="str.Tip.VS.Group.ScanType">Per-value match predicate. First Scan: Exact / Bigger / Smaller (compares against the value). Next Scan also allows Changed / Unchanged / Increased / Decreased — these compare against the previous round instead of a value (the value box hides), so you can find objects where the values moved a known way without knowing the exact numbers.</sys:String>
 
     <!-- Object Tree -->
     <sys:String x:Key="str.ObjectTree.Title">Object Tree</sys:String>
     <sys:String x:Key="str.ObjectTree.Search">Search objects (space = AND)...</sys:String>
-    <sys:String x:Key="str.ObjectTree.Load">Load</sys:String>
     <sys:String x:Key="str.ObjectTree.Reload">Reload</sys:String>
     <sys:String x:Key="str.ObjectTree.Loading">Loading...</sys:String>
-    <sys:String x:Key="str.ObjectTree.Count">Objects: {0}</sys:String>
     <sys:String x:Key="str.ObjectTree.CopyClassName">Copy Type</sys:String>
     <sys:String x:Key="str.ObjectTree.CopyObjectName">Copy Name</sys:String>
     <sys:String x:Key="str.ObjectTree.CopyAddress">Copy Address</sys:String>
@@ -213,7 +210,6 @@
 
     <!-- Live Walker -->
     <sys:String x:Key="str.LiveWalker.SearchHint">Search fields...</sys:String>
-    <sys:String x:Key="str.LiveWalker.SearchCount">{0} matches</sys:String>
     <sys:String x:Key="str.LiveWalker.MatchPrev">▲</sys:String>
     <sys:String x:Key="str.LiveWalker.MatchNext">▼</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.MatchPrev">Jump to the previous matching field (wraps to the last match)</sys:String>
@@ -244,7 +240,6 @@
     <sys:String x:Key="str.LiveWalker.FindRefs">Find Refs</sys:String>
     <sys:String x:Key="str.LiveWalker.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.LiveWalker.AddressHint">Address (hex or module.exe+offset)</sys:String>
-    <sys:String x:Key="str.LiveWalker.GWorldDepth">GWorld depth:</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.GWorldDepth">Maximum pointer hops to search downward from GWorld when using "Locate in GWorld" (default 7). Larger = finds deeper targets but slower.</sys:String>
     <sys:String x:Key="str.Toolbar.GWorldDepth">Locate in GWorld depth</sys:String>
     <sys:String x:Key="str.Toolbar.GWorldDeep">Deep (nested containers)</sys:String>
@@ -253,8 +248,6 @@
     <sys:String x:Key="str.Tip.Toolbar.DeepScanElemCap">Per-container element probe cap for the Instances "Lookup" deep scan — the recursive descent that finds a value buried in nested containers (e.g. SaveSlotList[1]…Tunes[N]). Only runs when the fast shallow lookup finds nothing. Higher = reaches values at higher element indices but slower; default 256.</sys:String>
     <sys:String x:Key="str.LiveWalker.Go">Go</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCE">Copy CE XML</sys:String>
-    <sys:String x:Key="str.LiveWalker.ExportCEField">Copy CE Field</sys:String>
-    <sys:String x:Key="str.LiveWalker.ExportCEFields">Copy CE Fields</sys:String>
     <sys:String x:Key="str.LiveWalker.CancelExport">Cancel</sys:String>
     <sys:String x:Key="str.LiveWalker.AobToggle">AOB</sys:String>
     <sys:String x:Key="str.LiveWalker.CollapseChain">Collapse chain</sys:String>
@@ -279,8 +272,6 @@
     <sys:String x:Key="str.LiveWalker.PtrValue">[Ptr]</sys:String>
     <sys:String x:Key="str.LiveWalker.CopyPtr">Ptr</sys:String>
     <sys:String x:Key="str.LiveWalker.AutoRefresh">Auto</sys:String>
-    <sys:String x:Key="str.LiveWalker.IntervalSec">sec</sys:String>
-    <sys:String x:Key="str.LiveWalker.Copy">Copy</sys:String>
     <sys:String x:Key="str.LiveWalker.HexFieldTip">Navigate CE hex view to field address (via AOBMaker CE Plugin)</sys:String>
     <sys:String x:Key="str.LiveWalker.HexPtrTip">Navigate CE hex view to pointer target (via AOBMaker CE Plugin)</sys:String>
     <sys:String x:Key="str.LiveWalker.HexObjectTip">Navigate CE hex view to current object address (via AOBMaker CE Plugin)</sys:String>
@@ -301,8 +292,6 @@
     <sys:String x:Key="str.LiveWalker.BookmarkClearOne">Clear this bookmark</sys:String>
     <sys:String x:Key="str.LiveWalker.BookmarkClearAll">&#x2715;</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.BookmarkClearAll">Clear ALL bookmarks for this game (also deletes the saved file). To clear just one, right-click that slot.</sys:String>
-    <sys:String x:Key="str.Tip.LiveWalker.BookmarkClear">Clear this bookmark</sys:String>
-    <sys:String x:Key="str.Tip.LiveWalker.BookmarkEmpty">Empty bookmark slot</sys:String>
 
     <!-- Instance Finder -->
     <sys:String x:Key="str.InstanceFinder.ClassNameHint">Class name (e.g. PlayerController)</sys:String>
@@ -312,7 +301,6 @@
     <sys:String x:Key="str.InstanceFinder.OpenInWalker">Open in Live Walker</sys:String>
     <sys:String x:Key="str.InstanceFinder.LocateGWorld">🌍 Locate</sys:String>
     <sys:String x:Key="str.InstanceFinder.LocateGWorldShort">🌍</sys:String>
-    <sys:String x:Key="str.InstanceFinder.LocateGameEngine">⚙ Locate</sys:String>
     <sys:String x:Key="str.InstanceFinder.LocateGameEngineShort">⚙</sys:String>
     <sys:String x:Key="str.InstanceFinder.AddressHint">Address (hex or module.exe+offset)</sys:String>
     <sys:String x:Key="str.InstanceFinder.Lookup">Lookup</sys:String>
@@ -474,7 +462,6 @@
 
     <!-- Experimental features gate (System-tab credit checkbox) -->
     <sys:String x:Key="str.Experimental.EnableHint">Enable advanced experimental features</sys:String>
-    <sys:String x:Key="str.Experimental.Placeholder">This experimental feature is under construction. See docs/experimental-snapshot-spc-pivot.md.</sys:String>
 
     <!-- Snapshot tab (experimental — Phase A) -->
     <sys:String x:Key="str.Snapshot.Intro">Capture every numeric UPROPERTY of every (scoped) object into a persisted snapshot. Snapshots feed SPC Query and Class Pivot. Enable "Native-C" to also capture unmanaged (non-UPROPERTY) raw values.</sys:String>
@@ -530,7 +517,6 @@
     <sys:String x:Key="str.Snapshot.Col.Scope">Scope</sys:String>
     <sys:String x:Key="str.Snapshot.Col.Ue">UE</sys:String>
     <!-- Snapshot diff -->
-    <sys:String x:Key="str.Snapshot.Diff.Header">Compare</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Old">Old:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.New">New:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Run">Run Diff</sys:String>
@@ -707,8 +693,6 @@
     <sys:String x:Key="str.Pivot.Discover.Header">🔍 Suggest targets — find what changed</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Intro">Don't know which class to pivot? Capture 2-4 snapshots around an in-game action (e.g. spend gold, take damage), tick them below, and Discover ranks the (class, property) targets that MOVED — by how much each looks like game state (named fields, specific changes, low noise). Pick one and Use → to pivot it. No class/key guessing.</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Pick">Snapshots (tick 2-4, oldest → newest = Before … After):</sys:String>
-    <sys:String x:Key="str.Pivot.Discover.From">Before:</sys:String>
-    <sys:String x:Key="str.Pivot.Discover.To">After:</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Run">🔍 Discover</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Use">Use → (pivot this)</sys:String>
     <!-- Usage limits, shown on the tab so expectations are clear up front. -->
@@ -992,7 +976,6 @@
     <sys:String x:Key="str.TP.HkHint">Global hotkeys for markers (Save / Recall / Recall-last), BugItGo, Debug camera, and the God Mode / Super Jump / Move Speed / Gravity toggles + teleport / cursor actions (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Click Cancel or press Esc to abort. Keyboard only for now (mouse extra-buttons / gamepad not yet supported). Saved automatically. A combo marked ⚠ is held by another app — free it and reconnect, or bind a different one.</sys:String>
     <sys:String x:Key="str.TP.ExpHkHeader">Experimental Hotkeys</sys:String>
     <sys:String x:Key="str.TP.ExpHkHint">Global hotkeys for the experimental features (Keep Foreground ON/OFF, Fly toggle). These are only active while Experimental features is enabled — turning it off unbinds them (and the emergency Keep-Foreground-OFF key). Bind them the same way: click Set, then press the combo.</sys:String>
-    <sys:String x:Key="str.TP.HkSet">Set</sys:String>
     <sys:String x:Key="str.TP.HkClear">Clear</sys:String>
     <sys:String x:Key="str.TP.CeHeader">CE Export</sys:String>
     <sys:String x:Key="str.TP.AddActions">Add action records to CE</sys:String>
@@ -1222,7 +1205,6 @@
     <sys:String x:Key="str.Tip.TP.CoordSetRot">When ticked, also restore the Pitch/Yaw/Roll below after the jump. Leave off to keep your current facing.</sys:String>
 
     <!-- Coordinate Library (P1) — docs/teleport-coord-library-spec.md -->
-    <sys:String x:Key="str.TP.LibHeader">Coordinate Library</sys:String>
     <sys:String x:Key="str.TP.LibHint">An unlimited, labelled list of positions saved per game. Separate from the 3 marker slots above: those live in the DLL and are hotkey-driven, this one is a curated list that persists across game patches.</sys:String>
     <sys:String x:Key="str.TP.LibSaveCurrent">＋ Save current pos</sys:String>
     <sys:String x:Key="str.TP.LibAddFields">＋ From fields</sys:String>
@@ -1323,12 +1305,8 @@ A .preclear.bak copy is written first, so this can be recovered by hand from the
 
     <!-- Proxy DLL / Deferred Scan -->
     <sys:String x:Key="str.Toolbar.StartScan">Start Scan</sys:String>
-    <sys:String x:Key="str.Toolbar.Scanning">Scanning...</sys:String>
 
     <!-- Errors -->
-    <sys:String x:Key="str.Error.Connection">Failed to connect to pipe server</sys:String>
-    <sys:String x:Key="str.Error.ReadFailed">Memory read failed</sys:String>
-    <sys:String x:Key="str.Error.AlreadyRunning">Another instance of UE5 Dump UI is already running</sys:String>
 
     <!-- Tooltips: MainWindow toolbar -->
     <sys:String x:Key="str.Tip.Connect">Connect to injected DLL via named pipe</sys:String>
@@ -1394,14 +1372,12 @@ A .preclear.bak copy is written first, so this can be recovered by hand from the
     <sys:String x:Key="str.Tip.PropertySearch.Deep">Also descend into nested struct members and struct-typed container elements (TArray/TSet/TMap of structs), so a field buried inside a struct/array (e.g. SaveSlotList[].MsTuneData.GP) becomes findable by name. Slower; matches show a dotted path and an owning class. Off = fast direct-field search only.</sys:String>
     <sys:String x:Key="str.Tip.PropertySearch.FindInstances">Find in Instance Finder: switch to the Instance Finder tab, fill in this row's class name, and run the search to list all live instances of it.</sys:String>
     <sys:String x:Key="str.Tip.PropertySearch.CopyOffset">Copy property offset to clipboard</sys:String>
-    <sys:String x:Key="str.Tip.PropertySearch.Freeze">Generate an AA Script that locks this property across all live instances. Requires AOBMaker plugin in CE.</sys:String>
 
     <!-- Tooltips: Game Class Filter -->
     <sys:String x:Key="str.Tip.GameClassFilter.Load">Load class list from game process</sys:String>
     <sys:String x:Key="str.Tip.GameClassFilter.GameOnly">Show only game-specific classes (exclude engine)</sys:String>
     <sys:String x:Key="str.Tip.GameClassFilter.SuperFilter">Filter by super/parent class</sys:String>
     <sys:String x:Key="str.Tip.GameClassFilter.PackageFilter">Filter by UE package name</sys:String>
-    <sys:String x:Key="str.Tip.GameClassFilter.TextFilter">Filter classes by name substring</sys:String>
     <sys:String x:Key="str.Tip.GameClassFilter.Clear">Clear all filters</sys:String>
     <sys:String x:Key="str.Tip.GameClassFilter.FindInstances">Find live instances of this class</sys:String>
     <sys:String x:Key="str.Tip.GameClassFilter.WalkClass">Open class in the Class Struct tab to inspect its full property layout and offsets</sys:String>

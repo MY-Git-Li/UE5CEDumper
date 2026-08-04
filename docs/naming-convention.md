@@ -52,6 +52,19 @@ narrative identity resonates with what the module *does*.
 | **Edel.cpp** | 艾德爾 | エーデル | Hypnosis-magic mage ("noble") | — | CurrentTarget: auto-detect the actor the player is targeting (GWorld→PlayerController→Pawn, score outgoing object-ptr fields) | Reads what the player's mind is fixed on — the focused enemy, so the user needn't guess a class-name keyword |
 | **Laufen.cpp** | 拉歐芬 | ラオフェン | High-speed-movement mage ("to run") | — | MovementTuning: force per-pawn CMC float knobs (MaxWalkSpeed/GravityScale/JumpZVelocity) × multiplier + re-assert worker | Runs faster than anyone — scales the pawn's movement; the float analogue of Solitar's bool-bit force |
 | **Grausam.cpp** | 格勞薩姆 | グラオザーム | Seven Sages, master of illusion magic | #— | ForegroundLock: MinHook user32!GetForegroundWindow → always report the game's own window as foreground | Master of illusion — casts the illusion that the game is always the foreground app, so `t.IdleWhenNotForeground` / focus-loss pause never fires |
+| **Denken.cpp** | 登肯 | デンケン | Elderly first-class mage, ex-Chancellor | #13 | NativeDisasm: Zydis x64 decode of a native UFunction → `[this+off]` property xref | Reads the machine's own reasoning — decodes what a compiled function actually touches |
+| **Dunste.cpp** | 敦斯特 | ドゥンスト | Exam proctor ("vapors") | — | Fly: no-gravity keyboard-driven 3D flight (CMC MOVE_Flying + Velocity drive) | Vapour — moves through the air with nothing holding it up |
+| **Hemmung.cpp** | 赫姆恩 | ヘムング | — ("inhibition") | — | TimeDilation: hold reflected time-dilation floats at an absolute value | Inhibition — slows the world itself |
+| **Linie.cpp** | 莉妮耶 | リーニエ | Shadow Warrior, copies techniques ("line") | — | LivePEProfiler: per-`UFunction*` fire-count table recorded from the ProcessEvent hook | Watches and records what actually ran — a line drawn through the frame |
+| **Schlacht.cpp** | 沙拉赫特 | シュラハト | — ("battle") | — | SeeThrough: hide the occluders between the camera and the view target | Clears the battlefield of what blocks the line of sight |
+| **Solide.cpp** | 佐利德 | ゾリーデ | Blindfold swordsman ("solid") | — | ForceField: hold a discovered reflected field at a value across every live instance of a class | Holds a stance no matter what pushes back — the multi-instance sibling of Hemmung |
+| **Sense.cpp** | 森瑟 | ゼンセ | Second-exam proctor, tea ceremony ("scythe") | #14 | Diagnostics: per-command dispatcher timing + process counters | Measures with a steady hand — the numbers every perf claim is checked against |
+| **Neu.h** | 諾伊 | ノイ | — ("new") | — | `UEnum::Names` layout parse (legacy `TArray` vs UE5.6+ `FNameData`) | The NEW enum container — reads the struct-of-arrays UE 5.6 introduced |
+| **Routine.h** | 路蒂涅 | ルティーネ | Shadow Warrior librarian | — | Periodic-worker scaffolding shared by the six re-assert / hold modules | Scheduled, repeating work — the librarian's rounds (header-only) |
+| **Lugner_Dxgi.cpp / _Dinput8.cpp / _Winmm.cpp** | 琉古納 | リュグナー | Demon master of disguise | #12 | The other three proxy DLLs (dxgi / dinput8 / winmm) | Same deceiver, three more disguises — see `Lugner.cpp` |
+| **BuildStamp.h/.cpp** | — | — | — (generic leaf utility) | — | Build number / git hash / config string baked in at compile time | Kept English by design: a generic leaf utility, per the exception in Rules below |
+| **Utf8Helpers.h** | — | — | — (generic leaf utility) | — | UTF-8 sanitisation + UTF-16→UTF-8 encoding + FString/FUtf8String width decode | Kept English by design (the rule names this file explicitly) |
+| **GraphPath.h** | — | — | — (algorithm helper) | — | Pure BFS shortest-path core, lives inside `Aura::` | Kept English by design: an algorithm helper inside an existing namespace |
 
 ---
 
@@ -111,6 +124,16 @@ Edel::                      // CurrentTarget — auto-detect the player's curren
 Laufen::                    // MovementTuning — force per-pawn CMC float knobs (speed/gravity/jump) × multiplier + re-assert
 Dunste::                    // Fly — no-gravity keyboard-driven 3D flight (CMC MOVE_Flying + Velocity drive, re-assert worker)
 Grausam::                   // ForegroundLock — hook GetForegroundWindow so the game always thinks it is foreground (defeat idle/pause when unfocused)
+Hemmung::                   // TimeDilation — hold reflected time-dilation floats at an ABSOLUTE value
+Solide::                    // ForceField — hold a discovered field across every live instance of a class
+Schlacht::                  // SeeThrough — hide the occluders between camera and view target
+Linie::                     // LivePEProfiler — per-UFunction fire counts from the ProcessEvent hook
+Denken::                    // NativeDisasm — Zydis x64 decode: native UFunction → [this+off] property xref
+Sense::                     // Diagnostics — per-command dispatcher timing + process counters
+Neu::                       // UEnum::Names layout parse (legacy TArray vs UE5.6+ FNameData; header-only)
+Routine::                   // Periodic-worker scaffolding for the six re-assert workers (header-only)
+BuildStamp::                // Build number / git hash / config (generic leaf utility, English by design)
+Utf8Helpers::               // UTF-8 sanitise / UTF-16 encode / FString width decode (English by design)
 Grimoire::                  // Constants — spell book
 DynOff::                    // Dynamic offsets (in Grimoire.h, unchanged)
 ```

@@ -551,9 +551,10 @@ public static class InvokeScriptGenerator
         return $"math.floor(tonumber(edits[{editIndex}].Text) or 0)";
     }
 
-    /// <summary>Escape special characters for Lua single-quoted string literal.</summary>
-    private static string EscapeLua(string s)
-    {
-        return s.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", "\\n");
-    }
+    /// <summary>Escape for a Lua single-quoted literal. Forwards to the one
+    /// implementation (R2). This copy was the WEAKEST of the three: it handled only
+    /// backslash / quote / newline, so CR and TAB survived verbatim and — the real
+    /// hazard — so did a closing long bracket, which would terminate AOBMaker's
+    /// <c>[==[ … ]==]</c> wrapper around the whole script.</summary>
+    private static string EscapeLua(string s) => CeLuaHygiene.EscapeLuaString(s);
 }

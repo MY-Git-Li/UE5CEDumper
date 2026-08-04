@@ -219,6 +219,12 @@ public static class TeleportScriptGenerator
         Line(sb, "end");
         Line(sb);
         Line(sb, "for slot = 0, 2 do");
+        // R3: this used to sample cmd ONCE and silently SKIP the slot when it was
+        // non-zero — clearing 2 of 3 markers and reporting "all markers cleared". And
+        // three back-to-back round-trips is precisely the shape that trips the
+        // status-before-cmd publication order.
+        CeLuaHygiene.AppendIdleWait(sb, "mb",
+            "hadError = true; showMessage('[Teleport] mailbox busy -- markers not cleared'); break", "  ");
         Line(sb, $"  if readInteger(mb + {CeMailboxLayout.OffCmd}) == 0 then");
         Line(sb, $"    writeQword(mb + {CeMailboxLayout.OffUfuncAddr}, slot)            -- slot");
         Line(sb, $"    writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, 6)               -- op = CLEAR_MARKER");
