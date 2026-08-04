@@ -583,10 +583,18 @@ public partial class ProxyDeployViewModel : ViewModelBase
             WriteOrphanReportCommand.NotifyCanExecuteChanged();
             NotifyOrphanSelectionChanged();
 
+            // Name the NEXT action explicitly, and quote the button label verbatim ("Report…",
+            // ellipsis and all) so it can be matched on screen. The scan finishing was being read
+            // as "the report has been produced" — a fair assumption, since a scan that reports its
+            // findings on screen looks finished — and the file was then never written. Saying which
+            // button writes it costs one clause and removes the guess. The clean case also states
+            // the coverage, because "found nothing" is only reassuring next to "…out of how many".
             SetOperationResult(
                 Orphans.Count == 0
-                    ? "No leftover proxy DLLs found"
-                    : $"Found {Orphans.Count} leftover proxy DLL(s) — nothing removed yet",
+                    ? $"No leftover proxy DLLs found ({_orphanFoldersExamined} folder(s) examined) — "
+                      + "press “Report…” to save this result as a file."
+                    : $"Found {Orphans.Count} leftover proxy DLL(s) — nothing removed yet. "
+                      + "Press “Report…” for a dry run of exactly what would go.",
                 0);
         }
         catch (OperationCanceledException)
