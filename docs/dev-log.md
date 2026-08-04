@@ -20,6 +20,55 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - Two exports that published something CE could not use (build 2581)
+
+Audit #4 B2 + B3, together because they are the same shape: code that emits a value without
+checking whether the consumer can do anything with it.
+
+**B2 — a mangled symbol name published as if it were an AOB.** `Genau` copies the winning
+signature's `pattern` into `gworldAob` (and the same triple for `&GEngine`) so a CE script can
+re-find the address with `AOBScanModuleUE` plus a fixed offset. It copied it unconditionally. But
+`SIG_EXPORT` entries store an MSVC **mangled name** in that field — Satisfactory resolves GWorld
+through `?GWorld@@3VUWorldProxy@@A` — and the UI's "an AOB is available" test is just "the string is
+non-empty". So the checkbox lit up, auto-ticked for anyone with the persisted preference, and the
+emitted script scanned for the literal characters of a symbol name. Every address in the exported
+table resolved to `??`.
+
+New `IsCeReplayableAob(AobResolve)` in `Himmel.h` is now the single place that answers "can CE
+replay this?" — true only for the RIP forms. `CallFollow` is excluded alongside the two symbol
+forms: its pattern *is* a byte string, but the address comes from following the CALL and scanning
+the callee, which no fixed offset into the match can express. All three also carry
+`instrOffset/opcodeLen/totalLen = 0`, so the published range would have been the degenerate `[0,0)`
+even if the pattern had been scannable.
+
+`Test_Sig_IsCeReplayableAob` pins the classification and then sweeps the four shipped pattern tables
+to assert that structural fact directly — and that the tables still *contain* symbol and call-follow
+entries, because a gate nothing exercises is a gate that has silently stopped guarding.
+
+**B3 — one `&` voided the whole export.** `<Description>` text is arbitrary game memory: TMap keys,
+TSet elements, soft-object paths, DataTable row names. It was interpolated raw, while
+`EscapeXmlContent` — which exists in the same file — was called at exactly two `<DropDownListLink>`
+sites. A key like `Bow & Arrow` produces an invalid entity reference and Cheat Engine rejects the
+**entire document**, so a multi-thousand-entry export imports as nothing with no clue which record
+was at fault. `CheatTableBuilder` escaped its output correctly; this file was the outlier, and no
+test compared them.
+
+All **eight** Description emissions are escaped now, not the four the audit named — escaping an
+already-safe string is a no-op, so "every Description is escaped" is a cheaper invariant to hold
+than a list of the risky ones.
+
+The new tests **parse the output with `XDocument`** instead of string-matching for `&amp;`.
+Asserting on the entity would pass for output that is still malformed somewhere else; asking a real
+parser is the property that actually matters, and it is the check this suite never performed. One of
+them round-trips the text back out, because "the document parses" would also be satisfied by output
+that dropped the characters rather than encoding them. Verified by negative control: removing the
+escaping again fails all five.
+
+**Not verified in-game:** B2 needs a modular build (Satisfactory-class) where GWorld resolves
+through a symbol export. 3155 C# green (+5), 929 C++ green (+29).
+
+-----
+
 ## 2026-08-04 - "There is a dxgi.dll here" was never evidence that it was ours (build 2577)
 
 Audit #4 B29. `Methode.cpp`'s `IsAlreadyLoadedInTarget` decided "UE5CEDumper is already present in

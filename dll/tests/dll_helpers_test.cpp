@@ -19,6 +19,7 @@
 //     RequiredAlignment now consults ElemSize and CasePreservingName mode.
 // ============================================================
 
+#include "../src/Himmel.h"  // AobResolve + IsCeReplayableAob + the shipped pattern tables
 #include "../src/Renge.h"
 #include "../src/Scharf.h"
 #include "../src/Radar.h"
@@ -3055,6 +3056,51 @@ static bool PatMatchAt(const Macht::ParsedPattern& pat,
     return true;
 }
 
+static void Test_Sig_IsCeReplayableAob() {
+    std::printf("Test_Sig_IsCeReplayableAob\n");
+
+    // Only the RIP forms give CE a (pattern, pos, len) triple it can replay with
+    // AOBScanModuleUE + a fixed offset into the match.
+    EXPECT("RipDirect replayable",        IsCeReplayableAob(AobResolve::RipDirect));
+    EXPECT("RipDeref replayable",         IsCeReplayableAob(AobResolve::RipDeref));
+    EXPECT("RipBoth replayable",          IsCeReplayableAob(AobResolve::RipBoth));
+
+    // SymbolExport / SymbolCallFollow keep an MSVC MANGLED NAME in `pattern`. Publishing
+    // one made the UI's "an AOB is available" test (non-empty string) true, and every
+    // address in the exported CE table then resolved to `??` (audit #4 B2).
+    EXPECT("SymbolExport NOT replayable", !IsCeReplayableAob(AobResolve::SymbolExport));
+    EXPECT("SymbolCallFollow NOT repl.",  !IsCeReplayableAob(AobResolve::SymbolCallFollow));
+
+    // CallFollow's pattern IS a byte string, but the address comes from following the
+    // CALL and scanning the callee — no fixed offset into the match can express that.
+    EXPECT("CallFollow NOT replayable",   !IsCeReplayableAob(AobResolve::CallFollow));
+
+    // The structural reason the gate is needed at all: every non-replayable form also
+    // carries instrOffset/opcodeLen/totalLen = 0, so the published range would be the
+    // degenerate [0,0) even if the pattern itself were scannable. Assert that over the
+    // REAL shipped tables rather than trusting the macros.
+    int checkedExports = 0, checkedCallFollow = 0;
+    auto sweep = [&](const AobSignature* tbl, size_t n) {
+        for (size_t i = 0; i < n; ++i) {
+            const auto& sig = tbl[i];
+            if (IsCeReplayableAob(sig.resolve)) continue;
+            EXPECT("non-replayable has zero instrOffset", sig.instrOffset == 0);
+            EXPECT("non-replayable has zero opcodeLen",   sig.opcodeLen   == 0);
+            EXPECT("non-replayable has zero totalLen",    sig.totalLen    == 0);
+            if (sig.resolve == AobResolve::SymbolExport ||
+                sig.resolve == AobResolve::SymbolCallFollow) ++checkedExports;
+            if (sig.resolve == AobResolve::CallFollow) ++checkedCallFollow;
+        }
+    };
+    sweep(Sig::GOBJECTS_PATTERNS, std::size(Sig::GOBJECTS_PATTERNS));
+    sweep(Sig::GNAMES_PATTERNS,   std::size(Sig::GNAMES_PATTERNS));
+    sweep(Sig::GWORLD_PATTERNS,   std::size(Sig::GWORLD_PATTERNS));
+    sweep(Sig::GENGINE_PATTERNS,  std::size(Sig::GENGINE_PATTERNS));
+    // A gate nothing exercises is a gate that silently stops guarding.
+    EXPECT("tables still carry symbol entries",     checkedExports > 0);
+    EXPECT("tables still carry a CallFollow entry", checkedCallFollow > 0);
+}
+
 static void Test_Macht_ParsePattern_Nibble() {
     std::printf("Test_Macht_ParsePattern_Nibble\n");
     Macht::ParsedPattern p;
@@ -3314,6 +3360,7 @@ int main() {
     Test_Holes_NormalizeGuessedType();
 
     // Macht — AOB pattern parser: nibble wildcards (4? / ?5) + anchor selection
+    Test_Sig_IsCeReplayableAob();
     Test_Macht_ParsePattern_Nibble();
 
     // DynOff — FFieldClass::Name probe (UE 5.8 virtual-dtor member shift)

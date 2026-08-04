@@ -1665,6 +1665,15 @@ Pick up when the active plan finishes or when blocked.
 > filtered** (so `[DEBUG]` lines count), and **See-Through / Foreground-Lock evidence lands in
 > `init-0.log`**, not `walk`/`pipe`, because their categories fall through `ResolveFile`.
 
+- ⬜ **Symbol-export GWorld no longer claims to have an AOB** (build 2581, audit #4 B2). The gate is
+  unit-tested against the shipped pattern tables, but needs a game whose GWorld actually resolves
+  through a symbol export — **Satisfactory** (`?GWorld@@3VUWorldProxy@@A`, see
+  [test-games.md](test-games.md)). **To test:** scan, then look at the CE-export / Standalone-Trainer
+  AOB toggle. PASS = the toggle is greyed out (no AOB offered) and the exported table's addresses
+  resolve normally through the non-AOB path. FAIL = the toggle is enabled and every address in the
+  exported table shows `??`. Nothing to check on a normal RIP-pattern game — the toggle behaves as
+  before there, which is the point.
+
 - ⬜ **CE-plugin double-inject guard — the third-party-wrapper case** (build 2577, audit #4 B29).
   Ownership is now decided by PE ProductName, not file name. **Verified on real files here** (our 5
   binaries say `UE5CEDumper`; the 4 System32 counterparts say `Microsoft® …`), but the case that

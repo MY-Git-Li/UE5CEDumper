@@ -18,7 +18,7 @@
 **Tally:** 3 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **52 items** (26 from 4a, 25 from 4b, 1 from in-game verification).
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
-**Progress: 7 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577) — 45 open.**
+**Progress: 9 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577), B2 + B3 (2581) — 43 open.**
 **+1 found by in-game verification** (B49), which is why 51 became 52.
 
 > ### ✅ Verification discipline
@@ -50,8 +50,8 @@ existing behaviour / perf.
 | **B27** ✅ | 🔴 | S/low | App composition root | ~~11 positional args to a 12-param ctor ⇒ `CoordinateLibraryStore` binds `null` ⇒ the whole Coordinate Library never persists~~ **FIXED build 2560** |
 | **B1** ✅ | 🔴 | M/med | CE teardown | CE Disable either never tears down (reported clean) **or** bricks the DLL for the session — exactly one is live, and they must be fixed together |
 | **B49** ✅ | 🔴 | S/med | Fern | ~~`Fern::Stop` closes a SYNCHRONOUS listen handle to "unblock" the accept thread; the close instead BLOCKS until a client connects — under `m_connMutex` — so a disable with no UI connected wedges the teardown thread forever~~ **FIXED build 2569** |
-| B2 | 🟠 | S/low | Genau | SymbolExport winner published in the AOB field ⇒ CE table / trainer / symbol all dead on modular UE builds |
-| B3 | 🟠 | S/low | CeXmlExport | `<Description>` never XML-escaped ⇒ one `&` in a game string voids the entire export |
+| B2 ✅ | 🟠 | S/low | Genau | ~~SymbolExport winner published in the AOB field ⇒ CE table / trainer / symbol all dead on modular UE builds~~ **FIXED build 2581** |
+| B3 ✅ | 🟠 | S/low | CeXmlExport | ~~`<Description>` never XML-escaped ⇒ one `&` in a game string voids the entire export~~ **FIXED build 2581** |
 | B4 | 🟠 | M/med | Mimic | Mailbox thread not a background worker ⇒ a latched per-command cancel empties every CE object lookup for the session |
 | B5 | 🟠 | M/med | Frieren | `s_initialized` latched *after* the multi-second scan ⇒ a concurrent second full init corrupts DynOff silently |
 | B6 ✅ | 🟠 | S/low | Coord library | ~~Clear-all: no confirm, no pre-clear backup, `.bak` expires after 2 saves~~ **FIXED build 2560** |
@@ -371,6 +371,21 @@ A rule applied by hand-copying it to a list of sites lands at N−k: B4 + B14 (t
 - **Where:** [`dll/src/Fern.cpp:450`](../dll/src/Fern.cpp:450), [`dll/src/Fern.h:51`](../dll/src/Fern.h:51)
 
 ### B2 — SymbolExport winner published as an AOB pattern
+
+> **✅ FIXED — build 2581.** New `IsCeReplayableAob(AobResolve)` in `Himmel.h` is the single place
+> that answers "can CE replay this winner's (pattern, pos, len) triple?" — true only for
+> `RipDirect`/`RipDeref`/`RipBoth`. Both publish sites (`Genau.cpp:4727` GWorld, `:4349`
+> `PublishGEngineMetadata`) gate on it, so a symbol or call-follow winner now publishes nothing and
+> the UI's existing "empty aob ⇒ toggle greys out" contract takes over. `CallFollow` is excluded
+> alongside the two symbol forms, as the finding required: its pattern IS a byte string, but the
+> address comes from following the CALL and scanning the callee, which no fixed offset can express.
+> `Test_Sig_IsCeReplayableAob` pins the classification **and** sweeps the four shipped pattern tables
+> to assert every non-replayable entry really does carry `instrOffset/opcodeLen/totalLen == 0`
+> (the structural reason the gate is needed), plus that the tables still contain symbol and
+> call-follow entries at all — a gate nothing exercises is a gate that silently stops guarding.
+> **Not verified in-game:** needs a modular build such as Satisfactory, where GWorld resolves through
+> `?GWorld@@3VUWorldProxy@@A`.
+
 **🟠** · S/low · Genau. Both `Genau.cpp:4720-4723` (GWorld) and `:4347-4350` (`PublishGEngineMetadata`)
 copy `ws->pattern` with no check on `ws->resolve`. `SIG_EXPORT` (`Himmel.h:1462`) stores an MSVC mangled
 name there with `instrOffset/opcodeLen/totalLen = 0`.
@@ -385,6 +400,16 @@ out" contract.
 **Where:** [`dll/src/Genau.cpp:4720`](../dll/src/Genau.cpp:4720), [`dll/src/Genau.cpp:4347`](../dll/src/Genau.cpp:4347)
 
 ### B3 — CE XML `<Description>` never escaped
+
+> **✅ FIXED — build 2581.** All **eight** `<Description>` emissions now route through
+> `EscapeXmlContent`, not just the four the finding named: escaping an already-safe string is a
+> no-op, so "every Description is escaped" is a cheaper invariant to hold than a list of the risky
+> ones. New `CeXmlEscapingTests` **parses the output with `XDocument`** rather than string-matching
+> for `&amp;` — asserting on the entity would pass for output still malformed elsewhere. Five cases:
+> the minimal `R&D` reproducer, the kitchen-sink string, a round-trip check that the text is
+> *recoverable* and not merely encoded-away, `<` opening a phantom element, and the hierarchical
+> emitter. **Verified by negative control:** removing the escaping again fails all five.
+
 **🟠** · S/low · CeXmlExportService. Raw interpolation at `:3527` (also `:3567`, `:3591`, `:3641`) while
 `EscapeXmlContent` (`:3729`) is called at only two sites, both `<DropDownListLink>`. The text is arbitrary
 game memory: map keys, set elements, soft-path strings, DataTable row names.
@@ -1003,7 +1028,7 @@ gating · Mimic `LIST_FUNCTIONS`/`LIST_INSTANCES` page-index overflow ·
 2. ~~**B1, both halves in one commit.**~~ **✅ DONE — build 2561**, with B30 + B40. The live test came
    first and inverted the plan: `executeCodeEx` returned `nil`, so (a) was real and (b) was latent —
    which made "fix the arity alone" a certain brick rather than a suspected one.
-3. **B2, B3** — two small, low-risk, high-damage-avoided changes; both are "publish/emit correctly".
+3. ~~**B2, B3** — two small, low-risk, high-damage-avoided changes; both are "publish/emit correctly".~~ **✅ DONE — build 2581.**
 4. **B31 + B37 + B38** — one `LoggingService`/reports commit (`rollOnFileSizeLimit: true` **with
    `retainedFileCountLimit: null`**, judge folders by newest file inside, one `Path.Combine` segment), and
    fix the false claim in `walk_payload_audit.py:51` in the same change.

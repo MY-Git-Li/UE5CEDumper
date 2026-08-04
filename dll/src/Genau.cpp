@@ -4344,7 +4344,9 @@ static void PublishGEngineMetadata(EnginePointers& out) {
     out.gengineAob    = nullptr;
     out.gengineAobPos = 0;
     out.gengineAobLen = 0;
-    if (auto* es = s_gengineReport.winningSig) {
+    // Same replayability gate as the GWorld triple above — a symbol/call-follow winner
+    // is a perfectly good way for US to find &GEngine, and a useless thing to hand CE.
+    if (auto* es = s_gengineReport.winningSig; es && IsCeReplayableAob(es->resolve)) {
         out.gengineAob    = es->pattern;
         out.gengineAobPos = es->instrOffset + es->opcodeLen;
         out.gengineAobLen = es->instrOffset + es->totalLen;
@@ -4716,8 +4718,13 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
     ExtractScanStats(s_gnamesReport,   out.gnamesPatternsTried,   out.gnamesPatternsHit);
     ExtractScanStats(s_gworldReport,   out.gworldPatternsTried,   out.gworldPatternsHit);
 
-    // GWorld winning pattern AOB metadata (for CE symbol registration via CreateSymbolScript)
-    if (auto* ws = s_gworldReport.winningSig) {
+    // GWorld winning pattern AOB metadata (for CE symbol registration via CreateSymbolScript).
+    // Published ONLY when the winner is a form CE can actually replay — see
+    // IsCeReplayableAob. A SymbolExport winner (e.g. Satisfactory, which resolves
+    // GWorld through ?GWorld@@3VUWorldProxy@@A) stores a mangled NAME here, and shipping it
+    // as if it were a byte pattern makes the UI's "AOB available" checkbox light up for an
+    // export in which every address then resolves to `??`.
+    if (auto* ws = s_gworldReport.winningSig; ws && IsCeReplayableAob(ws->resolve)) {
         out.gworldAob    = ws->pattern;
         out.gworldAobPos = ws->instrOffset + ws->opcodeLen;
         out.gworldAobLen = ws->instrOffset + ws->totalLen;
