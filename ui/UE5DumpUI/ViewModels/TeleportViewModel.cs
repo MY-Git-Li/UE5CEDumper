@@ -2924,6 +2924,19 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     public ObservableCollection<string> CoordFilterHistory => _coordFilterMemory.History;
 
     private readonly CoordinateLibraryStore? _coordStore;
+
+    /// <summary>
+    /// Composition-root probe. False means the VM was built without a
+    /// <see cref="CoordinateLibraryStore"/>, in which case every persistence path
+    /// below silently no-ops and the whole library dies with the process.
+    ///
+    /// This exists because that is exactly what shipped (audit #4 B27): App builds
+    /// <c>MainWindowViewModel</c> with positional arguments, and an omitted one binds
+    /// to its optional default instead of failing to compile. Asserted by
+    /// <c>CompositionRootWiringTests</c>; not used by the UI.
+    /// </summary>
+    internal bool HasCoordStore => _coordStore != null;
+
     private string _activeCoordKey = "";
     private bool _suppressCoordPersist;
 
@@ -3358,17 +3371,45 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         CoordStatus = $"Deleted '{row.Entry.Label}'.";
     }
 
-    /// <summary>Wipe the whole library for this game (file included).</summary>
+    /// <summary>
+    /// Wipe the whole library for this game (file included).
+    ///
+    /// Unlike Delete/Duplicate this button has no <c>HasSelectedCoord</c> gate, so with
+    /// nothing selected it is the only live button of the three and it sits next to
+    /// Delete. Hence both guards: a confirmation, and a <c>.preclear.bak</c> written
+    /// before the file goes. The backup is the load-bearing half — the rolling
+    /// <c>.bak</c> is overwritten by the next Save, and a Z-tolerance nudge saves.
+    /// </summary>
     [RelayCommand]
-    private void ClearCoordLibrary()
+    private async Task ClearCoordLibraryAsync()
     {
         int n = _coordAll.Count;
+        if (n == 0)
+        {
+            CoordStatus = Res.Get("str.TP.LibClear.Empty");
+            return;
+        }
+
+        bool confirmed = await UE5DumpUI.Views.ConfirmDialog.ShowAsync(
+            Res.Get("str.TP.LibClear.ConfirmTitle"),
+            Res.Format("str.TP.LibClear.ConfirmMessage", n),
+            Res.Get("str.TP.LibClear.ConfirmYes"));
+        if (!confirmed) return;
+
+        // Back up BEFORE anything is dropped, and only clear in-memory state once the
+        // on-disk copy is safe to lose.
+        var bak = _coordStore?.SavePreClearBackup(_activeCoordKey) ?? "";
+
         _coordAll.Clear();
         SelectedCoord = null;
         _coordStore?.Delete(_activeCoordKey);
         RebuildCoordGroups();
         ApplyCoordFilter();
-        CoordStatus = $"Cleared {n} entr{(n == 1 ? "y" : "ies")}.";
+
+        CoordStatus = string.IsNullOrEmpty(bak)
+            ? Res.Format("str.TP.LibClear.Result", n)
+            : Res.Format("str.TP.LibClear.ResultBackedUp", n, Path.GetFileName(bak));
+        _log.Info($"Coord library cleared: {n} entries, backup={(string.IsNullOrEmpty(bak) ? "(none)" : bak)}");
     }
 
     // ── Teleport ────────────────────────────────────────────────────────

@@ -519,6 +519,45 @@ a live path. Open follow-ons, in priority order:
 
 -----
 
+## 🔎 Audit #4 fixes (build 2554 — 2026-08-04; full detail in [audit-2026-08-04-findings.md](audit-2026-08-04-findings.md))
+
+Fourth audit, and the first to cover **refactor** alongside bugs/leaks. Scope = the 96 shipped source
+files / +15,372 lines changed since the audit #3 baseline (`af2ce50`). Run as two passes: **4a** swept 8
+bug areas + 2 refactor areas; a **completeness critic** then mapped what 4a never read, and **4b** closed
+those 6 gaps. 48 agents, test baseline 3110 green. **51 items kept** (2 HIGH · 14 MED · 32 LOW · 3 INFO),
+**7 refuted** (listed in the findings doc — do not re-raise).
+
+**Do not track individual status here** — that is the mistake audit #3's block made (one sentence said
+"awaits in-game verification" for 13 fixes at once, so nothing could be ticked off). The findings doc is
+the tracker; delete a row there when it ships and write it up in [dev-log.md](dev-log.md). This block only
+records what the audit *is* and the two things that must not be got wrong:
+
+- **✅ DONE (build 2560) — B6 + B27, one commit.** B27 = the Coordinate Library store was constructed and
+  never passed (11 positional args into a 12-param ctor), so the whole feature never persisted; B6 =
+  Clear-all had no pre-clear backup, harmless *only because* nothing persisted. Wiring now goes through
+  `AppComposition.BuildMainWindowViewModel` with **required** parameters (verified: dropping the argument
+  is now `CS7036`, not a silent no-op), and a `.preclear.bak` + confirmation guards the wipe. See
+  [dev-log.md](dev-log.md) build 2560.
+- **B1 needs one live test before either half is written.** Untick the CE record and check whether the DLL
+  log shows `UE5_Shutdown: Cleaning up...`. Fixing the `executeCodeEx` arity alone would convert a silent
+  no-op into a session-long DLL brick.
+
+**Two root causes, both worth fixing as patterns rather than site-by-site:** 4a's is *the report and the
+reality are computed by different code paths* (a success message written by code that never observed
+whether the operation ran); 4b's is *a cheap proxy signal substituted for a predicate this codebase
+already computes* — filename instead of an export probe, a 1-second sleep instead of an actual signal,
+directory mtime instead of the newest file inside — **and in 10 of 22 cases a sibling in this same repo
+implements the real check correctly.** A secondary 4b thread, *silent defaults at composition points*
+(B27, B31, B38, B45), is why B27's composition-root test is worth more than its one-line production fix.
+
+**`ce-artifacts` is the area to give standing attention.** Three of 4b's five MEDIUMs live there, each can
+leave a working setup broken with a confidently wrong message, and — unlike the AOB tooling, which now has
+five CI gates — the `.CT`, the emitted Lua and the CE-plugin entry path have **no automated coverage at
+all**. `axaml-strings`, the AOT/dependency surface and the generated-proxy family came back effectively
+clean, which is a real result worth recording.
+
+-----
+
 ## 🔎 Audit #3 fixes (build 2168 — 2026-07-14; full detail in [audit-2026-07-14-findings.md](audit-2026-07-14-findings.md))
 
 Third bug/leak audit of the post-b1872 code (Solide/Hemmung/Linie/Schlacht/Grausam + Auto-Snapshot/

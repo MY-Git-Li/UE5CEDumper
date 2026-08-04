@@ -20,6 +20,54 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - The Coordinate Library never persisted, and the thing that hid it was an optional parameter (build 2560)
+
+Audit #4's first two fixes, shipped together because fixing one alone would have made the other
+dangerous. Full audit: [audit-2026-08-04-findings.md](audit-2026-08-04-findings.md) (51 items).
+
+**B27.** `App.axaml.cs` constructed a `CoordinateLibraryStore` and then called
+`new MainWindowViewModel(...)` with **11 positional arguments** against a 12-parameter constructor
+whose 12th is `CoordinateLibraryStore? coordLibrary = null`. The store bound to its default, was
+forwarded as null into `TeleportViewModel`, and every persistence path — load, save,
+`Delete`, `SavePreImportBackup` — early-returned on its null guard. So the Coordinate Library
+worked perfectly in-session and lost everything on restart, with no exception, no log line and no
+compiler warning. It had been that way since the feature shipped (builds 2257–2267), which is also
+why `todo.md` still listed it as *"needs in-game verification"*: nobody had run it long enough to
+notice, and no test could.
+
+**Why no test could.** Every existing test that builds `MainWindowViewModel` passes *named*
+arguments for the services it cares about — `MainWindowInjectHelperTests.BuildVm` passes 7. That is
+correct for a unit test and structurally blind to this defect: the test supplies what it needs, so
+it can never notice what `App` forgot. A new test that built the VM itself would have had the same
+blind spot — it would assert that *the test* passes the store.
+
+So the wiring moved out of `App` into `AppComposition.BuildMainWindowViewModel`, **whose parameters
+are all required**. `App` calls it, `CompositionRootWiringTests` calls it, and the compiler now
+enforces what optional parameters cannot. Verified the guard rather than assuming it: dropping the
+argument again was re-tried on disk and the build failed with `CS7036 … required parameter
+'coordLibrary'` instead of silently disabling the feature. Three tests: the positive (the store
+arrives), a negative control (omit it and `HasCoordStore` is false — without this the positive could
+pass for the wrong reason), and a structural one asserting `AppComposition`'s parameters stay
+required and its arity matches the VM's.
+
+**B6, and why it could not ship later.** "Clear all" had no confirmation and no pre-clear backup —
+and unlike Delete/Duplicate it has no `HasSelectedCoord` gate, so with nothing selected it is the
+only live button of the three and it sits next to Delete. That was **harmless only because nothing
+persisted**. Wiring B27 first would have converted it into unrecoverable data loss on one misclick,
+so it is in the same commit. The rolling `.bak` cannot cover this: the next Save overwrites it, and
+`OnCoordZToleranceChanged` saves on every spinner nudge, so a cleared library survived roughly two
+clicks of a NumericUpDown. New `SavePreClearBackup` writes a `.preclear.bak` — distinct from both
+the rolling `.bak` and `.preimport.bak`, so a clear cannot eat an import's rollback copy or vice
+versa — plus a confirmation dialog and a status line naming the backup file.
+
+The tooltip said *"There is no undo."* It now says what is actually true, which is the point: audit
+#4's cross-cutting 4a root cause is **the report and the reality being computed by different code
+paths**, and leaving that string alone would have been a fresh instance of it.
+
+3117 tests green (+7).
+
+-----
+
 ## 2026-08-03 - Log retention had a hole exactly the size of a renamed category (build 2553)
 
 Found while reading a real session's logs to verify the entry below. `Logs\UE5DumpUI\` still

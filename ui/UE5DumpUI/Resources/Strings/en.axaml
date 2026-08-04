@@ -1229,6 +1229,14 @@
     <sys:String x:Key="str.TP.LibDuplicate">Duplicate</sys:String>
     <sys:String x:Key="str.TP.LibDelete">Delete</sys:String>
     <sys:String x:Key="str.TP.LibClear">Clear all</sys:String>
+    <sys:String x:Key="str.TP.LibClear.ConfirmTitle">Clear the whole coordinate library?</sys:String>
+    <sys:String x:Key="str.TP.LibClear.ConfirmMessage">This deletes all {0} entries for this game and removes the library file.
+
+A .preclear.bak copy is written first, so this can be recovered by hand from the app data folder.</sys:String>
+    <sys:String x:Key="str.TP.LibClear.ConfirmYes">Clear all</sys:String>
+    <sys:String x:Key="str.TP.LibClear.Empty">The library is already empty.</sys:String>
+    <sys:String x:Key="str.TP.LibClear.Result">Cleared {0} entries.</sys:String>
+    <sys:String x:Key="str.TP.LibClear.ResultBackedUp">Cleared {0} entries. Backed up to {1}</sys:String>
     <sys:String x:Key="str.TP.LibFilter">Filter:</sys:String>
     <sys:String x:Key="str.TP.LibFilterPlaceholder">space = AND (label, group, map)</sys:String>
     <sys:String x:Key="str.TP.LibGroup">Group:</sys:String>
@@ -1246,7 +1254,7 @@
     <sys:String x:Key="str.Tip.TP.LibForceGo">Teleport ignoring the map check. Only useful if the map name changed but the level is the same; jumping to another map's coordinates puts you outside the world.</sys:String>
     <sys:String x:Key="str.Tip.TP.LibCurrentMapOnly">Hide entries saved on other maps. On by default — coordinates from different maps are often numerically close, so mixing them is how you end up under the floor.</sys:String>
     <sys:String x:Key="str.Tip.TP.LibUpdateCoords">Overwrite the selected entry's coordinates (and map) with the live pose, keeping its label and group.</sys:String>
-    <sys:String x:Key="str.Tip.TP.LibClear">Delete every entry for this game, and its file. There is no undo.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LibClear">Delete every entry for this game, and its file. Asks first, and writes a .preclear.bak you can restore by hand.</sys:String>
 
     <sys:String x:Key="str.TP.LibExportCsv">Export CSV</sys:String>
     <sys:String x:Key="str.TP.LibExportTemplate">Sample CSV</sys:String>
