@@ -18,7 +18,9 @@
 **Tally:** 3 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **52 items** (26 from 4a, 25 from 4b, 1 from in-game verification).
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
-**Progress: 19 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577), B2 + B3 (2581), B31 + B37 + B38 (2585), B5 + B4 (2592), B8 + B10 + B14 + R5 (2596), B28 (2599) — 33 open.**
+**Progress: 50 of 52 shipped.** Builds: 2560 · 2561 · 2569 · 2577 · 2581 · 2585 · 2592 · 2596 · 2599 ·
+2603 (8 DLL + scripts) · 2610 (12 UI) · 2614 (refactor R1-R4/R6/R7) · 2617 (B39).
+**Open: the 5 that need a maintainer decision** — B13/B41, B21, B25, B26, B43 — plus R8 ("later").
 
 ---
 
@@ -59,21 +61,25 @@ coherent commit; the *within-batch* order matters where noted.
   to be zero. The discriminator must be **structural** (e.g. an interior-UTF-16-null check, preferring a
   clean UTF-16 decode when one exists). Add `"中文一二"` and `"第1章"` as regression buffers.
 
-### Batch D — the small-fix sweep (all S/low, independent, one commit each or one big one)
-B7, B9, B11, B12, B15, B16, B17, B18, B19, B20, B22, B23, B24, B32, B33, B34, B35, B36, B42, B44
-(comment only), B45, B46, B47, B48.
-Two carry corrections that must not be lost:
-- **B9** — **ADD** `_ = CheckForCompetingDumperHostsAsync(state);` at `MainWindowViewModel.cs:2611`
-  and **KEEP** the existing call at `:694`. Do **not** move it: `RescanApplied` is a duplicated
-  hand-rolled fan-out that never reaches `ApplyEngineState`, so moving deletes the one path that works.
-  Also add `MultipleDumperHostsWarning = "";` at `:1997` and capture `int epoch = _sessionEpoch;` at entry.
-- **B15** — a bare `return` is **wrong**; it would strand the record ticked. Use
-  `then hadError = true; showMessage(...); break end` and declare `hadError` in `GenerateClearAll`.
+### ~~Batch D~~ — the small-fix sweep ✅ **DONE, builds 2603 + 2610**
+Split by side: 2603 = the 8 DLL + scripts items (B11, B18, B19, B22, B24, B32, B33, B34, B44, B46,
+B47, B48), 2610 = the 12 UI items (B7, B9, B12, B15, B16, B17, B20, B23, B35, B36, B42, B45).
+Both corrections in the plan held up and were applied as written (B9 ADDED not moved; B15 sets
+`hadError` rather than a bare `return`).
 
-### Batch E — refactor
-R1, R2, R3, R4, R6, R7 (R5 lands with B14 in Batch B; R8 is "later"). **R4: measure first** — the
-current code lower-cases once at parse time and compares Ordinal; if per-field `OrdinalIgnoreCase`
-regresses on a large `.jsonl`, keep the parse-time lowercase and store the four fields separately.
+### ~~Batch E~~ — refactor ✅ **DONE, build 2614**
+R1, R2, R3, R4, R6, R7 (R5 shipped with B14 in 2596; R8 remains "later").
+**R4's "measure first" instruction paid off and inverted the recommendation** — the four-field split
+the finding proposed as the ideal shape measured **2× slower** (55.1 ms vs 26.7 ms over 500K entries
+× 3 terms), while a single pre-lowered haystack with `OrdinalIgnoreCase` was **not** a regression
+(25.8 ms) and produced identical hit counts. Rejected on the number, recorded in the code.
+
+### B39 ✅ **DONE, build 2617** — was missing from this plan entirely
+Not in any batch above; the omission was in the plan, not the finding. Both writers (four in
+`Flamme.cpp`, one in `AobUsageService`) now stage through a **per-process** `.tmp.<pid>`. The final
+rename stays last-writer-wins — that is the accepted semantics — but the staging file must not be
+shared, or one process truncates it while the other is mid-write and the loser's partial document
+gets renamed over the real cache.
 
 ### Needs a decision from the maintainer before coding
 **B13/B41** (which volume-recycler API), **B21** (the `AllowThousands` tradeoff — removing it rejects
@@ -132,58 +138,58 @@ existing behaviour / perf.
 | B4 ✅ | 🟠 | M/med | Mimic | ~~Mailbox thread not a background worker ⇒ a latched per-command cancel empties every CE object lookup for the session~~ **FIXED build 2592** |
 | B5 ✅ | 🟠 | M/med | Frieren | ~~`s_initialized` latched *after* the multi-second scan ⇒ a concurrent second full init corrupts DynOff silently~~ **FIXED build 2592** |
 | B6 ✅ | 🟠 | S/low | Coord library | ~~Clear-all: no confirm, no pre-clear backup, `.bak` expires after 2 saves~~ **FIXED build 2560** |
-| B7 | 🟠 | S/low | Coord library | Uid is the one field skipping every ingress guard; duplicate uid + delete-by-uid wipes rows the user didn't select |
+| B7 ✅ | 🟠 | S/low | Coord library | ~~Uid is the one field skipping every ingress guard; duplicate uid + delete-by-uid wipes rows the user didn't select~~ **FIXED build 2610** |
 | B8 ✅ | 🟠 | M/med | Dunste | ~~Collision state committed independently of the invoke ⇒ pawn left non-colliding, falls through the world~~ **FIXED build 2596** |
-| B9 | 🟠 | S/low | MainWindowVM | Wrong-game warning never runs on connect, never clears on disconnect |
+| B9 ✅ | 🟠 | S/low | MainWindowVM | ~~Wrong-game warning never runs on connect, never clears on disconnect~~ **FIXED build 2610** |
 | B10 ✅ | 🟠 | M/med | Ubel | ~~`WalkClassEx` has no memo despite 4 call sites commented `// cached`; deep-copies under the global lock~~ **FIXED build 2596** |
 | B28 ✅ | 🟠 | M/med | Utf8Helpers | ~~UTF-8-first gate accepts a UTF-16 CJK buffer whose byte at `n−1` is `0x00` ⇒ ASCII mojibake, UTF-16 branch unreachable~~ **FIXED build 2599** |
 | B29 ✅ | 🟠 | S/low | Methode | ~~CE-plugin "already loaded" guard matches by **filename alone** ⇒ ReShade's `dxgi.dll` makes it refuse to inject~~ **FIXED build 2577** |
 | B30 ✅ | 🟠 | S/low | UE5CEDumper.CT | ~~Every `ue5_inject()` bail-out leaves CE's record ticked ⇒ untick runs a real `UE5_Shutdown` against a proxy this script never injected~~ **FIXED build 2561** |
 | B31 ✅ | 🟠 | S/low | LoggingService | ~~`fileSizeLimitBytes` without `rollOnFileSizeLimit:true` ⇒ the sink silently stops writing at 8 MB for the rest of the process~~ **FIXED build 2585** |
-| B11 | 🟡 | S/low | Sein | `fprintf` on a NULL `FILE*` after a failed rotation reopen ⇒ can terminate the game |
-| B12 | 🟡 | S/low | Proxy cleanup | Confirm/status text asserts things the executed plan contradicts |
+| B11 ✅ | 🟡 | S/low | Sein | ~~`fprintf` on a NULL `FILE*` after a failed rotation reopen ⇒ can terminate the game~~ **FIXED build 2603** |
+| B12 ✅ | 🟡 | S/low | Proxy cleanup | ~~Confirm/status text asserts things the executed plan contradicts~~ **FIXED build 2610** |
 | B13/B41 | 🟡 | M/low | Proxy cleanup | "Recycle Bin" promise unverifiable; a drive-letter test is not a recycler test |
 | B14 ✅ | 🟡 | S/low | DLL workers | ~~Thread-proc exception guard rolled out to 2 of 7 thread procs~~ **FIXED build 2596** (with R5) |
-| B15 | 🟡 | S/low | TeleportScriptGen | Mailbox timeout `break`s into the auto-close ⇒ the CE window shuts on a failure |
-| B16 | 🟡 | S/low | TeleportPanel | 5 coord-grid columns sort on nested/mismatched paths ⇒ dead headers under AOT |
-| B17 | 🟡 | S/low | TeleportVM | Pose not cleared on disconnect ⇒ the next game's library renders "0 of N" |
-| B18 | 🟡 | S/low | Genau | Extra Scan ignores `Tot::Requested()` ⇒ CE UI freezes on the unbounded join |
-| B19 | 🟡 | S/low | Sein | One shared `error_code` ⇒ the first undeletable entry aborts the whole retention sweep, forever |
-| B20 | 🟡 | S/low | TeleportVM | Filter keystroke reverts an uncommitted edit; `_coordFilterMemory` never disposed |
+| B15 ✅ | 🟡 | S/low | TeleportScriptGen | ~~Mailbox timeout `break`s into the auto-close ⇒ the CE window shuts on a failure~~ **FIXED build 2610** |
+| B16 ✅ | 🟡 | S/low | TeleportPanel | ~~5 coord-grid columns sort on nested/mismatched paths ⇒ dead headers under AOT~~ **FIXED build 2610** |
+| B17 ✅ | 🟡 | S/low | TeleportVM | ~~Pose not cleared on disconnect ⇒ the next game's library renders "0 of N"~~ **FIXED build 2610** |
+| B18 ✅ | 🟡 | S/low | Genau | ~~Extra Scan ignores `Tot::Requested()` ⇒ CE UI freezes on the unbounded join~~ **FIXED build 2603** |
+| B19 ✅ | 🟡 | S/low | Sein | ~~One shared `error_code` ⇒ the first undeletable entry aborts the whole retention sweep, forever~~ **FIXED build 2603** |
+| B20 ✅ | 🟡 | S/low | TeleportVM | ~~Filter keystroke reverts an uncommitted edit; `_coordFilterMemory` never disposed~~ **FIXED build 2610** |
 | B21 | 🟡 | S–M/low | Coord parsers | Three independent import-parser holes (AllowThousands, quote-state, regex-in-literal) |
-| B22 | 🟡 | S/low | Laufen | Base captured as 0 ⇒ the knob pins the CMC value at 0 against the game |
-| B23 | 🟡 | S/low | CE Lua | Autorun binds DEBUG at CE start (its own instruction can't work); non-finite double emitted as bare `Infinity` |
-| B24 | 🟡 | S/low | Frieren | Forced hook installs burn the automatic retry budget |
+| B22 ✅ | 🟡 | S/low | Laufen | ~~Base captured as 0 ⇒ the knob pins the CMC value at 0 against the game~~ **FIXED build 2603** |
+| B23 ✅ | 🟡 | S/low | CE Lua | ~~Autorun binds DEBUG at CE start (its own instruction can't work); non-finite double emitted as bare `Infinity`~~ **FIXED build 2610** |
+| B24 ✅ | 🟡 | S/low | Frieren | ~~Forced hook installs burn the automatic retry budget~~ **FIXED build 2603** |
 | B25 | 🟡 | S/med | Genau | Total scan refusal armed off an uncorroborated PE ProductVersion |
 | B26 | 🟡 | M/med | PointerQueryScriptGen | Duplicate GameEngine records: the older record's DISABLE frees the newer one's buffer |
-| B32 | 🟡 | S/low | UE5CEDumper.CT | The "very old DLL" fallback is unreachable ⇒ a modal **timeout error on a healthy inject** |
-| B33 | 🟡 | S/low | UE5CEDumper.CT + CeReadinessLua | Readiness poll resolves only bare `g_invokeMailbox`, never `UE5Dumper.g_invokeMailbox` |
-| B34 | 🟡 | S/low | Heiter | CE-plugin detection is a 1 s race ⇒ AOB scan + pipe server open **inside cheatengine-x86_64.exe** |
-| B35 | 🟡 | S/low | DiagnosticsProbe | The probe's own closing round-trip falls inside the measured window ⇒ `transportMs > wallMs`, `ui` clamps to 0 |
-| B36 | 🟡 | S/low | PropertySearchPanel | No `FallbackValue` ⇒ all four mutually-exclusive Force actions render when nothing is selected |
+| B32 ✅ | 🟡 | S/low | UE5CEDumper.CT | ~~The "very old DLL" fallback is unreachable ⇒ a modal **timeout error on a healthy inject**~~ **FIXED build 2603** |
+| B33 ✅ | 🟡 | S/low | UE5CEDumper.CT + CeReadinessLua | ~~Readiness poll resolves only bare `g_invokeMailbox`, never `UE5Dumper.g_invokeMailbox`~~ **FIXED build 2603** |
+| B34 ✅ | 🟡 | S/low | Heiter | ~~CE-plugin detection is a 1 s race ⇒ AOB scan + pipe server open **inside cheatengine-x86_64.exe**~~ **FIXED build 2603** |
+| B35 ✅ | 🟡 | S/low | DiagnosticsProbe | ~~The probe's own closing round-trip falls inside the measured window ⇒ `transportMs > wallMs`, `ui` clamps to 0~~ **FIXED build 2610** |
+| B36 ✅ | 🟡 | S/low | PropertySearchPanel | ~~No `FallbackValue` ⇒ all four mutually-exclusive Force actions render when nothing is selected~~ **FIXED build 2610** |
 | B37 ✅ | 🟡 | S/low | LoggingService | ~~Count-based folder eviction ranks by **directory mtime** — the signal its own sibling documents as unusable~~ **FIXED build 2585** |
 | B38 ✅ | 🟡 | S/low | ProxyDeployVM | ~~Leftover-proxy reports written to `%LOCALAPPDATA%\Reports`, not `…\UE5CEDumper\Reports`~~ **FIXED build 2585** |
-| B39 | 🟡 | M/med | Flamme | Four HintCache writers share one fixed `.tmp` path; the UI writes the byte-identical path from another process |
+| B39 ✅ | 🟡 | M/med | Flamme | ~~Four HintCache writers share one fixed `.tmp` path; the UI writes the byte-identical path from another process~~ **FIXED build 2617** |
 | B40 ✅ | 🟡 | S/low | UE5CEDumper.CT | ~~`ue5_callDLL` uses bare `getAddress` and tests for nil — CE *throws*, aborting the disable block and leaking the log FILE handle~~ **FIXED build 2561** |
-| B42 | 🟡 | S/low | App | Second launch calls `Shutdown(1)` before the logger exists — no window, no dialog, no log line |
+| B42 ✅ | 🟡 | S/low | App | ~~Second launch calls `Shutdown(1)` before the logger exists — no window, no dialog, no log line~~ **FIXED build 2610** |
 | B43 | 🟡 | M/med | Lugner_Winmm | Exclusive SRWLOCK held across `LoadLibraryW` + Sein file I/O; the dxgi safety precondition it copies does not transfer |
-| B44 | 🟡 | S/low | Lugner_Winmm.asm | Thunk tests `mProcs[N]` before the resolver but not after ⇒ `jmp rax` with `rax==0` if a name never resolves |
-| B45 | 🟡 | S/low | ProxyDeployPanel | Orphan-scan Cancel shown by the shared `IsScanning` flag but wired to a different command ⇒ a ghost Cancel on the wrong card |
-| B46 | 🟡 | S/low | Renge | `HexToBytes` maps non-hex chars to `0x00`, drops an odd trailing nibble, cannot report failure — `write_mem` answers `ok:true` |
-| B47 | 🟡 | S/low | Heiter | "First-proxy-wins" mutex is `Global\…` though the comment says per-process; without `SeCreateGlobalPrivilege` the dedup silently never fires |
-| B48 | 🟡 | S/low | gen_proxy_forwarders | No PE-machine check ⇒ under 32-bit Python, WOW64 redirection feeds the **x86** winmm into an x64-only target |
+| B44 ✅ | 🟡 | S/low | Lugner_Winmm.asm | ~~Thunk tests `mProcs[N]` before the resolver but not after ⇒ `jmp rax` with `rax==0` if a name never resolves~~ **FIXED build 2603** |
+| B45 ✅ | 🟡 | S/low | ProxyDeployPanel | ~~Orphan-scan Cancel shown by the shared `IsScanning` flag but wired to a different command ⇒ a ghost Cancel on the wrong card~~ **FIXED build 2610** |
+| B46 ✅ | 🟡 | S/low | Renge | ~~`HexToBytes` maps non-hex chars to `0x00`, drops an odd trailing nibble, cannot report failure — `write_mem` answers `ok:true`~~ **FIXED build 2603** |
+| B47 ✅ | 🟡 | S/low | Heiter | ~~"First-proxy-wins" mutex is `Global\…` though the comment says per-process; without `SeCreateGlobalPrivilege` the dedup silently never fires~~ **FIXED build 2603** |
+| B48 ✅ | 🟡 | S/low | gen_proxy_forwarders | ~~No PE-machine check ⇒ under 32-bit Python, WOW64 redirection feeds the **x86** winmm into an x64-only target~~ **FIXED build 2603** |
 
 ## Summary table — refactor & hygiene
 
 | ID | Verdict | Eff/Risk | Item |
 |----|---------|----------|------|
-| R1 | do now | S/low | `docs/naming-convention.md` — three module lists, the first two 8 modules stale |
-| R2 | do now | S/low | Delete 3 private Lua escapers + the private preamble/close copies; use `CeLuaHygiene` |
-| R3 | do now | S/low | `CeLuaHygiene.AppendIdleWait` at the **2** generators that sample `cmd` once (not 11) |
-| R4 | do now | S/low | `DumpExplorerViewModel` — the sole holdout of the space=AND keyword MUST rule |
+| R1 ✅ | done | S/low | `docs/naming-convention.md` — three module lists, the first two 8 modules stale |
+| R2 ✅ | done | S/low | Delete 3 private Lua escapers + the private preamble/close copies; use `CeLuaHygiene` |
+| R3 ✅ | done | S/low | `CeLuaHygiene.AppendIdleWait` at the **2** generators that sample `cmd` once (not 11) |
+| R4 ✅ | done | S/low | `DumpExplorerViewModel` — the sole holdout of the space=AND keyword MUST rule |
 | R5 ✅ | done | S–M/low | ~~One `ReassertWorker` helper for the six hold modules~~ **DONE build 2596** — new `Routine.h` (`ReassertLoop` / `RunTickGuarded` / `SleepSliced`) + `Grimoire::WORKER_SLEEP_SLICE_MS` |
-| R6 | INFO | S/low | `en.axaml` — 24 inert keys, 2 shadowed by hardcoded C#; **zero dangling references** |
-| R7 | INFO | S/low | `aob_specificity.py` docstring says "NOT WIRED INTO CI" 3 days after `6f594fa` wired it in as a blocking gate |
+| R6 ✅ | done | S/low | `en.axaml` — 24 inert keys, 2 shadowed by hardcoded C#; **zero dangling references** |
+| R7 ✅ | done | S/low | `aob_specificity.py` docstring says "NOT WIRED INTO CI" 3 days after `6f594fa` wired it in as a blocking gate |
 | R8 | later | S/low | `build.ps1` dist native payload never refreshed or pruned outside `-Clean` |
 | — | later | — | `RunGuardedAsync` over TeleportVM's 55 busy/error blocks · LiveWalkerVM's hand-rolled debounce → `KeywordSearchMemory` · 135 hardcoded AXAML strings · the 12-generator mailbox emitter (after B15) · `ValidateAndFixOffsets` Step extraction · `Fern::DispatchCommand` handler table |
 | — | **never as filed** | — | The 8-copy player-chain extraction *with* "fixing" Schlacht's omission (it is deliberate — the fallback is a 486K full-pool scan on a 10 Hz timer) · the `Aura.cpp` split beyond steps 1–2 · `MovementKnobCardViewModel` (33 binding paths, silent AOT failure, zero user gain) |

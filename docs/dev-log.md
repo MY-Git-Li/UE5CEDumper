@@ -20,6 +20,114 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - The rest of audit #4: 26 small defects, six refactors, and a measurement that said no (builds 2603 / 2610 / 2614 / 2617)
+
+The tail of audit #4 - everything that was not a HIGH or a concurrency defect. Four commits, split
+by where the damage was.
+
+**2603 - eight DLL + script defects, each of which turns one failure into a worse one.**
+`Sein::WriteToFile` fprintf'd a **NULL** `FILE*` whenever a rotation's truncating reopen failed
+(full disk, or a viewer holding the file), and the UCRT's invalid-parameter handler *terminates the
+injected game*. Both retention sweeps shared one `error_code` between iteration and `fs::remove`, so
+the first undeletable entry tripped the loop's own `if (ec) break` - and since enumeration order is
+stable, it died at the same entry on every launch and the advertised 21-day retention silently
+stopped applying past it. One locked file was enough.
+
+Genau's Extra Scan had **zero** `Tot::` references against Aura's 30, while `Fern::Stop` joined its
+thread under a comment asserting these were "bounded AOB scans". `UE5_Shutdown` runs on the CE Lua
+caller's thread, so the freeze was CE's whole UI, not just the game's. Laufen/Hemmung captured a
+base of 0 during a cutscene or swim and then held the value AT ZERO while the panel read "300%,
+active" - and in Hemmung, where base is the RESTORE value, that meant Reset left the game frozen.
+The forced hook path skipped the retry cap but still spent its budget, so two clicks of Live Funcs
+silenced the automatic retry for the session.
+
+`g_isCEPlugin` was set only in `CEPlugin_InitializePlugin`, which CE calls only on **enable** - so a
+registered-but-unticked plugin got DllMain plus a 1 s wait that no human ticking a checkbox can
+beat, and the DLL ran a full AOB scan and opened the pipe **inside cheatengine-x86_64.exe**.
+`CEPlugin_GetVersion` now claims the identity, plus a process-name guard. The "first-loaded-wins"
+proxy mutex was `Global\...` though its comment said per-process: `Global\` needs
+`SeCreateGlobalPrivilege`, which a non-elevated game lacks, so `CreateMutexW` returned NULL and the
+dedup **silently never worked** - and on the rare elevated game it was worse, because a second
+instrumented game anywhere on the machine turned this proxy passive.
+
+`Renge::HexToBytes` could not fail: `strtoul` mapped every non-hex character to `0x00`, so
+`"DE AD BE EF"` - spaces and all, the way a person writes a byte pattern - was written into the game
+as `{DE,0A,0D,BE,0E}` and answered `ok:true`.
+
+And the proxy generator had no PE-machine check. Measured on this machine: System32 `winmm.dll` has
+180 named exports, SysWOW64 has 192 - 12 x86-only names and **174 shared names at different
+ordinals**. A regeneration under 32-bit Python therefore emits permanently-null lazy thunks (each a
+`jmp rax` with `rax == 0`) and a wholesale-wrong `@ordinal` map, with a build that stays internally
+consistent and links clean. That is the upstream cause of B44, whose explanatory comment went into
+the **generator** rather than the generated file - `--check` proved a comment written directly into
+`Lugner_Winmm.asm` would be deleted by the next regeneration.
+
+**2610 - twelve UI defects, all of the "the report and the reality are different code paths"
+family.** The wrong-game banner had exactly one call site, inside the `Pointers.RescanApplied`
+lambda, so it fired only after a UE-override apply or an Extra Scan and *never on Connect* - which
+is the moment it exists for, since the pipe name is shared and Connect lands on whichever server is
+free. The uid was the one coordinate-library field that skipped every ingress guard, so a row
+duplicated in Excel and renamed imported with a duplicate uid, and `DeleteCoord`'s
+`RemoveAll`-by-uid then wiped **both** rows while naming one. Pose was not cleared on disconnect,
+and `PoseMap` feeds the "current map only" filter, so the next game's library rendered "0 of 340".
+
+Two Teleport mailbox waits ended in a bare `then break end` and fell straight into the auto-close,
+so the Lua Engine window shut on the one outcome the user needed to read; the assertion that used
+to guard this is now a theory over every generator instead of Movement alone. The autorun script
+bound `DEBUG` at CE start-up, which made its own printed instruction ("set `UE5_DEBUG = 1` in the
+Lua console") impossible to follow.
+
+`DiagnosticsProbe` measured itself: `_txBefore` is a **field initializer**, so it runs after
+`BeginAsync`'s opening `get_diagnostics`, while `txAfter` was snapshotted *after* the closing one
+that `_sw` had already excluded. The probe's own 93-125 ms round-trip therefore landed in
+`transportMs` but not in `wallMs` - `transportMs > wallMs`, `uiMs` clamped to 0, `ipcMs` absorbed
+the probe. Those are the lines `docs/multipipe-eval.md` reasons from.
+
+Plus: all four Force actions rendering with nothing selected, five coord-grid sort headers dead
+under AOT, "Already gone - nothing left to remove" printed in success green over a run that had just
+pruned four directories, a ghost Cancel on whichever card was not scanning, and a second launch that
+called `Shutdown(1)` before the logger existed - no window, no dialog, no log line.
+
+**2614 - refactor, and one measurement that overruled the plan.** Three private Lua escapers
+collapsed into one; two were byte-identical copies whose own comment said *"keep them mirrors"*, and
+the third was silently weaker - backslash, quote and newline only, so a closing long bracket passed
+through verbatim into a script AOBMaker wraps in `[==[ ... ]==]`. `aob_specificity.py`'s docstring
+still said **"NOT ACTUALLY WIRED INTO CI"** three days after it was wired in as a *blocking* gate,
+which would lead a maintainer to `--update-baseline` straight past the one signal the golden file
+exists to deliver.
+
+The interesting one is R4. `DumpExplorerViewModel` was the last panel not using the shared
+space=AND helpers, and the audit prescribed splitting its concatenated haystack into four fields.
+Measured first, as the finding itself instructed - 500K entries, 3 terms, mean of 5 passes:
+
+| shape | time | hits |
+|---|---|---|
+| concat haystack + `Ordinal` (what it did) | 26.7 ms | 18,829 |
+| **four fields + `OrdinalIgnoreCase`** | **55.1 ms** | 18,829 |
+| concat haystack + `OrdinalIgnoreCase` (chosen) | 25.8 ms | 18,829 |
+
+Identical hit counts, and the prescribed shape is **2x slower** on the one panel that loads a whole
+offline dump. Rejected on the number. The real defect - splitting on `' '` alone, so tab/newline
+input from a spreadsheet was missed - is fixed by `SplitTerms`, and the match now goes through
+`MatchesAllTerms` so it cannot drift again.
+
+R6 deleted 24 unreachable `en.axaml` keys. The first sweep found 20: a key that is a *prefix* of
+another (`str.LiveWalker.Copy` vs `.CopyAddr`) looks used under a substring scan. The new
+`tools/check_axaml_strings.py` is token-aware, checks **both** directions, and is a CI gate -
+dangling is the crash case (a missing `StaticResource` raises at load time), orphan is the honesty
+case.
+
+**2617 - B39, which was missing from the continuation plan entirely.** Four `Flamme.cpp` writers and
+`AobUsageService.SaveFileAsync` all staged through the byte-identical `<file>.tmp`, from *different
+processes*, each with truncate. So the game's DLL could truncate the staging file while the UI was
+mid-write, and whichever renamed last published a half-written document over the real cache. The
+in-process semaphore guarding the C# side cannot see the other process. Now `.tmp.<pid>` on both
+sides; the final rename stays last-writer-wins, which is the accepted semantics.
+
+**50 of 52 audit items shipped.** 81 utf8 + 949 dll + 3205 C# green.
+
+-----
+
 ## 2026-08-04 - "中文一二" is not four ASCII characters (build 2599)
 
 Audit #4 **B28**. `DecodeFStringBuffer` decides whether an FText's buffer is 1-byte (FUtf8String)

@@ -1717,6 +1717,35 @@ Pick up when the active plan finishes or when blocked.
   racing). Absence of the new lines proves only that the race did not *occur*; the deliberate
   provocation is in ② below.
 
+- ⬜ **Cheat Engine is never scanned as if it were the game** (build 2603, B34). Free from any
+  session where the CE plugin is registered: grep `init-0.log` for `DllMain AutoStart:`.
+  **PASS** = when the host is CE, either `CE plugin host — skipping auto-start` (the normal path,
+  now reached because `CEPlugin_GetVersion` claims identity) or the new
+  `host process is '…' — Cheat Engine is never a scan target`. **FAIL** = `game process — calling
+  UE5_AutoStart` with `cheatengine-x86_64.exe` on the `UE5Dumper DLL loaded | … | process:` line
+  two lines above. To provoke the original race: register the plugin but leave it **unticked**,
+  then start CE.
+
+- ⬜ **Extra Scan can be cancelled** (build 2603, B18). Needs a game where GObjects does NOT
+  resolve by AOB, so Extra Scan actually runs long. Start it, then untick the CE record (or close
+  the UI) while it is still going. **PASS** = `pipe-0.log` shows `PipeServer: Stop watches+scan
+  joins done` within a second or so of `Stop entry`. **FAIL** = seconds of gap, or CE's window
+  frozen until the sweep finishes — that is the unbounded join, and `UE5_Shutdown` runs on CE's own
+  thread, which is why it freezes CE rather than just the game.
+
+- ⬜ **Log retention no longer dies at the first undeletable file** (build 2603, B19). Provoke it:
+  open any archived `%LOCALAPPDATA%\UE5CEDumper\Logs\<proc>\*.log` in a program that holds it open,
+  and make sure at least one OTHER archive in the same folder is older than 21 days (backdate it).
+  Start a game with the DLL. **PASS** = the backdated file is gone and the held one remains.
+  **FAIL** = both remain — the sweep aborted at the held file, which it did on every launch because
+  enumeration order is stable.
+
+- ⬜ **The proxy dedup guard says when it is not armed** (build 2603, B47). Any proxy session:
+  grep `init-0.log` for `first-loaded-wins guard is NOT armed`. **PASS** = the line is ABSENT
+  (`Local\` + PID succeeds where `Global\` needed a privilege the game does not have). Its presence
+  is not a failure of this fix — it is the fix reporting a condition that used to be silent — but
+  it is worth investigating if it appears.
+
 - ⬜ **CJK FText no longer renders as ASCII mojibake** (build 2599, B28) — *no log needed; the
   evidence is on screen.* Affects **FText-typed values only** (`ReadFTextString`); FString goes
   through the UTF-16-only reader and never had the bug. **To test:** any game with Chinese/Japanese
@@ -1777,6 +1806,24 @@ Pick up when the active plan finishes or when blocked.
   `'dxgi.dll' is loaded but is not ours`. FAIL = the old *"already loaded … no injection needed"*
   message, after which the UI cannot connect. Also worth eyeballing there: a game path with
   non-ASCII characters must now appear intact in that message (it used to render as `EVERSPACE? 2`).
+
+- ⬜ **The five dead coord-grid sort headers** (build 2610, B16). Teleport → Coordinate Library with
+  ≥3 rows. Click the **X**, **Y**, **Z**, **Yaw** and **Dist** headers. **PASS** = rows reorder on
+  every one. **FAIL** = the header glyph animates and nothing moves. Must be checked on a
+  **published (AOT/trimmed)** build — the whole defect is trimmed-away reflection metadata, so a
+  plain `dotnet run` will not reproduce it. Label / Group / Map worked before and must still work.
+
+- ⬜ **Second launch raises the first window** (build 2610, B42). Run `dist\UE5DumpUI.exe`, then run
+  it again (double-click the exe, or the shortcut). **PASS** = the existing window comes to the
+  front — including when it was minimized — and no second window appears. **FAIL** = nothing
+  visibly happens, which is the old behaviour. Worth testing with the first instance **connected to
+  a game**, since the window title carries the module name and a title-based search would miss
+  exactly then.
+
+- ⬜ **Force submenu with nothing selected** (build 2610, B36). Property Search → run a search →
+  **right-click empty space below the rows**, or a row you have not left-clicked. **PASS** = no
+  Force submenu. Left-click a BoolProperty row, right-click it: only Force ON / OFF. FAIL = all
+  four actions at once. (Needs the Experimental toggle on for the submenu to exist at all.)
 
 - ⬜ **Close the game with a hold worker live** (build 2596, B14 + R5). This is the exact repro that
   produced the live `0xC0000409` in build 2389, re-run against the loops that were still unguarded.
