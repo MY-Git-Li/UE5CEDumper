@@ -441,8 +441,14 @@ internal static class ProxyOrphanScanner
                            "Remove it by hand if you meant to protect it.");
         if (failed.Count > 0)
             return (false, $"Could not remove: {string.Join(", ", Take(failed, 3))}.");
+        // "Already gone" is only the whole truth when nothing else happened. ProxyDeployService
+        // counts a vanished file into allFilesGone and then still prunes the chain, so up to four
+        // directories could be removed while this line said "nothing left to remove" in success
+        // green. Report the directories the plan actually executed. (B12)
         if (filesRecycled == 0 && filesAlreadyGone > 0)
-            return (true, "Already gone — nothing left to remove.");
+            return dirsRemoved > 0
+                ? (true, $"File was already gone; {dirsRemoved} empty folder(s) removed.")
+                : (true, "Already gone — nothing left to remove.");
         if (filesRecycled == 0)
             return (false, "Nothing was removed.");
 

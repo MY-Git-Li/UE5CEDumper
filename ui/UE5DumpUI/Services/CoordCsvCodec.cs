@@ -258,7 +258,10 @@ public static class CoordCsvCodec
                 return cells[i];
             }
 
-            entry.Uid = Cell("uid").Trim();
+            // Through the same gate as label/group. A uid is a text field read from a
+            // user-editable CSV; it was the only one that skipped Normalize, so a control
+            // character or a 4 KB cell went straight into the persisted library. (B7)
+            entry.Uid = CoordText.Normalize(Cell("uid"), CoordText.MaxUidLength);
 
             foreach (var (col, maxLen, set) in new (string, int, Action<string>)[]
                      {

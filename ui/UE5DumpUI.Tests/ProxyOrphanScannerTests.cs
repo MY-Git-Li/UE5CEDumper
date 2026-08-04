@@ -571,6 +571,39 @@ public class ProxyOrphanScannerTests
         Assert.DoesNotContain("folder", msg, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// B12 — the exact counts from the finding. <c>ProxyDeployService</c> counts a
+    /// vanished file into <c>allFilesGone</c> and then still prunes the chain, so this
+    /// combination is reachable: the file was already gone, and four directories really
+    /// were removed. The old wording put "Already gone — nothing left to remove." in
+    /// success green over a run that had just deleted four folders.
+    /// </summary>
+    [Fact]
+    public void ResolveRemovalOutcome_AlreadyGoneStillReportsFoldersThatWereRemoved()
+    {
+        var (ok, msg) = ProxyOrphanScanner.ResolveRemovalOutcome(
+            filesRecycled: 0, filesAlreadyGone: 1, dirsRemoved: 4, dirsPlanned: 4,
+            Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
+
+        Assert.True(ok);
+        Assert.Contains("4", msg, StringComparison.Ordinal);
+        Assert.Contains("folder", msg, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("nothing left to remove", msg, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The other half: with no directories removed the original wording is
+    /// correct and must be kept.</summary>
+    [Fact]
+    public void ResolveRemovalOutcome_AlreadyGoneWithNoFoldersKeepsTheShortMessage()
+    {
+        var (ok, msg) = ProxyOrphanScanner.ResolveRemovalOutcome(
+            filesRecycled: 0, filesAlreadyGone: 1, dirsRemoved: 0, dirsPlanned: 4,
+            Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
+
+        Assert.True(ok);
+        Assert.Contains("Already gone", msg, StringComparison.Ordinal);
+    }
+
     // ── The dry-run report ───────────────────────────────────────────────────
 
     private static OrphanProxy SampleRow(bool selected = true) => new()

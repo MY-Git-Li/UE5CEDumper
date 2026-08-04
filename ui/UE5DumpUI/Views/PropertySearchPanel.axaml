@@ -152,24 +152,31 @@
           <!-- Force field (Solide) — hold the field across live instances.
                Gated behind the shared Experimental toggle (combat-affecting writes). -->
           <Separator IsVisible="{Binding ForceEnabled}"/>
+          <!-- B36: without FallbackValue the child IsVisible bindings resolve to
+               nothing when SelectedResult is null and Avalonia treats that as VISIBLE, so
+               right-clicking an unselected row showed Force ON + OFF + ->null + value...
+               together. ApplyResultFilter nulls SelectedResult on every search AND every
+               filter change, and the DataGrid only updates selection on left-press, so
+               "nothing selected" is the common state, not an edge one. The submenu itself
+               is gated on CanForceAny, which the model already exposed and nothing used. -->
           <MenuItem Header="{StaticResource str.PropertySearch.ForceMenu}"
-                    IsVisible="{Binding ForceEnabled}">
+                    IsVisible="{Binding ForceMenuVisible}">
             <MenuItem Header="{StaticResource str.PropertySearch.ForceOn}"
                       Command="{Binding ForceBoolOnCommand}"
                       CommandParameter="{Binding SelectedResult}"
-                      IsVisible="{Binding SelectedResult.CanForceBool}"/>
+                      IsVisible="{Binding SelectedResult.CanForceBool, FallbackValue=False}"/>
             <MenuItem Header="{StaticResource str.PropertySearch.ForceOff}"
                       Command="{Binding ForceBoolOffCommand}"
                       CommandParameter="{Binding SelectedResult}"
-                      IsVisible="{Binding SelectedResult.CanForceBool}"/>
+                      IsVisible="{Binding SelectedResult.CanForceBool, FallbackValue=False}"/>
             <MenuItem Header="{StaticResource str.PropertySearch.ForceNull}"
                       Command="{Binding ForceNullCommand}"
                       CommandParameter="{Binding SelectedResult}"
-                      IsVisible="{Binding SelectedResult.CanForceNull}"/>
+                      IsVisible="{Binding SelectedResult.CanForceNull, FallbackValue=False}"/>
             <MenuItem Header="{StaticResource str.PropertySearch.ForceValue}"
                       Command="{Binding ForceNumericCommand}"
                       CommandParameter="{Binding SelectedResult}"
-                      IsVisible="{Binding SelectedResult.CanForceNumeric}"/>
+                      IsVisible="{Binding SelectedResult.CanForceNumeric, FallbackValue=False}"/>
           </MenuItem>
         </ContextMenu>
       </DataGrid.ContextMenu>

@@ -208,7 +208,12 @@ public sealed class FreezeValueDialog : Window
                 return null;
 
             case "float" or "double":
-                if (!double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var dv))
+                // TryParse accepts "NaN"/"Infinity" and overflow rounds to ±Infinity, and
+                // ToString("R") then emits the bare word — not a Lua number literal, so the
+                // emitted script reads it as an undefined global (nil) and freezes nothing.
+                // Reject at the dialog, where the user can still see why. (B23)
+                if (!double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var dv)
+                    || !double.IsFinite(dv))
                 {
                     err = $"Not a valid {helperType} number";
                     return null;

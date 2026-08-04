@@ -37,7 +37,12 @@ public class App : Application
             _platform = new WindowsPlatformService();
             if (!_platform.TryAcquireSingleInstance())
             {
-                // Another instance is running
+                // Another instance is running. Raise ITS window before exiting — this
+                // runs before the logger exists, so a silent Shutdown(1) gives the user
+                // no window, no dialog and no log line, and a double-click reads as
+                // "the app did nothing". Bringing the first instance forward is both the
+                // useful outcome and the visible one. (B42)
+                _platform.ActivateExistingInstance();
                 desktop.ShutdownMode = Avalonia.Controls.ShutdownMode.OnExplicitShutdown;
                 desktop.Shutdown(1);
                 return;

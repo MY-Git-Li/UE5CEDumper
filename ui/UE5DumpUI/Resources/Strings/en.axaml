@@ -767,7 +767,7 @@
     <sys:String x:Key="str.ProxyDeploy.Orphans.DeleteTip">Moves the checked DLLs to the Recycle Bin, then removes the folders they leave empty. You will see the exact paths first.</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Orphans.OpenFolder">Open folder</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Orphans.NoneFound">No leftover proxy DLLs found.</sys:String>
-    <sys:String x:Key="str.ProxyDeploy.Orphans.FileOnlyNote">Outside a Steam library — only the DLL is removed, the folders are left alone.</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Orphans.FileOnlyNote">Only the DLL is removed — no folders are touched for this row. (See the note below for why.)</sys:String>
 
     <!-- Confirmation window -->
     <sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmTitle">Remove leftover proxy DLLs?</sys:String>

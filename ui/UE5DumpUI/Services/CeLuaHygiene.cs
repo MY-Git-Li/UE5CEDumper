@@ -59,6 +59,28 @@ public static class CeLuaHygiene
     }
 
     /// <summary>
+    /// LATE-BOUND variant of <see cref="AppendDebugPreamble"/>, for a file that is
+    /// loaded ONCE and whose functions run much later — CE's autorun folder being the
+    /// case that motivated it.
+    ///
+    /// <para>The eager preamble captures <c>UE5_DEBUG</c> into a local at the point the
+    /// chunk runs. In an autorun script that point is CE start-up, so the file's own
+    /// instruction — "set UE5_DEBUG = 1 in the Lua console" — could never work: by the
+    /// time the console exists, <c>DEBUG</c> has already been fixed at 0 and nothing
+    /// re-reads it. Here <c>dbg</c> reads the global on every call instead. (B23)</para>
+    ///
+    /// <para>Emits no <c>DEBUG</c> local, deliberately: a stale local is exactly the
+    /// bug. Anything needing the value at call time uses <c>ue5_debugOn()</c>.</para>
+    /// </summary>
+    public static void AppendLateBoundDebugPreamble(StringBuilder sb, string indent = "")
+    {
+        Line(sb, indent, "-- DEBUG is read at CALL time, not at load time: this file is loaded by CE's");
+        Line(sb, indent, "-- autorun at start-up, long before the Lua console exists to set UE5_DEBUG.");
+        Line(sb, indent, "local function ue5_debugOn() return (UE5_DEBUG or 0) ~= 0 end");
+        Line(sb, indent, "local function dbg(...) if ue5_debugOn() then print(...) end end");
+    }
+
+    /// <summary>
     /// Timeout in ms for a synchronous <c>executeCodeEx</c> DLL call. Finite on
     /// purpose: <c>nil</c>/<c>-1</c> means wait forever, which hangs CE's whole UI
     /// if the game thread is stalled, and <c>0</c> means "don't wait" AND leaks the

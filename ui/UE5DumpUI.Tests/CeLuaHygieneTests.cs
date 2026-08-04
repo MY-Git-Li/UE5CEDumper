@@ -1,3 +1,4 @@
+using System;
 using System.Text;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
@@ -112,6 +113,56 @@ public class CeLuaHygieneTests
         Assert.DoesNotContain("\r", s);
     }
 
+    /// <summary>
+    /// B15 — the "a timeout is an error" rule, checked over EVERY generator instead of
+    /// Movement alone. Movement-only is how Teleport kept two bare
+    /// <c>if elapsed >= … then break end</c> sites: one fell straight into the
+    /// auto-close, so the Lua Engine window shut on the single outcome the user needed
+    /// to read, and the other generator had no <c>hadError</c> at all.
+    ///
+    /// <para>The assertion is deliberately about the EMITTED TEXT, not about intent: a
+    /// bare <c>break</c> out of a mailbox wait is the exact shape CLAUDE.md forbids, and
+    /// it is greppable. Note a bare <c>return</c> is not the fix everywhere — in a
+    /// momentary [ENABLE] it would strand the record ticked — so the rule is "do not
+    /// break silently", satisfied by setting <c>hadError</c> first.</para>
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(EveryGeneratedScript))]
+    public void No_generator_breaks_a_mailbox_wait_silently(string name, string script)
+    {
+        Assert.False(script.Contains("then break end", StringComparison.Ordinal),
+            $"{name}: a mailbox wait ends with a bare 'then break end'. A timeout is an " +
+            "error — set hadError (and say so) before breaking, or the auto-close hides it.");
+
+        // Anything that CAN close on success must gate that close on hadError, since the
+        // only reason to track hadError is to make the close unreachable on failure.
+        if (script.Contains("hadError", StringComparison.Ordinal))
+        {
+            Assert.True(
+                script.Contains("not hadError", StringComparison.Ordinal),
+                $"{name}: declares hadError but never gates anything on it.");
+        }
+    }
+
+    public static TheoryData<string, string> EveryGeneratedScript()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (TeleportScriptGenerator.Action a in Enum.GetValues<TeleportScriptGenerator.Action>())
+            data.Add($"Teleport.{a}", TeleportScriptGenerator.Generate(a));
+        foreach (var k in Enum.GetValues<MovementScriptGenerator.Knob>())
+            data.Add($"Movement.{k}", MovementScriptGenerator.Generate(k, 150.0));
+        data.Add("Movement.GravityDirection", MovementScriptGenerator.GenerateGravityDirection(0, 0, -1));
+        foreach (var t in Enum.GetValues<TimeDilationScriptGenerator.Target>())
+            data.Add($"TimeDilation.{t}", TimeDilationScriptGenerator.Generate(t, 0.5));
+        foreach (var f in Enum.GetValues<FlyScriptGenerator.FlyToggle>())
+            data.Add($"Fly.{f}", FlyScriptGenerator.Generate(f));
+        data.Add("Protection", ProtectionScriptGenerator.Generate());
+        data.Add("SeeThrough", SeeThroughScriptGenerator.Generate());
+        data.Add("Foreground", ForegroundScriptGenerator.Generate());
+        data.Add("DebugCamera", DebugCameraScriptGenerator.Generate());
+        return data;
+    }
+
     [Fact]
     public void Movement_gravity_direction_gates_state_print_and_closes()
     {
@@ -146,7 +197,13 @@ public class CeLuaHygieneTests
 
         Assert.Contains("local DEBUG = UE5_DEBUG or 0", s);
         Assert.Contains("dbg('[Teleport] all markers cleared')", s);
-        Assert.Contains("if DEBUG == 0 then " + CeLuaHygiene.CloseCall + " end", s);
+        // B15: the close was UNCONDITIONAL here — this generator had no hadError at all,
+        // so a mailbox timeout while clearing markers shut the window on its own error
+        // message. The success line is gated too: "all markers cleared" must not be
+        // printed by a run where one of the three slots timed out.
+        Assert.Contains("if DEBUG == 0 and not hadError then " + CeLuaHygiene.CloseCall + " end", s);
+        Assert.Contains("if not hadError then dbg('[Teleport] all markers cleared') end", s);
+        Assert.DoesNotContain("then break end", s);
     }
 
     [Fact]

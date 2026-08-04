@@ -89,15 +89,26 @@ internal sealed class DiagnosticsProbe : IAsyncDisposable
         _sw.Stop();
         if (_dump == null || _before == null || _log == null) return;
 
+        // Close the transport window HERE, before the closing get_diagnostics — the same
+        // boundary _sw.Stop() above uses. The old code snapshotted AFTER that call while
+        // the stopwatch had already stopped before it, so the probe's own round-trip
+        // (93-125 ms in this repo's own measurements) landed in transportMs but not in
+        // wallMs. On a 57.7 ms "Copy CE Field" that made transportMs > wallMs, uiMs clamp
+        // to 0, and ipcMs absorb the probe. These lines are the evidence
+        // docs/multipipe-eval.md reasons from, so the error was not cosmetic. (B35)
+        var txAfter = PipeTransportStats.Snapshot();
+
         DiagnosticsResult after;
         try { after = await _dump.GetDiagnosticsAsync(limit: 0); }
         catch { return; }   // disconnected mid-operation: nothing to report
 
-        var txAfter = PipeTransportStats.Snapshot();
-        // Subtract the probe's OWN two get_diagnostics round-trips: they are real
-        // transport, but they are the measurement, not the operation.
+        // Nothing to subtract any more. _txBefore is a FIELD INITIALIZER, so it runs at
+        // construction — i.e. AFTER BeginAsync's opening get_diagnostics — and txAfter is
+        // now taken before the closing one. Neither probe call is inside the window, so
+        // the old `- 2` was wrong twice over: it discounted calls that were never counted
+        // and left in the milliseconds of one that was.
         double txMs = Math.Max(0, txAfter.Ms - _txBefore.Ms);
-        long txCalls = Math.Max(0, txAfter.Calls - _txBefore.Calls - 2);
+        long txCalls = Math.Max(0, txAfter.Calls - _txBefore.Calls);
 
         try { _log.Info(Constants.LogCatView,
                         Format(_label, _sw.Elapsed, _before, after, txMs, txCalls)); }

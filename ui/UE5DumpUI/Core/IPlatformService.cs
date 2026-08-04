@@ -14,6 +14,14 @@ public interface IPlatformService
     /// <summary>Release the single-instance mutex.</summary>
     void ReleaseSingleInstance();
 
+    /// <summary>Bring the already-running instance's window to the front. Called when
+    /// <see cref="TryAcquireSingleInstance"/> fails, i.e. the second launch is about to
+    /// exit — without this it exits before the logger exists, so the user gets no window,
+    /// no dialog and no log line, and a double-click reads as "nothing happened". (B42)
+    /// <para>Default no-op so test doubles need not implement it; returns whether a
+    /// window was actually raised.</para></summary>
+    bool ActivateExistingInstance() => false;
+
     /// <summary>Get the application data folder path (%APPDATA%).</summary>
     string GetAppDataPath();
 

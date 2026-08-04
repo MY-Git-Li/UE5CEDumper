@@ -64,7 +64,11 @@ public static class CeAutorunScriptGenerator
         Line(sb, "-- load time -- autorun runs before any process is attached.");
         Line(sb, "-- ================================================================");
         Line(sb);
-        CeLuaHygiene.AppendDebugPreamble(sb);
+        // LATE-BOUND on purpose. This file is loaded by CE's autorun at start-up, so the
+        // eager preamble would bind DEBUG to whatever UE5_DEBUG was before the Lua console
+        // even existed — making line 61's own instruction ("set UE5_DEBUG = 1 in the Lua
+        // console") impossible to follow. (B23)
+        CeLuaHygiene.AppendLateBoundDebugPreamble(sb);
         Line(sb);
         Line(sb, $"local DLL_PATH = '{CeLuaHygiene.EscapeLuaString(dllPath)}'");
         Line(sb);

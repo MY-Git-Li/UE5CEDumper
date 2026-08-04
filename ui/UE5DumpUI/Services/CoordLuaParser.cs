@@ -147,7 +147,7 @@ public static class CoordLuaParser
     {
         var e = new CoordEntry
         {
-            Uid = Str(entry, "uid") ?? "",
+            Uid = CoordText.Normalize(Str(entry, "uid"), CoordText.MaxUidLength),   // (B7)
         };
 
         var rawLabel = Str(entry, "label");

@@ -113,9 +113,14 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task CheckForCompetingDumperHostsAsync(EngineState state)
     {
         if (_proxyDeployForChecks == null) return;
+        // Process enumeration is slow, so this can land after the user has disconnected
+        // and reconnected — or after the disconnect that just cleared the banner. Publish
+        // only into the session we were started for. Same shape as ScheduleProxyConfirmation.
+        int epoch = _sessionEpoch;
         try
         {
             var procs = await _proxyDeployForChecks.ListGameProcessesAsync();
+            if (epoch != _sessionEpoch) return;
             var hosts = procs.Where(p => p.DumperLoaded).ToList();
             if (hosts.Count <= 1) { MultipleDumperHostsWarning = ""; return; }
 
@@ -2002,6 +2007,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     _proxyConfirmTimer?.Dispose();
                     _proxyConfirmTimer = null;
                     LiveFuncs.ResetOnDisconnect();   // clear stuck "recording" UI state (L16)
+                    // The banner names a PID. Left standing it pins a dead one for the
+                    // rest of the session and keeps warning about a conflict that ended
+                    // when the game closed. (B9)
+                    MultipleDumperHostsWarning = "";
                 }
             });
         };
@@ -2609,6 +2618,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         // confirmed-working — but only after the session proves stable (guards a
         // proxy that loads + connects then crashes the game seconds into play).
         ScheduleProxyConfirmation(state);
+
+        // Warn when more than one process has the dumper loaded. This is where every
+        // other post-connect action lives, and both ConnectAsync and the proxy
+        // TriggerScanAsync funnel through here — the check used to run ONLY from the
+        // Pointers.RescanApplied lambda, i.e. only after a UE-override apply or an Extra
+        // Scan, so an ordinary Connect never raised it. The pipe name is shared, so
+        // Connect lands on whichever server is free: the tree fills with the WRONG
+        // GAME'S data and nothing else on screen reveals it. ADDED here rather than
+        // moved — RescanApplied is a duplicated hand-rolled fan-out that never reaches
+        // this method, so moving the call would delete the one path that already worked.
+        // The check is idempotent. (B9)
+        _ = CheckForCompetingDumperHostsAsync(state);
 
         StatusText = $"Connected — UE{state.UEVersion} ({state.ObjectCount} objects)";
 

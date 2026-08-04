@@ -684,6 +684,14 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             _gravDirActive = false;
             ApplyMouseCursorState(-1);   // cursor badge back to Unknown
             ClearPovDisplay();
+            // The POSE must go too, and this is the half that had a user-visible cost.
+            // PoseMap survives the disconnect and feeds the "current map only" coord
+            // filter, so connecting to a DIFFERENT game loaded its library and then
+            // dropped every row against the previous game's map name —
+            // "Coordinate Library (0 of 340)", self-healing only after a manual
+            // Refresh pose. Same disconnect branch as B9's missing clear. (B17)
+            ClearPoseDisplay();
+            ApplyCoordFilter();
             // Reset the Stealth card too — otherwise a reconnect (possibly to a DIFFERENT
             // game) shows the old game's hold and Hold @0 would send its stale
             // class::field. (L13)
@@ -2939,6 +2947,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 
     private string _activeCoordKey = "";
     private bool _suppressCoordPersist;
+    // Set only while ApplyCoordFilter re-selects the equivalent row after rebuilding
+    // CoordResults, so the editor fields are not rewritten from the stored entry. (B20)
+    private bool _suppressCoordEditorSync;
 
     /// <summary>Card open/closed. Collapsed by default (R4).</summary>
     [ObservableProperty] private bool _coordLibraryExpanded;
@@ -3012,6 +3023,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 
     partial void OnSelectedCoordChanged(CoordRow? value)
     {
+        // Suppressed while ApplyCoordFilter restores the selection onto a rebuilt row —
+        // that is not the user choosing a row, and treating it as one wiped an
+        // in-progress edit on every filter keystroke. (B20)
+        if (_suppressCoordEditorSync) return;
         EditCoordLabel = value?.Entry.Label ?? "";
         EditCoordGroup = value?.Entry.Group ?? "";
     }
@@ -3128,7 +3143,20 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         UpdateCoordDistances();
 
         if (keepUid != null)
-            SelectedCoord = CoordResults.FirstOrDefault(r => r.Entry.Uid == keepUid);
+        {
+            // RESTORING the selection must not look like the user PICKING a row. The
+            // rebuild above makes fresh CoordRow objects, so SelectedCoord always changes
+            // reference and OnSelectedCoordChanged always fires — overwriting
+            // EditCoordLabel/Group from the stored entry. This runs per keystroke in the
+            // filter box, so typing while an edit was in progress silently reverted it.
+            // Same shape as _suppressCoordPersist. (B20)
+            _suppressCoordEditorSync = true;
+            try
+            {
+                SelectedCoord = CoordResults.FirstOrDefault(r => r.Entry.Uid == keepUid);
+            }
+            finally { _suppressCoordEditorSync = false; }
+        }
 
         OnPropertyChanged(nameof(CoordLibraryHeader));
     }
@@ -3257,7 +3285,16 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// <summary>Insert an entry, assigning a unique uid and normalising its text.</summary>
     private void AddCoordEntry(CoordEntry entry)
     {
-        entry.Uid = string.IsNullOrEmpty(entry.Uid) ? UniqueUid() : entry.Uid;
+        // Re-mint when the uid is EMPTY or ALREADY TAKEN. "Only when empty" trusted an
+        // incoming uid to be unique, and an imported file need not be: duplicate a row in
+        // Excel and rename it, and the merge diff commits it as Added (the uid match is
+        // consumed by row 1, the new label defeats the identity match) — carrying the
+        // duplicate uid straight in. (B7)
+        if (string.IsNullOrEmpty(entry.Uid) ||
+            _coordAll.Any(e => string.Equals(e.Uid, entry.Uid, StringComparison.Ordinal)))
+        {
+            entry.Uid = UniqueUid();
+        }
         entry.Label = CoordText.Normalize(entry.Label, CoordText.MaxLabelLength);
         entry.Group = CoordText.Normalize(entry.Group, CoordText.MaxGroupLength);
         _coordAll.Add(entry);
@@ -3363,7 +3400,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     {
         var row = SelectedCoord;
         if (row == null) return;
-        _coordAll.RemoveAll(e => string.Equals(e.Uid, row.Entry.Uid, StringComparison.Ordinal));
+        // Remove the entry the user actually selected, BY REFERENCE. RemoveAll-by-uid is
+        // identical whenever uids are unique — so this is a no-op in the intended state —
+        // but with a duplicate uid it deleted BOTH rows, persisted immediately, and the
+        // status line named one of them. (B7)
+        _coordAll.Remove(row.Entry);
         SelectedCoord = null;
         PersistCoordLibrary();
         RebuildCoordGroups();
@@ -3642,7 +3683,13 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             _coordAll.Clear();
             foreach (var e in _pendingImport)
             {
-                if (string.IsNullOrEmpty(e.Uid)) e.Uid = UniqueUid();
+                // Replace mode starts from an empty list, so a duplicate can only come
+                // from WITHIN the imported file — which is exactly the Excel case. (B7)
+                if (string.IsNullOrEmpty(e.Uid) ||
+                    _coordAll.Any(x => string.Equals(x.Uid, e.Uid, StringComparison.Ordinal)))
+                {
+                    e.Uid = UniqueUid();
+                }
                 _coordAll.Add(e);
             }
         }
@@ -3654,7 +3701,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 {
                     case CoordChangeKind.Added:
                         var add = change.Incoming!;
-                        if (string.IsNullOrEmpty(add.Uid)) add.Uid = UniqueUid();
+                        if (string.IsNullOrEmpty(add.Uid) ||
+                            _coordAll.Any(x => string.Equals(x.Uid, add.Uid, StringComparison.Ordinal)))
+                        {
+                            add.Uid = UniqueUid();   // (B7)
+                        }
                         _coordAll.Add(add);
                         break;
                     case CoordChangeKind.Changed:
@@ -4555,6 +4606,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         _cursorHotkey = null;
         foreach (var reg in _markerHotkeys.Values) reg.Dispose();
         _markerHotkeys.Clear();
+        // The other five disposable VMs dispose their KeywordSearchMemory; this one
+        // was the holdout, so its debounce timer outlived the VM. (B20)
+        _coordFilterMemory.Dispose();
         GC.SuppressFinalize(this);
     }
 }

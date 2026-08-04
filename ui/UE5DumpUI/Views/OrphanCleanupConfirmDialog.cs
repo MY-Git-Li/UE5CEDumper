@@ -140,6 +140,12 @@ public sealed class OrphanCleanupConfirmDialog : Window
         }
         else
         {
+            // File-only. Do NOT assert a reason we did not check: PlanPrune returns FileOnly for
+            // six different reasons and "outside a Steam library" is only one of them. The most
+            // common is !prunableLeaf — a third-party wrapper such as ReShade's dxgi.dll sitting
+            // beside our version.dll — which happens INSIDE a library, and whose real blocker is
+            // printed two lines below by the Blockers loop. Say the outcome (which is certain) and
+            // let Blockers say the cause. The dry-run report already got this right. (B12)
             panel.Children.Add(Label(
                 "    " + Res.Get("str.ProxyDeploy.Orphans.FileOnlyNote"), Warn));
         }

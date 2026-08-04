@@ -28,6 +28,46 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
         return true;
     }
 
+    /// <summary>Raise the first instance's main window. Matched by PROCESS, not by
+    /// window title — the title carries the connected game's module name, so a
+    /// title-based search would miss whenever the first instance is connected, which is
+    /// exactly when the user is most likely to double-click the exe again. (B42)</summary>
+    public bool ActivateExistingInstance()
+    {
+        try
+        {
+            var me = Process.GetCurrentProcess();
+            foreach (var p in Process.GetProcessesByName(me.ProcessName))
+            {
+                using (p)
+                {
+                    if (p.Id == me.Id) continue;
+                    var h = p.MainWindowHandle;
+                    if (h == IntPtr.Zero) continue;
+                    // Restore first: a minimized window ignores SetForegroundWindow.
+                    if (IsIconic(h)) ShowWindow(h, SW_RESTORE);
+                    return SetForegroundWindow(h);
+                }
+            }
+        }
+        catch { /* best-effort: we are exiting either way */ }
+        return false;
+    }
+
+    private const int SW_RESTORE = 9;
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
     public void ReleaseSingleInstance()
     {
         if (_singleInstanceMutex != null)

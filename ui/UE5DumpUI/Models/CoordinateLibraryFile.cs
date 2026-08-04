@@ -159,6 +159,12 @@ public static class CoordText
 {
     public const int MaxLabelLength = 64;
     public const int MaxGroupLength = 32;
+    /// <summary>Cap for the entry uid. Generous next to the 6-char minted value and the
+    /// 12-char pathological fallback, because an imported uid only has to be a stable
+    /// token — but it is a text field read from a user-editable file, so it goes through
+    /// the same Normalize gate as every other one. It used to be the ONE field that
+    /// skipped it entirely. (B7)</summary>
+    public const int MaxUidLength = 32;
 
     /// <summary>True when <paramref name="s"/> contains a character that cannot survive
     /// the emit path: NUL (luaL_dostring measures with strlen, so it truncates the

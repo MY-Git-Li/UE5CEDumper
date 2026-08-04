@@ -40,7 +40,7 @@
           <Button Content="{StaticResource str.ProxyDeploy.CancelScan}"
                   Command="{Binding ScanDrivesCancelCommand}"
                   ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.CancelScan}"
-                  IsVisible="{Binding IsScanning}"
+                  IsVisible="{Binding IsScanningDrives}"
                   Padding="12,4"/>
         </StackPanel>
         <ItemsControl ItemsSource="{Binding Drives}">
@@ -138,11 +138,13 @@
                   Command="{Binding ScanOrphansCommand}"
                   ToolTip.Tip="{StaticResource str.ProxyDeploy.Orphans.ScanTip}"
                   Classes="accent" Padding="12,4"/>
-          <!-- Bound to IsScanning, NOT to IsRemovingOrphans: this cancels the SCAN, and showing it
-               during a delete would offer to cancel an operation it is not wired to. -->
+          <!-- Bound to IsScanningOrphans, NOT to the shared IsScanning and NOT to
+               IsRemovingOrphans: this cancels the ORPHAN SCAN specifically. The shared flag is set
+               by three different commands, so it used to render this button during the Steam-library
+               scan and the drive scan too — wired to a command that could not run. (B45) -->
           <Button Content="{StaticResource str.ProxyDeploy.CancelScan}"
                   Command="{Binding ScanOrphansCancelCommand}"
-                  IsVisible="{Binding IsScanning}"
+                  IsVisible="{Binding IsScanningOrphans}"
                   Padding="12,4"/>
           <!-- Report and Execute deliberately side by side: the dry run is a first-class action, not
                something buried inside the confirmation. It writes a file the user reads at their own

@@ -22,6 +22,13 @@ public partial class ProxyDeployViewModel : ViewModelBase
     private readonly IPlatformService? _platform;
 
     [ObservableProperty] private bool _isScanning;
+    // WHICH scan is running. IsScanning stays the mutual-exclusion guard, but it cannot
+    // also drive the Cancel buttons: three commands set it and only two have a Cancel, so
+    // every one of them showed BOTH buttons — each wired to a different command, whose
+    // CanExecute (the wrapped command's CanBeCanceled) was false, rendering a disabled
+    // ghost Cancel on the card that was not scanning. (B45)
+    [ObservableProperty] private bool _isScanningDrives;
+    [ObservableProperty] private bool _isScanningOrphans;
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private string _sourceDllPath = "";
     [ObservableProperty] private string? _sourceDllVersion;
@@ -412,6 +419,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         {
             ClearError();
             IsScanning = true;
+            IsScanningDrives = true;
             StatusColor = StatusNeutral;
             StatusText = "Scanning drives for UE games...";
             LastOperationResult = null;
@@ -451,6 +459,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         finally
         {
             IsScanning = false;
+            IsScanningDrives = false;
         }
     }
 
@@ -537,6 +546,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         {
             ClearError();
             IsScanning = true;
+            IsScanningOrphans = true;
             StatusColor = StatusNeutral;
             StatusText = "Looking for leftover proxy DLLs...";
             LastOperationResult = null;
@@ -582,6 +592,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         finally
         {
             IsScanning = false;
+            IsScanningOrphans = false;
         }
     }
 
