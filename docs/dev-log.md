@@ -20,6 +20,50 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - "There is a dxgi.dll here" was never evidence that it was ours (build 2577)
+
+Audit #4 B29. `Methode.cpp`'s `IsAlreadyLoadedInTarget` decided "UE5CEDumper is already present in
+this process" from a module's **file name** — version/dinput8/dxgi/winmm — plus a test that its path
+was not under System32. `OnInjectAndConnect` acted on that with no identity check at all.
+
+Every proxy flavour we ship is named after the Windows DLL it hijacks, so that test is equally true
+of ReShade, Ultimate ASI Loader and SpecialK — and a UE game with ReShade installed is a
+configuration this repo documents three times over. The user clicks *"UE5CEDumper: Inject &&
+Connect"*, the walk matches on name, and the menu answers *"already loaded as 'dxgi.dll' — no
+injection needed"*. Nothing is injected, the pipe never exists, and the UI's Connect fails with no
+diagnostic pointing anywhere near the cause.
+
+The name is now only a cheap **pre-filter** for the module walk. Ownership is decided by **PE
+ProductName == `UE5CEDumper`** (`dll/src/version.rc` sets it on every binary we build), read via
+`GetFileVersionInfoW`/`VerQueryValueW` over whichever language block the file actually carries rather
+than assuming `040904B0`. That is deliberately the same rule the C# side already uses
+(`DumperModuleDetector`), so the two detectors cannot disagree about whether we are loaded.
+
+**The System32 path test is deleted, not kept as a belt.** A genuine Windows DLL fails the
+ProductName test anyway, so keeping it would leave two rules that can only drift apart — and it was
+the weaker one: the old check accepted *any* same-named DLL outside System32, so a plain copy of
+`System32\dxgi.dll` dropped into a game folder (which is what some passthrough wrappers ship) was
+claimed as ours.
+
+Second defect, same function, fixed by the same rewrite: the walk used `GetModuleFileNameExA`, which
+renders every character the ANSI code page cannot represent as `?`. A path like
+`D:\Games\EVERSPACE™ 2\…` was displayed and logged as `EVERSPACE? 2` — unpasteable, in the one
+message meant to help. The whole function went wide (`GetModuleFileNameExW`, `wcsrchr`, `_wcsicmp`),
+with `Utf8Helpers::EncodeUtf16` only at the log/message boundary. `Heiter.cpp`'s sibling was fixed
+the same way earlier.
+
+A same-named module that is *not* ours now logs a line naming it, since that is precisely the case
+that used to be misread in silence. A false negative here remains safe by design:
+`UE5_StartPipeServer` detects an existing pipe and returns `INIT_SKIPPED`, so the worst case is a
+second copy that declines to serve.
+
+**Rule verified on real files**, not just reasoned: all four shipped proxies and `UE5Dumper.dll`
+report `ProductName = UE5CEDumper`; all four System32 counterparts report `Microsoft® Windows®
+Operating System`. **Not verified:** no ReShade/ASI-Loader install exists on this machine to serve as
+the positive negative-control, and this path only runs inside Cheat Engine as a plugin. 3150 green.
+
+-----
+
 ## 2026-08-04 - A table script cannot know where it lives, and "documented" is not "verified" (build 2576)
 
 A user opened `dist/UE5CEDumper.CT` from Cheat Engine's recent-files menu with `UE5Dumper.dll`

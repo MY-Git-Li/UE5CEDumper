@@ -1665,6 +1665,16 @@ Pick up when the active plan finishes or when blocked.
 > filtered** (so `[DEBUG]` lines count), and **See-Through / Foreground-Lock evidence lands in
 > `init-0.log`**, not `walk`/`pipe`, because their categories fall through `ResolveFile`.
 
+- ⬜ **CE-plugin double-inject guard — the third-party-wrapper case** (build 2577, audit #4 B29).
+  Ownership is now decided by PE ProductName, not file name. **Verified on real files here** (our 5
+  binaries say `UE5CEDumper`; the 4 System32 counterparts say `Microsoft® …`), but the case that
+  motivated the fix has no test material on this machine. **To test:** install ReShade (or drop any
+  third-party `dxgi.dll`/`dinput8.dll` wrapper) into a UE game folder, attach CE, click
+  *UE5CEDumper: Inject && Connect*. PASS = it injects normally, and the DLL log carries
+  `'dxgi.dll' is loaded but is not ours`. FAIL = the old *"already loaded … no injection needed"*
+  message, after which the UI cannot connect. Also worth eyeballing there: a game path with
+  non-ASCII characters must now appear intact in that message (it used to render as `EVERSPACE? 2`).
+
 - ⬜ **`.CT` DLL discovery — the `reg.exe` recent-files fallback** (build 2576). The breadcrumb half
   is **✅ verified** (run `UE5DumpUI.exe` once, open the `.CT` from CE's recent-files menu, tick
   `init` → the DLL resolves). The registry half has NOT been exercised: it only runs when every

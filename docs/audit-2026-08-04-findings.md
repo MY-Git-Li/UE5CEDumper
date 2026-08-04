@@ -18,7 +18,7 @@
 **Tally:** 3 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **52 items** (26 from 4a, 25 from 4b, 1 from in-game verification).
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
-**Progress: 6 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569) — 46 open.**
+**Progress: 7 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577) — 45 open.**
 **+1 found by in-game verification** (B49), which is why 51 became 52.
 
 > ### ✅ Verification discipline
@@ -60,7 +60,7 @@ existing behaviour / perf.
 | B9 | 🟠 | S/low | MainWindowVM | Wrong-game warning never runs on connect, never clears on disconnect |
 | B10 | 🟠 | M/med | Ubel | `WalkClassEx` has no memo despite 4 call sites commented `// cached`; deep-copies under the global lock |
 | B28 | 🟠 | M/med | Utf8Helpers | UTF-8-first gate accepts a UTF-16 CJK buffer whose byte at `n−1` is `0x00` ⇒ ASCII mojibake, UTF-16 branch unreachable |
-| B29 | 🟠 | S/low | Methode | CE-plugin "already loaded" guard matches by **filename alone** ⇒ ReShade's `dxgi.dll` makes it refuse to inject |
+| B29 ✅ | 🟠 | S/low | Methode | ~~CE-plugin "already loaded" guard matches by **filename alone** ⇒ ReShade's `dxgi.dll` makes it refuse to inject~~ **FIXED build 2577** |
 | B30 ✅ | 🟠 | S/low | UE5CEDumper.CT | ~~Every `ue5_inject()` bail-out leaves CE's record ticked ⇒ untick runs a real `UE5_Shutdown` against a proxy this script never injected~~ **FIXED build 2561** |
 | B31 | 🟠 | S/low | LoggingService | `fileSizeLimitBytes` without `rollOnFileSizeLimit:true` ⇒ the sink silently stops writing at 8 MB for the rest of the process |
 | B11 | 🟡 | S/low | Sein | `fprintf` on a NULL `FILE*` after a failed rotation reopen ⇒ can terminate the game |
@@ -529,6 +529,29 @@ a clean UTF-16 decode whenever one exists. Add the `"中文一二"` and `"第1�
 **Where:** [`dll/src/Utf8Helpers.h:239`](../dll/src/Utf8Helpers.h:239)
 
 ### B29 — CE-plugin "already loaded" decided by filename alone
+
+> **✅ FIXED — build 2577.** One rewrite of `IsAlreadyLoadedInTarget`, covering both defects as the
+> finding predicted. The file name is now only a cheap PRE-FILTER for the module walk; ownership is
+> decided by **PE ProductName == "UE5CEDumper"**, read with `GetFileVersionInfoW`/`VerQueryValueW`
+> over whichever language block the file actually has (no fixed `040904B0` guess). That is
+> deliberately the SAME rule the C# side already uses (`DumperModuleDetector`), so the two detectors
+> cannot disagree. The whole walk went wide — `GetModuleFileNameExW` + `wcsrchr`/`_wcsicmp`, with
+> `Utf8Helpers::EncodeUtf16` only at the log/message boundary — which kills the `EVERSPACE? 2`
+> mojibake. A same-named module that is not ours now logs a line naming it, since that is exactly the
+> case that used to be silently misread. The System32 path test is **gone**, not kept alongside: a
+> genuine Windows DLL fails the ProductName test anyway, so the special case was a second rule that
+> could only drift from the first.
+>
+> **Rule verified on real files** (not just reasoned): all four shipped proxies + `UE5Dumper.dll`
+> report `ProductName = UE5CEDumper`; all four System32 counterparts report
+> `Microsoft® Windows® Operating System`. That also demonstrates the old defect directly — the old
+> test was "path is not under System32", so a copy of `System32\dxgi.dll` placed in a game folder
+> (which is what some passthrough wrappers ship) would have been claimed as ours.
+>
+> **Still to verify in-game:** no ReShade/ASI-Loader install exists on this machine to use as the
+> positive negative-control, and this code path only runs inside Cheat Engine as a plugin.
+> *Delete this row after the batch is merged to main.*
+
 **🟠** · S/low · Methode. *Merge of ce-art-03 + dll-left-6 — both defects live in the same 40-line
 function, `IsAlreadyLoadedInTarget`; one rewrite fixes both.*
 **Defect (primary):** the function decides "UE5CEDumper is already present" from a module's **file name**
@@ -984,8 +1007,7 @@ gating · Mimic `LIST_FUNCTIONS`/`LIST_INSTANCES` page-index overflow ·
 4. **B31 + B37 + B38** — one `LoggingService`/reports commit (`rollOnFileSizeLimit: true` **with
    `retainedFileCountLimit: null`**, judge folders by newest file inside, one `Path.Combine` segment), and
    fix the false claim in `walk_payload_audit.py:51` in the same change.
-5. **B29** — one rewrite of `IsAlreadyLoadedInTarget`: wide path + identity probe. Highest
-   damage-per-line in the whole audit.
+5. ~~**B29** — one rewrite of `IsAlreadyLoadedInTarget`: wide path + identity probe.~~ **✅ DONE — build 2577.**
 6. **B30 + B40** — one `.CT` commit: `memrec.Active = false` on all five bail-outs, quiet-if-absent
    `ue5_shutdown`, `pcall(getAddress)` in `ue5_callDLL`, **and the same guard in
    `CeInjectScriptGenerator.cs:89`**.
