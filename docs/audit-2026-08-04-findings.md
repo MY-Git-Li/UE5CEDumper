@@ -18,7 +18,7 @@
 **Tally:** 3 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **52 items** (26 from 4a, 25 from 4b, 1 from in-game verification).
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
-**Progress: 18 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577), B2 + B3 (2581), B31 + B37 + B38 (2585), B5 + B4 (2592), B8 + B10 + B14 + R5 (2596) — 34 open.**
+**Progress: 19 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577), B2 + B3 (2581), B31 + B37 + B38 (2585), B5 + B4 (2592), B8 + B10 + B14 + R5 (2596), B28 (2599) — 33 open.**
 
 ---
 
@@ -53,7 +53,7 @@ coherent commit; the *within-batch* order matters where noted.
   same uncached class would reallocate a vector already handed out by reference (use-after-free).
   **Change it to `try_emplace` FIRST.** Fixing the four `// cached` comments is a zero-risk standalone step.
 
-### Batch C — Utf8Helpers (needs design thought, do not rush)
+### ~~Batch C~~ — Utf8Helpers ✅ **DONE, build 2599**
 - **B28** `Utf8Helpers.h:239` — the obvious ratio-scoring fix **does not work**: `第1章` / `中A文` both
   score 0 bad, and scoring can regress the STVoyager UTF-8 case whenever the adjacent heap tail happens
   to be zero. The discriminator must be **structural** (e.g. an interior-UTF-16-null check, preferring a
@@ -136,7 +136,7 @@ existing behaviour / perf.
 | B8 ✅ | 🟠 | M/med | Dunste | ~~Collision state committed independently of the invoke ⇒ pawn left non-colliding, falls through the world~~ **FIXED build 2596** |
 | B9 | 🟠 | S/low | MainWindowVM | Wrong-game warning never runs on connect, never clears on disconnect |
 | B10 ✅ | 🟠 | M/med | Ubel | ~~`WalkClassEx` has no memo despite 4 call sites commented `// cached`; deep-copies under the global lock~~ **FIXED build 2596** |
-| B28 | 🟠 | M/med | Utf8Helpers | UTF-8-first gate accepts a UTF-16 CJK buffer whose byte at `n−1` is `0x00` ⇒ ASCII mojibake, UTF-16 branch unreachable |
+| B28 ✅ | 🟠 | M/med | Utf8Helpers | ~~UTF-8-first gate accepts a UTF-16 CJK buffer whose byte at `n−1` is `0x00` ⇒ ASCII mojibake, UTF-16 branch unreachable~~ **FIXED build 2599** |
 | B29 ✅ | 🟠 | S/low | Methode | ~~CE-plugin "already loaded" guard matches by **filename alone** ⇒ ReShade's `dxgi.dll` makes it refuse to inject~~ **FIXED build 2577** |
 | B30 ✅ | 🟠 | S/low | UE5CEDumper.CT | ~~Every `ue5_inject()` bail-out leaves CE's record ticked ⇒ untick runs a real `UE5_Shutdown` against a proxy this script never injected~~ **FIXED build 2561** |
 | B31 ✅ | 🟠 | S/low | LoggingService | ~~`fileSizeLimitBytes` without `rollOnFileSizeLimit:true` ⇒ the sink silently stops writing at 8 MB for the rest of the process~~ **FIXED build 2585** |
@@ -687,6 +687,37 @@ same uncached class would reallocate a vector already handed out by reference (u
 **Where:** [`dll/src/Ubel.cpp:885`](../dll/src/Ubel.cpp:885), [`dll/src/Ubel.cpp:813`](../dll/src/Ubel.cpp:813)
 
 ### B28 — UTF-8-first gate returns mojibake for ordinary CJK
+
+> **✅ FIXED — build 2599.** The audit was right that ratio scoring cannot do this. The
+> discriminator that can is **strict UTF-8 well-formedness** (new `IsWellFormedUtf8`): the first
+> `n` bytes of a UTF-16 CJK buffer contain a **lone continuation byte** — `中文一二`'s prefix is
+> `2D 4E 87 65`, and `0x87` is a continuation byte with no lead. That is not a "how much of this
+> looks like text" question, it is "this cannot be UTF-8". `Sanitize` had been turning it into
+> `-N?e` — one bad character in four, comfortably inside any ratio.
+>
+> Well-formedness alone does not settle `第1章` → `,{1` or `中A文` → `-NA`: both prefixes are clean
+> ASCII with zero replacements. Those needed the structural point the finding made, applied as a
+> rule: **the two pieces of evidence are not equally strong.** The UTF-8 evidence (`buf[n-1]==0`)
+> sits *inside* a UTF-16 string's own payload (`n-1 < 2n-2` for every `n>1`), so UTF-16 text
+> produces it routinely. The UTF-16 evidence (a zero unit at byte `2n-2`) sits *outside* an n-byte
+> UTF-8 string's payload, in unrelated heap, and can only be satisfied by chance. So both
+> hypotheses are now evaluated before either is returned, and the stronger evidence wins.
+>
+> **The regression the audit predicted is closed by rule 2, not hoped away:** a well-formed UTF-8
+> buffer containing a *multi-byte sequence* is decided as UTF-8 before the UTF-16 hypothesis is even
+> considered. A UTF-16 prefix essentially cannot produce a valid multi-byte sequence, and the real
+> shipped case (STVoyager's FText, 11 three-byte CJK characters) is exactly that. There is a test
+> that hands it a zero heap tail at `[2n-2]` on purpose and asserts UTF-8 still wins.
+>
+> **Residual, stated rather than hidden:** an *ASCII-only* UTF-8 buffer whose heap tail is `00 00`
+> at exactly `[2n-2]` **and** whose full 2n-byte reading still passes `LooksLikeDecodedText` would
+> be read as UTF-16. Both must hold, and FUtf8String FText exists precisely for non-ASCII, so no
+> ASCII-only case is known in the wild. Documented in the function header.
+>
+> 13 new EXPECTs. Negative control run: restoring "return the first hypothesis that passes" fails
+> exactly the three CJK cases and nothing else. 81 utf8 + 938 dll green.
+> *Delete this row after the batch is merged to main.*
+
 **🟠** · M/med · Utf8Helpers. The UTF-8 hypothesis accepts on `buf[n-1]==0` plus an interior-null scan
 that stops at `i+1 < n` — the terminator byte is deliberately excluded. The docstring's justification
 reasons only about UTF-16 **high** bytes; **low** bytes are `0x00` for every U+xx00 codepoint.

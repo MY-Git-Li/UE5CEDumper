@@ -400,6 +400,92 @@ static void Test_Decode_Utf16AsciiEvenLenInteriorNull() {
                   Utf8Helpers::DecodeFStringBuffer(buf, sizeof(buf), 4), "ABC");
 }
 
+// --- B28: UTF-16 CJK buffers the UTF-8 hypothesis used to swallow -----------
+//
+// Every case here has buf[n-1] == 0 for a reason INSIDE the string's own data — a
+// U+xx00 character's low byte, or an ASCII character's high byte — with no interior
+// zero before it. The old gate returned the n-byte prefix as UTF-8 and never reached
+// the UTF-16 branch. These are ordinary Chinese, not adversarial input.
+static void Test_Decode_Utf16Cjk_TrailingZeroLowByte() {
+    // 中文一二 : 4E2D 6587 4E00 4E8C + NUL → num = 5.
+    // buf[4] = 0x00 is 一's LOW byte, and bytes 0..3 (2D 4E 87 65) have no zero.
+    // The UTF-8 prefix "-N\x87e" is NOT well-formed UTF-8 — 0x87 is a continuation
+    // byte with no lead — which is what now rejects it. A replacement-ratio test
+    // could not: Sanitize gives "-N?e", 1 bad of 4, comfortably inside any ratio.
+    const uint8_t buf[] = { 0x2D,0x4E, 0x87,0x65, 0x00,0x4E, 0x8C,0x4E, 0x00,0x00 };
+    EXPECT_EQ_STR("UTF-16 中文一二 (U+4E00 low byte at n-1)",
+                  Utf8Helpers::DecodeFStringBuffer(buf, sizeof(buf), 5),
+                  "\xE4\xB8\xAD\xE6\x96\x87\xE4\xB8\x80\xE4\xBA\x8C");
+}
+
+static void Test_Decode_Utf16Cjk_AsciiLookingPrefix() {
+    // 第1章 : 7B2C 0031 7AE0 + NUL → num = 4. buf[3] = 0x00 is '1's HIGH byte.
+    // The UTF-8 prefix is ",{1" — pure ASCII, well-formed, ZERO replacement chars,
+    // so neither well-formedness nor any ratio can reject it. This is the case that
+    // forces "evaluate both, prefer the stronger evidence" rather than "return the
+    // first hypothesis that passes".
+    const uint8_t buf[] = { 0x2C,0x7B, 0x31,0x00, 0xE0,0x7A, 0x00,0x00 };
+    EXPECT_EQ_STR("UTF-16 第1章 (ASCII-looking UTF-8 prefix)",
+                  Utf8Helpers::DecodeFStringBuffer(buf, sizeof(buf), 4),
+                  "\xE7\xAC\xAC" "1" "\xE7\xAB\xA0");
+}
+
+static void Test_Decode_Utf16Cjk_MixedAscii() {
+    // 中A文 : 4E2D 0041 6587 + NUL → num = 4. buf[3] = 0x00 is 'A's high byte;
+    // the UTF-8 prefix "-NA" is again clean ASCII.
+    const uint8_t buf[] = { 0x2D,0x4E, 0x41,0x00, 0x87,0x65, 0x00,0x00 };
+    EXPECT_EQ_STR("UTF-16 中A文 (mixed ASCII)",
+                  Utf8Helpers::DecodeFStringBuffer(buf, sizeof(buf), 4),
+                  "\xE4\xB8\xAD" "A" "\xE6\x96\x87");
+}
+
+static void Test_Decode_Utf8MultiByteBeatsZeroHeapTail() {
+    // The guard on the fix itself. A genuine UTF-8 CJK buffer whose adjacent heap
+    // happens to be 0x00 0x00 at exactly the UTF-16 terminator position [2n-2] —
+    // the regression the audit warned a naive "prefer UTF-16" would cause. 你好 is
+    // 6 UTF-8 bytes + NUL → num = 7, so the UTF-16 terminator would sit at [12].
+    // Rule 2 (well-formed AND multi-byte ⇒ UTF-8) settles it before the UTF-16
+    // hypothesis is even evaluated.
+    uint8_t buf[14] = {
+        0xE4,0xBD,0xA0, 0xE5,0xA5,0xBD, 0x00,          // "你好" + NUL
+        0x41,0x00, 0x42,0x00, 0x43,0x00,               // plausible-looking tail
+        0x00                                            // [12] and [13] are 0x00
+    };
+    buf[12] = 0x00; buf[13] = 0x00;
+    EXPECT_EQ_STR("UTF-8 你好 survives a zero heap tail at the UTF-16 terminator",
+                  Utf8Helpers::DecodeFStringBuffer(buf, sizeof(buf), 7),
+                  "\xE4\xBD\xA0\xE5\xA5\xBD");
+}
+
+static void Test_IsWellFormedUtf8() {
+    bool multi = false;
+    EXPECT("ASCII is well-formed",
+           Utf8Helpers::IsWellFormedUtf8(reinterpret_cast<const uint8_t*>("abc"), 3, multi));
+    EXPECT("ASCII has no multi-byte", !multi);
+
+    const uint8_t cjk[] = { 0xE4,0xB8,0xAD };          // 中
+    EXPECT("3-byte CJK is well-formed", Utf8Helpers::IsWellFormedUtf8(cjk, 3, multi));
+    EXPECT("CJK sets hasMultiByte", multi);
+
+    // The exact shape a UTF-16 CJK prefix produces: a continuation byte with no lead.
+    const uint8_t lone[] = { 0x2D,0x4E,0x87,0x65 };
+    EXPECT("lone continuation byte rejected",
+           !Utf8Helpers::IsWellFormedUtf8(lone, 4, multi));
+
+    const uint8_t truncated[] = { 0xE4,0xB8 };          // 3-byte lead, only 2 bytes
+    EXPECT("truncated sequence rejected",
+           !Utf8Helpers::IsWellFormedUtf8(truncated, 2, multi));
+
+    const uint8_t overlong[] = { 0xC0,0x80 };           // overlong NUL
+    EXPECT("overlong rejected", !Utf8Helpers::IsWellFormedUtf8(overlong, 2, multi));
+
+    const uint8_t surrogate[] = { 0xED,0xA0,0x80 };     // U+D800 encoded as UTF-8
+    EXPECT("surrogate half rejected", !Utf8Helpers::IsWellFormedUtf8(surrogate, 3, multi));
+
+    const uint8_t fiveByte[] = { 0xF8,0x80,0x80,0x80,0x80 };
+    EXPECT("5-byte form rejected", !Utf8Helpers::IsWellFormedUtf8(fiveByte, 5, multi));
+}
+
 static void Test_Decode_RejectsEmptyAndGarbage() {
     const uint8_t buf[] = { 0x00,0x00,0x00,0x00 };
     EXPECT_EQ_STR("num < 2 is empty",
@@ -471,6 +557,12 @@ int main() {
     Test_Decode_Utf8Ascii();
     Test_Decode_Utf16AsciiEvenLenInteriorNull();
     Test_Decode_RejectsEmptyAndGarbage();
+    // B28 — UTF-16 CJK buffers the UTF-8 hypothesis used to swallow
+    Test_Decode_Utf16Cjk_TrailingZeroLowByte();
+    Test_Decode_Utf16Cjk_AsciiLookingPrefix();
+    Test_Decode_Utf16Cjk_MixedAscii();
+    Test_Decode_Utf8MultiByteBeatsZeroHeapTail();
+    Test_IsWellFormedUtf8();
     Test_LooksLikeDecodedText();
 
     std::printf("---------------------\n");

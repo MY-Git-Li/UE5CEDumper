@@ -20,6 +20,52 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - "中文一二" is not four ASCII characters (build 2599)
+
+Audit #4 **B28**. `DecodeFStringBuffer` decides whether an FText's buffer is 1-byte (FUtf8String)
+or 2-byte (UTF-16) by where the null terminator sits. It tried UTF-8 first and returned on the
+first hypothesis that passed — and the UTF-8 gate accepted far more than its docstring claimed.
+
+The docstring justified the gate by reasoning about UTF-16 **high** bytes: they are `0x00` for
+ASCII, which the interior-null scan catches. It never mentions **low** bytes, which are `0x00` for
+every `U+xx00` codepoint. `中文一二` is `2D 4E 87 65 00 4E 8C 4E 00 00`; `buf[4]` is 一's low byte,
+and bytes 0-3 contain no zero. The UTF-8 hypothesis accepted, `Sanitize` produced `-N?e`, the
+one-third replacement tolerance passed it (1 of 4), and the correct UTF-16 branch was never
+reached. The trigger is not exotic — any even-length CJK string with a `U+xx00` character:
+統一, 第一, 唯一, 萬一.
+
+The audit's own caveat ruled out the obvious fix: scoring both candidates by replacement ratio
+does nothing for `第1章` → `,{1` or `中A文` → `-NA`, which score **zero** bad characters, and it
+can regress the shipped UTF-8 case. So the fix is two structural rules, not a score.
+
+**Rule 1 — strict UTF-8 well-formedness** (new `IsWellFormedUtf8`). The first `n` bytes of a UTF-16
+CJK buffer carry a lone continuation byte: `0x87` with no lead. That is not "how much of this looks
+like text", it is "this cannot be UTF-8". Kills `中文一二` outright.
+
+**Rule 2 — a well-formed multi-byte sequence decides the width**, before the UTF-16 hypothesis is
+even evaluated. A UTF-16 prefix essentially cannot produce a valid multi-byte sequence, and the real
+shipped case — Star Trek Voyager's FText, eleven 3-byte CJK characters — is exactly that. This is
+what closes the regression the audit warned about; there is a test that hands it a zero heap tail at
+the UTF-16 terminator position on purpose and asserts UTF-8 still wins.
+
+**Rule 3 — when the UTF-8 candidate is pure ASCII, prefer UTF-16.** This is the part the finding
+identified and it rests on an asymmetry worth stating plainly: the UTF-8 evidence (`buf[n-1] == 0`)
+sits **inside** a UTF-16 string's own payload, so UTF-16 text produces it routinely; the UTF-16
+evidence (a zero unit at byte `2n-2`) sits **outside** an n-byte UTF-8 string's payload, in
+unrelated heap, and can only be satisfied by chance. Evidence that cannot be self-produced beats
+evidence that can.
+
+Residual, written into the function header rather than left implicit: an ASCII-only UTF-8 buffer
+whose heap tail is `00 00` at exactly `[2n-2]` *and* whose full 2n-byte reading still looks textual
+would be misread. Both conditions must hold, and FUtf8String FText exists precisely for non-ASCII.
+
+13 new EXPECTs, including the two cases the second lens found and a `IsWellFormedUtf8` battery
+(lone continuation / truncated / overlong / surrogate / 5-byte). Negative control: restoring
+"return the first hypothesis that passes" fails exactly the three CJK cases and nothing else.
+81 utf8 + 938 dll green.
+
+-----
+
 ## 2026-08-04 - The report said collision was off; nobody had turned it off (build 2596)
 
 Audit #4 **B8 + B10 + B14 + R5**.

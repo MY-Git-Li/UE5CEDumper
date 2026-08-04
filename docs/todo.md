@@ -1717,6 +1717,16 @@ Pick up when the active plan finishes or when blocked.
   racing). Absence of the new lines proves only that the race did not *occur*; the deliberate
   provocation is in ② below.
 
+- ⬜ **CJK FText no longer renders as ASCII mojibake** (build 2599, B28) — *no log needed; the
+  evidence is on screen.* Affects **FText-typed values only** (`ReadFTextString`); FString goes
+  through the UTF-16-only reader and never had the bug. **To test:** any game with Chinese/Japanese
+  UI text — set the game to a CJK language, find an FText property in Live Walker or Property
+  Search. **PASS** = the value reads as CJK. **FAIL** = short ASCII punctuation soup (`,{1`, `-N?e`)
+  where CJK belongs. Worth checking specifically on a string with an **even** character count
+  containing a `U+xx00` character (一, 第…一, 統一) — that is the exact trigger. Counter-check that
+  the fix did not swing the other way: **Star Trek Voyager (UE5.6)** stores its FText as UTF-8, and
+  its Chinese must still read correctly.
+
 - ⬜ **Fly/Noclip no longer leaves the pawn ghosted** (build 2596, B8). The whole answer is in the
   log, and the trigger is the *ordinary* way to turn Fly off on an idle-when-unfocused title.
   **To test:** Teleport tab → Fly ON + Noclip → fly through a wall → **alt-tab to the UI** (wait
