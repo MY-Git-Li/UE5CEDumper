@@ -1658,6 +1658,11 @@ Pick up when the active plan finishes or when blocked.
 
 ## Pending live-game verification (verify only — no code)
 
+> 🇹🇼 **繁體中文版：[pending-verification_zh-TW.md](pending-verification_zh-TW.md)** — a standalone
+> translation of THIS section, reorganised by how much effort each check costs (seven of the ①
+> items are free from any ordinary session). **This English section is canonical**: if the two
+> disagree, this one is right, and edits land here first.
+>
 > **Procedure lives in [log-verification-checklist.md](log-verification-checklist.md)** — where to
 > grep, which file each marker lands in, and which items need a deliberate in-game action versus
 > which are free evidence from any ordinary session. THIS section is the status (⬜ / ✅); that one
