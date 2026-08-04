@@ -517,6 +517,20 @@ function ue5_pickDllManually()
     return picked
 end
 
+-- Resolve the exported mailbox symbol, trying BOTH spellings CE may present.
+-- Depending on how CE's symbol handler picked up the module, an export is reachable
+-- as the bare name or only as "&lt;module&gt;.&lt;name&gt;", and which one works is not
+-- predictable from here. lessons-learned.md mandates trying both, and eight other
+-- sites in this repo already do; these two were the holdouts, and a single-spelling
+-- miss silently degrades the readiness poll to the old blind 15 s wait. (B33)
+function ue5_findMailbox()
+    for _, sym in ipairs({ "g_invokeMailbox", "UE5Dumper.g_invokeMailbox" }) do
+        local ok, addr = pcall(getAddress, sym)
+        if ok and addr and addr ~= 0 then return addr end
+    end
+    return nil
+end
+
 function ue5_inject()
     ue5_log("Starting UE5 Dumper...")
 
@@ -579,8 +593,8 @@ function ue5_inject()
         --              revive it in place: the DLL is still mapped, so injecting
         --              again would double-map us (audit #4 B1(b)).
         local pre = nil
-        local okSym, mbNow = pcall(getAddress, "g_invokeMailbox")
-        if okSym and mbNow and mbNow ~= 0 then
+        local mbNow = ue5_findMailbox()
+        if mbNow then
             local okRead, v = pcall(readInteger, mbNow + MAILBOX_INITSTATE_OFF)
             pre = okRead and v or nil
         end
@@ -648,18 +662,27 @@ function ue5_inject()
 
     ue5_log("Waiting for GObjects/GNames scan + Pipe Server (polling)...")
     local waited, state, lastLogged = 0, INIT_IDLE, -1
+    -- Did the DLL ever show a sign of life? This separates two very different
+    -- outcomes that both end the loop still-not-READY (B32):
+    --   sawProgress = true  -> it really did start and then stall. A timeout.
+    --   sawProgress = false -> it never left IDLE for the whole window, which is
+    --                          also exactly what an OLD DLL looks like: offset 0x0C
+    --                          used to be an `int32_t reserved` that nothing ever
+    --                          wrote, so the symbol resolves and reads 0 forever.
+    --                          Reporting that as a timeout put a modal error on a
+    --                          perfectly healthy injection.
+    local sawProgress = false
     while waited &lt; TIMEOUT_MS do
         if mb == nil then
-            local okGet, addr = pcall(getAddress, "g_invokeMailbox")
-            if okGet and addr and addr ~= 0 then
-                mb = addr
-            elseif waited &gt;= SYMBOL_GRACE_MS then
+            mb = ue5_findMailbox()
+            if mb == nil and waited &gt;= SYMBOL_GRACE_MS then
                 break   -- symbol never appeared → fall back below
             end
         end
         if mb ~= nil then
             local okRead, v = pcall(readInteger, mb + MAILBOX_INITSTATE_OFF)
             state = (okRead and v) or INIT_IDLE
+            if state ~= INIT_IDLE then sawProgress = true end
             if state == INIT_READY or state == INIT_FAILED or state == INIT_SKIPPED then
                 break
             end
@@ -692,9 +715,19 @@ function ue5_inject()
             ue5_logError("DLL init finished but the Pipe Server FAILED to start.")
             showMessage("UE5 Dumper Error:\n\nThe DLL loaded and initialised, but the Pipe Server failed to start.\n\nMost likely another process already owns \\\\.\\pipe\\UE5DumpBfx.\nCheck the DLL log:\n  %LOCALAPPDATA%\\UE5CEDumper\\Logs")
             return false
+        elseif not sawProgress then
+            -- The symbol resolved but the field never once left IDLE. That is NOT a
+            -- timeout — it is indistinguishable from an older DLL where this offset
+            -- was an `int32_t reserved` nothing ever wrote, so it reads 0 forever.
+            -- The old code called it a timeout and threw a modal error on a
+            -- perfectly healthy injection. Proceed quietly instead; the pipe is
+            -- almost certainly up, and the UI's Connect will say so if it is not.
+            -- (B32)
+            ue5_log("Readiness field never changed — this DLL predates it. " ..
+                    "Proceeding; if Connect fails, check the DLL log.")
         else
-            -- Timed out still IDLE/RUNNING — the scan is wedged or far slower
-            -- than expected. A timeout is an error: report and stop.
+            -- Progress WAS observed and then stopped: the scan is wedged or far
+            -- slower than expected. A timeout is an error: report and stop.
             ue5_logError("Timed out after %d sec waiting for DLL auto-start (state=%d).",
                          TIMEOUT_MS / 1000, state)
             showMessage("UE5 Dumper Error:\n\nTimed out waiting for the DLL to finish starting up.\n\nThe AOB scan may be wedged, or the game may be blocking our thread.\nCheck the DLL log:\n  %LOCALAPPDATA%\\UE5CEDumper\\Logs")

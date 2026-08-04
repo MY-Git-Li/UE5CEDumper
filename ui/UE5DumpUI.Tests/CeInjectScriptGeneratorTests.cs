@@ -132,8 +132,27 @@ public class CeInjectScriptGeneratorTests
         var loopStart = e.IndexOf("while waited <", StringComparison.Ordinal);
         var loopBody = e.Substring(loopStart);
         // CE's symbol handler may not see the just-injected module on the first try.
-        Assert.Contains("pcall(getAddress, 'g_invokeMailbox')", loopBody);
-        Assert.Contains($"elseif waited >= {CeReadinessLua.SymbolGraceMs} then", loopBody);
+        Assert.Contains("pcall(getAddress, sym)", loopBody);
+        Assert.Contains($"if mb == nil and waited >= {CeReadinessLua.SymbolGraceMs} then", loopBody);
+    }
+
+    /// <summary>
+    /// B33 — lessons-learned.md mandates trying BOTH symbol spellings: depending on how
+    /// CE's symbol handler picked up the module, an export is reachable bare or only as
+    /// "&lt;module&gt;.&lt;name&gt;". Eight other sites in the repo obey it; this generator
+    /// was a holdout, and a single-spelling miss silently degrades the readiness poll
+    /// back to the blind fixed wait it was written to replace.
+    /// </summary>
+    [Fact]
+    public void Enable_tries_both_mailbox_symbol_spellings()
+    {
+        var e = Enable(CeInjectScriptGenerator.Generate(Dll));
+        var loopStart = e.IndexOf("while waited <", StringComparison.Ordinal);
+        var loopBody = e.Substring(loopStart);
+        Assert.Contains("'g_invokeMailbox'", loopBody);
+        Assert.Contains("'UE5Dumper.g_invokeMailbox'", loopBody);
+        // Both must be in ONE iterated list, not two hand-copied branches that can drift.
+        Assert.Contains("ipairs({'g_invokeMailbox', 'UE5Dumper.g_invokeMailbox'})", loopBody);
     }
 
     [Fact]

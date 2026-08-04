@@ -3059,6 +3059,33 @@ static bool PatMatchAt(const Macht::ParsedPattern& pat,
     return true;
 }
 
+// B46 — HexToBytes could not fail, so write_mem could not report a bad pattern.
+static void Test_Renge_TryHexToBytes() {
+    std::printf("Test_Renge_TryHexToBytes\n");
+    std::vector<uint8_t> out;
+
+    EXPECT("plain hex parses", Renge::TryHexToBytes("DEADBEEF", out));
+    EXPECT("plain hex length", out.size() == 4);
+    EXPECT("plain hex bytes",
+           out.size() == 4 && out[0] == 0xDE && out[1] == 0xAD &&
+           out[2] == 0xBE && out[3] == 0xEF);
+
+    EXPECT("lowercase parses", Renge::TryHexToBytes("deadbeef", out));
+    EXPECT("lowercase bytes", out.size() == 4 && out[0] == 0xDE && out[3] == 0xEF);
+
+    // The exact string from the finding. strtoul turned every non-hex char into 0x00,
+    // so this was WRITTEN INTO THE GAME as {DE,0A,0D,BE,0E} and answered ok:true.
+    out.assign(1, 0xAA);
+    EXPECT("spaced hex is REJECTED (not silently mangled)",
+           !Renge::TryHexToBytes("DE AD BE EF", out));
+    EXPECT("rejected input leaves out untouched", out.size() == 1 && out[0] == 0xAA);
+
+    EXPECT("odd length rejected",     !Renge::TryHexToBytes("ABC", out));
+    EXPECT("0x prefix rejected",      !Renge::TryHexToBytes("0xAB", out));
+    EXPECT("non-hex letter rejected", !Renge::TryHexToBytes("ZZ", out));
+    EXPECT("empty rejected",          !Renge::TryHexToBytes("", out));
+}
+
 // B4 — the mailbox poller needs immunity from the PER-COMMAND cancel WITHOUT being
 // classified a background worker. One flag used to answer both questions; this asserts
 // they are now genuinely independent. The second EXPECT in the poller block is the
@@ -3417,6 +3444,9 @@ int main() {
 
     // Tot — per-command cancel immunity is independent of "is a background worker"
     Test_Tot_CancelImmunityVsBackgroundWorker();
+
+    // Renge — hex parsing has a failure channel (write_mem can refuse a bad pattern)
+    Test_Renge_TryHexToBytes();
 
     // DynOff — FFieldClass::Name probe (UE 5.8 virtual-dtor member shift)
     Test_FFieldClassName_Probe();

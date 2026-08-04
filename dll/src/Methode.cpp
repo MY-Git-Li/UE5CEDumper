@@ -331,6 +331,14 @@ __declspec(dllexport)
 BOOL __stdcall CEPlugin_GetVersion(CePluginVersion* pv, int /*sizeofpluginversion*/)
 {
     if (!pv) return FALSE;
+    // Claim CE-plugin identity HERE, not only in InitializePlugin. CE calls
+    // InitializePlugin only when the plugin is ENABLED, so a registered-but-unticked
+    // plugin used to get DllMain + GetVersion and nothing else — and DllMain's 1 s
+    // wait cannot be beaten by a human ticking a checkbox. The auto-start thread then
+    // ran a full AOB scan and opened \\.\pipe\UE5DumpBfx INSIDE cheatengine-x86_64.exe.
+    // GetVersion is called for enabled and disabled plugins alike, and it is called
+    // early, which is exactly the signal the race needed. (B34)
+    g_isCEPlugin.store(true);
     pv->version    = CESDK_VERSION;
     pv->pluginname = g_PluginName;
     return TRUE;

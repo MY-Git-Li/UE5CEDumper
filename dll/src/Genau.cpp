@@ -14,6 +14,7 @@
 #include "Aura.h"
 #include "Serie.h"
 #include "Neu.h"     // UEnum::Names layout parse (legacy TArray vs UE5.6+ FNameData)
+#include "Tot.h"     // Tot::Requested — Extra Scan must bail so Fern::Stop's join is bounded (B18)
 
 #include <string>
 #include <cstring>
@@ -1822,6 +1823,10 @@ static uintptr_t FindGNamesByPointerScan() {
         int diagCount = 0;  // Limit diagnostic dumps to first few candidates
         for (size_t off = 0; off + 8 <= secSize; off += 8) {
             uintptr_t ptr = 0;
+            // Cooperative cancel. UE5_Shutdown runs on the CE Lua caller's thread and
+            // joins the accept thread, so an unbounded sweep here freezes CE's UI for its
+            // whole duration. Aura's idiom: poll cheaply every 4096 slots. (B18)
+            if ((off & 0xFFF) == 0 && Tot::Requested()) return 0;
             if (!Macht::ReadSafe(secBase + off, ptr)) continue;
 
             // Plausible user-space 64-bit address (exclude null, low, kernel)
@@ -3929,6 +3934,11 @@ uintptr_t ExtraScanGObjects() {
                   (size_t)(sec.end - sec.start));
 
         for (uintptr_t addr = sec.start; addr + 0x20 < sec.end; addr += 4) {
+            if ((addr & 0xFFF) == 0 && Tot::Requested()) {
+                Sein::Warn("SCAN:GObj", "ExtraScanGObjects: cancelled (%d candidates tested)",
+                           candidatesTested);
+                return 0;   // (B18)
+            }
             // Mode 1: Inline — the FUObjectArray struct starts at addr
             if (ValidateGObjects(addr)) {
                 Sein::Info("SCAN:GObj", "ExtraScanGObjects: Found inline FUObjectArray at 0x%llX (%d candidates tested)",
@@ -4032,6 +4042,7 @@ uintptr_t ExtraScanGWorld() {
     // skipped) — and prefer the highest-index world (most recently created = the active map).
     std::vector<std::pair<uintptr_t, int32_t>> worlds;   // (instance addr, index), sorted by addr
     for (int32_t i = 0; i < count; ++i) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) return 0;   // (B18)
         uintptr_t obj = Aura::GetByIndex(i);
         if (!obj) continue;
         uintptr_t cls = 0;
@@ -4074,6 +4085,7 @@ uintptr_t ExtraScanGWorld() {
         size_t    secSize = section->Misc.VirtualSize;
         for (size_t off = 0; off + sizeof(uintptr_t) <= secSize; off += sizeof(uintptr_t)) {
             uintptr_t val = 0;
+            if ((off & 0xFFF) == 0 && Tot::Requested()) return 0;   // (B18)
             if (!Macht::ReadSafe(secBase + off, val) || val < 0x10000) continue;
             auto it = std::lower_bound(worlds.begin(), worlds.end(), std::make_pair(val, 0));
             if (it != worlds.end() && it->first == val) {

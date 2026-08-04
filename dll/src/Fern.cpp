@@ -542,8 +542,12 @@ void Fern::Stop() {
     // says not to use.
     StopAllWatches();
 
-    // Join background scan threads (they exit naturally; RunScan/RunRescan are
-    // bounded AOB scans).
+    // Join background scan threads. These joins are UNBOUNDED — the comment here used
+    // to claim RunScan/RunRescan were "bounded AOB scans", but RunRescan runs Genau's
+    // Extra Scan, a full .data sweep. What actually bounds them is Tot::RequestShutdown()
+    // above plus the cancel polls Genau's loops now carry; without those, and since
+    // UE5_Shutdown runs on the CE Lua caller's thread, CE's UI froze for the remainder
+    // of the sweep. (B18)
     m_rescan.running.store(false);
     if (m_rescan.scanThread.joinable()) {
         m_rescan.scanThread.join();
@@ -1925,7 +1929,15 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             }
 
             uintptr_t addr = Renge::StrToAddr(addrStr);
-            auto bytes = Renge::HexToBytes(hexBytes);
+            // Reject a malformed pattern instead of writing a silently-mangled one.
+            // strtoul mapped every non-hex character to 0x00, so "DE AD BE EF" used to
+            // be written as {DE,0A,0D,BE,0E} and answered ok:true. (B46)
+            std::vector<uint8_t> bytes;
+            if (!Renge::TryHexToBytes(hexBytes, bytes)) {
+                return Renge::MakeError(id,
+                    "Invalid bytes (need an even-length hex string, no separators): "
+                    + hexBytes).dump();
+            }
             if (bytes.empty() || bytes.size() > 65536) {
                 return Renge::MakeError(id, "Invalid write size (max 65536)").dump();
             }
@@ -4556,7 +4568,12 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             std::vector<uint8_t> paramBuf(bufSize, 0);
 
             if (!paramsHex.empty()) {
-                auto hexBytes = Renge::HexToBytes(paramsHex);
+                std::vector<uint8_t> hexBytes;
+                if (!Renge::TryHexToBytes(paramsHex, hexBytes)) {
+                    return Renge::MakeError(id,
+                        "Invalid params hex (need an even-length hex string): "
+                        + paramsHex).dump();
+                }
                 size_t copyLen = (std::min)(hexBytes.size(), paramBuf.size());
                 if (copyLen > 0) {
                     memcpy(paramBuf.data(), hexBytes.data(), copyLen);

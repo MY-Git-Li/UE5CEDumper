@@ -48,6 +48,20 @@ def read_exports(path):
         d = fh.read()
     pe = struct.unpack_from("<I", d, 0x3C)[0]
     magic = struct.unpack_from("<H", d, pe + 24)[0]
+    machine = struct.unpack_from("<H", d, pe + 4)[0]
+    # Refuse a 32-bit source outright. This function happily parses PE32, and the
+    # generated files would build and link clean — but they would be WRONG in a way
+    # nothing downstream can detect. Measured on this machine: System32 winmm.dll has
+    # 180 named exports, SysWOW64 has 192; 12 are x86-only, and 174 shared names sit at
+    # DIFFERENT ordinals. A 32-bit Python run therefore emits 12 permanently-null lazy
+    # thunks (each one a `jmp rax` with rax==0 — see Lugner_Winmm.asm) plus a
+    # wholesale-wrong @ordinal map, and the build stays internally consistent. (B48)
+    if magic != 0x20B or machine != 0x8664:
+        raise RuntimeError(
+            f"{path} is not a 64-bit PE (magic=0x{magic:X}, machine=0x{machine:04X}); "
+            "expected magic=0x20B machine=0x8664. Under 32-bit Python, WOW64 redirects "
+            r"%SystemRoot%\System32 to SysWOW64 — re-run with 64-bit Python."
+        )
     dd = pe + 24 + (112 if magic == 0x20B else 96)
     nsec = struct.unpack_from("<H", d, pe + 6)[0]
     so = pe + 24 + struct.unpack_from("<H", d, pe + 20)[0]
@@ -250,6 +264,19 @@ def emit_asm(name, dll, count):
         "ResolveAll endp",
         "",
         "; fN: jump through mProcs[N]; on first use (mProcs[N]==0) resolve, then jump.",
+        ";",
+        "; NOTE -- there is deliberately NO post-resolve null test. If the resolver could",
+        "; not fill this slot (the name does not exist in the host System32 DLL), rax is",
+        "; still 0 and the `jmp rax` faults with RIP=0. That is a KNOWN, ACCEPTED tradeoff,",
+        "; not an oversight: a stub returning 0 would be worse for winmm, where",
+        "; 0 == TIMERR_NOERROR, so a missing timeBeginPeriod would SILENTLY no-op the 1 ms",
+        "; tick instead of saying anything (dll/CMakeLists.txt records the same rejection).",
+        "; A crash at least names the problem.",
+        ";",
+        "; The real defence is upstream, in this file's generator: it now asserts the",
+        "; source DLL is a 64-bit PE. A 32-bit Python run used to read the SysWOW64 copy",
+        "; via WOW64 redirection and emit permanently-null slots pointing straight at this",
+        "; instruction, with a build that stayed internally consistent. (B44 / B48)",
         "LAZY_THUNK macro idx",
         "f&idx& proc",
         "    mov  rax, qword ptr mProcs[8*idx]",
@@ -329,7 +356,15 @@ def main():
     low = args.name.lower()
     cap = low.capitalize()
     dll = low + ".dll"
-    real = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", dll)
+    # Under 32-bit Python, WOW64 silently redirects System32 -> SysWOW64. `Sysnative`
+    # is the documented escape hatch that reaches the REAL 64-bit System32 from a
+    # 32-bit process; it does not exist for 64-bit processes, hence the conditional.
+    # read_exports asserts the result anyway — this just makes the common case work
+    # instead of only failing loudly. (B48)
+    sysroot = os.environ.get("SystemRoot", r"C:\Windows")
+    sysdir = "Sysnative" if sys.maxsize < 2 ** 32 else "System32"
+    real = os.path.join(sysroot, sysdir, dll)
+    print(f"host python: {8 * struct.calcsize('P')}-bit -> reading {real}")
 
     exports, skipped = read_exports(real)
     print(f"{dll}: {len(exports)} named exports"

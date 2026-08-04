@@ -1483,9 +1483,17 @@ static void TryInstallGameThreadHook(bool force = false) {
         uint64_t last = s_lastHookAttemptMs.load(std::memory_order_relaxed);
         if (now - last < kHookRetryCooldownMs) return;   // too soon — stay quiet
     }
-    s_hookAttempts.fetch_add(1, std::memory_order_relaxed);
+    // Only the AUTOMATIC path spends the budget. A forced attempt already skips the
+    // cap and the cooldown, so counting it there just burned the automatic retries on
+    // the user's behalf: two clicks of a feature that forces a hook (Live Funcs,
+    // See-through) exhausted kMaxHookAttempts and the lazy retry went silent for the
+    // rest of the session. The timestamp IS still stamped for both — a forced attempt
+    // is a real attempt, and the cooldown should measure from it. (B24)
+    if (!force) {
+        s_hookAttempts.fetch_add(1, std::memory_order_relaxed);
+        attempts += 1;
+    }
     s_lastHookAttemptMs.store(GetTickCount64(), std::memory_order_relaxed);
-    attempts += 1;
 
     uintptr_t peAddr = ResolveProcessEventAddr();
     if (!peAddr) {

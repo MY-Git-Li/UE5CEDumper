@@ -290,9 +290,12 @@ void ApplyKnobLocked(const Ctx& c, int knobId, bool* drifted) {
     double current = 0;
     if (!ReadFloatAt(f.addr, f.size, current)) return;
     // Re-capture base on pawn change (respawn): the new CMC's value is untouched
-    // by us, so it is the genuine base to scale.
+    // by us, so it is the genuine base to scale. But KEEP the previous base if the
+    // fresh pawn reads 0 / non-finite — otherwise a respawn that lands mid-cutscene
+    // silently converts the hold into "pin at zero" (B22). The pawn is still adopted,
+    // so a later tick with a sane value is not re-captured over our own write.
     if (c.pawn != k.capturedPawn) {
-        k.base = current;
+        if (current > 0.0 && std::isfinite(current)) k.base = current;
         k.capturedPawn = c.pawn;
     }
     double target = k.base * k.multiplier;
@@ -460,6 +463,17 @@ int32_t SetMultiplier(int32_t knobId, double multiplier) {
         double current = 0;
         if (!ReadFloatAt(f.addr, f.size, current)) return MR_ERR_REFLECT;
         KnobState& k = s_knobs[knobId];
+        // A base of 0 (or NaN/inf) makes every target 0 too, and the worker then writes
+        // that over the game's own value every 250 ms while the panel reads "300%,
+        // active" — the knob is pinning the value AT ZERO. Games really do park these
+        // at 0 (cutscene, swim, mount, ragdoll), so refuse the capture rather than the
+        // command: the pawn/field are fine, just not sampleable right now. (B22)
+        if (!(current > 0.0) || !std::isfinite(current)) {
+            LOG_WARN("Movement: knob %d ('%s') base reads %.3f — not a usable base "
+                     "(cutscene / swim / mount?). Not engaging; try again in normal play.",
+                     knobId, f.name.c_str(), current);
+            return MR_ERR_REFLECT;
+        }
         // Capture an untouched base only when (re)activating or the pawn changed —
         // NOT when merely changing the multiplier on the same active pawn, or we
         // would fold our own write into the base and compound.

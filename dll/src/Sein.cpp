@@ -227,21 +227,28 @@ static void ArchiveByWriteTime(const fs::path& src, const fs::path& dir,
 
 // Delete archived logs past the retention window. Only touches *.log, and never
 // the live -0.log (callers archive that first, so it does not exist here).
+// One error_code for ITERATION, a fresh one per filesystem call. Sharing a single ec
+// let a failed fs::remove poison the loop's own `if (ec) break`: the first undeletable
+// entry ended the sweep — and because enumeration order is stable, it ended it at the
+// SAME entry on every launch, so the advertised 21-day retention silently stopped
+// applying past that point forever. One locked file is enough to do that. (B19)
 static void PruneAgedLogs(const fs::path& dir) {
-    std::error_code ec;
+    std::error_code iterEc;
     FILETIME nowFt{};
     GetSystemTimeAsFileTime(&nowFt);
     const ULONGLONG now    = AsU64(nowFt);
     const ULONGLONG maxAge = RetentionTicks();
 
-    for (auto& entry : fs::directory_iterator(dir, ec)) {
-        if (ec) break;
+    for (auto& entry : fs::directory_iterator(dir, iterEc)) {
+        if (iterEc) break;
+        std::error_code ec;
         if (!entry.is_regular_file(ec)) continue;
         if (entry.path().extension() != L".log") continue;
 
         FILETIME ft{};
         if (!FileWriteTime(entry.path(), ft)) continue;
         const ULONGLONG t = AsU64(ft);
+        // A failure here is per-file and must not stop the sweep.
         if (now > t && (now - t) > maxAge) fs::remove(entry.path(), ec);
     }
 }
@@ -315,6 +322,12 @@ static void CloseFile(LogFileState& fs_state) {
 static void WriteToFile(LogFileState& fs_state, const char* line) {
     if (!fs_state.file) return;
     RotateIfNeeded(fs_state);
+    // RotateIfNeeded RETURNS VOID and can leave `file` null: it closes the old handle
+    // unconditionally, and the truncating reopen can fail (disk full — the 21-day
+    // retention has no size cap — or a viewer holding the file open). fprintf on a NULL
+    // FILE* hits the UCRT invalid-parameter handler, which terminates the INJECTED GAME
+    // with no message. Logging is best-effort; the game is not. (B11)
+    if (!fs_state.file) return;
     int written = fprintf(fs_state.file, "%s\n", line);
     if (written > 0) fs_state.written += static_cast<size_t>(written);
     fflush(fs_state.file);
@@ -333,32 +346,40 @@ static void WriteToFile(LogFileState& fs_state, const char* line) {
 // `keep` is the folder this process owns and is never removed, even in the
 // pathological case of a system clock jump.
 static void PruneStaleProcessFolders(const fs::path& parentDir, const fs::path& keep) {
-    std::error_code ec;
+    std::error_code iterEc;
     FILETIME nowFt{};
     GetSystemTimeAsFileTime(&nowFt);
     const ULONGLONG now    = AsU64(nowFt);
     const ULONGLONG maxAge = RetentionTicks();
 
-    for (auto& entry : fs::directory_iterator(parentDir, ec)) {
-        if (ec) break;
+    // Same per-entry error_code discipline as PruneAgedLogs: an undeletable folder
+    // (a game still running, a viewer holding a file) must cost that folder, not the
+    // rest of the sweep. The old `ec.clear()` sat BEFORE both remove_all calls, so it
+    // could not undo the failure that actually broke the loop. (B19)
+    for (auto& entry : fs::directory_iterator(parentDir, iterEc)) {
+        if (iterEc) break;
+        std::error_code ec;
         if (!entry.is_directory(ec)) continue;
         if (fs::equivalent(entry.path(), keep, ec)) continue;
 
         ULONGLONG newest = 0;
         bool sawFile = false;
-        for (auto& sub : fs::directory_iterator(entry.path(), ec)) {
-            if (ec) break;
+        std::error_code subEc;
+        for (auto& sub : fs::directory_iterator(entry.path(), subEc)) {
+            if (subEc) break;
             FILETIME ft{};
             if (!FileWriteTime(sub.path(), ft)) continue;
             sawFile = true;
             const ULONGLONG t = AsU64(ft);
             if (t > newest) newest = t;
         }
-        ec.clear();
+        // Could not even enumerate it — leave it alone rather than guess it is empty.
+        if (subEc) continue;
 
+        std::error_code rmEc;
         // An empty folder is removable immediately; there is nothing to retain.
-        if (!sawFile) { fs::remove_all(entry.path(), ec); continue; }
-        if (now > newest && (now - newest) > maxAge) fs::remove_all(entry.path(), ec);
+        if (!sawFile) { fs::remove_all(entry.path(), rmEc); continue; }
+        if (now > newest && (now - newest) > maxAge) fs::remove_all(entry.path(), rmEc);
     }
 }
 

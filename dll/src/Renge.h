@@ -222,13 +222,39 @@ inline std::string BytesToHex(const uint8_t* data, size_t len) {
     return oss.str();
 }
 
-// Hex string to bytes
+// Hex string to bytes, with a failure channel.
+//
+// The old version could not fail: `strtoul` maps any non-hex character to 0, and an
+// odd trailing nibble was silently dropped. `"DE AD BE EF"` — spaces and all, the way
+// a human writes a byte pattern — became `{DE,0A,0D,BE,0E}`, was WRITTEN INTO THE GAME,
+// and answered `ok:true`. Nothing in the pipe layer could tell the difference between
+// "wrote what you asked" and "wrote five bytes of nonsense at that address". (B46)
+//
+// Returns false on any non-hex character or an odd length; `out` is then untouched.
+inline bool TryHexToBytes(const std::string& hex, std::vector<uint8_t>& out) {
+    if (hex.empty() || (hex.size() % 2) != 0) return false;
+    auto nibble = [](char c, uint8_t& v) -> bool {
+        if (c >= '0' && c <= '9') { v = static_cast<uint8_t>(c - '0');        return true; }
+        if (c >= 'a' && c <= 'f') { v = static_cast<uint8_t>(c - 'a' + 10);   return true; }
+        if (c >= 'A' && c <= 'F') { v = static_cast<uint8_t>(c - 'A' + 10);   return true; }
+        return false;
+    };
+    std::vector<uint8_t> bytes;
+    bytes.reserve(hex.size() / 2);
+    for (size_t i = 0; i < hex.size(); i += 2) {
+        uint8_t hi = 0, lo = 0;
+        if (!nibble(hex[i], hi) || !nibble(hex[i + 1], lo)) return false;
+        bytes.push_back(static_cast<uint8_t>((hi << 4) | lo));
+    }
+    out = std::move(bytes);
+    return true;
+}
+
+// Lenient wrapper kept for callers that have already validated their input.
+// Prefer TryHexToBytes anywhere the string came from outside this process.
 inline std::vector<uint8_t> HexToBytes(const std::string& hex) {
     std::vector<uint8_t> bytes;
-    for (size_t i = 0; i + 1 < hex.size(); i += 2) {
-        uint8_t byte = static_cast<uint8_t>(strtoul(hex.substr(i, 2).c_str(), nullptr, 16));
-        bytes.push_back(byte);
-    }
+    TryHexToBytes(hex, bytes);
     return bytes;
 }
 

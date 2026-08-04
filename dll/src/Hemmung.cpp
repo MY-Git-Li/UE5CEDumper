@@ -251,8 +251,11 @@ void ApplyDilLocked(int32_t target, bool* drifted) {
     if (!ReadFloatAt(f.addr, f.size, current)) return;
     // Re-capture the natural base when the owner changes (a new WorldSettings on
     // level load, or a respawned pawn): that owner's value is untouched by us.
+    // Unlike Laufen the base is not a multiplicand here — it is what Reset RESTORES,
+    // so capturing 0 means Reset leaves the game permanently frozen. Fall back to the
+    // engine default rather than store a value we know is unusable. (B22)
     if (f.owner != d.capturedOwner) {
-        d.base = current;
+        d.base = (current > 0.0 && std::isfinite(current)) ? current : 1.0;
         d.capturedOwner = f.owner;
     }
     double eps = (std::max)(1e-4, std::fabs(d.value) * 1e-5);
@@ -380,7 +383,17 @@ int32_t SetDilation(int32_t target, double value) {
         // changed — NOT when merely changing the value on the same active owner, or
         // we would fold our own write into the restore base.
         if (!d.active || f.owner != d.capturedOwner) {
-            d.base = current;
+            // See the worker's note: base is the RESTORE value, so 0 / NaN would make
+            // Reset freeze the game forever. 1.0 is the engine default for both
+            // AWorldSettings::TimeDilation and AActor::CustomTimeDilation. (B22)
+            if (current > 0.0 && std::isfinite(current)) {
+                d.base = current;
+            } else {
+                LOG_WARN("Time: target %d ('%s') reads %.4f — not a usable base; "
+                         "Reset will restore the engine default 1.0 instead",
+                         target, f.name.c_str(), current);
+                d.base = 1.0;
+            }
             d.capturedOwner = f.owner;
         }
         d.value = value;

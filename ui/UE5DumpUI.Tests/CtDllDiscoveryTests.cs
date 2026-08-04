@@ -170,6 +170,41 @@ public class CtDllDiscoveryTests
         }
     }
 
+    /// <summary>
+    /// B33 — the readiness poll must try BOTH symbol spellings, via the single shared
+    /// helper. Two hand-copied call sites is how the bare-only spelling survived here
+    /// while eight other places in the repo already tried both.
+    /// </summary>
+    [Fact]
+    public void Mailbox_symbol_is_resolved_through_the_two_spelling_helper()
+    {
+        var code = CodeOnly(Ct());
+        Assert.Contains("function ue5_findMailbox()", code, StringComparison.Ordinal);
+        Assert.Contains("\"UE5Dumper.g_invokeMailbox\"", code, StringComparison.Ordinal);
+        // No call site may resolve the bare spelling on its own any more.
+        Assert.DoesNotContain("getAddress, \"g_invokeMailbox\"", code, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// B32 — a readiness field that NEVER left IDLE is an old DLL (offset 0x0C used to be
+    /// an <c>int32_t reserved</c> nothing wrote), not a wedged scan. Reporting it as a
+    /// timeout threw a modal error on a perfectly healthy injection, so the two outcomes
+    /// must be distinguished before the error branch is reached.
+    /// </summary>
+    [Fact]
+    public void Never_leaving_idle_is_not_reported_as_a_timeout()
+    {
+        var code = CodeOnly(Ct());
+        Assert.Contains("sawProgress", code, StringComparison.Ordinal);
+        var progressIdx = code.IndexOf("elseif not sawProgress then", StringComparison.Ordinal);
+        var timeoutIdx = code.IndexOf("Timed out after", StringComparison.Ordinal);
+        Assert.True(progressIdx > 0, "the never-progressed branch is missing");
+        Assert.True(timeoutIdx > 0, "the timeout branch is missing");
+        Assert.True(progressIdx < timeoutIdx,
+            "the never-progressed branch must be tested BEFORE the timeout error, or an " +
+            "old DLL still lands in the modal.");
+    }
+
     [Fact]
     public void Stale_auto_run_comment_is_gone()
     {
