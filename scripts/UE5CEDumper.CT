@@ -25,6 +25,45 @@ if syntaxcheck then return end
 -- unaffected by this flag.
 -- ============================================================
 
+-- Remember a folder that WORKED, so neither the console-spawning registry read
+-- nor the file picker is ever needed twice.
+--
+-- Written back from exactly TWO places, both of which have PROVEN the folder is
+-- this table's own: a manual pick, and the recent-files entry matched by this
+-- table's filename. Never from a folder that merely happened to win the probe --
+-- pinning, say, a stale copy left in CE's install folder would silently load a
+-- mismatched build on every future run, which is worse than failing loudly.
+function ue5_recordDllDir(dir)
+    if type(dir) ~= "string" or dir == "" then return end
+    dir = dir:gsub("[\\/]+$", "")
+    pcall(function()
+        local ad = os.getenv("LOCALAPPDATA") or ""
+        if ad == "" then return end
+        local p = ad .. "\\UE5CEDumper\\dll-path.txt"
+
+        local keep = {}
+        local h = io.open(p, "r")
+        if h then
+            for line in h:lines() do
+                line = line:gsub("^\239\187\191", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                if line ~= "" and line:sub(1, 1) ~= "#"
+                   and line:lower() ~= dir:lower() and #keep &lt; 3 then
+                    keep[#keep + 1] = line
+                end
+            end
+            h:close()
+        end
+
+        local w = io.open(p, "w")
+        if not w then return end
+        w:write("# UE5CEDumper - folders that have held UE5Dumper.dll, newest first.\n")
+        w:write("# Written by UE5DumpUI at startup and by UE5CEDumper.CT after a manual pick.\n")
+        w:write(dir .. "\n")
+        for _, l in ipairs(keep) do w:write(l .. "\n") end
+        w:close()
+    end)
+end
+
 -- ============================================================
 -- Locate UE5Dumper.dll
 -- ============================================================
@@ -92,92 +131,18 @@ pcall(function() _scriptDir = extractFilePath(getCurrentScriptPath() or "") or "
 _slot("folder of the running script", _scriptDir,
       "CE does not report a script file for a table script")
 
--- 5/6. CE's own recent-files list (HKCU\Software\Cheat Engine, REG_MULTI_SZ).
---      This is the one place a .CT's absolute path lands no matter HOW it was
---      opened -- double-click and the File menu's recent list both update it
---      while touching no dialog. getSettings() is CE's documented registry
---      accessor; Value[] is a plain string read and typically refuses a
---      MULTI_SZ, so getBinaryValue is the real path. Both guarded: failing both
---      just leaves these two slots empty.
-local _mru = {}
-pcall(function()
-    local s = getSettings()
-    if not s then return end
-
-    local raw = nil
-    pcall(function() raw = s.Value["Recent Files"] end)
-    if type(raw) == "string" and raw ~= "" then
-        for line in raw:gmatch("[^\r\n%z]+") do _mru[#_mru + 1] = line end
-    end
-    if #_mru ~= 0 then return end
-
-    local b = nil
-    pcall(function() b = s:getBinaryValue("Recent Files") end)
-    if type(b) ~= "table" then return end
-
-    -- UTF-16LE MULTI_SZ -&gt; UTF-8, hand-decoded because the value arrives as a
-    -- byte table. Paths with non-ASCII characters have to survive intact.
-    local i = (b[0] ~= nil) and 0 or 1
-    local cur, out = {}, {}
-    local function _put(cp)
-        if cp &lt; 0x80 then
-            cur[#cur + 1] = string.char(cp)
-        elseif cp &lt; 0x800 then
-            cur[#cur + 1] = string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64)
-        elseif cp &lt; 0x10000 then
-            cur[#cur + 1] = string.char(0xE0 + math.floor(cp / 4096),
-                                        0x80 + math.floor(cp / 64) % 64,
-                                        0x80 + cp % 64)
-        else
-            cur[#cur + 1] = string.char(0xF0 + math.floor(cp / 262144),
-                                        0x80 + math.floor(cp / 4096) % 64,
-                                        0x80 + math.floor(cp / 64) % 64,
-                                        0x80 + cp % 64)
-        end
-    end
-    while b[i] ~= nil and b[i + 1] ~= nil and #out &lt; 24 do
-        local cp = b[i] + b[i + 1] * 256
-        i = i + 2
-        if cp == 0 then
-            if #cur == 0 then break end          -- double NUL ends the list
-            out[#out + 1] = table.concat(cur)
-            cur = {}
-        elseif cp &gt;= 0xD800 and cp &lt; 0xDC00 and b[i] ~= nil and b[i + 1] ~= nil then
-            local lo = b[i] + b[i + 1] * 256     -- surrogate pair
-            i = i + 2
-            _put(0x10000 + (cp - 0xD800) * 1024 + (lo - 0xDC00))
-        else
-            _put(cp)
-        end
-    end
-    if #cur ~= 0 then out[#out + 1] = table.concat(cur) end
-    _mru = out
-end)
-
--- 5. The most recent recent-files entry whose FILENAME is this table's own name.
---    That name check is what makes the MRU safe to trust: it cannot bind to a
---    stale UE5Dumper.dll that happens to sit beside an unrelated .CT. (Verified
---    on a real machine: the user's own UE5CEDumper.CT was entry 2, not entry 1.)
-local _mruSelf = ""
-for i = 1, #_mru do
-    local leaf = ""
-    pcall(function() leaf = (extractFileName(_mru[i]) or ""):lower() end)
-    if leaf == "ue5cedumper.ct" then
-        pcall(function() _mruSelf = extractFilePath(_mru[i]) or "" end)
-        break
-    end
-end
-_slot("folder of the most recent UE5CEDumper.CT in CE's recent-files list", _mruSelf,
-      "CE's recent-files list has no UE5CEDumper.CT in it")
-
--- 6. The single most recently opened table, whatever it is called -- the same
---    answer when the user has RENAMED this .CT. Deliberately entry 1 only: the
---    rest of the list is other games' tables, and probing those would both
---    invite a stale hit and risk stalling on a disconnected network drive.
-local _mruTop = ""
-if _mru[1] then pcall(function() _mruTop = extractFilePath(_mru[1]) or "" end) end
-_slot("folder of the most recently opened cheat table", _mruTop,
-      "CE reported no recent files")
+-- Slots 5/6 used to read CE's recent-files list here via getSettings(). MEASURED
+-- DEAD on this CE build (2026-08-04): "Recent Files" is REG_MULTI_SZ, and both
+-- documented accessors refuse that type -- Value["Recent Files"] returns an EMPTY
+-- string and getBinaryValue("Recent Files") returns nil, even though celua.txt:3516
+-- advertises it as returning a bytetable. A control read in the same session proved
+-- the API itself is fine: getSettings("Plugins64").Value["00000000 A"] returned the
+-- plugin path. So it is the TYPE that is unreadable, not the call.
+--
+-- The list is still the best answer -- it records a table's absolute path however it
+-- was opened -- so it IS read, but further down and via reg.exe, after the cheap
+-- slots have missed. Deferred on purpose: shelling out flashes a console window, and
+-- a hit writes the folder to the breadcrumb so the next run never needs it again.
 
 -- 7. Breadcrumb written by UE5DumpUI at startup: the folder UE5DumpUI.exe was
 --    launched from, which is where UE5Dumper.dll ships beside it. Plain file
@@ -238,17 +203,89 @@ end
 DLL_PATH = nil
 _DLL_FOUND_SLOT = nil
 local _dllFoundIn = nil
-for i, s in ipairs(_slots) do
-    if s.dir == "" then
-        s.state = "NOT SEARCHED"
-    else
-        local hit = _dllAt(s.dir)
-        if hit then
-            DLL_PATH, _dllFoundIn, _DLL_FOUND_SLOT = hit, s.dir, i
-            s.state = "FOUND"
+local _dllFoundLabel = ""
+
+local function _probeSlots(from)
+    for i = from, #_slots do
+        local s = _slots[i]
+        if s.dir == "" then
+            s.state = "NOT SEARCHED"
+        else
+            local hit = _dllAt(s.dir)
+            if hit then
+                DLL_PATH, _dllFoundIn, _DLL_FOUND_SLOT = hit, s.dir, i
+                _dllFoundLabel = s.label
+                s.state = "FOUND"
+                return true
+            end
+            s.state = "no DLL"
+        end
+    end
+    return false
+end
+
+_probeSlots(1)
+
+-- ------------------------------------------------------------
+-- Deferred: CE's recent-files list, read through reg.exe
+-- ------------------------------------------------------------
+-- Only when everything cheap has missed, because this spawns a console window.
+-- It is the one source that records this .CT's absolute path NO MATTER HOW the
+-- table was opened -- double-click and the File &gt; Load Recent menu both update
+-- it while touching no dialog, which is exactly the case that failed. CE's own
+-- Settings API cannot read it (see the note at slot 5/6 above), and CE's File
+-- menu does not carry the paths either: "Load Recent" is a submenu, so the
+-- entries are not reachable as File-menu children.
+--
+-- reg.exe renders a REG_MULTI_SZ with the LITERAL two characters \0 between
+-- entries, so the split is on that, not on a real NUL.
+if not DLL_PATH then
+    local _mruFirst = #_slots + 1
+    local _mru = {}
+    pcall(function()
+        local h = io.popen('reg query "HKCU\\Software\\Cheat Engine" /v "Recent Files" 2&gt;nul')
+        if not h then return end
+        local out = h:read("*a") or ""
+        h:close()
+        local data = out:match("REG_MULTI_SZ%s+([^\r\n]*)")
+        if not data or data == "" then return end
+        for entry in (data .. "\\0"):gmatch("(.-)\\0") do
+            entry = entry:gsub("^%s+", ""):gsub("%s+$", "")
+            if entry ~= "" then _mru[#_mru + 1] = entry end
+        end
+    end)
+
+    -- The entry whose FILENAME is this table's own name. That check is what makes
+    -- the list safe to trust: it cannot bind to a stale UE5Dumper.dll sitting
+    -- beside some unrelated game's table. (Measured: this .CT has been seen at
+    -- both position 1 and position 2 of that list, so never take entry 1 blindly.)
+    local _mruSelf = ""
+    for i = 1, #_mru do
+        local leaf = ""
+        pcall(function() leaf = (extractFileName(_mru[i]) or ""):lower() end)
+        if leaf == "ue5cedumper.ct" then
+            pcall(function() _mruSelf = extractFilePath(_mru[i]) or "" end)
             break
         end
-        s.state = "no DLL"
+    end
+    _slot("folder of the most recent UE5CEDumper.CT in CE's recent-files list", _mruSelf,
+          (#_mru == 0) and "could not read CE's recent-files list"
+                        or "CE's recent-files list has no UE5CEDumper.CT in it")
+
+    -- The single most recently opened table, whatever it is called -- the same
+    -- answer when the user has RENAMED this .CT. Entry 1 only: the rest of the
+    -- list is other games' tables, and probing those invites a stale hit.
+    local _mruTop = ""
+    if _mru[1] then pcall(function() _mruTop = extractFilePath(_mru[1]) or "" end) end
+    _slot("folder of the most recently opened cheat table", _mruTop,
+          "CE reported no recent files")
+
+    if _probeSlots(_mruFirst) and _dllFoundLabel:find("UE5CEDumper.CT", 1, true) then
+        -- Self-heal: this folder was proven to hold the DLL *and* proven to be
+        -- this table's own folder, so record it and no later run has to shell
+        -- out again. Only the name-matched slot earns this -- "most recently
+        -- opened table" could be any game's folder.
+        pcall(function() ue5_recordDllDir(_dllFoundIn) end)
     end
 end
 
@@ -436,42 +473,6 @@ end
 -- ============================================================
 -- ue5_inject()  —  called from [ENABLE] of the AA entry
 -- ============================================================
-
--- Remember a folder that WORKED, so the picker below is needed at most once.
--- Only a MANUAL pick is written back: recording an auto-resolved folder would let
--- a stale copy that happened to win (one left in CE's own folder, say) get PINNED
--- as the preferred answer for every future session -- silently loading a
--- mismatched build, which is strictly worse than failing loudly.
-function ue5_recordDllDir(dir)
-    if type(dir) ~= "string" or dir == "" then return end
-    dir = dir:gsub("[\\/]+$", "")
-    pcall(function()
-        local ad = os.getenv("LOCALAPPDATA") or ""
-        if ad == "" then return end
-        local p = ad .. "\\UE5CEDumper\\dll-path.txt"
-
-        local keep = {}
-        local h = io.open(p, "r")
-        if h then
-            for line in h:lines() do
-                line = line:gsub("^\239\187\191", ""):gsub("^%s+", ""):gsub("%s+$", "")
-                if line ~= "" and line:sub(1, 1) ~= "#"
-                   and line:lower() ~= dir:lower() and #keep &lt; 3 then
-                    keep[#keep + 1] = line
-                end
-            end
-            h:close()
-        end
-
-        local w = io.open(p, "w")
-        if not w then return end
-        w:write("# UE5CEDumper - folders that have held UE5Dumper.dll, newest first.\n")
-        w:write("# Written by UE5DumpUI at startup and by UE5CEDumper.CT after a manual pick.\n")
-        w:write(dir .. "\n")
-        for _, l in ipairs(keep) do w:write(l .. "\n") end
-        w:close()
-    end)
-end
 
 -- Last resort: ask. createOpenDialog gives an absolute path to a file that
 -- EXISTS -- the one thing none of the inferred folders can guarantee. Only

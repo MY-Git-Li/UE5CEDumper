@@ -33,16 +33,47 @@ public class CtDllDiscoveryTests
         throw new FileNotFoundException("scripts/UE5CEDumper.CT not found from " + AppContext.BaseDirectory);
     }
 
+    /// <summary>Lua source with full-line comments dropped. The comments here name dead
+    /// APIs deliberately, to record WHY they are dead — an assertion about what the code
+    /// does must not match them.</summary>
+    private static string CodeOnly(string lua) =>
+        string.Join('\n', lua.Split('\n')
+            .Where(l => !l.TrimStart().StartsWith("--", StringComparison.Ordinal)));
+
     [Fact]
     public void Reads_CEs_recent_files_list_because_that_is_the_only_channel_a_double_click_fills()
     {
         var s = Ct();
-        // getSettings() is CE's documented registry accessor (celua.txt:3504); the MRU
-        // is REG_MULTI_SZ at HKCU\Software\Cheat Engine, so the byte reader is required —
-        // a plain Value[] string read typically refuses a MULTI_SZ.
-        Assert.Contains("getSettings()", s, StringComparison.Ordinal);
+        // MEASURED on a real CE build: getSettings() cannot read this value.
+        // "Recent Files" is REG_MULTI_SZ, and both documented accessors refuse that
+        // type — Value["Recent Files"] returns an EMPTY string and
+        // getBinaryValue("Recent Files") returns nil, despite celua.txt:3516
+        // advertising a bytetable. A control read in the same session
+        // (getSettings("Plugins64").Value["00000000 A"]) succeeded, so it is the TYPE
+        // that is unreadable, not the call. reg.exe is the working route.
+        Assert.Contains("reg query", s, StringComparison.Ordinal);
         Assert.Contains("Recent Files", s, StringComparison.Ordinal);
-        Assert.Contains("getBinaryValue", s, StringComparison.Ordinal);
+        Assert.Contains("REG_MULTI_SZ%s+", s, StringComparison.Ordinal);
+        // The dead API must not creep back in AS CODE -- the note explaining why it
+        // is dead is a comment, and comments are excluded here.
+        var code = CodeOnly(s);
+        Assert.DoesNotContain("getBinaryValue", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("getSettings(", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_registry_read_is_deferred_and_self_healing()
+    {
+        var s = Ct();
+        // Shelling out flashes a console window, so it must run only after every cheap
+        // slot has missed...
+        int probe1 = s.IndexOf("_probeSlots(1)", StringComparison.Ordinal);
+        int reg = s.IndexOf("reg query", StringComparison.Ordinal);
+        Assert.True(probe1 > 0 && reg > probe1,
+            "the reg.exe read must come after the first probe pass, not before it");
+        Assert.Contains("if not DLL_PATH then", s, StringComparison.Ordinal);
+        // ...and a hit must be recorded so no later run needs it again.
+        Assert.Contains("ue5_recordDllDir(_dllFoundIn)", s, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -71,12 +102,14 @@ public class CtDllDiscoveryTests
         // A UE5Dumper.dll in CE's own folder can only have been hand-placed, and is
         // most likely a stale build. Silently loading it is worse than failing.
         var s = Ct();
-        int mru = s.IndexOf("Recent Files", StringComparison.Ordinal);
-        int crumb = s.IndexOf("dll-path.txt", StringComparison.Ordinal);
+        int crumb = s.IndexOf("io.open(_appData", StringComparison.Ordinal);
         int ceDir = s.IndexOf("getCheatEngineDir", StringComparison.Ordinal);
-        Assert.True(mru > 0 && crumb > 0 && ceDir > 0);
-        Assert.True(mru < ceDir, "the recent-files slot must be probed before CE's install folder");
+        Assert.True(crumb > 0 && ceDir > 0);
         Assert.True(crumb < ceDir, "the UI breadcrumb must be probed before CE's install folder");
+        // The recent-files slots are the exception, and deliberately so: they are
+        // appended AFTER the first probe pass because reading them spawns a console
+        // window. They are last in file order but they are also the only slots that
+        // verify the folder is this table's own, so a hit there is trustworthy.
     }
 
     [Fact]
@@ -116,7 +149,7 @@ public class CtDllDiscoveryTests
         // recent-files reader is written.
         var lines = Ct().Split('\n');
         foreach (var api in new[] { "OpenDialog1.FileName", "SaveDialog1.FileName",
-                                    "getCurrentScriptPath()", "getSettings()",
+                                    "getCurrentScriptPath()", "io.popen(",
                                     "createOpenDialog(" })
         {
             int at = -1;
