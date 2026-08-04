@@ -17,6 +17,7 @@
 #include "Macht.h"
 #include "Aura.h"
 #include "Tot.h"     // Tot::MarkBackgroundWorker — re-assert worker ignores per-command cancel (M4)
+#include "Routine.h"   // Routine::ReassertLoop — shared sliced-sleep + guarded tick (R5/B14)
 #include "Ubel.h"
 
 #include <algorithm>
@@ -282,18 +283,12 @@ void FillDilLocked(int32_t target, DilationInfo& info) {
 // ---- re-assert worker (identical discipline to Laufen) ----
 
 void WorkerLoop() {
-    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
-    LOG_INFO("Time: re-assert worker started (%d ms)", Grimoire::TIME_REASSERT_MS);
+    // Sliced sleep, cancel-immunity, per-tick exception guard and the shutdown break
+    // all live in Routine::ReassertLoop (R5 / B14). Only the tick is ours.
     int driftCount = 0;
-    while (!s_workerStop.load()) {
-        for (int slept = 0;
-             slept < Grimoire::TIME_REASSERT_MS && !s_workerStop.load();
-             slept += 25)
-            std::this_thread::sleep_for(std::chrono::milliseconds(25));
-        if (s_workerStop.load()) break;
-
+    Routine::ReassertLoop("Time", Grimoire::TIME_REASSERT_MS, s_workerStop, [&] {
         std::lock_guard<std::mutex> lk(s_mutex);
-        if (!AnyActiveLocked()) continue;   // all levers reset between ticks
+        if (!AnyActiveLocked()) return;   // all levers reset between ticks
         bool drifted = false;
         for (int i = 0; i < DIL_COUNT; ++i)
             ApplyDilLocked(i, &drifted);
@@ -304,8 +299,7 @@ void WorkerLoop() {
                          "recomputing it (slow-mo ability / Sequencer time track); the "
                          "override is being held against it.", driftCount);
         }
-    }
-    LOG_INFO("Time: re-assert worker stopped");
+    });
 }
 
 // Worker start/stop "Locked" cores (caller ALREADY holds s_workerMutex). Lock

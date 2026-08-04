@@ -1717,6 +1717,26 @@ Pick up when the active plan finishes or when blocked.
   racing). Absence of the new lines proves only that the race did not *occur*; the deliberate
   provocation is in ② below.
 
+- ⬜ **Fly/Noclip no longer leaves the pawn ghosted** (build 2596, B8). The whole answer is in the
+  log, and the trigger is the *ordinary* way to turn Fly off on an idle-when-unfocused title.
+  **To test:** Teleport tab → Fly ON + Noclip → fly through a wall → **alt-tab to the UI** (wait
+  >500 ms so ProcessEvent goes quiet) → click Disable. Grep `init-0.log` for `Fly:`.
+  **PASS** = `Fly: DISABLED but the pawn's collision is still OFF (game thread unresponsive)`,
+  then — after you click back into the game — `Fly: game thread resumed after N ms — pawn collision
+  restored`. **FAIL** = the old shape: a plain `Fly: DISABLED` and nothing else, after which the
+  pawn falls through the world. Corroborate in-game: walk into a wall, it should stop you.
+  Second, cheaper check on any Fly session: `Fly: collision disable deferred` may appear, but it
+  must not repeat — it is rate-limited to once per stall.
+
+- ⬜ **`WalkClassEx` memo — the win is already instrumented** (build 2596, B10). Snapshot capture is
+  wrapped in a `DiagnosticsProbe`, so no new logging is needed: grep `pipe-0.log` for
+  `PERF Snapshot capture`. **PASS** = `wall … ms` is materially lower than the same capture on a
+  pre-2596 build (the memo removes a 100–300 × `FieldInfo` deep copy per struct-array *element*),
+  and correctness is unchanged — property grids still show struct types, enum names and bool masks,
+  which are exactly the fields `WalkClassEx` adds on top of `WalkClass`. **FAIL** = those columns go
+  blank (the memo would be serving a pre-enrichment entry), or a crash under a parallel scan (a
+  handed-out reference being invalidated — the reason `try_emplace` landed first).
+
 - ⬜ **CE mailbox survives a dead UI client** (build 2592, B4). The evidence line is **cold** — once
   per latch, so it costs nothing to leave in. Needs a deliberate sequence but the whole answer is in
   the log, so it lives here: connect the UI, start something long (Property Search deep, or a full
@@ -1747,6 +1767,18 @@ Pick up when the active plan finishes or when blocked.
   `'dxgi.dll' is loaded but is not ours`. FAIL = the old *"already loaded … no injection needed"*
   message, after which the UI cannot connect. Also worth eyeballing there: a game path with
   non-ASCII characters must now appear intact in that message (it used to render as `EVERSPACE? 2`).
+
+- ⬜ **Close the game with a hold worker live** (build 2596, B14 + R5). This is the exact repro that
+  produced the live `0xC0000409` in build 2389, re-run against the loops that were still unguarded.
+  **To test:** enable **two** holds whose workers were previously bare — Time Dilation (Hemmung) and
+  Move Speed (Laufen) — plus See-through, then **disable See-through while the game is backgrounded**
+  so its `PendingRestoreLoop` is actually waiting, and close the game from its own window.
+  **PASS** = no crash, no WER minidump, nothing in the Windows Application event log. **FAIL** =
+  exit code `0xc0000409` with a fault on a `version.dll` stack — that is an exception escaping a
+  thread entry. If `init-0.log` carries `tick threw (…) — skipping (game tearing down?)`, the guard
+  fired and did its job; its absence proves only that nothing threw this time.
+  *Why it can't be tested here: the throw comes from reading a UFunction in a process that is
+  actively freeing it — there is no way to stage that outside a real game shutdown.*
 
 - ⬜ **Provoke the concurrent `UE5_Init`** (build 2592, B5) — the active half of the passive check in
   ① above. Needs the **proxy** launch path, because that is what makes the second caller reachable:

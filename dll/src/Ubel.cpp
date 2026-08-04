@@ -805,12 +805,17 @@ ClassInfo WalkClass(uintptr_t uclassAddr) {
 
     LOG_INFO("WalkClass: %s — %zu fields", info.Name.c_str(), info.Fields.size());
 
-    // Cache the result for subsequent WalkInstance calls. Concurrent builders
-    // of the same class produce equal ClassInfo (idempotent), so last-writer
-    // wins harmlessly.
+    // Cache the result for subsequent WalkInstance calls. Concurrent builders of the
+    // same class produce an equal ClassInfo (idempotent), so first-writer wins just as
+    // harmlessly as last-writer — but try_emplace is NOT interchangeable with
+    // `cache[addr] = info` here. WalkClassEx hands out a `const ClassInfo&` into this
+    // map, and an assign-over-existing destroys the entry's Fields vector while a
+    // reader may still hold that reference. try_emplace leaves an existing entry
+    // untouched, which is what makes reference-return safe (node-based map, and there
+    // is no erase/clear of either cache anywhere in dll/src). (B10)
     {
         std::lock_guard<std::mutex> lk(s_walkClassCacheMutex);
-        s_walkClassCache[uclassAddr] = info;
+        s_walkClassCache.try_emplace(uclassAddr, info);
     }
 
     return info;
@@ -882,7 +887,28 @@ static std::string ReadSubclassTypeName(uintptr_t propAddr) {
 // before any caller reads FProperty subclass extension fields.
 static void CorrectSubclassOffsets(const std::vector<FieldInfo>& fields);
 
-ClassInfo WalkClassEx(uintptr_t uclassAddr) {
+// Memo for the ENRICHED walk. Separate from s_walkClassCache because the two hold
+// different things: that one holds WalkClass's plain fields, this one holds the same
+// fields plus every structType / objClassName / innerType / enumName / boolFieldMask
+// read on top of them. Four call sites were already commented `// cached` — they were
+// not, and the difference is not academic: WalkClass's Fields is the FLATTENED
+// inheritance chain, so an Actor subclass carries 100-300 FieldInfo × 14 std::string,
+// deep-copied on every call, and snapshot capture / group scan reach this per struct-
+// array ELEMENT from every ParallelGObjectsScan worker at once. (B10)
+static std::unordered_map<uintptr_t, ClassInfo> s_walkClassExCache;
+static std::mutex s_walkClassExCacheMutex;
+
+const ClassInfo& WalkClassEx(uintptr_t uclassAddr) {
+    // Reference-return needs a stable object for the failure case too.
+    static const ClassInfo s_emptyClassInfo{};
+    if (!uclassAddr) return s_emptyClassInfo;
+
+    {
+        std::lock_guard<std::mutex> lk(s_walkClassExCacheMutex);
+        auto it = s_walkClassExCache.find(uclassAddr);
+        if (it != s_walkClassExCache.end()) return it->second;
+    }
+
     ClassInfo info = WalkClass(uclassAddr);
 
     // Calibrate FSTRUCTPROP_STRUCT (and the FProperty subclass extension
@@ -1020,7 +1046,13 @@ ClassInfo WalkClassEx(uintptr_t uclassAddr) {
         }
     }
 
-    return info;
+    // try_emplace, never assign: a concurrent builder of the same class may already
+    // have published an entry whose reference another thread is reading. The two
+    // results are equal (the enrichment is a pure function of the same reads), so
+    // keeping the existing one costs nothing and keeps every handed-out reference
+    // valid. Node-based map + no erase/clear anywhere ⇒ entries never move. (B10)
+    std::lock_guard<std::mutex> lk(s_walkClassExCacheMutex);
+    return s_walkClassExCache.try_emplace(uclassAddr, std::move(info)).first->second;
 }
 
 // ============================================================
@@ -3355,7 +3387,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         result.className == "BlueprintGeneratedClass" ||
         result.className == "WidgetBlueprintGeneratedClass") {
         result.isDefinition = true;
-        ClassInfo ci = WalkClassEx(instanceAddr);
+        const ClassInfo& ci = WalkClassEx(instanceAddr);
         if (!ci.Name.empty()) result.name = ci.Name;
 
         for (const auto& fi : ci.Fields) {
@@ -5753,7 +5785,7 @@ DataTableWalkResult WalkDataTableRows(uintptr_t dataTableAddr, int32_t offset, i
     }
 
     // Walk the DataTable's class to find RowStruct field
-    ClassInfo ci = WalkClassEx(classAddr);
+    const ClassInfo& ci = WalkClassEx(classAddr);
     if (ci.Fields.empty()) {
         result.error = "DataTable class has no reflected fields";
         return result;
@@ -5776,7 +5808,7 @@ DataTableWalkResult WalkDataTableRows(uintptr_t dataTableAddr, int32_t offset, i
     result.rowStructName = GetName(rowStructAddr);
 
     // Get field layout from RowStruct
-    ClassInfo rowCI = WalkClassEx(rowStructAddr);
+    const ClassInfo& rowCI = WalkClassEx(rowStructAddr);
     if (rowCI.Fields.empty()) {
         result.error = "RowStruct has no fields (name=" + result.rowStructName + ")";
         return result;

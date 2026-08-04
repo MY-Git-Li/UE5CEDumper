@@ -20,6 +20,69 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - The report said collision was off; nobody had turned it off (build 2596)
+
+Audit #4 **B8 + B10 + B14 + R5**.
+
+**B8 — Fly/noclip.** The collision record was written whether or not `SetActorEnableCollision`
+ran, in both directions — and the re-emit condition reads that same record, so nothing ever
+retried. Turning Fly off while the game thread was paused therefore restored MovementMode, zeroed
+velocity, **skipped** the collision restore, and wiped the record. The pawn fell through the world,
+and re-enabling Fly without Noclip did not bring it back.
+
+The finding called that an alt-tab edge case. It is the *normal* path: on an idle-when-unfocused
+title the click that turns Fly off is in **our** window, which is what backgrounds the game and
+stops ProcessEvent — so `IsGameThreadResponsive` is false at exactly the moment the restore is
+needed. Three changes, each of which was hiding the next:
+
+- The worker commits `collisionOff/collisionPawn` from what the invoke actually did. The only
+  non-committing path is the deferred one, which is precisely the one that must retry. A missing
+  setter *does* commit — retrying cannot conjure one, and `InvokeSetCollision` already says so once.
+- `active` is cleared, the worker **joined**, and only then is the restore decided. The old order
+  let an in-flight tick turn collision back off after the restore (Schlacht's M1 shape).
+- The record is **kept**, and a `PendingRestoreLoop` polls for the game thread and restores the
+  instant the user clicks back in — Schlacht's shipped precedent, now a second user of it.
+
+It also restores on the pawn the collision was actually disabled on, not a freshly re-resolved one:
+after a respawn those differ, and re-enabling collision on the new pawn leaves the original
+permanently ghosted.
+
+**B10 — `WalkClassEx` had no memo, and four call sites said it did.** `WalkClass`'s `Fields` is the
+flattened inheritance chain, so an Actor subclass carries 100-300 `FieldInfo` × 14 `std::string` —
+deep-copied on every call, from every `ParallelGObjectsScan` worker, per struct-array **element**
+during snapshot capture and group scan. Added `s_walkClassExCache`; `WalkClassEx` returns
+`const ClassInfo&` and 23 call sites bind by reference.
+
+The prerequisite was not optional. `s_walkClassCache[addr] = info` is an assign-over-existing that
+destroys the entry's vector — harmless while everyone got a copy, a use-after-free the moment
+anyone holds a reference. Both caches now `try_emplace`: first writer wins, the results are equal
+anyway (walk and enrichment are pure functions of the same reads), and an existing entry is never
+touched. Node-based map, no `erase`/`clear` in `dll/src`, so entries never move. A regex sweep
+confirmed no caller mutated the result before the return type changed; the compiler enforces it now.
+
+The payoff is measurable with no new logging — snapshot capture already runs inside a
+`DiagnosticsProbe`, so its `PERF Snapshot capture: wall … ms` line records the difference by itself.
+
+**B14 + R5 — the guard that reached 2 of 7 threads.** Build 2389 added a per-tick exception guard
+for a live-reproduced `0xC0000409` (a `bad_alloc` escaping a thread entry is `std::terminate`, not a
+caught error). It was applied by hand-copying, so it landed at two sites. New **`Routine.h`**
+(Frieren roster: ルティーネ, the Shadow Warrior librarian — *"scheduled / periodic subroutine"*) owns
+the shape once: `ReassertLoop` = cancel-immunity + sliced sleep + guarded tick + a
+`Tot::ShutdownRequested()` break the hand-copied loops never had, plus `RunTickGuarded` and
+`SleepSliced`. The four hold workers (Solitar / Laufen / Hemmung / Solide) are now their tick and
+nothing else, both `PendingRestoreLoop`s are wrapped, and `Grimoire::WORKER_SLEEP_SLICE_MS` replaces
+8 bare `25`s.
+
+The shutdown break matters on its own: `Tot::ShutdownRequested()` is **not** set when a user simply
+closes the game, so a `PendingRestoreLoop` could keep walking reflection against a tearing-down
+process for up to five minutes.
+
+Deliberately not templated: each module's drift WARN. Those strings are individually worded and the
+log-verification checklist greps them by format string, so collapsing them into one template would
+have cost more than it saved. 938 C++ + 3161 C# green.
+
+-----
+
 ## 2026-08-04 - Two threads, one latch, and a flag that was answering two different questions (build 2592)
 
 Audit #4 **B5 + B4**, the DLL concurrency pair. Both are the same shape: a guard that reads correct

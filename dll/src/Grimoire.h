@@ -336,12 +336,20 @@ constexpr double  SCHLACHT_TRACE_STEP    = 2.0;      // uu — advance the ray s
 constexpr int     SCHLACHT_PIERCE_DEFAULT = 1;       // hide this many nearest occluders by default
 constexpr int     SCHLACHT_PIERCE_MAX     = 10;      // UI/clamp ceiling for the pierce depth
 constexpr int     SCHLACHT_MAX_EXTRA_ITERS = 16;     // extra trace iterations beyond pierceN (skipped Pawns / dupes)
-// Deferred-restore poll: a disable while the game thread is paused cannot un-hide,
-// so a short-lived worker waits for the thread to come back and restores then. The
-// tick is slow (this is a "has the user clicked back into the game yet" poll, not a
-// trace loop); the bound stops a thread outliving everything if they never return —
-// realistically the game is closed by then, which makes the leftover moot anyway.
-constexpr int     SCHLACHT_PENDING_TICK_MS = 250;
-constexpr int     SCHLACHT_PENDING_MAX_MS  = 5 * 60 * 1000;   // 5 minutes
+// Every re-assert worker sleeps its period in slices of this, so StopWorker()'s join
+// waits at most one slice rather than a whole period. Was 8 bare `25`s across four
+// modules (R5). Keep it well under the shortest period (PROTECT/MOVE/TIME/SOLIDE) —
+// a slice longer than a period would turn the sliced sleep into a single long one.
+constexpr int     WORKER_SLEEP_SLICE_MS = 25;
+
+// Deferred-restore poll: a disable while the game thread is paused cannot undo what
+// the feature did, so a short-lived worker waits for the thread to come back and
+// restores then. The tick is slow (this is a "has the user clicked back into the game
+// yet" poll, not a trace loop); the bound stops a thread outliving everything if they
+// never return — realistically the game is closed by then, which makes the leftover
+// moot anyway. Shared by Schlacht (un-hide occluders) and Dunste (re-enable the pawn's
+// collision) — same poll, same reason, so deliberately NOT per-module constants.
+constexpr int     PENDING_RESTORE_TICK_MS = 250;
+constexpr int     PENDING_RESTORE_MAX_MS  = 5 * 60 * 1000;   // 5 minutes
 
 } // namespace Grimoire

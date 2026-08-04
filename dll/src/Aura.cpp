@@ -1932,7 +1932,7 @@ static void CollectContainersRecursive(
     constexpr int kMaxDepth = 3;
     if (depth > kMaxDepth) return;
 
-    auto ci = Ubel::WalkClassEx(structAddr);
+    const ClassInfo& ci = Ubel::WalkClassEx(structAddr);
     for (const auto& f : ci.Fields) {
         if (!f.Address) continue;
 
@@ -2080,7 +2080,7 @@ static void EmitStructDirectLeaves(uintptr_t structAddr, uintptr_t base,
                                    const ContainerLeafVisitor& visit) {
     constexpr int kMaxStructDepth = 4;
     if (structDepth > kMaxStructDepth || !structAddr) return;
-    ClassInfo ci = Ubel::WalkClassEx(structAddr);
+    const ClassInfo& ci = Ubel::WalkClassEx(structAddr);
     for (const auto& f : ci.Fields) {
         std::string leafName = namePrefix.empty() ? f.Name : (namePrefix + "." + f.Name);
         if (IsScalarLeafType(f.TypeName)) {
@@ -2788,7 +2788,7 @@ static void CollectRefMetaRecursive(uintptr_t structAddr,
     constexpr int kMaxDepth = 3;
     if (depth > kMaxDepth) return;
 
-    auto ci = Ubel::WalkClassEx(structAddr);
+    const ClassInfo& ci = Ubel::WalkClassEx(structAddr);
     for (const auto& f : ci.Fields) {
         if (!f.Address) continue;
 
@@ -3975,7 +3975,7 @@ static void CollectSchemaLeaves(
     // sibling fields of the same struct type are both visited.
     if (!pathStructs.insert(structAddr).second) return;
 
-    ClassInfo ci = Ubel::WalkClassEx(structAddr);
+    const ClassInfo& ci = Ubel::WalkClassEx(structAddr);
     for (const auto& f : ci.Fields) {
         if (out.size() >= kMaxSchemaLeavesPerClass) break;
         if (!f.Address) continue;
@@ -4150,7 +4150,7 @@ PropertySearchResult SearchProperties(
         result.scannedClasses++;
 
         // Walk class properties (including inherited)
-        ClassInfo ci = Ubel::WalkClassEx(obj);
+        const ClassInfo& ci = Ubel::WalkClassEx(obj);
         if (ci.Fields.empty()) continue;
 
         // Search properties
@@ -4518,7 +4518,7 @@ std::vector<PropertySearchResult> SearchPropertiesBatch(
 
         scannedClasses++;
 
-        ClassInfo ci = Ubel::WalkClassEx(obj);
+        const ClassInfo& ci = Ubel::WalkClassEx(obj);
         if (ci.Fields.empty()) continue;
 
         // Per-field: check every query in one pass over the field list.
@@ -4670,7 +4670,7 @@ std::vector<ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs)
         }
         // ClassInfo lives at global scope (see Ubel.h), but the
         // WalkClassEx function lives inside namespace Ubel.
-        ClassInfo ci = Ubel::WalkClassEx(addr);
+        const ClassInfo& ci = Ubel::WalkClassEx(addr);
         if (ci.Fields.empty()) ++emptyCount;
         out.push_back(std::move(ci));
     }
@@ -4799,7 +4799,7 @@ ClassListResult ListClasses(bool gameOnly, int maxResults) {
         result.totalClasses++;
 
         // Walk class to get property count and size
-        ClassInfo ci = Ubel::WalkClassEx(obj);
+        const ClassInfo& ci = Ubel::WalkClassEx(obj);
 
         ClassListEntry entry;
         entry.className      = ci.Name;
@@ -4970,7 +4970,7 @@ AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries) {
         // is wasted work here, but the alternative (a Functions-only walker)
         // would mean a parallel reader path -- not worth the maintenance burden
         // for the typical perf budget.
-        ClassInfo ci = Ubel::WalkClassEx(obj);
+        const ClassInfo& ci = Ubel::WalkClassEx(obj);
         std::vector<FunctionInfo> funcs = Ubel::WalkFunctions(obj);
 
         for (const auto& f : funcs) {
@@ -6060,7 +6060,7 @@ ValueScanResult ScanForValue(
                                        int depth) -> void {
         constexpr int kMaxStructDepth = 4;   // direct-struct nesting inside the element
         if (depth > kMaxStructDepth || !innerStructAddr) return;
-        ClassInfo ci = Ubel::WalkClassEx(innerStructAddr);
+        const ClassInfo& ci = Ubel::WalkClassEx(innerStructAddr);
         for (const auto& f : ci.Fields) {
             bool accepted = false;
             for (const auto& t : acceptedTypes) {
@@ -6115,7 +6115,7 @@ ValueScanResult ScanForValue(
         // on the UE4 UProperty path only; the UE5 FProperty path needs
         // the WalkClassEx pass). The extra metadata reads we don't use
         // are cheap relative to the GObjects walk itself.
-        ClassInfo ci = Ubel::WalkClassEx(structAddr);
+        const ClassInfo& ci = Ubel::WalkClassEx(structAddr);
         for (const auto& f : ci.Fields) {
             // Leaf-type match: emit a ScanField at the cumulative offset.
             bool accepted = false;
@@ -6367,7 +6367,7 @@ ValueScanResult ScanForValue(
         // WalkClassEx also populates structType / inner / enum metadata
         // we want available). Then expandFields walks the property chain
         // recursively for ScanField emission.
-        ClassInfo ci = Ubel::WalkClassEx(classAddr);
+        const ClassInfo& ci = Ubel::WalkClassEx(classAddr);
         sci.className = ci.Name;
         sci.classPath = ci.FullPath;
         sci.gameClass = !IsEnginePackage(ci.FullPath);
@@ -7142,7 +7142,7 @@ ValueScanResult ScanForValue(
                 // Holes = the element struct's bytes NOT covered by a reflected field
                 // (the native region). For a 0-UPROPERTY struct that's the whole
                 // element; for a partially-reflected struct only its gaps.
-                ClassInfo eci = Ubel::WalkClassEx(elemStruct);   // cached
+                const ClassInfo& eci = Ubel::WalkClassEx(elemStruct);   // memoized (B10) — by ref
                 const int32_t maxRegion = cfe.stride - regionOff;   // bytes available to this side
                 int32_t structSize = eci.PropertiesSize;
                 if (structSize <= 0)        structSize = maxRegion;
@@ -7561,7 +7561,7 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
                 ePos = out[aPos].elements.size();
                 Aura::SnapshotArrayElement el; el.index = lf.elemIndex;
                 if (lf.elemStructAddr) {
-                    ClassInfo eci = Ubel::WalkClassEx(lf.elemStructAddr);  // cached
+                    const ClassInfo& eci = Ubel::WalkClassEx(lf.elemStructAddr);  // memoized (B10) — by ref
                     std::vector<std::string> types, names;
                     types.reserve(eci.Fields.size()); names.reserve(eci.Fields.size());
                     for (const auto& ff : eci.Fields) { types.push_back(ff.TypeName); names.push_back(ff.Name); }
@@ -7695,7 +7695,7 @@ void CollectGroupLeaves(uintptr_t obj, const std::string& ownerClassName,
     for (uintptr_t v : visited) if (v == structAddr) return;  // cycle guard
     visited.push_back(structAddr);
 
-    ClassInfo ci = Ubel::WalkClassEx(structAddr);  // cached per struct
+    const ClassInfo& ci = Ubel::WalkClassEx(structAddr);  // memoized per struct (B10)
     for (const auto& f : ci.Fields) {
         if (leaves.size() >= leafCap) break;
         Radar::DataType dt;
@@ -8580,7 +8580,7 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
             // never dropped. Verdict is thread-local memoized per class.
             if (skipNoiseClasses && IsSnapshotNoiseClass(cls, classPath)) continue;
 
-            ClassInfo ci = Ubel::WalkClassEx(cls);  // cached per class (value copy)
+            const ClassInfo& ci = Ubel::WalkClassEx(cls);  // memoized per class (B10) — no copy
             if (ci.Fields.empty()) continue;
 
             typeNames.clear();

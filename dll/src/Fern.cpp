@@ -1757,7 +1757,7 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
 
             uintptr_t addr = Renge::StrToAddr(addrStr);
-            ClassInfo ci = Ubel::WalkClassEx(addr);
+            const ClassInfo& ci = Ubel::WalkClassEx(addr);
 
             json data;
             data["class"] = EncodeClassInfoToJson(ci);

@@ -18,6 +18,7 @@
 #include "Macht.h"
 #include "Aura.h"
 #include "Tot.h"     // Tot::MarkBackgroundWorker — re-assert worker ignores per-command cancel (M4)
+#include "Routine.h"   // Routine::ReassertLoop — shared sliced-sleep + guarded tick (R5/B14)
 #include "Ubel.h"
 
 #include <algorithm>
@@ -356,20 +357,14 @@ void FillKnobLocked(const Ctx& c, int knobId, KnobInfo& info) {
 // ---- re-assert worker ----
 
 void WorkerLoop() {
-    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
-    LOG_INFO("Movement: re-assert worker started (%d ms)", Grimoire::MOVE_REASSERT_MS);
+    // Sliced sleep, cancel-immunity, per-tick exception guard and the shutdown break
+    // all live in Routine::ReassertLoop (R5 / B14). Only the tick is ours.
     int driftCount = 0;
-    while (!s_workerStop.load()) {
-        for (int slept = 0;
-             slept < Grimoire::MOVE_REASSERT_MS && !s_workerStop.load();
-             slept += 25)
-            std::this_thread::sleep_for(std::chrono::milliseconds(25));
-        if (s_workerStop.load()) break;
-
+    Routine::ReassertLoop("Movement", Grimoire::MOVE_REASSERT_MS, s_workerStop, [&] {
         std::lock_guard<std::mutex> lk(s_mutex);
-        if (!AnyActiveLocked()) continue;     // all knobs reset between ticks
+        if (!AnyActiveLocked()) return;      // all knobs reset between ticks
         Ctx c;
-        if (ResolveCtx(c) != MR_OK) continue; // pawn/CMC gone (menu) — retry next tick
+        if (ResolveCtx(c) != MR_OK) return;  // pawn/CMC gone (menu) — retry next tick
         bool drifted = false;
         for (int i = 0; i < KNOB_COUNT; ++i)
             ApplyKnobLocked(c, i, &drifted);
@@ -381,8 +376,7 @@ void WorkerLoop() {
                          "recomputing the value each tick (sprint/ability system); the "
                          "override is being held against it.", driftCount);
         }
-    }
-    LOG_INFO("Movement: re-assert worker stopped");
+    });
 }
 
 // Worker start/stop split into "Locked" cores (caller ALREADY holds s_workerMutex)

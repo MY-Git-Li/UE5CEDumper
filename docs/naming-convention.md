@@ -324,7 +324,7 @@ German spelling.
 | Löwe (Held) | レーヴェ | Lowe | Governor / anti-magic ("lion") | ⬜ | Aggressive / dominant heuristic |
 | Radar | ラダール | Radar | Shadow Warrior chief | 🟢 ValueScan | CE-style by-value First/Next Scan (`Radar.cpp/.h`, was `ValueScan`) |
 | Schritt | シュリット | Schritt | Shadow Warrior ("step") | ⬜ | Stepping / single-step iteration |
-| Routine | ルティーネ | Routine | Shadow Warrior librarian | ⬜ | Scheduled / periodic subroutine |
+| Routine | ルティーネ | Routine | Shadow Warrior librarian | 🟢 | **`Routine.h`** — periodic-worker scaffolding shared by the six re-assert / hold modules (sliced sleep + guarded tick) |
 | Kreis | クライス | Kreis | Shadow Warrior blacksmith ("circle") | ⬜ | Ring buffer / loop / cycle |
 | Lore | ローレ | Lore | Shadow Warrior nun ("lore") | ⬜ | Knowledge base / metadata store |
 | Walross | ヴァルロス | Walross | Ex-Hero Rasen ("walrus") | ⬜ | (thematic) |

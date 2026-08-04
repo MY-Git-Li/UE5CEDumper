@@ -18,7 +18,7 @@
 **Tally:** 3 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **52 items** (26 from 4a, 25 from 4b, 1 from in-game verification).
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
-**Progress: 14 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577), B2 + B3 (2581), B31 + B37 + B38 (2585), B5 + B4 (2592) — 38 open.**
+**Progress: 18 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577), B2 + B3 (2581), B31 + B37 + B38 (2585), B5 + B4 (2592), B8 + B10 + B14 + R5 (2596) — 34 open.**
 
 ---
 
@@ -38,7 +38,7 @@ coherent commit; the *within-batch* order matters where noted.
   user one-shot CE invokes. Add a separate per-command-cancel-immunity flag, or mark only around the
   resolve calls.
 
-### Batch B — Dunste + the worker-guard structure
+### ~~Batch B~~ — Dunste + the worker-guard structure ✅ **DONE, build 2596**
 - **B8** `Dunste.cpp:453/577` — set `collisionOff/collisionPawn` from the invoke's **actual result**;
   when the invoke is skipped, KEEP the record and start the Schlacht-style deferred restore
   (`Schlacht.cpp:635-658` + `PendingRestoreLoop` is the shipped precedent). Join the worker before
@@ -133,9 +133,9 @@ existing behaviour / perf.
 | B5 ✅ | 🟠 | M/med | Frieren | ~~`s_initialized` latched *after* the multi-second scan ⇒ a concurrent second full init corrupts DynOff silently~~ **FIXED build 2592** |
 | B6 ✅ | 🟠 | S/low | Coord library | ~~Clear-all: no confirm, no pre-clear backup, `.bak` expires after 2 saves~~ **FIXED build 2560** |
 | B7 | 🟠 | S/low | Coord library | Uid is the one field skipping every ingress guard; duplicate uid + delete-by-uid wipes rows the user didn't select |
-| B8 | 🟠 | M/med | Dunste | Collision state committed independently of the invoke ⇒ pawn left non-colliding, falls through the world |
+| B8 ✅ | 🟠 | M/med | Dunste | ~~Collision state committed independently of the invoke ⇒ pawn left non-colliding, falls through the world~~ **FIXED build 2596** |
 | B9 | 🟠 | S/low | MainWindowVM | Wrong-game warning never runs on connect, never clears on disconnect |
-| B10 | 🟠 | M/med | Ubel | `WalkClassEx` has no memo despite 4 call sites commented `// cached`; deep-copies under the global lock |
+| B10 ✅ | 🟠 | M/med | Ubel | ~~`WalkClassEx` has no memo despite 4 call sites commented `// cached`; deep-copies under the global lock~~ **FIXED build 2596** |
 | B28 | 🟠 | M/med | Utf8Helpers | UTF-8-first gate accepts a UTF-16 CJK buffer whose byte at `n−1` is `0x00` ⇒ ASCII mojibake, UTF-16 branch unreachable |
 | B29 ✅ | 🟠 | S/low | Methode | ~~CE-plugin "already loaded" guard matches by **filename alone** ⇒ ReShade's `dxgi.dll` makes it refuse to inject~~ **FIXED build 2577** |
 | B30 ✅ | 🟠 | S/low | UE5CEDumper.CT | ~~Every `ue5_inject()` bail-out leaves CE's record ticked ⇒ untick runs a real `UE5_Shutdown` against a proxy this script never injected~~ **FIXED build 2561** |
@@ -143,7 +143,7 @@ existing behaviour / perf.
 | B11 | 🟡 | S/low | Sein | `fprintf` on a NULL `FILE*` after a failed rotation reopen ⇒ can terminate the game |
 | B12 | 🟡 | S/low | Proxy cleanup | Confirm/status text asserts things the executed plan contradicts |
 | B13/B41 | 🟡 | M/low | Proxy cleanup | "Recycle Bin" promise unverifiable; a drive-letter test is not a recycler test |
-| B14 | 🟡 | S/low | DLL workers | Thread-proc exception guard rolled out to 2 of 7 thread procs |
+| B14 ✅ | 🟡 | S/low | DLL workers | ~~Thread-proc exception guard rolled out to 2 of 7 thread procs~~ **FIXED build 2596** (with R5) |
 | B15 | 🟡 | S/low | TeleportScriptGen | Mailbox timeout `break`s into the auto-close ⇒ the CE window shuts on a failure |
 | B16 | 🟡 | S/low | TeleportPanel | 5 coord-grid columns sort on nested/mismatched paths ⇒ dead headers under AOT |
 | B17 | 🟡 | S/low | TeleportVM | Pose not cleared on disconnect ⇒ the next game's library renders "0 of N" |
@@ -181,7 +181,7 @@ existing behaviour / perf.
 | R2 | do now | S/low | Delete 3 private Lua escapers + the private preamble/close copies; use `CeLuaHygiene` |
 | R3 | do now | S/low | `CeLuaHygiene.AppendIdleWait` at the **2** generators that sample `cmd` once (not 11) |
 | R4 | do now | S/low | `DumpExplorerViewModel` — the sole holdout of the space=AND keyword MUST rule |
-| R5 | do now | S–M/low | One `ReassertWorker` helper for the six hold modules (**do with B14**) |
+| R5 ✅ | done | S–M/low | ~~One `ReassertWorker` helper for the six hold modules~~ **DONE build 2596** — new `Routine.h` (`ReassertLoop` / `RunTickGuarded` / `SleepSliced`) + `Grimoire::WORKER_SLEEP_SLICE_MS` |
 | R6 | INFO | S/low | `en.axaml` — 24 inert keys, 2 shadowed by hardcoded C#; **zero dangling references** |
 | R7 | INFO | S/low | `aob_specificity.py` docstring says "NOT WIRED INTO CI" 3 days after `6f594fa` wired it in as a blocking gate |
 | R8 | later | S/low | `build.ps1` dist native payload never refreshed or pruned outside `-Clean` |
@@ -596,6 +596,33 @@ the intended state; route uid through `CoordText.Normalize` + a new `MaxUidLengt
 **Where:** [`ui/UE5DumpUI/ViewModels/TeleportViewModel.cs:3616`](../ui/UE5DumpUI/ViewModels/TeleportViewModel.cs:3616)
 
 ### B8 — Fly/noclip collision state committed independently of the invoke
+
+> **✅ FIXED — build 2596.** Three separate defects had to move together, because each one
+> hid the next.
+> 1. **The commit is now the invoke's.** `FlyTickLocked` no longer writes
+>    `collisionOff/collisionPawn`; the worker does, after the call. The re-emit condition reads that
+>    same record, so an un-committed state re-emits on the next tick — the retry the optimistic
+>    commit had silently removed. The one path that deliberately does NOT commit is the deferred one
+>    (game thread unresponsive), which is exactly the one that must retry. A missing
+>    `SetActorEnableCollision` DOES commit: retrying cannot conjure a setter, and
+>    `InvokeSetCollision` already says so once.
+> 2. **Join before deciding.** `active` is cleared, the worker is joined, and only then is the
+>    restore decided — the old order let an in-flight tick turn collision back off *after* the
+>    restore. Same shape as Schlacht's M1.
+> 3. **Keep the record, defer the restore.** Wiping it is what made the pawn fall through the world.
+>    Now a new `PendingRestoreLoop` (Schlacht's shipped precedent) polls for the game thread and
+>    restores the instant the user clicks back into the game.
+>
+> One thing the finding did not say, and it inverts the common case: on an idle-when-unfocused
+> title the *click that turns Fly off is in our own window*, which is what backgrounds the game and
+> stops ProcessEvent. `IsGameThreadResponsive` is therefore false at precisely the moment the
+> restore is needed — the skip is the normal path, not the edge.
+>
+> Also restores on the pawn the collision was **actually disabled on**, not a freshly re-resolved
+> one: after a respawn those differ, and re-enabling collision on the new pawn leaves the original
+> permanently ghosted.
+> *Delete this row after the batch is merged to main.*
+
 **🟠** · M/med · Dunste. *Merge of DWP-1 + DWP-2.* `Dunste.cpp:453-454` (optimistic commit) · `:577-582`
 (wipe-then-skip). The collision record is written whether or not `InvokeSetCollision` ran or succeeded, in
 both directions; the re-emit condition reads the already-updated state, so nothing retries.
@@ -629,6 +656,23 @@ at entry, publishing only on match (same shape as `ShouldConfirmProxy`).
 [`ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:1997`](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs:1997)
 
 ### B10 — `Ubel::WalkClassEx` has no memo; four call sites claim otherwise
+
+> **✅ FIXED — build 2596.** `s_walkClassExCache` added; `WalkClassEx` now returns
+> `const ClassInfo&` and 23 call sites bind by reference instead of deep-copying. The four
+> `// cached` comments now say `memoized (B10)`.
+>
+> **The prerequisite was done first and it was not optional.** `Ubel.cpp:813` was
+> `s_walkClassCache[addr] = info;` — an assign-over-existing that destroys the entry's `Fields`
+> vector. The moment a reference is handed out, that is a use-after-free for any thread still
+> reading it. Both caches now `try_emplace`: first writer wins, the two results are equal anyway
+> (the walk and the enrichment are pure functions of the same reads), and an existing entry is never
+> touched. Node-based map, no `erase`/`clear` anywhere in `dll/src` ⇒ entries never move.
+>
+> Verified no caller mutates the result before switching the return type — a regex sweep for
+> assignment/`push_back`/`clear`/`erase` on `ci.` / `eci.` / `rowCI.` came back empty, and the
+> compiler then enforced it for good.
+> *Delete this row after the batch is merged to main.*
+
 **🟠** · M/med · Ubel. `Ubel.cpp:885-1023` has no lookup and no store; `:713-717` deep-copies on a cache
 hit **inside** the lock. Per-object reach is wider than first filed: snapshot capture hits it at
 `Aura.cpp:8583`, `:7605`, `:7564` (per struct-array element) and `:8420`; group scan at `:7698` **and
@@ -802,7 +846,13 @@ configuration.
 dialog never makes the promise. M/low.
 [`ui/UE5DumpUI/Services/WindowsPlatformService.cs:736`](../ui/UE5DumpUI/Services/WindowsPlatformService.cs:736)
 
-**B14 — Thread-proc exception guard at 2 of 7 sites.** Guarded: `Schlacht.cpp:468`, `Dunste.cpp:480`.
+**B14 — Thread-proc exception guard at 2 of 7 sites.** ✅ **FIXED build 2596, with R5.** New
+`Routine.h` (Frieren roster: ルティーネ, *"scheduled / periodic subroutine"*) holds `ReassertLoop`
+(cancel-immunity + sliced sleep + guarded tick + a `ShutdownRequested` break the hand-copied loops
+never had), `RunTickGuarded`, and `SleepSliced`. The four hold workers are now their tick and
+nothing else; both `PendingRestoreLoop`s are wrapped. `Grimoire::WORKER_SLEEP_SLICE_MS` replaces the
+8 bare `25`s. The per-module drift WARN wording is deliberately NOT templated — those strings are
+individually worded and the log checklist greps them. *Original finding:* Guarded: `Schlacht.cpp:468`, `Dunste.cpp:480`.
 Unguarded: `Schlacht.cpp:507` (`PendingRestoreLoop`, which calls the same `InvokeSetHidden` path),
 `Solide.cpp:330`, `Hemmung.cpp:284`, `Laufen.cpp:358`, `Solitar.cpp:312`. Build 2389 added the guard for a
 live-reproduced `0xC0000409` (bad_alloc escaping a thread entry). `Tot::ShutdownRequested()` is not set on

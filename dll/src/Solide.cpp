@@ -18,6 +18,7 @@
 #include "Macht.h"
 #include "Aura.h"
 #include "Tot.h"     // Tot::MarkBackgroundWorker — re-assert worker ignores per-command cancel (M4)
+#include "Routine.h"   // Routine::ReassertLoop — shared sliced-sleep + guarded tick (R5/B14)
 #include "Ubel.h"
 
 #include <algorithm>
@@ -328,18 +329,12 @@ std::vector<Job>::iterator FindJobLocked(const std::string& cls, const std::stri
 // ---- re-assert worker (identical discipline to Hemmung) ----
 
 void WorkerLoop() {
-    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
-    LOG_INFO("Solide: force-field re-assert worker started (%d ms)", Grimoire::SOLIDE_REASSERT_MS);
+    // Sliced sleep, cancel-immunity, per-tick exception guard and the shutdown break
+    // all live in Routine::ReassertLoop (R5 / B14). Only the tick is ours.
     int driftCount = 0;
-    while (!s_workerStop.load()) {
-        for (int slept = 0;
-             slept < Grimoire::SOLIDE_REASSERT_MS && !s_workerStop.load();
-             slept += 25)
-            std::this_thread::sleep_for(std::chrono::milliseconds(25));
-        if (s_workerStop.load()) break;
-
+    Routine::ReassertLoop("Solide", Grimoire::SOLIDE_REASSERT_MS, s_workerStop, [&] {
         std::lock_guard<std::mutex> lk(s_mutex);
-        if (!AnyJobLocked()) continue;
+        if (!AnyJobLocked()) return;
         bool drifted = false;
         for (auto& job : s_jobs)
             ApplyJobLocked(job, /*restore=*/false, &drifted);
@@ -349,8 +344,7 @@ void WorkerLoop() {
                 LOG_WARN("Solide: re-asserted forced field(s) (drift #%d) — the game keeps "
                          "re-writing them; the hold is being maintained against it.", driftCount);
         }
-    }
-    LOG_INFO("Solide: force-field re-assert worker stopped");
+    });
 }
 
 void StartWorkerLocked() {
@@ -481,7 +475,7 @@ int32_t FindStealthMeter(std::vector<StealthCandidate>& out, int32_t maxResults)
         uintptr_t cls = Ubel::GetClass(ro.addr);
         if (!cls) continue;
         std::string clsName = Ubel::GetName(cls);
-        ClassInfo ci = Ubel::WalkClassEx(cls);
+        const ClassInfo& ci = Ubel::WalkClassEx(cls);
         for (const auto& f : ci.Fields) {
             if (!IsFloatType(f.TypeName)) continue;   // meters are floats
             int32_t score = MatchStealthField(ToLower(f.Name));
