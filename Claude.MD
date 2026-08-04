@@ -48,6 +48,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Github\UE5CEDumper\build
 powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Github\UE5CEDumper\build.ps1" -Target UI
 
 # Run tests only
+# ⚠ -Target Test does NOT compile the DLL. It builds only the two test executables
+#   (`--target utf8_helpers_test` / `dll_helpers_test`), which link HEADERS — so a syntax
+#   error in Fern.cpp / Stark.cpp / any other .cpp passes it clean. A green -Target Test
+#   after editing a .cpp measures nothing about that file. Use -Target DLL (or no -Target)
+#   before claiming a C++ change builds. Learned the hard way 2026-08-04: "959 dll green"
+#   was reported over a Fern.cpp that had never been compiled and did not parse.
 powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Github\UE5CEDumper\build.ps1" -Target Test
 
 # Debug build

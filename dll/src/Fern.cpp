@@ -727,7 +727,6 @@ void Fern::AcceptLoop() {
     }
     LOG_INFO("PipeServer: AcceptLoop exiting");
   });
-  });
 }
 
 std::string Fern::ReadLine(HANDLE pipe) {
