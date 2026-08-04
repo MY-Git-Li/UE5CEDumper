@@ -1,8 +1,0 @@
-**B39 — HintCache writers share one fixed `.tmp` path across processes.** `Flamme.cpp:303/357/423/494` —
-four writers, one fixed `.tmp` path, `std::ios::trunc`, no mutex in the module; `set_ue_version_override`
-and `set_invoke_timeout` are not gated on `m_scan.running`. *The in-DLL lost-update window is small* (read
-and write both live inside `SaveResults`) and a duplicate rename throws into the existing catch. **The
-genuinely routine race is cross-process:** `AobUsageService.cs:129-135` writes the byte-identical path from
-the UI on every scan completion, guarded only by an in-process semaphore, with its own comment at `:58`
-documenting an ordering nothing enforces. Worst case: a lost `ueVersionUserOverride`. M/med.
-[`dll/src/Flamme.cpp:303`](../dll/src/Flamme.cpp:303)

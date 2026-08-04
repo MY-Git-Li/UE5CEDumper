@@ -18,9 +18,9 @@
 **Tally:** 3 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **52 items** (26 from 4a, 25 from 4b, 1 from in-game verification).
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
-**Progress: 50 of 52 shipped.** Builds: 2560 · 2561 · 2569 · 2577 · 2581 · 2585 · 2592 · 2596 · 2599 ·
+**Progress: 51 of 52 shipped.** Builds: 2560 · 2561 · 2569 · 2577 · 2581 · 2585 · 2592 · 2596 · 2599 ·
 2603 (8 DLL + scripts) · 2610 (12 UI) · 2614 (refactor R1-R4/R6/R7) · 2617 (B39).
-**Open: the 5 that need a maintainer decision** — B13/B41, B21, B25, B26, B43 — plus R8 ("later").
+**Open: 4 that need a maintainer decision** — B13/B41, B21, B25, B26 — plus R8 ("later").
 
 ---
 
@@ -84,8 +84,8 @@ gets renamed over the real cache.
 ### Needs a decision from the maintainer before coding
 **B13/B41** (which volume-recycler API), **B21** (the `AllowThousands` tradeoff — removing it rejects
 Excel's `"67,162.398"`), **B25** (should the version refusal ever fire on an uncorroborated signal),
-**B26** (should duplicate CE records be deduped at push), **B43** (remove the SRWLOCK — and **reject**
-the spin-until-resolved option, it deadlocks deterministically).
+**B26** (should duplicate CE records be deduped at push), ~~**B43**~~ ✅ **DONE build 2620** — was not actually a decision: the finding prescribed the fix
+and ruled out the dangerous alternative.
 
 ### The DO-NOT list, carried forward
 Do not raise the CE-side timeout. Do not add `CancelSynchronousIo` without re-measuring first. Do not
@@ -172,7 +172,7 @@ existing behaviour / perf.
 | B39 ✅ | 🟡 | M/med | Flamme | ~~Four HintCache writers share one fixed `.tmp` path; the UI writes the byte-identical path from another process~~ **FIXED build 2617** |
 | B40 ✅ | 🟡 | S/low | UE5CEDumper.CT | ~~`ue5_callDLL` uses bare `getAddress` and tests for nil — CE *throws*, aborting the disable block and leaking the log FILE handle~~ **FIXED build 2561** |
 | B42 ✅ | 🟡 | S/low | App | ~~Second launch calls `Shutdown(1)` before the logger exists — no window, no dialog, no log line~~ **FIXED build 2610** |
-| B43 | 🟡 | M/med | Lugner_Winmm | Exclusive SRWLOCK held across `LoadLibraryW` + Sein file I/O; the dxgi safety precondition it copies does not transfer |
+| B43 ✅ | 🟡 | M/med | Lugner_Winmm | ~~Exclusive SRWLOCK held across `LoadLibraryW` + Sein file I/O; the dxgi safety precondition it copies does not transfer~~ **FIXED build 2620** |
 | B44 ✅ | 🟡 | S/low | Lugner_Winmm.asm | ~~Thunk tests `mProcs[N]` before the resolver but not after ⇒ `jmp rax` with `rax==0` if a name never resolves~~ **FIXED build 2603** |
 | B45 ✅ | 🟡 | S/low | ProxyDeployPanel | ~~Orphan-scan Cancel shown by the shared `IsScanning` flag but wired to a different command ⇒ a ghost Cancel on the wrong card~~ **FIXED build 2610** |
 | B46 ✅ | 🟡 | S/low | Renge | ~~`HexToBytes` maps non-hex chars to `0x00`, drops an odd trailing nibble, cannot report failure — `write_mem` answers `ok:true`~~ **FIXED build 2603** |
