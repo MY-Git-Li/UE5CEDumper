@@ -20,7 +20,15 @@
 
 **Progress: 52 of 52 shipped.** Builds: 2560 · 2561 · 2569 · 2577 · 2581 · 2585 · 2592 · 2596 · 2599 ·
 2603 (8 DLL + scripts) · 2610 (12 UI) · 2614 (refactor R1-R4/R6/R7) · 2617 (B39).
-**ALL 52 SHIPPED.** The last four landed after the maintainer's decisions (2026-08-04): B13/B41
+**ALL 52 SHIPPED — but 2 of them FAILED their first in-game check and were refixed.**
+See [todo.md](todo.md#pending-live-game-verification-verify-only--no-code) for the register.
+First sweep (2026-08-04, build 2622): **7 verified, 2 failed, 16 not yet exercised**.
+**B34** and **B14+R5** both failed the same way — a rule applied to an ENUMERATION that had
+counted wrong (three CE filenames; seven thread procs). Refixed in build 2628. That is the
+sharpest thing this audit produced: *a fix verified against the list it was written from is
+not verified.*
+
+ The last four landed after the maintainer's decisions (2026-08-04): B13/B41
 *refuse and say why*, B21 *drop AllowThousands*, B25 *require corroboration*, B26 *both halves*.
 Only R8 remains, filed "later" by the audit itself.
 

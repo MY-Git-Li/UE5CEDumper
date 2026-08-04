@@ -6,6 +6,36 @@
 > [log-verification-checklist.md](log-verification-checklist.md)。
 > 這份講的是**狀態**（⬜ / ✅），那份講的是**怎麼做**。
 
+-----
+
+## 目前狀態（2026-08-04 第一次實機掃描，build 2622 — DQ7R / Elliot / CE 三份 log）
+
+**7 項 ✅ 已驗證 · 2 項 🔴 失敗並已重修 · 16 項 ⬜ 尚未被觸發**
+
+| 狀態 | 項目 |
+|---|---|
+| ✅ 已驗證 | B49、B31、B5（被動半）、B47、**B35**、B42、B36 |
+| 🔴 **失敗 → 已重修（build 2628，要重測）** | **B34**、**B14 + R5** |
+| ⬜ 尚未觸發 | 其餘 16 項 |
+
+### 兩個失敗共同的教訓
+
+**用「清單」寫出來的修正，拿同一份清單去驗，等於沒驗。**
+
+- **B34** 列了三個 CE 檔名 —— 但 CE 實際的執行檔是 `cheatengine-x86_64-SSE4-AVX2.exe`，
+  三個都沒中。DLL 在 CE 裡面掃了 5.8 秒，還把 pipe 開起來了。
+- **B14** 列了七個 thread proc —— 但 DLL 實際上約有 15 個地方「丟出例外 = `std::terminate`」。
+  WER dump 證明它在一條沒有任何 guard 的執行緒上 terminate。
+
+兩者對自己清單上的每一項都是對的，對世界是錯的。剩下 16 項請帶著這個教訓看。
+
+### ⬜ 不等於「應該沒問題」
+
+⬜ 的意思是**沒有人看過**。這次 16 項裡有 9 項單純是沒被觸發：沒裝第三方 wrapper、
+沒有在指令執行中砍掉 UI、Noclip 從頭到尾沒開、沒跑 Extra Scan、沒跑 Report。
+
+-----
+
 ## 開 log 之前一定要知道的兩件事
 
 1. **沒有 log level，什麼都不會被過濾** —— 所以 `[DEBUG]` 行也算數。
@@ -33,36 +63,52 @@ Log 根目錄：`%LOCALAPPDATA%\UE5CEDumper\Logs`
 
 ## 建議的驗證順序
 
-不用照清單順序做。按「要花多少力氣」排：
+不用照清單順序做。按「要花多少力氣」排。**下表已反映 2026-08-04 的掃描結果。**
 
 ### 第 0 步 —— 完全免費（任何一次正常遊戲 session 之後 grep 就好）
 
-這七項不需要你為它們做任何特別的事。玩完一輪、開 log、grep。
+原本七項，這次一次結掉四項。剩下三項不是「沒過」，是**這次的操作沒有觸發它們**。
 
-| 項目 | Grep 什麼 | 檔案 |
-|---|---|---|
-| B5 被動半 | `UE5_Init:` | `init-0.log` |
-| B49 | `PipeServer: Stop entry` | `pipe-0.log` |
-| B29 log 半 | `is loaded but is not ours` | `init-0.log` |
-| B31 | 直接 `ls` log 目錄，不用 grep | `Logs\UE5DumpUI\` |
-| B34 | `DllMain AutoStart:` | `init-0.log` |
-| B47 | `first-loaded-wins guard is NOT armed` | `init-0.log` |
-| B38 | 跑一次 proxy cleanup Report，看檔案落在哪 | — |
+| 項目 | Grep 什麼 | 檔案 | 狀態 |
+|---|---|---|---|
+| B5 被動半 | `UE5_Init:` | `init-0.log` | ✅ 5/5、14/14、1/1 一對一 |
+| B49 | `PipeServer: Stop entry` | `pipe-0.log` | ✅ conns=0，59 ms |
+| B31 | 直接 `ls` log 目錄，不用 grep | `Logs` 下的 `UE5DumpUI` | ✅ 8 MB + `_001` 已輪替 |
+| B47 | `first-loaded-wins guard is NOT armed` | `init-0.log` | ✅ 0 次 |
+| B34 | `DllMain AutoStart:` | `init-0.log` | 🔴 **失敗**，已重修 2628 |
+| B29 log 半 | `is loaded but is not ours` | `init-0.log` | ⬜ 沒裝 wrapper，沒觸發 |
+| B38 | 跑一次 proxy cleanup Report，看檔案落在哪 | — | ⬜ 沒跑過 Report |
 
 ### 第 1 步 —— 需要刻意操作，但答案完全在 log 裡
 
-B28、B8、B10、B4、B18、B19。
+**B35 ✅ 已順帶結案**（`PERF Snapshot capture` 那行的分項算術自己就證明了）。
+
+剩下：B28、B8、B4、B18、B19 —— 這次都沒觸發到。
+**B10 卡在沒有對照組**：只有一條 `PERF Snapshot capture`，沒有 2596 之前的數字可比。
+
+這一步真正要做的事很少：
+- **B8** 只要記得**把 Noclip 打開**（這次 Fly 全程 `noclip=0`，所以那條路徑根本沒走到）
+- **B4** 要在指令執行到一半時砍掉 UI
+- **B18 / B19** 各自需要一個刻意佈置的前提（見各項）
 
 ### 第 2 步 —— 純人工，要看畫面或看遊戲
 
-② 那一整組。其中 **B14 + R5** 最值得先做：它是 build 2389 真的當掉過的重現步驟。
+B42、B36 ✅ 已確認。剩下 ② 那一組。
+
+其中 **B14 + R5 必須優先重測** —— 它這次**失敗了**，而且是唯一一個真的把遊戲弄當掉的項目。
 
 -----
 
 # ① 可從 log 取得
 
-## ⬜ B49 —— `Fern::Stop` 不再等一個永遠不會來的 client
-**build 2569**
+## ✅ B49 —— `Fern::Stop` 不再等一個永遠不會來的 client
+**build 2569** · **已驗證（2026-08-04 三份 session log，build 2622）**
+
+CE 那次 session 剛好命中最關鍵的條件 —— `Stop entry (conns=0)`，也就是舊版對一個同步 listen
+handle 呼叫 `CloseHandle` 會**永遠卡住**的那個情況：
+
+`cancels+wake done (0 ms)` → `conn drain satisfied, 0 left (3 ms)` → `accept join done (3 ms)`
+→ `monitor join done (58 ms)` → `Stopped`。全程 59 ms，PASS 標準是 100 ms 內。
 
 **已經內建量測** —— 這個修正出貨時就順便加了 per-phase logging，正是為了讓它不需要特別跑。
 
@@ -86,8 +132,12 @@ grep `pipe-0.log` 的 `PipeServer: Stop entry` 以及後面接著的各階段行
 
 > 人工的另一半（真的去裝一個 wrapper）在 ② 裡。
 
-## ⬜ B31 —— UI log 到 8 MB 會輪替，不會停住
-**build 2585**
+## ✅ B31 —— UI log 到 8 MB 會輪替，不會停住
+**build 2585** · **已驗證（2026-08-04 三份 session log，build 2622）**
+
+`Logs` 下的 `UE5DumpUI` 資料夾裡同時存在 `pipe-0.log`（**8,388,756 bytes**，正好是 8 MiB 上限）
+和 `pipe-0_001.log`（4,055,182 bytes，**時間比較新** —— 21:05 vs 20:53）。輪替發生了，
+而且寫入繼續進到新檔案。無聲停寫的特徵會是：只有那個 8 MB 檔案，而且最後一行很舊。
 
 任何長時間 session 之後都免費：`ls %LOCALAPPDATA%\UE5CEDumper\Logs\UE5DumpUI\`
 
@@ -99,7 +149,11 @@ grep `pipe-0.log` 的 `PipeServer: Stop entry` 以及後面接著的各階段行
 > 最快跑到 8 MB 的方法：Teleport → Auto refresh，開著放它跑。
 
 ## ⬜ B38 —— 殘留 proxy 的報告檔落在 app 資料夾裡面
-**build 2585**
+**build 2585** · **尚未觸發**
+
+這次沒有跑過 Report，所以無法結案。查過了：舊位置 `%LOCALAPPDATA%\Reports\` 裡確實有一個
+`leftover-proxies-20260730-210903.txt`，但它的日期是 **2026-07-30**，在 build 2585 之前 ——
+屬於文件裡寫明「2585 之前寫出來的檔案會留在舊位置」的情況，**不是失敗的證據**。
 
 跑一次 proxy cleanup 的 Report。
 
@@ -108,8 +162,14 @@ grep `pipe-0.log` 的 `PipeServer: Stop entry` 以及後面接著的各階段行
 
 > 2585 之前寫出來的檔案會留在舊位置，這是設計如此，不算 FAIL。
 
-## ⬜ B5（被動半）—— `UE5_Init` 的鎖沒有弄壞正常初始化
-**build 2592** · 任何 session 都免費
+## ✅ B5（被動半）—— `UE5_Init` 的鎖沒有弄壞正常初始化
+**build 2592** · **已驗證（2026-08-04 三份 session log，build 2622）**
+
+三個遊戲的 `Starting initialization...` 與 `Complete (UE…)` 都嚴格一對一
+（DQ7R 5/5、Elliot 14/14、CE 1/1），兩條新行也都沒出現。
+
+⚠ 如同下面原本就寫的：**這只證明鎖沒有造成傷害，不證明競爭被修好了**。
+刻意觸發的版本仍然在 ② 裡，還沒做。
 
 grep `init-0.log` 的 `UE5_Init:`
 
@@ -121,8 +181,28 @@ grep `init-0.log` 的 `UE5_Init:`
 
 > ⚠ **新行沒出現只證明「這次沒發生競爭」，不證明修好了。** 刻意觸發的版本在 ② 裡。
 
-## ⬜ B34 —— Cheat Engine 本身不會被當成遊戲來掃描
-**build 2603**
+## 🔴 B34 —— Cheat Engine 本身不會被當成遊戲來掃描
+**build 2603** · **失敗（2026-08-04 三份 session log，build 2622）→ 已重修 build 2628，要重測**
+
+log 裡清楚寫著：
+
+```
+process: C:\Program Files\Cheat Engine\cheatengine-x86_64-SSE4-AVX2.exe
+DllMain AutoStart: game process — calling UE5_AutoStart
+```
+
+接著是 5.8 秒的 AOB 掃描、1.3 MB 的 `scan-0.log`，而且 pipe 就開在 CE 裡面。
+
+**原因**：那個防護是一份「精確檔名清單」，而 CE 真正的執行檔是 `-SSE4-AVX2` 這個 CPU 變體，
+三個名字一個都沒中。而且 `g_isCEPlugin=0` —— 這次是手動注入，所以 `CEPlugin_GetVersion`
+那一半也幫不上忙。
+
+**現在**改成 `Grimoire::IsCheatEngineExeName`：對 `cheatengine` 這個字根做不分大小寫的
+**前綴**比對，而且錨定在開頭（所以 `MyCheatEngineClone.exe` 這種遊戲不會被誤拒）。
+
+**重測**：再手動把 DLL 注入 CE 一次。
+**PASS** = 出現 `host process is '…' — Cheat Engine is never a scan target`，
+而且那個資料夾裡的 `scan-0.log` 不會長大。
 
 任何有註冊 CE plugin 的 session 都免費：grep `init-0.log` 的 `DllMain AutoStart:`
 
@@ -161,8 +241,12 @@ grep `init-0.log` 的 `UE5_Init:`
 > 而且因為列舉順序是穩定的，舊版本**每一次啟動**都會停在同一個檔案。一個被鎖住的檔案就足以
 > 讓 21 天保留機制從此失效。
 
-## ⬜ B47 —— proxy 去重的防護會講出「它其實沒生效」
-**build 2603**
+## ✅ B47 —— proxy 去重的防護會講出「它其實沒生效」
+**build 2603** · **已驗證（2026-08-04 三份 session log，build 2622）**
+
+DQ7R 是透過 `version.dll` 跑的（真正的 proxy session，所以這段防護有被編進去），而
+`first-loaded-wins guard is NOT armed` 出現 **0 次** —— `Local` + PID 的名稱成功了，
+而舊的 `Global` 名稱需要遊戲沒有的權限。
 
 任何 proxy session：grep `init-0.log` 的 `first-loaded-wins guard is NOT armed`
 
@@ -170,6 +254,21 @@ grep `init-0.log` 的 `UE5_Init:`
 
 > 這行出現**不代表這個修正失敗** —— 它就是修正本身在回報一個以前完全無聲的狀況。
 > 但如果真的出現了，值得追一下。
+
+## ✅ B35 —— PERF 的分項不再把自己的探針算進去
+**build 2610** · **已驗證（2026-08-04 三份 session log，build 2622）**
+
+> 這一項出貨時**根本沒有建立驗證條目** —— 是掃這批 log 的時候才發現的歸檔漏洞。
+
+grep `PERF Snapshot capture` 得到：
+
+```
+wall 5,256.2 ms … split dll 2,733.5 / ipc 692.4 / ui 1,830.3 ms
+```
+
+三個分項加起來正好等於 wall；transport（dll+ipc = 3,425.9）**小於** wall；`ui` 是一個很大的非零值。
+修正前的特徵剛好相反：transport **大於** wall，於是 `ui` 被夾到 0，而 `ipc` 把探針自己那
+93–125 ms 的往返吸收掉了。這幾個數字正是 [multipipe-eval.md](multipipe-eval.md) 推論的依據。
 
 ## ⬜ B28 —— CJK FText 不再顯示成 ASCII 亂碼
 **build 2599** · 不需要 log，證據直接在畫面上
@@ -213,7 +312,12 @@ grep `init-0.log` 的 `Fly:`
 `Fly: collision disable deferred` 可能會出現，但**不可以重複** —— 它被限制成每次卡住只印一次。
 
 ## ⬜ B10 —— `WalkClassEx` 的 memo，效益已經自動被量測了
-**build 2596**
+**build 2596** · **卡在沒有「對照組」，不是卡在量測**
+
+保留下來的 log 裡只有**一條** `PERF Snapshot capture`（`wall 5,256.2 ms`，2026-08-04，
+修正之後），沒有 2596 之前的數字可以比。兩個選擇：把這個數字當成新的基準，下次對
+**同一個遊戲、同一份 snapshot** 再抓一次來比；或者只驗正確性那一半
+（struct 型別 / enum 名稱 / bool mask 仍然有值）。
 
 Snapshot capture 本來就包在 `DiagnosticsProbe` 裡，所以**不需要新增任何 log**：
 grep `pipe-0.log` 的 `PERF Snapshot capture`
@@ -337,8 +441,8 @@ grep `PRE-UE4 engine POSITIVELY identified`。
 
 Label / Group / Map 本來就是好的，現在也必須還是好的。
 
-## ⬜ B42 —— 第二次啟動會把第一個視窗叫到前面
-**build 2610**
+## ✅ B42 —— 第二次啟動會把第一個視窗叫到前面
+**build 2610** · **已驗證（2026-08-04，由維護者確認）**
 
 **怎麼做**：跑 `dist\UE5DumpUI.exe`，然後再跑一次（雙擊 exe 或捷徑）。
 
@@ -348,8 +452,8 @@ Label / Group / Map 本來就是好的，現在也必須還是好的。
 **值得在第一個實例「已連線到遊戲」的狀態下測**，因為視窗標題會帶上模組名稱，
 用標題搜尋的做法正好會在這個時候失效。
 
-## ⬜ B36 —— 沒選任何列時的 Force 子選單
-**build 2610**
+## ✅ B36 —— 沒選任何列時的 Force 子選單
+**build 2610** · **已驗證（2026-08-04，由維護者確認）**
 
 **怎麼做**：Property Search → 執行一次搜尋 → **在列的下方空白處按右鍵**，
 或在一個你沒有左鍵點過的列上按右鍵。
@@ -360,8 +464,30 @@ Label / Group / Map 本來就是好的，現在也必須還是好的。
 
 > 需要先打開 Experimental 開關，子選單才會存在。
 
-## ⬜ B14 + R5 —— 在 hold worker 還活著的時候關掉遊戲
-**build 2596** · **建議優先做這一項**
+## 🔴 B14 + R5 —— 在 hold worker 還活著的時候關掉遊戲
+**build 2596** · **失敗（2026-08-04 三份 session log，build 2622）→ 適用範圍已修正 build 2628，要重測**
+
+DQ7R 在 21:05:06 當掉，跑的是 build 2622（所有修正都在裡面）。WER dump
+（`%LOCALAPPDATA%\CrashDumps\DQ7R-Win64-Shipping.exe.55564.dmp`）顯示：
+
+- `0xC0000409`，**param[0] = 7 = FAST_FAIL_FATAL_APP_EXIT** —— 就是 `abort()` / `std::terminate`
+- 整條錯誤堆疊都在 `version.dll` 和 CRT 裡面，也就是**我們自己的程式碼**
+- **任何地方都沒有 `tick threw`** —— 表示連一個 guard 都沒被碰到
+
+當時的情境：`pipe-0.log` 最後一行是 `FindInstancesByClass` 回報 `nonNull=35109`，
+而 0.3 秒前同一個查詢還是 `154964` —— 遊戲正在拆掉物件池，而我們還在走它。
+
+**修正本身是對的，錯的是它的適用範圍。** 原本的 finding 寫「7 個 thread proc 中的 2 個」；
+DLL 實際上約有 15 個地方「丟出例外 = `std::terminate`」。build 2628 把
+`Routine::RunThreadGuarded` 補到全部，其中最關鍵的是 `Stark::HookedProcessEvent` ——
+它跑在**遊戲自己的執行緒**上，由沒有任何 handler 的遊戲程式碼呼叫進來，而且會配置記憶體兩次。
+
+**重測**：照下面原本的步驟。**PASS** = event log 沒有任何一筆。
+如果又發生，`init-0.log` 現在會有 `UNCAUGHT exception … contained` 並指出是哪條執行緒 ——
+這正是把所有進入點都走同一個 helper 換來的東西。
+
+> 同一份 event log 裡的 Elliot 當機是 build **2567**，在 B14 出貨之前 ——
+> 那是原本的 bug，不是回歸。
 
 這正是 build 2389 真的產生 `0xC0000409` 的重現步驟，現在拿來對那些當時還沒防護的迴圈再跑一次。
 

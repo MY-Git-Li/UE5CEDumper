@@ -1685,10 +1685,30 @@ Pick up when the active plan finishes or when blocked.
 > **② Manual-only** — needs a human at the keyboard doing something no log can cause (a click
 > sequence, a specific game, a specific third-party install). Each of these carries its exact steps
 > and the PASS/FAIL observation.
+>
+> **STATUS after the first real sweep (2026-08-04, build 2622 — DQ7R / Elliot / CE logs):**
+> **7 ✅ verified · 2 🔴 FAILED and refixed · 16 ⬜ not yet exercised.**
+> Verified: B49, B31, B5(passive), B47, B35, B42, B36. Failed: **B34** (CE's real exe is the
+> `-SSE4-AVX2` variant, which an exact-name list missed) and **B14+R5** (the guard was applied to
+> an enumeration that had counted wrong — a WER dump proved `std::terminate` on a thread no guard
+> covered). Both refixed in build 2628 and need a re-test.
+>
+> **The lesson both failures share, worth carrying into the remaining 16:** a fix verified against
+> the *list* it was written from is not verified. B34 listed three CE filenames; B14 listed seven
+> thread procs. Each was correct about every item on its list and wrong about the world.
+>
+> ⬜ does **not** mean "probably fine". It means nobody has looked. Nine of the sixteen were simply
+> not exercised by these sessions (no wrapper installed, no UI killed mid-command, Noclip never
+> switched on, no Extra Scan, no Report run).
 
 #### ① Log-derivable
 
-- ⬜ **`Fern::Stop` no longer waits for a client that may never come** (build 2569, B49).
+- ✅ **`Fern::Stop` no longer waits for a client that may never come** (build 2569, B49) —
+  **VERIFIED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622.** The CE session hit the exact wedge condition, `Stop entry (conns=0)`,
+  which is the case the old `CloseHandle` on a synchronous listen handle blocked on forever:
+  `cancels+wake done (0 ms)` → `conn drain satisfied, 0 left (3 ms)` → `accept join done (3 ms)`
+  → `monitor join done (58 ms)` → `Stopped`. 59 ms end to end against a PASS bar of ~100 ms.
+  *Original instructions kept below for the next build.*
   **Already instrumented** — the fix shipped with per-phase logging precisely so this needs no
   special run. Play normally with the UI connected, then disconnect the UI and untick the CE record.
   Grep `pipe-0.log` for `PipeServer: Stop entry` and the phase lines that follow it.
@@ -1703,18 +1723,31 @@ Pick up when the active plan finishes or when blocked.
   case that used to be misread. **PASS** = the line names the foreign module and injection proceeds.
   (The manual half — actually installing a wrapper — is in ② below.)
 
-- ⬜ **UI log rolls at 8 MB instead of stopping** (build 2585, B31). Free from any long session:
+- ✅ **UI log rolls at 8 MB instead of stopping** (build 2585, B31) — **VERIFIED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622.**
+  `Logs\UE5DumpUI\` holds `pipe-0.log` at **8,388,756 bytes** (the 8 MiB cap) *and*
+  `pipe-0_001.log` at 4,055,182 bytes with a **newer** mtime (21:05 vs 20:53). The roll happened
+  and writing continued into the new file — the silent-stop signature would have been the 8 MB
+  file alone with a stale last line. *Original instructions below.*
+  Free from any long session:
   `ls %LOCALAPPDATA%\UE5CEDumper\Logs\UE5DumpUI\`. **PASS** = files named `pipe-0_001.log` (or
   similar) exist alongside `pipe-0.log` once a category passes 8 MB, and the newest file's last line
   is recent. **FAIL** = a single `pipe-0.log` sitting at exactly ~8 MB with a stale last line — that
   is the silent-stop signature. Fastest way to reach it: Teleport → Auto refresh, left running.
 
-- ⬜ **Leftover-proxy reports land inside the app folder** (build 2585, B38). Run a proxy-cleanup
-  Report. **PASS** = the file appears under `%LOCALAPPDATA%\UE5CEDumper\Reports\`. **FAIL** = it
+- ⬜ **Leftover-proxy reports land inside the app folder** (build 2585, B38). **Not yet exercised**
+  — no Report has been run since the fix. Checked 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622: `%LOCALAPPDATA%\Reports\` does
+  hold `leftover-proxies-20260730-210903.txt`, but that is dated **2026-07-30**, i.e. before
+  build 2585, so it is the documented pre-fix leftover and **not** evidence of failure.
+  Run a proxy-cleanup Report. **PASS** = the file appears under `%LOCALAPPDATA%\UE5CEDumper\Reports\`. **FAIL** = it
   appears in `%LOCALAPPDATA%\Reports\`. (Files written before 2585 stay in the old place by design.)
 
-- ⬜ **The `UE5_Init` guard did not break ordinary init** (build 2592, B5) — *passive half, free from
-  any session.* Grep `init-0.log` for `UE5_Init:`. **PASS** = `Starting initialization...` and
+- ✅ **The `UE5_Init` guard did not break ordinary init** (build 2592, B5) — *passive half* —
+  **VERIFIED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622.** `Starting initialization...` and `Complete (UE…)` are one-for-one in
+  all three games (DQ7R 5/5, Elliot 14/14, CE 1/1), and neither new line
+  (`init already in progress`, `shutdown was requested during the scan`) appears anywhere.
+  As stated below, that proves the guard is harmless, **not** that the race is fixed — the
+  deliberate provocation is still open in ②. *Original instructions below.*
+  *free from any session.* Grep `init-0.log` for `UE5_Init:`. **PASS** = `Starting initialization...` and
   `Complete (UE…)` alternate strictly one-for-one, and neither of the two new lines
   (`init already in progress`, `shutdown was requested during the scan`) appears. **FAIL** =
   a `Starting` with no matching `Complete` (the guard deadlocked — nothing should be able to cause
@@ -1722,7 +1755,18 @@ Pick up when the active plan finishes or when blocked.
   racing). Absence of the new lines proves only that the race did not *occur*; the deliberate
   provocation is in ② below.
 
-- ⬜ **Cheat Engine is never scanned as if it were the game** (build 2603, B34). Free from any
+- 🔴 **Cheat Engine is never scanned as if it were the game** (build 2603, B34) — **FAILED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622, REFIXED build 2628, needs a re-test.**
+  The capture shows `process: …\cheatengine-x86_64-SSE4-AVX2.exe` followed by
+  `DllMain AutoStart: game process — calling UE5_AutoStart` — a 5.8 s AOB scan and the pipe
+  opened **inside CE** (1.3 MB `scan-0.log` in that folder). Cause: the guard was an exact-name
+  list and CE's real executable is the `-SSE4-AVX2` CPU-feature variant, which matched none of
+  the three names. `g_isCEPlugin=0` too — the DLL was hand-injected, so the
+  `CEPlugin_GetVersion` half could not help either. Now
+  `Grimoire::IsCheatEngineExeName`, a case-insensitive **prefix** on the `cheatengine` stem
+  (anchored at the start, so `MyCheatEngineClone.exe` is still allowed).
+  **Re-test:** inject the DLL into CE by hand again. **PASS** = `host process is '…' — Cheat
+  Engine is never a scan target` and **no** `scan-0.log` growth in that folder.
+  Free from any
   session where the CE plugin is registered: grep `init-0.log` for `DllMain AutoStart:`.
   **PASS** = when the host is CE, either `CE plugin host — skipping auto-start` (the normal path,
   now reached because `CEPlugin_GetVersion` claims identity) or the new
@@ -1745,11 +1789,24 @@ Pick up when the active plan finishes or when blocked.
   **FAIL** = both remain — the sweep aborted at the held file, which it did on every launch because
   enumeration order is stable.
 
-- ⬜ **The proxy dedup guard says when it is not armed** (build 2603, B47). Any proxy session:
+- ✅ **The proxy dedup guard says when it is not armed** (build 2603, B47) — **VERIFIED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622.**
+  DQ7R ran through `version.dll` (a real proxy session, so the guard is compiled in) and
+  `first-loaded-wins guard is NOT armed` appears **zero** times: `Local\…_<PID>` succeeded where
+  `Global\` needed a privilege the game does not have. *Original instructions below.*
+  Any proxy session:
   grep `init-0.log` for `first-loaded-wins guard is NOT armed`. **PASS** = the line is ABSENT
   (`Local\` + PID succeeds where `Global\` needed a privilege the game does not have). Its presence
   is not a failure of this fix — it is the fix reporting a condition that used to be silent — but
   it is worth investigating if it appears.
+
+- ✅ **The PERF split no longer measures its own probe** (build 2610, B35) — **VERIFIED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622.**
+  *This item had no verification entry when it shipped — a gap in the filing, found while
+  sweeping these logs.* `grep 'PERF Snapshot capture'` gives
+  `wall 5,256.2 ms … split dll 2,733.5 / ipc 692.4 / ui 1,830.3 ms`. The three parts sum to the
+  wall time exactly, transport (dll+ipc = 3,425.9) is **less** than wall, and `ui` is a large
+  non-zero. The pre-fix signature was the opposite: transport **exceeded** wall, so `ui` clamped
+  to 0 and `ipc` absorbed the probe's own 93–125 ms round-trip. These are the numbers
+  [multipipe-eval.md](multipipe-eval.md) reasons from.
 
 - ⬜ **CJK FText no longer renders as ASCII mojibake** (build 2599, B28) — *no log needed; the
   evidence is on screen.* Affects **FText-typed values only** (`ReadFTextString`); FString goes
@@ -1772,7 +1829,12 @@ Pick up when the active plan finishes or when blocked.
   Second, cheaper check on any Fly session: `Fly: collision disable deferred` may appear, but it
   must not repeat — it is rate-limited to once per stall.
 
-- ⬜ **`WalkClassEx` memo — the win is already instrumented** (build 2596, B10). Snapshot capture is
+- ⬜ **`WalkClassEx` memo — the win is already instrumented** (build 2596, B10). **Blocked on a
+  BASELINE**, not on instrumentation: the retained logs hold exactly one
+  `PERF Snapshot capture` line (`wall 5,256.2 ms`, 2026-08-04, post-fix), so there is nothing
+  pre-2596 to compare it against. Either keep this number as the new baseline and compare the
+  next capture of the SAME snapshot on the same game, or settle the correctness half alone
+  (struct types / enum names / bool masks still populate). Snapshot capture is
   wrapped in a `DiagnosticsProbe`, so no new logging is needed: grep `pipe-0.log` for
   `PERF Snapshot capture`. **PASS** = `wall … ms` is materially lower than the same capture on a
   pre-2596 build (the memo removes a 100–300 × `FieldInfo` deep copy per struct-array *element*),
@@ -1843,19 +1905,36 @@ Pick up when the active plan finishes or when blocked.
   **published (AOT/trimmed)** build — the whole defect is trimmed-away reflection metadata, so a
   plain `dotnet run` will not reproduce it. Label / Group / Map worked before and must still work.
 
-- ⬜ **Second launch raises the first window** (build 2610, B42). Run `dist\UE5DumpUI.exe`, then run
+- ✅ **Second launch raises the first window** (build 2610, B42) — **VERIFIED 2026-08-04 (maintainer).** Run `dist\UE5DumpUI.exe`, then run
   it again (double-click the exe, or the shortcut). **PASS** = the existing window comes to the
   front — including when it was minimized — and no second window appears. **FAIL** = nothing
   visibly happens, which is the old behaviour. Worth testing with the first instance **connected to
   a game**, since the window title carries the module name and a title-based search would miss
   exactly then.
 
-- ⬜ **Force submenu with nothing selected** (build 2610, B36). Property Search → run a search →
+- ✅ **Force submenu with nothing selected** (build 2610, B36) — **VERIFIED 2026-08-04 (maintainer).** Property Search → run a search →
   **right-click empty space below the rows**, or a row you have not left-clicked. **PASS** = no
   Force submenu. Left-click a BoolProperty row, right-click it: only Force ON / OFF. FAIL = all
   four actions at once. (Needs the Experimental toggle on for the submenu to exist at all.)
 
-- ⬜ **Close the game with a hold worker live** (build 2596, B14 + R5). This is the exact repro that
+- 🔴 **Close the game with a hold worker live** (build 2596, B14 + R5) — **FAILED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622, SCOPE CORRECTED build 2628, needs a re-test.**
+  DQ7R crashed at 21:05:06 on build 2622 (every fix present). The WER dump
+  (`%LOCALAPPDATA%\CrashDumps\DQ7R-Win64-Shipping.exe.55564.dmp`) gives
+  `0xC0000409` with **param[0] = 7 = FAST_FAIL_FATAL_APP_EXIT** — `abort()`/`std::terminate` —
+  and the whole faulting stack inside `version.dll` + the CRT. **No `tick threw` line anywhere**,
+  so no guard was even reached. Context: `pipe-0.log`'s last line is a `FindInstancesByClass`
+  reporting `nonNull=35109` where the call 0.3 s earlier said `154964` — the game was freeing its
+  object pool while we walked it.
+  **The fix was right; its SCOPE was wrong.** The finding said "2 of 7 thread procs"; the DLL has
+  ~15 places where a throw is fatal. Build 2628 adds `Routine::RunThreadGuarded` to all of them,
+  the important one being `Stark::HookedProcessEvent` — it runs on the **game's own thread**,
+  entered from game code with no handler for us, and allocates twice.
+  **Re-test:** same steps below. **PASS** = no event-log entry. If it fires again, `init-0.log`
+  now carries `UNCAUGHT exception … contained` naming the thread — that is what routing every
+  entry point through one helper buys.
+  *Note: the Elliot crash in the same event log is build **2567**, before B14 shipped — that one
+  is the original bug, not a regression.*
+  This is the exact repro that
   produced the live `0xC0000409` in build 2389, re-run against the loops that were still unguarded.
   **To test:** enable **two** holds whose workers were previously bare — Time Dilation (Hemmung) and
   Move Speed (Laufen) — plus See-through, then **disable See-through while the game is backgrounded**
