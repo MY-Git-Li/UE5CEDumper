@@ -18,7 +18,7 @@
 **Tally:** 3 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **52 items** (26 from 4a, 25 from 4b, 1 from in-game verification).
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
-**Progress: 9 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577), B2 + B3 (2581) — 43 open.**
+**Progress: 12 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577), B2 + B3 (2581), B31 + B37 + B38 (2585) — 40 open.**
 **+1 found by in-game verification** (B49), which is why 51 became 52.
 
 > ### ✅ Verification discipline
@@ -62,7 +62,7 @@ existing behaviour / perf.
 | B28 | 🟠 | M/med | Utf8Helpers | UTF-8-first gate accepts a UTF-16 CJK buffer whose byte at `n−1` is `0x00` ⇒ ASCII mojibake, UTF-16 branch unreachable |
 | B29 ✅ | 🟠 | S/low | Methode | ~~CE-plugin "already loaded" guard matches by **filename alone** ⇒ ReShade's `dxgi.dll` makes it refuse to inject~~ **FIXED build 2577** |
 | B30 ✅ | 🟠 | S/low | UE5CEDumper.CT | ~~Every `ue5_inject()` bail-out leaves CE's record ticked ⇒ untick runs a real `UE5_Shutdown` against a proxy this script never injected~~ **FIXED build 2561** |
-| B31 | 🟠 | S/low | LoggingService | `fileSizeLimitBytes` without `rollOnFileSizeLimit:true` ⇒ the sink silently stops writing at 8 MB for the rest of the process |
+| B31 ✅ | 🟠 | S/low | LoggingService | ~~`fileSizeLimitBytes` without `rollOnFileSizeLimit:true` ⇒ the sink silently stops writing at 8 MB for the rest of the process~~ **FIXED build 2585** |
 | B11 | 🟡 | S/low | Sein | `fprintf` on a NULL `FILE*` after a failed rotation reopen ⇒ can terminate the game |
 | B12 | 🟡 | S/low | Proxy cleanup | Confirm/status text asserts things the executed plan contradicts |
 | B13/B41 | 🟡 | M/low | Proxy cleanup | "Recycle Bin" promise unverifiable; a drive-letter test is not a recycler test |
@@ -84,8 +84,8 @@ existing behaviour / perf.
 | B34 | 🟡 | S/low | Heiter | CE-plugin detection is a 1 s race ⇒ AOB scan + pipe server open **inside cheatengine-x86_64.exe** |
 | B35 | 🟡 | S/low | DiagnosticsProbe | The probe's own closing round-trip falls inside the measured window ⇒ `transportMs > wallMs`, `ui` clamps to 0 |
 | B36 | 🟡 | S/low | PropertySearchPanel | No `FallbackValue` ⇒ all four mutually-exclusive Force actions render when nothing is selected |
-| B37 | 🟡 | S/low | LoggingService | Count-based folder eviction ranks by **directory mtime** — the signal its own sibling documents as unusable |
-| B38 | 🟡 | S/low | ProxyDeployVM | Leftover-proxy reports written to `%LOCALAPPDATA%\Reports`, not `…\UE5CEDumper\Reports` |
+| B37 ✅ | 🟡 | S/low | LoggingService | ~~Count-based folder eviction ranks by **directory mtime** — the signal its own sibling documents as unusable~~ **FIXED build 2585** |
+| B38 ✅ | 🟡 | S/low | ProxyDeployVM | ~~Leftover-proxy reports written to `%LOCALAPPDATA%\Reports`, not `…\UE5CEDumper\Reports`~~ **FIXED build 2585** |
 | B39 | 🟡 | M/med | Flamme | Four HintCache writers share one fixed `.tmp` path; the UI writes the byte-identical path from another process |
 | B40 ✅ | 🟡 | S/low | UE5CEDumper.CT | ~~`ue5_callDLL` uses bare `getAddress` and tests for nil — CE *throws*, aborting the disable block and leaking the log FILE handle~~ **FIXED build 2561** |
 | B42 | 🟡 | S/low | App | Second launch calls `Shutdown(1)` before the logger exists — no window, no dialog, no log line |
@@ -1029,9 +1029,8 @@ gating · Mimic `LIST_FUNCTIONS`/`LIST_INSTANCES` page-index overflow ·
    first and inverted the plan: `executeCodeEx` returned `nil`, so (a) was real and (b) was latent —
    which made "fix the arity alone" a certain brick rather than a suspected one.
 3. ~~**B2, B3** — two small, low-risk, high-damage-avoided changes; both are "publish/emit correctly".~~ **✅ DONE — build 2581.**
-4. **B31 + B37 + B38** — one `LoggingService`/reports commit (`rollOnFileSizeLimit: true` **with
-   `retainedFileCountLimit: null`**, judge folders by newest file inside, one `Path.Combine` segment), and
-   fix the false claim in `walk_payload_audit.py:51` in the same change.
+4. ~~**B31 + B37 + B38**~~ **✅ DONE — build 2585**, including the
+   `walk_payload_audit.py` docstring, which was wrong in BOTH halves it asserted.
 5. ~~**B29** — one rewrite of `IsAlreadyLoadedInTarget`: wide path + identity probe.~~ **✅ DONE — build 2577.**
 6. **B30 + B40** — one `.CT` commit: `memrec.Active = false` on all five bail-outs, quiet-if-absent
    `ue5_shutdown`, `pcall(getAddress)` in `ue5_callDLL`, **and the same guard in

@@ -20,6 +20,58 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - The 8 MB "cap" was a kill switch, and the folder sweep used the one signal its sibling calls unusable (build 2585)
+
+Audit #4 B31 + B37 + B38 — one commit, all in log/report retention.
+
+**B31.** `CreateFileLogger` passed `fileSizeLimitBytes` and stopped there. Serilog defaults
+`rollOnFileSizeLimit` to **false** and `rollingInterval` to **Infinite**, so the sink has no roll
+point: once a category file reaches 8 MB it **drops every subsequent event for the rest of the
+process** — no exception, no `SelfLog`, nothing. Meanwhile `docs/architecture.md:274` and the
+CLAUDE.md log rule both state the cap *archives* mid-session, and the DLL half
+(`Sein::RotateIfNeeded`) genuinely does.
+
+Two reachable ways to hit it, neither exotic: Teleport's Auto-refresh runs a 500 ms timer that logs a
+`Pipe TX`/`Pipe RX` pair per tick, so the pipe category dies mid-session with **no user action at
+all**; and `UE5DUMP_PIPE_LOG_FULL=1` uncaps bodies, after which 8 MB falls within a handful of
+batched responses.
+
+Fixed with `rollOnFileSizeLimit: true` **and `retainedFileCountLimit: null`**. The second half is not
+optional: Serilog defaults that to 31 the moment rolling is enabled, and a generation **count** limit
+is exactly the retention policy this project deliberately replaced with an age-based one — leaving it
+defaulted would reinstate count eviction by the back door. Retention stays owned by `PruneAgedLogs`,
+which still sees the rolled files: they are named `{prefix}-0_001.log`, which matches its
+`{prefix}-*.log` glob and does not end in `-0.log`, so the live-file guard leaves only the active
+file alone.
+
+**B37.** `CleanupProcessFolders` ranked folders by `DirectoryInfo.LastWriteTimeUtc` — the signal the
+age-based sweep 30 lines below **documents as unusable**, because Windows bumps a directory's
+timestamp when entries are added or removed but not when an existing child is appended to. A live
+game's folder can therefore sink below a batch of stale ones and be deleted out from under it. Both
+sweeps now share one `NewestWriteUtc` helper, and the eviction rule moved into
+`SelectFoldersToEvict` — pure policy, same shape as `ProxyOrphanScanner.SelectExpiredReports`, so it
+is testable without touching disk. The UI's own folder is now exempt from the count cap too, and
+excluded *before* the cap so it cannot silently consume a kept slot.
+
+**B38.** `GetAppDataPath()` is `%LOCALAPPDATA%` itself, so the app folder segment has to be added —
+every other consumer does. Without it, the written record of a **destructive cleanup** landed in
+`%LOCALAPPDATA%\Reports`: outside the System-tab data wipe, and outside "send me your app data
+folder". (Reports already written to the old location stay there; they are harmless `.txt` files and
+moving user data to tidy up is not worth the risk.)
+
+Also corrected: `walk_payload_audit.py`'s docstring told the reader that setting
+`UE5DUMP_PIPE_LOG_FULL=1` gives *"the LAST ~32 MiB … an unbiased one"*. **Both halves were false** —
+nothing rotated at all, so the script was measuring the export's opening prefix and reintroducing
+precisely the bias the flag exists to remove. It now describes what the code does.
+
+New `LoggingServiceRetentionTests`: five cases pin the eviction policy (including "an actively
+written folder outranks stale ones", the B37 failure in one assertion), and one writes past the real
+8 MB cap and asserts the event logged **after** it is on disk — the only honest way to test that
+property. **Verified by negative control:** removing `rollOnFileSizeLimit` again fails exactly that
+test. 3161 green (+6), suite duration unchanged.
+
+-----
+
 ## 2026-08-04 - Two exports that published something CE could not use (build 2581)
 
 Audit #4 B2 + B3, together because they are the same shape: code that emits a value without

@@ -616,7 +616,12 @@ public partial class ProxyDeployViewModel : ViewModelBase
         try
         {
             ClearError();
-            string dir = Path.Combine(_platform.GetAppDataPath(), "Reports");
+            // GetAppDataPath() is %LOCALAPPDATA% itself, so the app's own folder segment
+            // has to be added — every other consumer does. Without it the written record
+            // of a destructive cleanup landed in %LOCALAPPDATA%\Reports: outside the
+            // System-tab data wipe, and outside "send me your app data folder". Audit #4 B38.
+            string dir = Path.Combine(_platform.GetAppDataPath(),
+                                      Constants.LogFolderName, "Reports");
             Directory.CreateDirectory(dir);
             // Timestamped rather than overwritten so two scans can be compared, and so a report the
             // user is still reading is never replaced under them.
