@@ -640,7 +640,16 @@ public partial class ProxyDeployViewModel : ViewModelBase
     private async Task WriteOrphanReportAsync()
     {
         // Gate on "a scan has run", not on "it found something" — see CanWriteOrphanReport.
-        if (!OrphanScanRan) { LastOperationResult = "Nothing to report — run the scan first"; return; }
+        // Log BOTH outcomes. Three rounds were spent on "I ran Report and no file appeared"
+        // with nothing in the log to say whether the command had even been entered — the
+        // success path logged nothing and the refusal logged nothing, so "it never ran" and
+        // "it ran and failed" were indistinguishable. Same defect this whole audit is about.
+        if (!OrphanScanRan)
+        {
+            _log.Info("ProxyDeploy", "Leftover report refused: no orphan scan has run in this session");
+            LastOperationResult = "Nothing to report — run the scan first";
+            return;
+        }
         if (_platform == null) { LastOperationResult = "Report unavailable on this platform"; return; }
 
         try
@@ -671,6 +680,9 @@ public partial class ProxyDeployViewModel : ViewModelBase
             PruneAgedReports(dir);
             await _platform.OpenWithShellAsync(file);
 
+            _log.Info("ProxyDeploy",
+                      $"Leftover report written: {file} ({Orphans.Count} row(s), " +
+                      $"{_orphanFoldersExamined} folder(s) examined)");
             SetOperationResult($"Report written: {file}", 0);
         }
         catch (Exception ex)

@@ -1829,6 +1829,21 @@ Pick up when the active plan finishes or when blocked.
   its Chinese must still read correctly.
 
 - 🟡 **Fly/Noclip no longer leaves the pawn ghosted** (build 2596, B8) — **MAIN PATH VERIFIED**
+  > **⚠ READ THIS BEFORE RE-TESTING — the deferred half is NOT reachable by closing the game.**
+  > Closing a game never calls Fly's disable at all: `UE5_Shutdown` does not run on game close
+  > (proven — zero `UE5_Shutdown: Cleaning up` lines in any session), so `Dunste::SetEnabled(false)`
+  > never executes and `DISABLED but the pawn's collision is still OFF` can never be printed.
+  > Confirmed in the 22:33 Elliot run: Fly was ON, the game was closed, and there is **no
+  > `Fly: DISABLED` line at all**. That run is a B14 test, not a B8 test.
+  >
+  > The deferred half needs the **Disable button clicked while the game thread is quiet**. The
+  > 22:01 Elliot run did click Disable — and `SetActorEnableCollision(1) invoked` proves the game
+  > thread was still ticking, so Elliot does not appear to idle when unfocused. Alt-tab duration is
+  > not the variable; whether the title honours `t.IdleWhenNotForeground` is.
+  >
+  > **So this needs a game that actually goes quiet when backgrounded.** If none is to hand it is
+  > reasonable to close it as accepted-unverified: the code path is the same one Schlacht has been
+  > running in production since build 2364, and the main path is verified.
   (Elliot, 2026-08-04, noclip ON). The log shows the fixed ordering exactly:
   `Fly: worker stopped` → `Fly: SetActorEnableCollision(1) invoked` → `Fly: DISABLED`. Join
   before restore, and the restore is committed from the invoke *actually running*. **The
