@@ -3059,6 +3059,34 @@ static bool PatMatchAt(const Macht::ParsedPattern& pat,
     return true;
 }
 
+// B34 — Cheat Engine must never be auto-scanned as if it were the game.
+//
+// The first version of this guard was an exact-name list and shipped "verified". A live
+// capture then showed the DLL scanning CE for 5.8 s and opening the game pipe inside it,
+// because the real executable is cheatengine-x86_64-SSE4-AVX2.exe — a CPU-feature variant
+// none of the three listed names matched. That exact string is the first assertion here.
+static void Test_Grimoire_IsCheatEngineExeName() {
+    std::printf("Test_Grimoire_IsCheatEngineExeName\n");
+
+    // The name from the failing capture. If only one line of this test survives, this one.
+    EXPECT("SSE4-AVX2 variant (the live miss)",
+           IsCheatEngineExeName(L"cheatengine-x86_64-SSE4-AVX2.exe"));
+
+    EXPECT("plain x86_64",   IsCheatEngineExeName(L"cheatengine-x86_64.exe"));
+    EXPECT("i386",           IsCheatEngineExeName(L"cheatengine-i386.exe"));
+    EXPECT("launcher shim",  IsCheatEngineExeName(L"Cheat Engine.exe"));
+    EXPECT("case-insensitive", IsCheatEngineExeName(L"CHEATENGINE-X86_64.EXE"));
+    // A variant that does not exist yet must also match — that is the point of a prefix.
+    EXPECT("hypothetical future variant",
+           IsCheatEngineExeName(L"cheatengine-x86_64-AVX512.exe"));
+
+    // Anchored at the start, so a game that merely CONTAINS the words is not refused.
+    EXPECT("substring is not enough",  !IsCheatEngineExeName(L"MyCheatEngineClone.exe"));
+    EXPECT("unrelated game",           !IsCheatEngineExeName(L"DQ7R-Win64-Shipping.exe"));
+    EXPECT("empty",                    !IsCheatEngineExeName(L""));
+    EXPECT("null",                     !IsCheatEngineExeName(nullptr));
+}
+
 // B46 — HexToBytes could not fail, so write_mem could not report a bad pattern.
 static void Test_Renge_TryHexToBytes() {
     std::printf("Test_Renge_TryHexToBytes\n");
@@ -3444,6 +3472,9 @@ int main() {
 
     // Tot — per-command cancel immunity is independent of "is a background worker"
     Test_Tot_CancelImmunityVsBackgroundWorker();
+
+    // Grimoire — Cheat Engine host detection (prefix, not an exact-name list)
+    Test_Grimoire_IsCheatEngineExeName();
 
     // Renge — hex parsing has a failure channel (write_mem can refuse a bad pattern)
     Test_Renge_TryHexToBytes();

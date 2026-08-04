@@ -53,6 +53,36 @@ inline void RunTickGuarded(const char* tag, bool& warnedOnce, TickFn&& tick) {
     }
 }
 
+// Wrap an ENTIRE thread body (or any callback invoked from foreign code) so a throw
+// cannot escape into a frame that has no handler.
+//
+// WHY THIS EXISTS SEPARATELY FROM RunTickGuarded: audit #4's B14 was filed as "the guard
+// reached 2 of 7 thread procs", and fixing exactly those seven left the process still
+// terminating. A live DQ7R capture (2026-08-04, build 2622, WER param[0]=7 =
+// FAST_FAIL_FATAL_APP_EXIT with the whole stack inside our own module) proved the
+// enumeration itself was wrong: the DLL has ~15 places where a C++ exception means
+// std::terminate, and the six feature workers are only some of them. The rest are Fern's
+// accept / connection / watch / scan threads, Mimic's poller, Heiter's auto-start thread,
+// and — the one that cannot be reached any other way — Stark's ProcessEvent hook, which
+// runs on the GAME's own thread and is entered from game code that has no handler for us.
+//
+// Returns false when the body threw, so a caller that must react (rather than merely
+// survive) can. Never rethrows.
+template <typename Fn>
+inline bool RunThreadGuarded(const char* tag, Fn&& body) {
+    try {
+        body();
+        return true;
+    } catch (const std::exception& e) {
+        LOG_ERROR("%s: UNCAUGHT exception (%s) — contained. This would previously have "
+                  "terminated the game (0xC0000409).", tag, e.what());
+    } catch (...) {
+        LOG_ERROR("%s: UNCAUGHT non-standard exception — contained. This would previously "
+                  "have terminated the game (0xC0000409).", tag);
+    }
+    return false;
+}
+
 // Sleep `totalMs` in WORKER_SLEEP_SLICE_MS slices so StopWorker()'s join waits at most
 // one slice instead of a whole period. Returns false if the stop flag was raised (or a
 // shutdown began) while sleeping — i.e. "do not run the tick".

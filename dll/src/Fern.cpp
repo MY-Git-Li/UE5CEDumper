@@ -17,6 +17,7 @@
 #include "Stark.h"
 #include "Radar.h"
 #include "Tot.h"
+#include "Routine.h"   // Routine::RunThreadGuarded — a throw out of a thread proc is std::terminate (B14)
 #include "Wirbel.h"
 #include "Laufen.h"
 #include "Hemmung.h"  // Hemmung::SetDilation/ResetDilation/GetSnapshot for time_* commands
@@ -597,6 +598,8 @@ void Fern::Stop() {
 // scan bails. Peeks only while m_commandInFlight (handler is CPU-bound in
 // DispatchCommand, not touching the pipe) — no concurrent read/write.
 void Fern::MonitorLoop() {
+  // Allocates while peeking the pipe and formatting logs; a raw thread proc. (B14)
+  Routine::RunThreadGuarded("PipeServer: MonitorLoop", [&] {
     while (m_running.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         if (!m_running.load()) break;
@@ -642,9 +645,13 @@ void Fern::MonitorLoop() {
             }
         }
     }
+  });
 }
 
 void Fern::AcceptLoop() {
+  // The accept thread allocates (Connection, the registry, log formatting). A throw here
+  // is std::terminate — and it also silently ends the server, so the guard reports it. (B14)
+  Routine::RunThreadGuarded("PipeServer: AcceptLoop", [&] {
     while (m_running.load()) {
         // Create a new pipe instance (multi-instance: up to kMaxPipeInstances
         // concurrent clients, so the UI's interactive + bulk lanes can connect
@@ -710,9 +717,17 @@ void Fern::AcceptLoop() {
         if (firstConn) Tot::ResetPerCommand();
 
         LOG_INFO("PipeServer: Client connected (conns=%zu)", connCount);
-        std::thread([this, conn]() { HandleConnection(conn); }).detach();
+        // Guarded: only DispatchCommand inside HandleConnection had a handler, so a
+        // throw from ReadLine / the JSON pre-parse / WriteLine escaped a DETACHED
+        // thread — std::terminate, i.e. the game dies. (B14)
+        std::thread([this, conn]() {
+            Routine::RunThreadGuarded("PipeServer: connection",
+                                      [&] { HandleConnection(conn); });
+        }).detach();
     }
     LOG_INFO("PipeServer: AcceptLoop exiting");
+  });
+  });
 }
 
 std::string Fern::ReadLine(HANDLE pipe) {
@@ -5505,7 +5520,9 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
 // ============================================================
 void Fern::RunScan() {
     Sein::Info("PIPE:scan", "RunScan: started");
-    UE5_Init();  // Updates ScanProgress phases 1-7
+    // UE5_Init allocates heavily against a live game. The flags below MUST still be
+    // cleared if it throws, or the UI waits on a scan that is never coming. (B14)
+    Routine::RunThreadGuarded("RunScan", [] { UE5_Init(); });
     m_scan.completed = true;
     m_scan.running.store(false);
     Sein::Info("PIPE:scan", "RunScan: finished");
@@ -5515,6 +5532,15 @@ void Fern::RunScan() {
 // RunRescan — Background thread for aggressive pointer recovery
 // ============================================================
 void Fern::RunRescan(bool scanGObjects, bool scanGWorld) {
+    // Guarded, and the `running` flag is cleared in BOTH outcomes: Genau's Extra Scan
+    // allocates against a live process, and a throw here used to terminate the game AND
+    // (had it not) would have left the UI waiting on a rescan that never finishes. (B14)
+    Routine::RunThreadGuarded("RunRescan", [&] { RunRescanBody(scanGObjects, scanGWorld); });
+    m_rescan.phase.store(3);
+    m_rescan.running.store(false);
+}
+
+void Fern::RunRescanBody(bool scanGObjects, bool scanGWorld) {
     Sein::Info("PIPE:rescan", "RunRescan: started (GObjects=%d, GWorld=%d)",
                  scanGObjects, scanGWorld);
 
@@ -5581,6 +5607,10 @@ void Fern::StartWatch(const std::shared_ptr<Connection>& conn, uintptr_t addr, u
 
     WatchEntry* ptr = entry.get();
     entry->watchThread = std::thread([this, ptr]() {
+      // Fully unguarded before B14's scope correction, and it allocates on every tick:
+      // the buffer, BytesToHex's string, the json object, and dump(). A bad_alloc here
+      // terminated the game.
+      Routine::RunThreadGuarded("PipeServer: watch", [&] {
         std::vector<uint8_t> buf(ptr->size);
         while (ptr->active.load() && m_running.load()) {
             if (Macht::ReadBytesSafe(ptr->addr, buf.data(), ptr->size)) {
@@ -5598,6 +5628,7 @@ void Fern::StartWatch(const std::shared_ptr<Connection>& conn, uintptr_t addr, u
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(ptr->interval_ms));
         }
+      });
     });
 
     m_watches[addr] = std::move(entry);

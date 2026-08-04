@@ -10,6 +10,7 @@
 #include "BuildStamp.h"
 #include "Grimoire.h"
 #include "Utf8Helpers.h"
+#include "Routine.h"   // Routine::RunThreadGuarded — a throw out of a thread proc is std::terminate (B14)
 
 // Global DLL module handle — used by CEPlugin.cpp to resolve the DLL's
 // own file path when injecting into the game process.
@@ -61,7 +62,17 @@ static bool   g_primaryProxyMutexArmed = false;
 // In proxy mode, we start the pipe server immediately (no scan).
 // The user triggers scanning later from the UI when the game has loaded.
 // No CE delay needed — proxy DLL is always in the game process.
+static void AutoStartBody();
+
+// Guarded entry: AutoStartBody runs the whole AOB scan + pipe start, which allocates
+// heavily, and this is a raw CreateThread proc where a throw is std::terminate. (B14)
 static DWORD WINAPI AutoStartThreadProc(LPVOID)
+{
+    Routine::RunThreadGuarded("DllMain AutoStart", [] { AutoStartBody(); });
+    return 0;
+}
+
+static void AutoStartBody()
 {
     // Guard: if this DLL was accidentally loaded by UE5DumpUI.exe (e.g. both
     // files in the same directory), skip all initialization to avoid the UI
@@ -77,7 +88,7 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
         if (exe == L"ue5dumpui.exe") {
             LOG_WARN("DllMain ProxyStart: loaded by UE5DumpUI.exe — skipping proxy init");
             g_invokeMailbox.initState = Mimic::INIT_SKIPPED;
-            return 0;
+            return;
         }
     }
 
@@ -90,7 +101,6 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
     bool ok = UE5_StartPipeServer();
     g_invokeMailbox.initState = ok ? Mimic::INIT_READY : Mimic::INIT_FAILED;
     LOG_INFO("DllMain ProxyStart: pipe server %s", ok ? "started" : "FAILED to start");
-    return 0;
 }
 #else
 // ── CE / Manual inject auto-start ──────────────────────────────────────────
@@ -102,7 +112,17 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
 // This eliminates the need for CE Lua to call UE5_Init via executeCodeEx,
 // which was timing out due to the AOB scan taking longer than CE's remote-
 // thread timeout.
+static void AutoStartBody();
+
+// Guarded entry: AutoStartBody runs the whole AOB scan + pipe start, which allocates
+// heavily, and this is a raw CreateThread proc where a throw is std::terminate. (B14)
 static DWORD WINAPI AutoStartThreadProc(LPVOID)
+{
+    Routine::RunThreadGuarded("DllMain AutoStart", [] { AutoStartBody(); });
+    return 0;
+}
+
+static void AutoStartBody()
 {
     // Log immediately (before any sleep) to confirm thread is running.
     LOG_INFO("DllMain AutoStart: thread started (g_isCEPlugin=%d)", (int)g_isCEPlugin.load());
@@ -115,26 +135,32 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
     if (g_isCEPlugin.load()) {
         LOG_INFO("DllMain AutoStart: CE plugin host — skipping auto-start");
         g_invokeMailbox.initState = Mimic::INIT_SKIPPED;
-        return 0;
+        return;
     }
 
     // Belt and braces for the same race (B34). CEPlugin_GetVersion now claims plugin
     // identity, which closes the ordinary window — but "did a human tick a checkbox in
     // under a second" is not a condition worth betting a full AOB scan of the WRONG
-    // PROCESS on. Cheat Engine is never a scan target, so name it explicitly.
+    // PROCESS on, and identity is never claimed at all when the DLL is injected into CE
+    // by hand rather than loaded as a plugin. Cheat Engine is never a scan target.
+    //
+    // PREFIX match, not an exact-name list. The first version of this guard listed
+    // "cheatengine-x86_64.exe" / "cheatengine-i386.exe" / "Cheat Engine.exe" and was
+    // verified against a live capture that named the real executable:
+    // **cheatengine-x86_64-SSE4-AVX2.exe** — a build variant none of those three
+    // matched, so the DLL scanned CE for 5.8 s and opened \\.\pipe\UE5DumpBfx inside it.
+    // CE ships several suffixed variants and can add more; the stable part is the stem.
     {
         wchar_t hostPath[MAX_PATH] = {};
         if (GetModuleFileNameW(nullptr, hostPath, MAX_PATH)) {
             const wchar_t* leaf = wcsrchr(hostPath, L'\\');
             leaf = leaf ? leaf + 1 : hostPath;
-            if (_wcsicmp(leaf, L"cheatengine-x86_64.exe") == 0 ||
-                _wcsicmp(leaf, L"cheatengine-i386.exe")   == 0 ||
-                _wcsicmp(leaf, L"Cheat Engine.exe")       == 0) {
+            if (IsCheatEngineExeName(leaf)) {
                 LOG_WARN("DllMain AutoStart: host process is '%ls' — Cheat Engine is never "
-                         "a scan target; skipping auto-start (CE plugin, not yet enabled?)",
-                         leaf);
+                         "a scan target; skipping auto-start (CE plugin, not yet enabled, "
+                         "or the DLL was injected into CE by hand?)", leaf);
                 g_invokeMailbox.initState = Mimic::INIT_SKIPPED;
-                return 0;
+                return;
             }
         }
     }
@@ -151,13 +177,13 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
         // SKIPPED, not FAILED: a pipe server IS up (owned by the other instance),
         // so a CE Lua poller should proceed to connect rather than report an error.
         g_invokeMailbox.initState = Mimic::INIT_SKIPPED;
-        return 0;
+        return;
     }
 
     LOG_INFO("DllMain AutoStart: game process — calling UE5_AutoStart");
     UE5_AutoStart();
     LOG_INFO("DllMain AutoStart: UE5_AutoStart returned");
-    return 0;
+    return;
 }
 #endif
 

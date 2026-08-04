@@ -26,6 +26,7 @@
 #include "Macht.h"
 #include "Grimoire.h"
 #include "Tot.h"      // Tot::MarkCancelImmune — the poller must survive a pipe client's death (B4)
+#include "Routine.h"   // Routine::RunThreadGuarded — a throw out of a thread proc is std::terminate (B14)
 
 #include <Windows.h>
 #include <timeapi.h>   // MMRESULT / TIMERR_NOERROR (types only — see WinmmTimer below)
@@ -192,7 +193,17 @@ void EndTimePeriod(UINT ms) {
 
 // ---- Polling thread ----
 
+static void PollingThreadBody();
+
+// Guarded thread entry. The poller resolves names, walks reflection and builds result
+// buffers straight out of a live game, so it allocates constantly — and it is a raw
+// CreateThread proc, where a throw is std::terminate. (B14)
 static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
+    Routine::RunThreadGuarded("Mailbox", [] { PollingThreadBody(); });
+    return 0;
+}
+
+static void PollingThreadBody() {
     LOG_INFO("Mailbox: polling thread started (poll=%ums)", kPollIntervalMs);
 
     // This thread serves CE, not the pipe. Fern's disconnect monitor LATCHES the
@@ -326,7 +337,6 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
     }
 
     LOG_INFO("Mailbox: polling thread stopped");
-    return 0;
 }
 
 // ---- Public API ----

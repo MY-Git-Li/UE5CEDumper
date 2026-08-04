@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <string>    // DynOff::LooksLikeFieldClassName / PickFFieldClassNameOffset
+#include <cwchar>    // _wcsnicmp / _wcsicmp — IsCheatEngineExeName
 
 namespace Grimoire {
 
@@ -336,6 +337,38 @@ constexpr double  SCHLACHT_TRACE_STEP    = 2.0;      // uu — advance the ray s
 constexpr int     SCHLACHT_PIERCE_DEFAULT = 1;       // hide this many nearest occluders by default
 constexpr int     SCHLACHT_PIERCE_MAX     = 10;      // UI/clamp ceiling for the pierce depth
 constexpr int     SCHLACHT_MAX_EXTRA_ITERS = 16;     // extra trace iterations beyond pierceN (skipped Pawns / dupes)
+} // namespace Grimoire
+
+// ============================================================
+// Host-process identification
+// ============================================================
+
+/// True when `exeLeafName` is a Cheat Engine executable. Cheat Engine is NEVER a scan
+/// target: if our DLL is loaded into it (as a not-yet-enabled plugin, or injected by
+/// hand) the auto-start path must refuse rather than AOB-scan CE and open the game pipe
+/// inside it.
+///
+/// **A PREFIX test on purpose.** The first version of this guard was an exact-name list
+/// — `cheatengine-x86_64.exe`, `cheatengine-i386.exe`, `Cheat Engine.exe` — and a live
+/// capture then named the real executable **`cheatengine-x86_64-SSE4-AVX2.exe`**, which
+/// matched none of them. CE ships several CPU-feature variants and can add more; what is
+/// stable is the stem. Matching the stem also covers `cheatengine-i386.exe`,
+/// `cheatengine-x86_64.exe` and any future `-AVX512`-style suffix without another edit.
+///
+/// Case-insensitive (Windows filenames are). Deliberately NOT a substring search: a game
+/// legitimately called e.g. `MyCheatEngineClone.exe` must not be refused, so the match is
+/// anchored at the start. (Audit #4 B34, corrected by in-game verification.)
+inline bool IsCheatEngineExeName(const wchar_t* exeLeafName) {
+    if (!exeLeafName || !*exeLeafName) return false;
+    // "cheatengine-*.exe" — every shipped variant of the main executable.
+    if (_wcsnicmp(exeLeafName, L"cheatengine", 11) == 0) return true;
+    // The installer's launcher shim, which has a space and no suffix.
+    if (_wcsicmp(exeLeafName, L"Cheat Engine.exe") == 0) return true;
+    return false;
+}
+
+namespace Grimoire {
+
 // Every re-assert worker sleeps its period in slices of this, so StopWorker()'s join
 // waits at most one slice rather than a whole period. Was 8 bare `25`s across four
 // modules (R5). Keep it well under the shortest period (PROTECT/MOVE/TIME/SOLIDE) —

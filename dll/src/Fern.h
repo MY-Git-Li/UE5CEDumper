@@ -116,6 +116,8 @@ private:
     };
     RescanState m_rescan;
     void RunRescan(bool scanGObjects, bool scanGWorld);
+    // The actual work; RunRescan is the guarded wrapper that always clears `running`.
+    void RunRescanBody(bool scanGObjects, bool scanGWorld);
 
     void AcceptLoop();
     void HandleConnection(std::shared_ptr<Connection> conn);
