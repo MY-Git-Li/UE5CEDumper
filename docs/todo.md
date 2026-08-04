@@ -1686,9 +1686,10 @@ Pick up when the active plan finishes or when blocked.
 > sequence, a specific game, a specific third-party install). Each of these carries its exact steps
 > and the PASS/FAIL observation.
 >
-> **STATUS after three rounds of live testing (2026-08-04, builds 2622 → 2638):**
-> **10 ✅ verified · 1 🟡 half · 14 ⬜ not yet exercised.**
-> Verified: B49, B31, B5(passive), B47, B35, B42, B36, **B34**, **B14+R5**, and B8's main path.
+> **STATUS after four rounds of live testing (2026-08-04, builds 2622 → 2643):**
+> **11 ✅ verified · 1 🟡 half (B8) · 14 ⬜ not yet exercised.**
+> Verified: B49, B31, B5(passive), B47, B35, B42, B36, **B34**, **B14+R5**, **B38**,
+> the clean-scan report, and B8's main path.
 >
 > **B14+R5 took three attempts, and the two failures are the most useful thing this audit
 > produced.** Round 1: the guard was applied to an enumeration ("2 of 7 thread procs") that had
@@ -1704,6 +1705,16 @@ Pick up when the active plan finishes or when blocked.
 > thread procs. Each was correct about every item on its list and wrong about the world. And when
 > a fix does not take, re-read the EVIDENCE before adding more of the same fix — round 2 was
 > effort spent on a mechanism that was never involved.
+>
+> ### ⚠ The three worth doing FIRST next session
+>
+> | # | Item | Why it leads |
+> |---|---|---|
+> | **1** | **B28** — CJK FText mojibake | The only open item that shows the user **wrong data**. Needs a CJK-language game; trigger is an even-length string containing a `U+xx00` char (一, 第…一, 統一). Counter-check STVoyager (UTF-8 FText) still reads correctly — that is the regression direction. |
+> | **2** | **B4** — CE mailbox survives a dead UI client | Fails **silently**: lookups answer 0 while reporting `scanned=<full pool>`, which reads as "the object isn't there". A CE-only session stays broken for its whole life. |
+> | **3** | `Stop conn drain TIMEOUT` | New observation, not a regression: disabling with the UI connected **freezes CE for 5 s**. Now instrumented — the next occurrence names the connection and whether it was parked in `ReadFile` (cancel missed it) or inside a command (cancel cannot help). Those need opposite fixes. |
+>
+> The rest (B18, B19, B2, B25, B26, B13/B41 …) cannot produce wrong data or a crash, so they can wait.
 >
 > ⬜ does **not** mean "probably fine". It means nobody has looked. Most of the fourteen were
 > simply not exercised (no wrapper installed, no UI killed mid-command, no Extra Scan).
@@ -1741,12 +1752,32 @@ Pick up when the active plan finishes or when blocked.
   is recent. **FAIL** = a single `pipe-0.log` sitting at exactly ~8 MB with a stale last line — that
   is the silent-stop signature. Fastest way to reach it: Teleport → Auto refresh, left running.
 
-- ⬜ **Leftover-proxy reports land inside the app folder** (build 2585, B38). **Not yet exercised**
+- ✅ **Leftover-proxy reports land inside the app folder** (build 2585, B38) — **VERIFIED
+  2026-08-04 22:49, build 2643.** `leftover-proxies-20260804-224903.txt` was written to
+  `%LOCALAPPDATA%\UE5CEDumper\Reports\`, and the old `%LOCALAPPDATA%\Reports\` still holds only
+  the pre-fix file from 2026-07-30. Log line: `Leftover report written: …\UE5CEDumper\Reports\…`
+  *Original instructions below.*
+  **Previously not exercised**
   — no Report has been run since the fix. Checked 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622: `%LOCALAPPDATA%\Reports\` does
   hold `leftover-proxies-20260730-210903.txt`, but that is dated **2026-07-30**, i.e. before
   build 2585, so it is the documented pre-fix leftover and **not** evidence of failure.
   Run a proxy-cleanup Report. **PASS** = the file appears under `%LOCALAPPDATA%\UE5CEDumper\Reports\`. **FAIL** = it
   appears in `%LOCALAPPDATA%\Reports\`. (Files written before 2585 stay in the old place by design.)
+
+- ✅ **A CLEAN scan still produces a report** (build 2637) — **VERIFIED 2026-08-04 22:49.**
+  Raised by the maintainer: a scan that finds nothing must still leave an artifact, because
+  "scanned everything and found nothing" and "never ran / looked in the wrong place / failed
+  silently" are otherwise indistinguishable a week later. `BuildReport` had always handled the
+  empty case; `CanWriteOrphanReport => Orphans.Count > 0` made that text unreachable and greyed
+  the button out. Now gated on `OrphanScanRan`, and the empty report states the coverage:
+  *"No leftover proxy DLLs were found. 67 folder(s) were examined."*
+
+  > **Open UX question, NOT a defect — for the maintainer to decide.** The expectation was that
+  > *Find leftovers* produces the report and *Report…* merely opens it. That is a reasonable
+  > model, and arguably a better one: the evidence-that-the-scan-ran only exists today if someone
+  > remembers to ask for it. The current design makes writing a file an explicit act on purpose
+  > (don't write files nobody asked for). Both are defensible; nothing has been changed either
+  > way. If auto-write is wanted, it is a small change in `ScanOrphansAsync`.
 
 - ✅ **The `UE5_Init` guard did not break ordinary init** (build 2592, B5) — *passive half* —
   **VERIFIED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622.** `Starting initialization...` and `Complete (UE…)` are one-for-one in

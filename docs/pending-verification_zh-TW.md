@@ -10,15 +10,25 @@
 
 ## 目前狀態（2026-08-04 第一次實機掃描，build 2622 — DQ7R / Elliot / CE 三份 log）
 
-**（2026-08-04 三輪實測，build 2622 → 2638）**
+**（2026-08-04 四輪實測，build 2622 → 2643）**
 
-**10 項 ✅ 已驗證 · 1 項 🟡 一半 · 14 項 ⬜ 尚未被觸發**
+**11 項 ✅ 已驗證 · 1 項 🟡 一半 · 14 項 ⬜ 尚未被觸發**
 
 | 狀態 | 項目 |
 |---|---|
-| ✅ 已驗證 | B49、B31、B5（被動半）、B47、B35、B42、B36、**B34**、**B14 + R5** |
-| 🟡 主要路徑已驗證 | **B8**（延後還原那條路徑還沒走到） |
+| ✅ 已驗證 | B49、B31、B5（被動半）、B47、B35、B42、B36、**B34**、**B14 + R5**、**B38**、乾淨掃描也產生 report |
+| 🟡 主要路徑已驗證 | **B8**（延後還原那條路徑還沒走到，而且**關遊戲永遠走不到**，見下） |
 | ⬜ 尚未觸發 | 其餘 14 項 |
+
+### ⚠ 下一個 session 最值得先測的三項
+
+| 優先 | 項目 | 為什麼 |
+|---|---|---|
+| **1** | **B28** CJK FText 亂碼 | **唯一會讓使用者看到錯誤資料**的項目。中日文遊戲的 FText 值，偶數字數且含 `U+xx00`（一、第…一、統一）是觸發點。同時要反向確認 STVoyager（UTF-8 FText）的中文還是對的 |
+| **2** | **B4** CE mailbox 在 UI 死掉後仍可用 | 失敗時是**無聲的**：查詢回 0 卻寫 `scanned=<全部>`，看起來像「物件不存在」。CE-only session 會一直壞下去 |
+| **3** | `Stop conn drain TIMEOUT` | 新觀察，不是回歸。UI 連著時按 Disable 會**凍住 CE 五秒**。已加診斷，下次發生會直接指出是哪條連線、卡在哪個指令 |
+
+其餘（B18、B19、B2、B25、B26、B13/B41…）都不會造成錯誤資料或當機，可以慢慢來。
 
 ### 兩個失敗共同的教訓
 
@@ -164,14 +174,31 @@ grep `pipe-0.log` 的 `PipeServer: Stop entry` 以及後面接著的各階段行
 
 > 最快跑到 8 MB 的方法：Teleport → Auto refresh，開著放它跑。
 
-## ⬜ B38 —— 殘留 proxy 的報告檔落在 app 資料夾裡面
-**build 2585** · **尚未觸發**
+## ✅ B38 —— 殘留 proxy 的報告檔落在 app 資料夾裡面
+**build 2585** · **已驗證（2026-08-04 22:49，build 2643）**
 
-這次沒有跑過 Report，所以無法結案。查過了：舊位置 `%LOCALAPPDATA%\Reports\` 裡確實有一個
-`leftover-proxies-20260730-210903.txt`，但它的日期是 **2026-07-30**，在 build 2585 之前 ——
-屬於文件裡寫明「2585 之前寫出來的檔案會留在舊位置」的情況，**不是失敗的證據**。
+`leftover-proxies-20260804-224903.txt` 寫進了 `%LOCALAPPDATA%\UE5CEDumper\Reports\`，
+而舊位置 `%LOCALAPPDATA%\Reports\` 裡仍然只有 2026-07-30 那個修正前的檔案。
+log 也有對應行：`Leftover report written: …\UE5CEDumper\Reports\…（0 row(s), 67 folder(s) examined）`
 
-跑一次 proxy cleanup 的 Report。
+## ✅ 乾淨掃描也會產生 report
+**build 2637** · **已驗證（2026-08-04 22:49）**
+
+由維護者提出：掃描沒找到東西時**也必須留下檔案**，否則「掃過了、什麼都沒有」和
+「根本沒掃 / 掃錯地方 / 靜靜失敗了」一週之後完全分不出來。
+
+`BuildReport` 本來就處理了空集合的情況，是 `CanWriteOrphanReport => Orphans.Count > 0`
+讓那段文字永遠走不到、按鈕也是灰的。現在改成看 `OrphanScanRan`，而且空報告會寫出涵蓋範圍：
+*「No leftover proxy DLLs were found. 67 folder(s) were examined.」*
+
+> **一個待決定的 UX 問題（不是 bug）**：原本的預期是「按 **Find leftovers** 就會產生報告，
+> **Report…** 只是用 ShellExecute 把它打開」。這個想法有道理，甚至可能更好 ——
+> 因為「證明掃描跑過」的證據目前只有在有人記得多按一次時才存在。
+> 現在的設計則是刻意讓「寫檔」是一個明確的動作（不寫使用者沒要求的檔案）。
+> 兩種都說得通，**目前沒有動任何一邊**。如果要改成自動產生，
+> 在 `ScanOrphansAsync` 裡是個小改動。
+
+原本的測試步驟：
 
 - **PASS** = 檔案出現在 `%LOCALAPPDATA%\UE5CEDumper\Reports\`
 - **FAIL** = 出現在 `%LOCALAPPDATA%\Reports\`
@@ -308,8 +335,31 @@ Property Search 裡找一個 FText property。
 **反向確認（很重要）**：確認修正沒有往另一邊歪掉 ——
 **Star Trek Voyager（UE5.6）** 的 FText 是用 UTF-8 存的，它的中文必須仍然正確。
 
-## ⬜ B8 —— Fly / Noclip 不再把角色留在「穿透」狀態
-**build 2596**
+## 🟡 B8 —— Fly / Noclip 不再把角色留在「穿透」狀態
+**build 2596** · **主要路徑已驗證（Elliot 22:01）· 延後路徑仍未觸發**
+
+已驗證的部分 —— log 顯示修正後的順序完全正確：
+`Fly: worker stopped` → `Fly: SetActorEnableCollision(1) invoked` → `Fly: DISABLED`。
+先 join 再還原，而且還原是從 invoke **真的執行了**才記錄狀態。
+
+> ### ⚠ 重要：**關遊戲永遠測不到延後那條路徑**
+>
+> 關掉遊戲時 `UE5_Shutdown` **根本不會被呼叫**（整份 log 裡 `UE5_Shutdown: Cleaning up`
+> 出現 0 次），所以 `Dunste::SetEnabled(false)` 完全沒有執行，
+> `DISABLED but the pawn's collision is still OFF` 這行永遠不可能印出來。
+> 22:33 那次 Elliot 就是證據：Fly 開著關掉遊戲，log 裡**連一行 `Fly: DISABLED` 都沒有**。
+> 那是 B14 的測試，不是 B8 的測試。
+>
+> 延後路徑需要的是**在遊戲執行緒安靜的時候按下 Disable 按鈕**。
+> 22:01 那次確實按了 Disable，而 `SetActorEnableCollision(1) invoked` 證明當下遊戲執行緒
+> **還在跳**。所以關鍵變數不是 alt-tab 多久，而是**那款遊戲會不會在失焦時 idle**
+> （`t.IdleWhenNotForeground`）—— Elliot 看起來不會。
+>
+> **所以這一項需要一款失焦真的會安靜下來的遊戲。** 如果手邊沒有，
+> 把它結成「接受未驗證」是合理的：這條程式路徑跟 Schlacht 從 build 2364 就在跑的是同一條，
+> 而且主要路徑已經驗過了。
+
+原本的測試步驟：
 
 答案完全在 log 裡，而且觸發方式就是在「失焦會 idle」的遊戲上**關掉 Fly 的正常做法**。
 

@@ -22,11 +22,18 @@
 2603 (8 DLL + scripts) · 2610 (12 UI) · 2614 (refactor R1-R4/R6/R7) · 2617 (B39).
 **ALL 52 SHIPPED — but 2 of them FAILED their first in-game check and were refixed.**
 See [todo.md](todo.md#pending-live-game-verification-verify-only--no-code) for the register.
-First sweep (2026-08-04, build 2622): **7 verified, 2 failed, 16 not yet exercised**.
+Four rounds of live testing (2026-08-04, builds 2622 → 2643): **11 verified, 1 half, 14 not yet
+exercised** — and B14+R5 needed THREE attempts, which produced the two most useful lessons here.
 **B34** and **B14+R5** both failed the same way — a rule applied to an ENUMERATION that had
-counted wrong (three CE filenames; seven thread procs). Refixed in build 2628. That is the
-sharpest thing this audit produced: *a fix verified against the list it was written from is
-not verified.*
+counted wrong (three CE filenames; seven thread procs). Two lessons, both earned the hard way:
+
+1. *A fix verified against the list it was written from is not verified.* Each was correct
+   about every item on its list and wrong about the world.
+2. *When a fix does not take, re-read the EVIDENCE before adding more of the same fix.* B14's
+   second round put guards on all ~15 thread entry points and crashed identically — because
+   there was never an exception. `~std::thread()` on a joinable thread calls `std::terminate`
+   directly, and `UE5_Shutdown` never runs on game close. Fixed as a property of the TYPE
+   (`Routine::SafeThread`) rather than a third list.
 
  The last four landed after the maintainer's decisions (2026-08-04): B13/B41
 *refuse and say why*, B21 *drop AllowThousands*, B25 *require corroboration*, B26 *both halves*.
