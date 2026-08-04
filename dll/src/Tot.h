@@ -27,6 +27,10 @@
 // clear a running scan's cancel on another lane; shutdown is sticky. Background
 // re-assert workers opt out of the per-command cancel via MarkBackgroundWorker()
 // (they live for the game process, not a single pipe command). (M4)
+//
+// The CE mailbox poller (Mimic) opts out too, via MarkCancelImmune() — it serves CE,
+// so a PIPE client's death must not cancel its work — but it is NOT a background
+// worker, because it carries the user's one-shot invokes. See t_cancelImmune. (B4)
 // ============================================================
 
 #include <atomic>
@@ -58,7 +62,22 @@ inline std::atomic<bool> g_shutdown{false};
 // only instance source (Aura::FindInstancesByClass) polls Requested() at n=0 and
 // would bail to an EMPTY set every re-assert tick while a client is gone. (M4)
 inline thread_local bool t_backgroundWorker = false;
-inline void MarkBackgroundWorker() { t_backgroundWorker = true; }
+
+// Immunity from the PER-COMMAND cancel, split out from "is a background worker"
+// because one flag was answering two different questions:
+//   (a) should this thread ignore a PIPE client's mid-command disconnect?
+//   (b) is this a REPEATING worker, so refuse the off-game-thread invoke fallback?
+// For the re-assert workers both answers are yes, which is why one flag sufficed —
+// until the CE mailbox poller (Mimic) needed (a) without (b). It serves CE, not the
+// pipe, so a pipe disconnect must not cancel its work; but it carries the user's
+// ONE-SHOT CE invokes, so marking it a background worker would make
+// UE5_CallProcessEventEx refuse them with -8 whenever the PE hook is down. (B4)
+inline thread_local bool t_cancelImmune = false;
+inline void MarkCancelImmune() { t_cancelImmune = true; }
+
+// Every background worker is also cancel-immune — set both so existing call sites
+// keep their exact behaviour.
+inline void MarkBackgroundWorker() { t_backgroundWorker = true; t_cancelImmune = true; }
 
 /// True on a re-assert / feature worker thread. Read by the invoke path to refuse
 /// the "direct ProcessEvent call off the game thread" fallback for REPEATING
@@ -72,7 +91,7 @@ inline bool IsBackgroundWorker() { return t_backgroundWorker; }
 // the SAME resolve helper honours the cancel when called from a pipe command but
 // keeps running when called from a re-assert worker.
 inline bool Requested() {
-    if (t_backgroundWorker)
+    if (t_cancelImmune)
         return g_shutdown.load(std::memory_order_relaxed);
     return g_perCommand.load(std::memory_order_relaxed)
         || g_shutdown.load(std::memory_order_relaxed);

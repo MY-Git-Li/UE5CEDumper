@@ -18,7 +18,7 @@
 **Tally:** 3 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **52 items** (26 from 4a, 25 from 4b, 1 from in-game verification).
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
-**Progress: 12 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577), B2 + B3 (2581), B31 + B37 + B38 (2585) — 40 open.**
+**Progress: 14 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569), B29 (2577), B2 + B3 (2581), B31 + B37 + B38 (2585), B5 + B4 (2592) — 38 open.**
 
 ---
 
@@ -28,8 +28,8 @@ Written 2026-08-04 at build 2587, `dev` 13 commits ahead of `main`, tree clean, 
 green. The goal is **finish every open item**, then verify. Batches below are ordered so each one is a
 coherent commit; the *within-batch* order matters where noted.
 
-### Batch A — the two DLL concurrency defects (do first)
-**B5** is the prerequisite for trusting any offset-related bug report, so it leads.
+### ~~Batch A~~ — the two DLL concurrency defects ✅ **DONE, build 2592**
+**B5** is the prerequisite for trusting any offset-related bug report, so it led.
 - **B5** `Frieren.cpp:490` — dedicated mutex around the `UE5_Init` body + an in-progress flag so a
   second caller waits and returns the first result. Today the latch is set *after* a multi-second scan.
 - **B4** `Mimic.cpp:194` — **do NOT just call `Tot::MarkBackgroundWorker()`.** That same flag is read by
@@ -129,8 +129,8 @@ existing behaviour / perf.
 | **B49** ✅ | 🔴 | S/med | Fern | ~~`Fern::Stop` closes a SYNCHRONOUS listen handle to "unblock" the accept thread; the close instead BLOCKS until a client connects — under `m_connMutex` — so a disable with no UI connected wedges the teardown thread forever~~ **FIXED build 2569** |
 | B2 ✅ | 🟠 | S/low | Genau | ~~SymbolExport winner published in the AOB field ⇒ CE table / trainer / symbol all dead on modular UE builds~~ **FIXED build 2581** |
 | B3 ✅ | 🟠 | S/low | CeXmlExport | ~~`<Description>` never XML-escaped ⇒ one `&` in a game string voids the entire export~~ **FIXED build 2581** |
-| B4 | 🟠 | M/med | Mimic | Mailbox thread not a background worker ⇒ a latched per-command cancel empties every CE object lookup for the session |
-| B5 | 🟠 | M/med | Frieren | `s_initialized` latched *after* the multi-second scan ⇒ a concurrent second full init corrupts DynOff silently |
+| B4 ✅ | 🟠 | M/med | Mimic | ~~Mailbox thread not a background worker ⇒ a latched per-command cancel empties every CE object lookup for the session~~ **FIXED build 2592** |
+| B5 ✅ | 🟠 | M/med | Frieren | ~~`s_initialized` latched *after* the multi-second scan ⇒ a concurrent second full init corrupts DynOff silently~~ **FIXED build 2592** |
 | B6 ✅ | 🟠 | S/low | Coord library | ~~Clear-all: no confirm, no pre-clear backup, `.bak` expires after 2 saves~~ **FIXED build 2560** |
 | B7 | 🟠 | S/low | Coord library | Uid is the one field skipping every ingress guard; duplicate uid + delete-by-uid wipes rows the user didn't select |
 | B8 | 🟠 | M/med | Dunste | Collision state committed independently of the invoke ⇒ pawn left non-colliding, falls through the world |
@@ -498,6 +498,19 @@ callers untouched); add a golden test that `XDocument.Parse`s output containing 
 **Where:** [`ui/UE5DumpUI/Services/CeXmlExportService.cs:3527`](../ui/UE5DumpUI/Services/CeXmlExportService.cs:3527)
 
 ### B4 — Mailbox thread misses `Tot::MarkBackgroundWorker()`
+
+> **✅ FIXED — build 2592, shipped with B5.** One `thread_local` was answering two different
+> questions, so the mailbox poller could not have (a) *ignore a pipe client's disconnect* without
+> also getting (b) *refuse the off-game-thread invoke fallback*. Split into `Tot::t_cancelImmune`
+> (+ `MarkCancelImmune()`), read by `Requested()`; `MarkBackgroundWorker()` now sets **both**, so
+> every existing worker call site keeps its exact behaviour. Mimic's poller marks itself
+> cancel-immune only. A cold WARN — `cmd=%d runs while a pipe client's per-command cancel is
+> latched` — fires once per latch so the state is provable from a log instead of on trust.
+> 9 EXPECTs across three roles (unmarked / poller / worker); the poller block's
+> *"is NOT a background worker"* assertion is the negative control for the tempting one-liner.
+> Reverting `Requested()` to the old flag was confirmed to fail the test. 938 C++ green.
+> *Delete this row after the batch is merged to main.*
+
 **🟠** · M/med · Mimic. Verified absent at `Mimic.cpp:194`; the six markers live in Dunste/Hemmung/
 Laufen/Schlacht/Solide/Solitar.
 **Failure:** UI killed mid-scan → the disconnect monitor latches `g_perCommand` (`Fern.cpp:552`), cleared
@@ -513,6 +526,24 @@ separate per-command-cancel-immunity flag, or mark only around the resolve calls
 **Where:** [`dll/src/Mimic.cpp:194`](../dll/src/Mimic.cpp:194)
 
 ### B5 — `UE5_Init` latch set after the whole scan
+
+> **✅ FIXED — build 2592, shipped with B4.** `s_initialized` is now `std::atomic<bool>` (the
+> unlocked fast path was itself a data race) behind a dedicated `s_initMutex` around the body, with
+> the latch re-tested **under** the lock — a second caller that waited must return the first
+> caller's result, never re-scan. `try_to_lock` first so the wait itself logs (`init already in
+> progress on another thread — tid=… is waiting`), which is the only externally observable proof
+> the interleave was reachable.
+>
+> **One thing the finding did not cover, found while fixing it:** a CE Disable landing mid-scan
+> clears the latch and tears the server down, but the scan thread would then set the latch to
+> `true` on its way out — every cancellable loop having bailed early on `Tot::Requested()`. The next
+> enable would short-circuit `UE5_Init` and run the whole session on those partial results. So the
+> latch is now refused when `Tot::ShutdownRequested()` is set at that point (safe against a false
+> positive: `UE5_AutoStart` calls `ResetShutdown()` before `UE5_Init`). `UE5_Shutdown` deliberately
+> does **not** take `s_initMutex` — that would make a Disable block for the rest of the scan and
+> re-create the wedged-teardown shape B49 just fixed; `RequestShutdown()` is the interlock instead.
+> *Delete this row after the batch is merged to main.*
+
 **🟠** · M/med · Frieren. `Frieren.cpp:490` (latch) vs `:112-115` (guard) — a plain `static bool`, no
 mutex, multi-second body.
 **Failure (proxy mode is the designed-in case):** `Heiter.cpp:81-90` starts the pipe without scanning, so

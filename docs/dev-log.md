@@ -20,6 +20,66 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - Two threads, one latch, and a flag that was answering two different questions (build 2592)
+
+Audit #4 **B5 + B4**, the DLL concurrency pair. Both are the same shape: a guard that reads correct
+until you ask *which thread*.
+
+**B5 — `UE5_Init` latched only at the end.** The "already initialized?" test at the top read a plain
+`static bool` that the body sets on its **last** line, after a multi-second scan. So the guard could
+never serialize two callers — it could only tell you about a scan that had already finished. And
+there is a designed-in second caller: in **proxy mode** `Heiter` starts the pipe *without* scanning,
+so both cached pointers are 0 while the pipe is already live. A UI Scan (`Fern::RunScan` →
+`UE5_Init`) and a CE hotkey (`Mimic::EnsureInitialized` → `UE5_Init`) both find the latch clear and
+both run a full init. They write `DynOff::*`, Aura's array descriptor, Serie's pool state and
+`FindGEngineSlot`'s report wholesale, and the later probes read back what earlier probes latched — so
+an interleave latches a *mix*. That is the failure `Grimoire.h` documents as total but silent: every
+property type unknown, log still printing `validated=yes`.
+
+`s_initialized` is now `std::atomic<bool>` (the unlocked fast path was itself a data race) behind a
+dedicated `s_initMutex` around the body, with the latch **re-tested under the lock** — a caller that
+waited returns the first caller's result rather than starting a second scan. `try_to_lock` runs
+first purely so the wait is *loggable*: `init already in progress on another thread — tid=… is
+waiting`. That line is the only externally observable proof the interleave was ever reachable, and
+the verification note in [todo.md](todo.md) is built on it.
+
+**The part the finding did not cover, found while fixing it.** A CE Disable landing mid-scan clears
+the latch and tears the server down — and then the scan thread, whose cancellable loops all bailed
+early on `Tot::Requested()`, sets the latch to `true` on its way out. The next enable would
+short-circuit `UE5_Init` and run the entire session on those partial results. The latch is now
+refused when `Tot::ShutdownRequested()` is set at that point. Deliberately **not** fixed by taking
+`s_initMutex` in `UE5_Shutdown`: that would make a Disable block for the remainder of the scan and
+re-create exactly the wedged-teardown shape [B49](audit-2026-08-04-findings.md) had just removed.
+
+**B4 — one `thread_local`, two questions.** `Tot::t_backgroundWorker` was being asked both *"should
+this thread ignore a pipe client's mid-command disconnect?"* and *"is this a repeating worker, so
+refuse the off-game-thread invoke fallback?"*. For the six re-assert workers both answers are yes,
+which is why one flag sufficed — until the CE mailbox poller needed the first without the second.
+
+It needs the first because Fern's disconnect monitor **latches** `g_perCommand` when a UI client dies
+mid-command, and only `Fern::Start` / `AcceptLoop` firstConn clear it: in a CE-only session it never
+clears at all. `Aura::FindInstancesByClass` then bails at `n==0`, so every mailbox lookup —
+`FIND_INSTANCE`, `LIST_INSTANCES`, `INVOKE_BY_NAME`, plus the class-scan fallback resolvers in
+Wirbel/Solitar/Laufen/Hemmung — returns empty *while reporting* `scanned=<full pool>`, which reads
+like "the object isn't there" rather than "the scan was cancelled".
+
+It must not have the second, because that policy exists to stop a 10 Hz worker calling ProcessEvent
+off the game thread for minutes; the poller carries the user's **one-shot** CE invokes, and blanket
+-marking it would start refusing them with `-8` whenever the PE hook is down. So the one-line fix
+the symptom suggests would have traded one silent failure for another.
+
+Split into `Tot::t_cancelImmune` + `MarkCancelImmune()`, which is what `Requested()` now reads;
+`MarkBackgroundWorker()` sets **both**, so all six existing worker call sites keep their exact
+behaviour. Mimic's poller marks itself cancel-immune only.
+
+**Evidence, not trust.** A cold WARN — `cmd=%d runs while a pipe client's per-command cancel is
+latched` — fires once per latch, so a whole session costs one line, and the state B4 is about stops
+being invisible. 9 EXPECTs across three roles (unmarked / poller / worker); the poller block's *"is
+NOT a background worker"* assertion is the negative control for the tempting one-liner. Reverting
+`Requested()` to the old flag was confirmed to fail the test before restoring it. 938 C++ green.
+
+-----
+
 ## 2026-08-04 - The 8 MB "cap" was a kill switch, and the folder sweep used the one signal its sibling calls unusable (build 2585)
 
 Audit #4 B31 + B37 + B38 — one commit, all in log/report retention.

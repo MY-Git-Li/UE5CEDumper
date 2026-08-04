@@ -34,9 +34,12 @@
 #include "../src/Orden.h"       // Multi-value group scan: source-agnostic SDR matcher (MatchGroup)
 #include "../src/Ubel.h"        // Native-C scan P0: ComputeHoles / ComputeClassHoles / NormalizeGuessedTypeToProperty (inline, pure)
 #include "../src/Aura.h"        // IsEnginePackage (header-inline, pure) — engine/game package gate
+#include "../src/Tot.h"         // Cancellation flags: cancel-immunity vs background-worker (B4)
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
+
+#include <thread>
 
 #include <algorithm>
 #include <cstdio>
@@ -3056,6 +3059,55 @@ static bool PatMatchAt(const Macht::ParsedPattern& pat,
     return true;
 }
 
+// B4 — the mailbox poller needs immunity from the PER-COMMAND cancel WITHOUT being
+// classified a background worker. One flag used to answer both questions; this asserts
+// they are now genuinely independent. The second EXPECT in the poller block is the
+// negative control for the tempting one-line "fix": calling MarkBackgroundWorker() on
+// the poller would satisfy the first assertion and break this one, which is what would
+// make UE5_CallProcessEventEx refuse (-8) the user's one-shot CE invokes.
+//
+// Each role runs on its own thread because the flags are thread_local; the threads are
+// joined one at a time, so the shared g_pass/g_fail counters are never raced.
+static void Test_Tot_CancelImmunityVsBackgroundWorker() {
+    std::printf("Test_Tot_CancelImmunityVsBackgroundWorker\n");
+
+    Tot::ResetPerCommand();
+    Tot::ResetShutdown();
+
+    // A fresh thread starts unmarked — the pipe-command case.
+    std::thread([] {
+        EXPECT("unmarked thread: no cancel pending",   !Tot::Requested());
+        EXPECT("unmarked thread: not a bg worker",     !Tot::IsBackgroundWorker());
+        Tot::RequestPerCommand();
+        EXPECT("unmarked thread HONOURS per-command",   Tot::Requested());
+    }).join();
+    // g_perCommand stays latched from here on — exactly the state a CE-only session is
+    // stuck in after a UI client dies mid-command (nothing clears it without Fern::Start).
+
+    // The Mimic poller: immune to the pipe's cancel, but NOT a background worker.
+    std::thread([] {
+        Tot::MarkCancelImmune();
+        EXPECT("poller IGNORES the latched per-command", !Tot::Requested());
+        EXPECT("poller is NOT a background worker",      !Tot::IsBackgroundWorker());
+        Tot::RequestShutdown();
+        EXPECT("poller still aborts on real shutdown",    Tot::Requested());
+        Tot::ResetShutdown();
+    }).join();
+
+    // A re-assert worker: unchanged on both axes (MarkBackgroundWorker sets both flags).
+    std::thread([] {
+        Tot::MarkBackgroundWorker();
+        EXPECT("bg worker ignores per-command",  !Tot::Requested());
+        EXPECT("bg worker reports as bg worker",  Tot::IsBackgroundWorker());
+        Tot::RequestShutdown();
+        EXPECT("bg worker aborts on shutdown",    Tot::Requested());
+        Tot::ResetShutdown();
+    }).join();
+
+    Tot::ResetPerCommand();
+    Tot::ResetShutdown();
+}
+
 static void Test_Sig_IsCeReplayableAob() {
     std::printf("Test_Sig_IsCeReplayableAob\n");
 
@@ -3362,6 +3414,9 @@ int main() {
     // Macht — AOB pattern parser: nibble wildcards (4? / ?5) + anchor selection
     Test_Sig_IsCeReplayableAob();
     Test_Macht_ParsePattern_Nibble();
+
+    // Tot — per-command cancel immunity is independent of "is a background worker"
+    Test_Tot_CancelImmunityVsBackgroundWorker();
 
     // DynOff — FFieldClass::Name probe (UE 5.8 virtual-dtor member shift)
     Test_FFieldClassName_Probe();

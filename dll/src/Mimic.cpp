@@ -25,6 +25,7 @@
 #include "Genau.h"
 #include "Macht.h"
 #include "Grimoire.h"
+#include "Tot.h"      // Tot::MarkCancelImmune — the poller must survive a pipe client's death (B4)
 
 #include <Windows.h>
 #include <timeapi.h>   // MMRESULT / TIMERR_NOERROR (types only — see WinmmTimer below)
@@ -194,6 +195,17 @@ void EndTimePeriod(UINT ms) {
 static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
     LOG_INFO("Mailbox: polling thread started (poll=%ums)", kPollIntervalMs);
 
+    // This thread serves CE, not the pipe. Fern's disconnect monitor LATCHES the
+    // per-command cancel when a UI client dies mid-command, and in a CE-only session
+    // nothing ever clears it (only Fern::Start / AcceptLoop firstConn do). Without this
+    // line every object lookup below would then bail at n==0 —
+    // FIND_INSTANCE / LIST_INSTANCES / INVOKE_BY_NAME plus the class-scan fallback
+    // resolvers in Wirbel/Solitar/Laufen/Hemmung — and still report scanned=<full pool>.
+    // NOT MarkBackgroundWorker(): that also refuses (-8) the off-game-thread invoke
+    // fallback, a policy scoped to repeating workers. These are the user's one-shot
+    // CE invokes. (B4)
+    Tot::MarkCancelImmune();
+
     // Bump Windows timer resolution to 1ms for the lifetime of this thread.
     // Without this, Sleep(1) on a host with the default 15.6ms tick (rare on
     // modern Win10/11 game processes, common on idle/server SKUs) would actually
@@ -223,6 +235,24 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
             g_invokeMailbox.status = STATUS_PROCESSING;
 
             LOG_INFO("Mailbox: received cmd=%d", cmd);
+
+            // The state B4's immunity exists for is otherwise invisible: a UI client
+            // that died mid-command leaves the per-command cancel latched forever in a
+            // CE-only session, and the old code answered every lookup with an empty set
+            // while reporting scanned=<full pool>. Log the FIRST command that runs under
+            // a latched cancel — once per latch, so the whole session costs one line.
+            {
+                static bool s_loggedCancelLatch = false;
+                const bool latched = Tot::g_perCommand.load(std::memory_order_relaxed);
+                if (latched && !s_loggedCancelLatch) {
+                    s_loggedCancelLatch = true;
+                    LOG_WARN("Mailbox: cmd=%d runs while a pipe client's per-command cancel is "
+                             "latched — this thread is cancel-immune, so lookups still scan (B4)",
+                             cmd);
+                } else if (!latched) {
+                    s_loggedCancelLatch = false;
+                }
+            }
 
             // Auto-init if needed (proxy DLL mode: UE5_Init not called yet)
             if (!EnsureInitialized() && cmd != CMD_IDLE) {

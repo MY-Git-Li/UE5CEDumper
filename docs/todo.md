@@ -1708,6 +1708,25 @@ Pick up when the active plan finishes or when blocked.
   Report. **PASS** = the file appears under `%LOCALAPPDATA%\UE5CEDumper\Reports\`. **FAIL** = it
   appears in `%LOCALAPPDATA%\Reports\`. (Files written before 2585 stay in the old place by design.)
 
+- ⬜ **The `UE5_Init` guard did not break ordinary init** (build 2592, B5) — *passive half, free from
+  any session.* Grep `init-0.log` for `UE5_Init:`. **PASS** = `Starting initialization...` and
+  `Complete (UE…)` alternate strictly one-for-one, and neither of the two new lines
+  (`init already in progress`, `shutdown was requested during the scan`) appears. **FAIL** =
+  a `Starting` with no matching `Complete` (the guard deadlocked — nothing should be able to cause
+  this, which is why it is worth one grep per session), or two `Starting` lines in a row (still
+  racing). Absence of the new lines proves only that the race did not *occur*; the deliberate
+  provocation is in ② below.
+
+- ⬜ **CE mailbox survives a dead UI client** (build 2592, B4). The evidence line is **cold** — once
+  per latch, so it costs nothing to leave in. Needs a deliberate sequence but the whole answer is in
+  the log, so it lives here: connect the UI, start something long (Property Search deep, or a full
+  Instance Finder scan), **kill the UI process while it runs**, then use any CE-side lookup — the
+  `.CT`'s Find Instance, or a teleport/GodMode hotkey on a game that resolves through the class-scan
+  fallback. Grep `pipe-0.log` for `per-command cancel is latched`.
+  **PASS** = that WARN appears **and** the command that follows it reports a non-zero result count.
+  **FAIL** = the old signature: no WARN, and a lookup answering `0` with `scanned=<full pool>` —
+  the message that made this bug read like "the object isn't there".
+
 #### ② Manual-only
 
 - ⬜ **Symbol-export GWorld no longer claims to have an AOB** (build 2581, audit #4 B2). The gate is
@@ -1728,6 +1747,20 @@ Pick up when the active plan finishes or when blocked.
   `'dxgi.dll' is loaded but is not ours`. FAIL = the old *"already loaded … no injection needed"*
   message, after which the UI cannot connect. Also worth eyeballing there: a game path with
   non-ASCII characters must now appear intact in that message (it used to render as `EVERSPACE? 2`).
+
+- ⬜ **Provoke the concurrent `UE5_Init`** (build 2592, B5) — the active half of the passive check in
+  ① above. Needs the **proxy** launch path, because that is what makes the second caller reachable:
+  the proxy starts the pipe *without* scanning, so both cached pointers are 0 while the pipe is
+  already live. **To test:** launch the game with a deployed proxy DLL, connect the UI, click Scan,
+  and **while the scan is still running** trigger any CE-side mailbox command (tick the `.CT`, or a
+  teleport hotkey) — that path calls `Mimic::EnsureInitialized`, which is the second `UE5_Init`.
+  **PASS** = `init-0.log` shows `init already in progress on another thread — tid=… is waiting`
+  followed by `resumed after waiting (first caller succeeded — returning its result, no second
+  scan)`, exactly **one** `Starting initialization...`, and the CE command then works normally.
+  **FAIL** = two `Starting` lines, or a `validated=yes` summary on a session where drill-down shows
+  every property type unknown — that is the silent-corruption shape this fix exists to prevent.
+  *Why it can't be tested here: it needs two real threads racing a multi-second scan inside a live
+  game; the unit tests can only pin the flag semantics, not the timing.*
 
 - ⬜ **`.CT` DLL discovery — the `reg.exe` recent-files fallback** (build 2576). The breadcrumb half
   is **✅ verified** (run `UE5DumpUI.exe` once, open the `.CT` from CE's recent-files menu, tick

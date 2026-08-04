@@ -78,7 +78,17 @@ const char* g_cachedGEngineAob       = nullptr;
 int         g_cachedGEngineAobPos    = 0;
 int         g_cachedGEngineAobLen    = 0;
 
-static bool        s_initialized = false;
+// The init latch is set only at the very END of UE5_Init, after a multi-second scan,
+// so it can never serialize two callers on its own — and there IS a designed-in second
+// caller: proxy mode (Heiter) starts the pipe WITHOUT scanning, so a UI "Scan"
+// (Fern::RunScan -> UE5_Init) and a CE hotkey (Mimic::EnsureInitialized -> UE5_Init)
+// can both find the latch clear and both run a full init. Both write DynOff::*, Aura's
+// array descriptor, Serie's pool state, and FindGEngineSlot's report wholesale, and the
+// probes read back what earlier probes latched — so an interleave latches a MIX and
+// still prints validated=yes. Atomic for the unlocked fast path; s_initMutex guards the
+// body so a second caller waits and returns the first caller's result. (B4/B5 audit #4)
+static std::atomic<bool> s_initialized{false};
+static std::mutex  s_initMutex;
 static Fern  s_pipeServer;
 static std::mutex  s_walkMutex;
 static ClassInfo   s_walkCache;
@@ -112,7 +122,29 @@ static bool CopyToBuffer(const std::string& src, char* buf, int32_t bufLen) {
 extern "C" {
 
 bool UE5_Init() {
-    if (s_initialized) {
+    if (s_initialized.load(std::memory_order_acquire)) {
+        LOG_WARN("UE5_Init: Already initialized");
+        return true;
+    }
+
+    // Serialize the body. try_lock first so the WAIT is visible in the log: a queued
+    // caller is this guard doing its job, and it is the only externally observable
+    // proof that the interleave was possible at all (see the log-derivable check in
+    // todo.md). Then re-test the latch under the lock — the first caller may have
+    // completed while we blocked, and re-scanning would be the very corruption
+    // this guard exists to prevent.
+    std::unique_lock<std::mutex> initLock(s_initMutex, std::try_to_lock);
+    if (!initLock.owns_lock()) {
+        LOG_WARN("UE5_Init: init already in progress on another thread — tid=%lu is waiting "
+                 "(guard working, not an error)", GetCurrentThreadId());
+        initLock.lock();
+        LOG_INFO("UE5_Init: tid=%lu resumed after waiting (first caller %s)",
+                 GetCurrentThreadId(),
+                 s_initialized.load(std::memory_order_acquire)
+                     ? "succeeded — returning its result, no second scan"
+                     : "did NOT complete — this thread will scan");
+    }
+    if (s_initialized.load(std::memory_order_acquire)) {
         LOG_WARN("UE5_Init: Already initialized");
         return true;
     }
@@ -487,7 +519,20 @@ bool UE5_Init() {
         }
     }
 
-    s_initialized = true;
+    // A CE Disable that landed while this scan was running has already cleared the
+    // latch (UE5_Shutdown) and torn the server down, and every cancellable loop above
+    // bailed early on Tot::Requested() — so these results are partial by construction.
+    // Latching true now would make the next enable's UE5_Init short-circuit and run the
+    // whole session on them. Refuse the latch instead; the next enable re-scans. Safe
+    // against a false positive: UE5_AutoStart calls Tot::ResetShutdown() before this.
+    if (Tot::ShutdownRequested()) {
+        LOG_WARN("UE5_Init: shutdown was requested during the scan — results are partial, "
+                 "NOT latching initialized so the next enable re-scans");
+        Sein::SetChannel(LogChannel::Pipe);
+        return false;
+    }
+
+    s_initialized.store(true, std::memory_order_release);
     LOG_INFO("UE5_Init: Complete (UE%u, GObjects=0x%llX, GNames=0x%llX, Objects=%d)",
              ptrs.UEVersion,
              static_cast<unsigned long long>(ptrs.GObjects),
@@ -560,7 +605,11 @@ void UE5_Shutdown() {
     // blocked on EnqueueInvoke receives its -7 result and unwinds cleanly.
     Stark::Shutdown();
     s_pipeServer.Stop();
-    s_initialized = false;
+    // Deliberately NOT under s_initMutex: taking it here would make a Disable block for
+    // the full remaining scan, re-creating the wedged-teardown shape B49 just fixed.
+    // Tot::RequestShutdown() above is the interlock — a scan still running past this
+    // point sees it and refuses to latch (see UE5_Init).
+    s_initialized.store(false, std::memory_order_release);
     // The pipe is gone, so stop advertising READY — a CE Lua re-enable after a
     // Disable must wait for the fresh auto-start rather than read a stale flag.
     g_invokeMailbox.initState = Mimic::INIT_IDLE;
