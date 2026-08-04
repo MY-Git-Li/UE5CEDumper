@@ -124,17 +124,30 @@ public class CeAutorunScriptGeneratorTests
     }
 
     [Fact]
-    public void Inject_polls_readiness_and_never_uses_executeCodeEx()
+    public void Inject_polls_readiness_and_never_uses_executeCodeEx_on_the_startup_path()
     {
+        // Twin of CeInjectScriptGeneratorTests' rule, narrowed for the same reason
+        // (audit #4 B1(b)): ue5_inject now also revives an already-mapped DLL that a
+        // previous ue5_shutdown parked, and that needs a remote call because the
+        // mailbox poller has been joined. Injection-time — from injectDLL through the
+        // readiness poll — is the part that runs while a game may still be blocking
+        // CreateRemoteThread, and it stays clean.
         var s = CeAutorunScriptGenerator.Generate(Dll);
         var inject = s.Substring(s.IndexOf("function ue5_inject()", StringComparison.Ordinal),
             s.IndexOf("function ue5_shutdown()", StringComparison.Ordinal)
                 - s.IndexOf("function ue5_inject()", StringComparison.Ordinal));
         Assert.Contains("readInteger, mb + 0x0C", inject, StringComparison.Ordinal);
         Assert.Contains($"sleep({CeReadinessLua.PollIntervalMs})", inject, StringComparison.Ordinal);
-        // Injection-time = exactly when games block CreateRemoteThread.
-        var code = string.Join('\n', CodeLines(inject));
-        Assert.DoesNotContain("executeCodeEx", code, StringComparison.Ordinal);
+
+        var startupPath = string.Join('\n', CodeLines(
+            inject.Substring(inject.IndexOf("injectDLL(DLL_PATH)", StringComparison.Ordinal))));
+        Assert.DoesNotContain("executeCodeEx", startupPath, StringComparison.Ordinal);
+
+        // The revive path goes through the shared emitter, never a hand-rolled call:
+        // that emitter is the one place that knows executeCodeEx's real signature.
+        Assert.Contains("callDLL('UE5_AutoStart')", inject, StringComparison.Ordinal);
+        Assert.Contains($"pcall(executeCodeEx, 0, {CeLuaHygiene.DllCallTimeoutMs},", inject,
+            StringComparison.Ordinal);
     }
 
     [Fact]

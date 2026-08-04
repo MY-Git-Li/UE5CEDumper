@@ -11,10 +11,15 @@ namespace UE5DumpUI.Tests;
 /// standalone UE5CEDumper.CT is no longer needed just to inject.
 ///
 /// The invariants that matter: it polls the DLL's mailbox initState instead of
-/// sleeping a fixed budget, it never uses executeCodeEx during start-up (games block
-/// CreateRemoteThread then), every failure path returns BEFORE the success-close so
-/// the Lua Engine window stays readable, and the emitted text is safe to hand to the
-/// AOBMaker plugin (which wraps the whole body in [==[ ... ]==]).
+/// sleeping a fixed budget, it never uses executeCodeEx on the START-UP path (games
+/// block CreateRemoteThread then) and reaches the target only through the shared
+/// <c>callDLL</c> emitter when it must, every failure path returns BEFORE the
+/// success-close so the Lua Engine window stays readable, and the emitted text is
+/// safe to hand to the AOBMaker plugin (which wraps the whole body in [==[ ... ]==]).
+///
+/// <para>One shape rule that is easy to trip over: an [ENABLE]-block comment must
+/// never contain the literal "[DISABLE]" — both CE and <see cref="Enable"/> slice the
+/// script on that marker, so it silently truncates the block.</para>
 /// </summary>
 public class CeInjectScriptGeneratorTests
 {
@@ -67,15 +72,57 @@ public class CeInjectScriptGeneratorTests
             .Where(l => !l.TrimStart().StartsWith("--", StringComparison.Ordinal)));
 
     [Fact]
-    public void Enable_never_uses_executeCodeEx_in_code()
+    public void Enable_never_uses_executeCodeEx_on_the_startup_path()
     {
-        // Start-up is exactly when games block CreateRemoteThread — the readiness
-        // check has to be a pure memory read. Checking CODE ONLY matters twice
-        // over: the block's comments name executeCodeEx deliberately (to say why
-        // it is avoided), and a real use could be `pcall(executeCodeEx, ...)`
-        // rather than a direct `executeCodeEx(` call.
+        // NARROWED (audit #4 B1(b)), and the narrowing is the point: the original
+        // rule was "no executeCodeEx anywhere in [ENABLE]", justified by "start-up
+        // is exactly when games block CreateRemoteThread". That reason only covers
+        // the START-UP path. [ENABLE] now also has a revive path — the DLL is
+        // already mapped and parked because a previous disable ran UE5_Shutdown —
+        // and reviving it REQUIRES a remote call: the mailbox poller is joined, so
+        // there is no memory-write channel left to ask through.
+        //
+        // The invariant that actually protects users is therefore the one asserted
+        // here: from injectDLL onwards — the fresh-injection and readiness-poll
+        // region, the only part that runs while a game is still starting up —
+        // nothing may call into the target.
+        var e = Enable(CeInjectScriptGenerator.Generate(Dll));
+        var startupPath = CodeOnly(e.Substring(e.IndexOf("injectDLL(DLL_PATH)", StringComparison.Ordinal)));
+        Assert.DoesNotContain("executeCodeEx", startupPath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Enable_only_reaches_the_target_through_the_shared_callDLL_helper()
+    {
+        // The other half of the narrowing above. Any remote call in [ENABLE] must go
+        // through CeLuaHygiene's emitter, which is the one place that knows
+        // executeCodeEx's real signature — (callmethod, timeout, address). Getting
+        // those slots wrong is silent: CE returns nil WITHOUT raising, so a bare
+        // inline call reads as success while doing nothing (that is B1(a), which
+        // shipped for months in exactly this file).
         var code = CodeOnly(Enable(CeInjectScriptGenerator.Generate(Dll)));
-        Assert.DoesNotContain("executeCodeEx", code, StringComparison.Ordinal);
+        foreach (var idx in Occurrences(code, "executeCodeEx"))
+        {
+            var line = LineAt(code, idx);
+            Assert.Contains($"pcall(executeCodeEx, 0, {CeLuaHygiene.DllCallTimeoutMs},", line,
+                StringComparison.Ordinal);
+        }
+        // ...and the revive path really is wired to the helper, not hand-rolled.
+        Assert.Contains("callDLL('UE5_AutoStart')", code, StringComparison.Ordinal);
+    }
+
+    private static System.Collections.Generic.IEnumerable<int> Occurrences(string s, string needle)
+    {
+        for (int i = s.IndexOf(needle, StringComparison.Ordinal); i >= 0;
+             i = s.IndexOf(needle, i + 1, StringComparison.Ordinal))
+            yield return i;
+    }
+
+    private static string LineAt(string s, int idx)
+    {
+        var start = s.LastIndexOf('\n', idx) + 1;
+        var end = s.IndexOf('\n', idx);
+        return end < 0 ? s[start..] : s[start..end];
     }
 
     [Fact]

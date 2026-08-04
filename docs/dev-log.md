@@ -20,6 +20,60 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - CE Disable tore nothing down and said it went fine; making it work first required making the DLL restartable (build 2561)
+
+Audit #4 B1 + B30 + B40, one commit because fixing any one alone was worse than
+leaving all three. Detail: [audit-2026-08-04-findings.md](audit-2026-08-04-findings.md).
+
+**What the live test found.** CE's `celua.txt:589` gives the signature as
+`executeCodeEx(callmethod, timeout, address, params...)` — `callmethod` 0=stdcall / 1=cdecl,
+`timeout` in ms (`nil`/`-1` = forever, **`0` = no wait AND the call memory is never freed**), and
+**the address is argument 3**. Every emitter here passed `(0, fn)`, so the address landed in the
+timeout slot. Running the teardown for real logged `executeCodeEx returned nil for
+UE5_StopPipeServer` / `UE5_Shutdown`: **it returns `nil` without raising.** No remote call ever
+happened, and `UE5_Shutdown` had never run in the field.
+
+That inverted the plan. The second defect — `UE5_Shutdown` latches `Tot::RequestShutdown()` and joins
+the mailbox poller, whose `StartThread` had exactly one caller, `DllMain` — was not a *risk* of fixing
+the arity, it was a *certainty*. So both halves shipped together.
+
+**(a)** One `CeLuaHygiene.AppendCallDllHelper` now emits the call for all three routes, with a finite
+5 s timeout, and checks the **result** rather than `pcall`'s status. That second part matters as much
+as the arity: the generators did `return (pcall(executeCodeEx, 0, fn))`, whose parentheses truncate to
+the pcall status — and since the malformed call returned `nil` instead of raising, both results read
+`true`, the failure branch was skipped, and the CE window **auto-closed reporting a clean shutdown**.
+The `.CT`'s `:148` comment ("executeCodeEx: retType 0=void, 1=integer") read `callmethod` as a return
+type; that comment is how the bug got written, so it went in the same commit.
+
+**(b)** `UE5_AutoStart` now calls `Tot::ResetShutdown()` + `Mimic::StartThread()` at the top. Both are
+no-ops on a first start, and `StartThread` was already safely re-callable — it early-returns on
+`s_running` and `StopThread` nulls the handle; nothing had ever called it outside `DllMain`.
+`ResetShutdown` had to move here rather than lean on `Fern::Start`, which runs *after* `UE5_Init`: a
+re-enable would otherwise rescan with `g_shutdown` still latched and every `StartWorker*` gate — which
+reads that same flag — would refuse to spawn.
+
+**(B30)** "Already loaded" was one branch doing one thing; it is now two, told apart by `initState`.
+**SERVING** (a proxy or another instance owns the pipe) is not ours: say so and untick, so the disable
+block can never run `UE5_Shutdown` against a pipe this record never started. **PARKED** (`UE5_Shutdown`
+left it at IDLE) is ours: revive in place via `UE5_AutoStart` rather than re-injecting an
+already-mapped DLL. `memrec` only exists in the record's own chunk, so `ue5_inject()` now returns a
+bool and `[ENABLE]` acts on it. **(B40)** `ue5_callDLL`'s bare `getAddress` — which *throws* — is
+`pcall`-wrapped, and the log handle closes on every path.
+
+**One deliberate invariant was narrowed rather than quietly dropped.** A test forbade `executeCodeEx`
+anywhere in `[ENABLE]`, justified by *"start-up is exactly when games block CreateRemoteThread"*. That
+reason covers the start-up path only, and reviving a parked DLL genuinely needs a remote call — the
+mailbox poller has been joined, so no memory-write channel is left to ask through. The rule is now two
+tests: nothing calls into the target from `injectDLL` onward, and any remaining use must be the shared
+emitter's exact text. Same change in the autorun twin.
+
+New `CeExecuteCodeExArityTests` pins the three-argument form and the finite-non-zero timeout across
+both generators **and reads the shipped `.CT` from disk** — the first automated coverage that file has
+ever had, which audit #4 had flagged as the worst-covered surface in the project. Verified by negative
+control: reverting the `.CT` to the two-argument form fails the test. 3124 green (+6).
+
+-----
+
 ## 2026-08-04 - The Coordinate Library never persisted, and the thing that hid it was an optional parameter (build 2560)
 
 Audit #4's first two fixes, shipped together because fixing one alone would have made the other

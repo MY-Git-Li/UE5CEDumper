@@ -59,6 +59,59 @@ public static class CeLuaHygiene
     }
 
     /// <summary>
+    /// Timeout in ms for a synchronous <c>executeCodeEx</c> DLL call. Finite on
+    /// purpose: <c>nil</c>/<c>-1</c> means wait forever, which hangs CE's whole UI
+    /// if the game thread is stalled, and <c>0</c> means "don't wait" AND leaks the
+    /// call memory (CE's own <c>celua.txt</c> flags it).
+    /// </summary>
+    public const int DllCallTimeoutMs = 5000;
+
+    /// <summary>
+    /// Emit the shared <c>callDLL(name)</c> helper: resolve an exported symbol and
+    /// call it, returning <c>true</c> only when the call actually ran. Requires
+    /// <see cref="AppendDebugPreamble"/> earlier in the same <c>{$lua}</c> block.
+    ///
+    /// <para>Emitted from here because getting <c>executeCodeEx</c> wrong is
+    /// <b>silent</b>, and this repo got it wrong everywhere for a long time. The real
+    /// signature is <c>executeCodeEx(callmethod, timeout, address, params...)</c> —
+    /// <c>callmethod</c> 0=stdcall / 1=cdecl, and <b>the address is argument 3</b>.
+    /// Passing the address in slot 2 makes CE execute with <c>address = nil</c> and
+    /// return <c>nil</c> <i>without raising</i>, so a <c>pcall</c> around it reports
+    /// success for a call that never happened (audit #4 B1 — a CE Disable therefore
+    /// tore nothing down while telling the user it had).</para>
+    ///
+    /// <para>Hence also the result check: <c>pcall</c>'s status answers "did Lua
+    /// raise", never "did the function run". <c>executeCodeEx</c> returns the callee's
+    /// RAX on success and <c>nil</c> on failure/timeout, so <c>nil</c> is the only
+    /// honest failure signal.</para>
+    /// </summary>
+    public static void AppendCallDllHelper(StringBuilder sb, string indent = "")
+    {
+        Line(sb, indent, "-- executeCodeEx(callmethod, timeout, address): callmethod 0=stdcall, timeout ms.");
+        Line(sb, indent, "-- The address is argument THREE. Put it in the timeout slot and CE runs with");
+        Line(sb, indent, "-- address=nil and returns nil WITHOUT raising -- so pcall's status would say");
+        Line(sb, indent, "-- 'success' for a call that never happened. Check the RESULT, not the status.");
+        Line(sb, indent, "local function callDLL(name)");
+        Line(sb, indent, "  local okGet, fn = pcall(getAddress, name)");
+        Line(sb, indent, "  if not (okGet and fn and fn ~= 0) then");
+        Line(sb, indent, "    dbg('[UE5CEDumper] export not found: ' .. name)");
+        Line(sb, indent, "    return false");
+        Line(sb, indent, "  end");
+        Line(sb, indent, $"  local okCall, ret = pcall(executeCodeEx, 0, {DllCallTimeoutMs}, fn)");
+        Line(sb, indent, "  if not okCall or ret == nil then");
+        Line(sb, indent, "    dbg('[UE5CEDumper] call did not run: ' .. name)");
+        Line(sb, indent, "    return false");
+        Line(sb, indent, "  end");
+        Line(sb, indent, "  return true");
+        Line(sb, indent, "end");
+    }
+
+    private static void Line(StringBuilder sb, string indent, string text)
+    {
+        sb.Append(indent).Append(text).Append('\n');
+    }
+
+    /// <summary>
     /// Escape arbitrary text for a Lua SINGLE-quoted literal. The one escaper new
     /// code should call — there are four divergent private copies in this repo
     /// (BakedScriptGenerator, FreezeScriptGenerator, InvokeScriptGenerator, plus

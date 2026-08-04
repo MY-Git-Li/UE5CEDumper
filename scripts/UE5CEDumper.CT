@@ -145,7 +145,21 @@ function ue5_logError(fmt, ...)
 end
 
 -- ============================================================
--- DLL call wrapper  (executeCodeEx: retType 0=void, 1=integer)
+-- DLL call wrapper
+--
+-- executeCodeEx(callmethod, timeout, address, params...) -- CE's celua.txt:
+--   callmethod : 0 = stdcall, 1 = cdecl   (NOT a return type; the old comment
+--                here said "retType 0=void, 1=integer" and that misreading is
+--                what shipped the bug below)
+--   timeout    : milliseconds. nil / -1 = wait forever (hangs CE's UI on a
+--                stalled game thread); 0 = do not wait AND never free the call
+--                memory, i.e. a leak. Always pass a finite value.
+--   address    : the address to execute -- argument THREE.
+--
+-- Getting the slots wrong is SILENT: CE runs with address = nil and returns nil
+-- without raising. Audit #4 B1 -- for a long time this called
+-- executeCodeEx(retType, fn), so the address landed in the timeout slot,
+-- UE5_Shutdown never actually ran, and the CE script reported a clean teardown.
 -- ============================================================
 
 -- ============================================================
@@ -196,15 +210,22 @@ function ue5_isAlreadyLoaded()
     return true, "(unknown module)", nil
 end
 
+-- Milliseconds to wait for a DLL call. Finite on purpose -- see the header above.
+local UE5_CALL_TIMEOUT_MS = 5000
+
 function ue5_callDLL(funcName, retType, ...)
-    local fn = getAddress(funcName)
-    if fn == nil or fn == 0 then
+    -- pcall: getAddress THROWS when the symbol is not in CE's table (it is
+    -- getAddressSafe that returns nil), and an uncaught throw here would abort
+    -- the whole [DISABLE] chunk before the log handle is closed.
+    local okGet, fn = pcall(getAddress, funcName)
+    if not okGet or fn == nil or fn == 0 then
         ue5_logError("Export not found: %s  (DLL not injected?)", funcName)
         return nil
     end
 
-    local ceRetType = (retType == "void") and 0 or 1
-    local result = executeCodeEx(ceRetType, fn, ...)
+    -- retType is ours, not CE's: it selects how we interpret the returned RAX.
+    -- CE's own first argument is the CALLING CONVENTION and x64 has only one.
+    local result = executeCodeEx(0, UE5_CALL_TIMEOUT_MS, fn, ...)
 
     -- Propagate nil: executeCodeEx returns nil when the remote call fails
     -- (process gone, crash, timeout). Treat nil as failure for all types.
@@ -232,7 +253,7 @@ function ue5_inject()
     if pid == 0 then
         ue5_logError("No game process attached! Open a game process in CE first (File &gt; Open Process).")
         showMessage("UE5 Dumper Error:\n\nNo game process is attached to Cheat Engine.\n\nPlease attach CE to a running UE5 game first:\n  File &gt; Open Process (or click the process icon)")
-        return
+        return false
     end
     ue5_log("Target process PID: %d", pid)
 
@@ -240,28 +261,63 @@ function ue5_inject()
     -- Common case: user has version.dll deployed in the game folder, then
     -- tries to inject via CE — without this guard we'd map a duplicate
     -- copy into VA before Heiter.cpp's runtime pipe-existence guard bails.
+    local INIT_IDLE, INIT_RUNNING = 0, 1
+    local INIT_READY, INIT_FAILED, INIT_SKIPPED = 2, 3, 4
+    local MAILBOX_INITSTATE_OFF = 0x0C   -- MailboxData.initState
+
     local present, modName, modPath = ue5_isAlreadyLoaded()
+    local revived = false
     if present then
-        ue5_log("UE5CEDumper already loaded as '%s' (path: %s) — skipping inject.",
-                modName or "?", modPath or "?")
-        local msg = "UE5CEDumper is already loaded in this process as '"
-                 .. (modName or "?") .. "'.\n\n"
-                 .. "No injection needed — just launch UE5DumpUI.exe and click Connect.\n"
-                 .. "Pipe: \\\\.\\pipe\\UE5DumpBfx"
-        showMessage(msg)
-        return
+        -- "Already loaded" splits two ways that need OPPOSITE handling, and the
+        -- mailbox's initState is what separates them:
+        --   SERVING  — a proxy DLL deployed it, or another instance owns the pipe.
+        --              Not ours. Return false so [ENABLE] unticks the record and
+        --              its [DISABLE] can never run UE5_Shutdown against a pipe
+        --              this script never started (audit #4 B30).
+        --   PARKED   — this record was ticked, then unticked, which runs
+        --              UE5_Shutdown and leaves initState at IDLE. Re-ticking must
+        --              revive it in place: the DLL is still mapped, so injecting
+        --              again would double-map us (audit #4 B1(b)).
+        local pre = nil
+        local okSym, mbNow = pcall(getAddress, "g_invokeMailbox")
+        if okSym and mbNow and mbNow ~= 0 then
+            local okRead, v = pcall(readInteger, mbNow + MAILBOX_INITSTATE_OFF)
+            pre = okRead and v or nil
+        end
+
+        if pre == INIT_READY or pre == INIT_SKIPPED then
+            ue5_log("UE5CEDumper already loaded as '%s' (path: %s) and serving — skipping inject.",
+                    modName or "?", modPath or "?")
+            local msg = "UE5CEDumper is already loaded and serving in this process as '"
+                     .. (modName or "?") .. "'.\n\n"
+                     .. "No injection needed — just launch UE5DumpUI.exe and click Connect.\n"
+                     .. "Pipe: \\\\.\\pipe\\UE5DumpBfx"
+            showMessage(msg)
+            return false
+        end
+
+        ue5_log("UE5CEDumper loaded as '%s' but parked (initState=%s) — restarting in place.",
+                modName or "?", tostring(pre))
+        if ue5_callDLL("UE5_AutoStart", "bool") == nil then
+            ue5_logError("UE5_AutoStart did not run — cannot restart in place.")
+            showMessage("UE5 Dumper Error:\n\nThe DLL is loaded but could not be restarted.\n\nUE5_AutoStart did not run — the game may be blocking remote threads.\nRestart the game to get a clean state.")
+            return false
+        end
+        revived = true
     end
 
-    -- 1. Inject DLL into the target process.
+    -- 1. Inject DLL into the target process (skipped when we revived one in place).
     -- The DLL auto-start thread handles UE5_Init (AOBScan) + UE5_StartPipeServer
     -- internally — no executeCodeEx calls needed or possible (remote threads may
     -- be blocked by the game; executeCodeEx relies on CreateRemoteThread).
-    if not injectDLL(DLL_PATH) then
-        ue5_logError("injectDLL failed! Is CE attached to the game? DLL_PATH: %s", DLL_PATH)
-        showMessage("UE5 Dumper Error:\n\ninjectDLL failed.\n\nPossible causes:\n1. CE is not attached to a game process\n2. DLL file not found: " .. DLL_PATH .. "\n3. Anti-cheat blocking injection")
-        return
+    if not revived then
+        if not injectDLL(DLL_PATH) then
+            ue5_logError("injectDLL failed! Is CE attached to the game? DLL_PATH: %s", DLL_PATH)
+            showMessage("UE5 Dumper Error:\n\ninjectDLL failed.\n\nPossible causes:\n1. CE is not attached to a game process\n2. DLL file not found: " .. DLL_PATH .. "\n3. Anti-cheat blocking injection")
+            return false
+        end
+        ue5_log("DLL injected OK")
     end
-    ue5_log("DLL injected OK")
 
     -- 2. Wait for the auto-start thread to finish — by POLLING, not by sleeping
     --    a fixed budget.
@@ -276,9 +332,9 @@ function ue5_inject()
     -- g_invokeMailbox symbol — deliberately NOT executeCodeEx, which needs
     -- CreateRemoteThread and is exactly what step 1's comment says we avoid
     -- here because games may block it.
-    local INIT_IDLE, INIT_RUNNING = 0, 1
-    local INIT_READY, INIT_FAILED, INIT_SKIPPED = 2, 3, 4
-    local MAILBOX_INITSTATE_OFF = 0x0C   -- MailboxData.initState
+    -- INIT_* / MAILBOX_INITSTATE_OFF are declared at the top of this function —
+    -- the already-loaded check above reads the same field to tell "serving" from
+    -- "parked", so they cannot live only down here.
     local POLL_MS      = 250
     local TIMEOUT_MS   = 25000           -- generous: a cold cache + big pool can
                                          -- legitimately exceed the old 15s budget
@@ -335,14 +391,14 @@ function ue5_inject()
             -- Real failure: init ran but the pipe server did not come up.
             ue5_logError("DLL init finished but the Pipe Server FAILED to start.")
             showMessage("UE5 Dumper Error:\n\nThe DLL loaded and initialised, but the Pipe Server failed to start.\n\nMost likely another process already owns \\\\.\\pipe\\UE5DumpBfx.\nCheck the DLL log:\n  %LOCALAPPDATA%\\UE5CEDumper\\Logs")
-            return
+            return false
         else
             -- Timed out still IDLE/RUNNING — the scan is wedged or far slower
             -- than expected. A timeout is an error: report and stop.
             ue5_logError("Timed out after %d sec waiting for DLL auto-start (state=%d).",
                          TIMEOUT_MS / 1000, state)
             showMessage("UE5 Dumper Error:\n\nTimed out waiting for the DLL to finish starting up.\n\nThe AOB scan may be wedged, or the game may be blocking our thread.\nCheck the DLL log:\n  %LOCALAPPDATA%\\UE5CEDumper\\Logs")
-            return
+            return false
         end
     end
 
@@ -351,6 +407,7 @@ function ue5_inject()
     ue5_log("Launch UE5DumpUI.exe and click Connect.")
     ue5_log("DLL log: %%LOCALAPPDATA%%\\UE5CEDumper\\Logs")
     ue5_log("=========================================")
+    return true
 end
 
 -- ============================================================
@@ -358,9 +415,19 @@ end
 -- ============================================================
 
 function ue5_shutdown()
-    ue5_callDLL("UE5_StopPipeServer", "void")
-    ue5_callDLL("UE5_Shutdown",       "void")
-    ue5_log("UE5 Dumper stopped.")
+    -- Nothing loaded? Say nothing and do nothing. [ENABLE]'s bail-outs untick the
+    -- record, which makes CE run this block even though this script never injected
+    -- anything — and a bare getAddress would THROW here, aborting the chunk before
+    -- the log handle is closed (audit #4 B40).
+    local okProbe, probe = pcall(getAddress, "UE5_StopPipeServer")
+    if not (okProbe and probe and probe ~= 0) then
+        ue5_log("Nothing loaded — nothing to shut down.")
+    else
+        ue5_callDLL("UE5_StopPipeServer", "void")
+        ue5_callDLL("UE5_Shutdown",       "void")
+        ue5_log("UE5 Dumper stopped.")
+    end
+    -- Always close the log, on every path.
     if _logHandle then
         _logHandle:close()
         _logHandle = nil
@@ -395,7 +462,13 @@ ue5_log("DLL_PATH = %s", DLL_PATH)
 {$lua}
 if syntaxcheck then return end
 
-ue5_inject()
+-- memrec only exists in THIS chunk, not inside ue5_inject, so the untick has to
+-- happen here. Without it CE ticks the record on every bail-out — including the
+-- "already loaded and serving" one — and unticking then runs a real UE5_Shutdown
+-- against a proxy this script never injected (audit #4 B30).
+if ue5_inject() == false then
+  if memrec then memrec.Active = false end
+end
 
 [DISABLE]
 {$lua}

@@ -18,7 +18,7 @@
 **Tally:** 2 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **51 items** (26 from 4a, 25 from 4b).
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
-**Progress: 2 shipped (B27 + B6, build 2560), 49 open.**
+**Progress: 5 shipped — B27 + B6 (build 2560), B1 + B30 + B40 (build 2561) — 46 open.**
 
 > ### ✅ Verification discipline
 > Nothing here is a raw finder claim. Every item survived a skeptic whose mandated default stance was
@@ -47,7 +47,7 @@ existing behaviour / perf.
 | ID | Sev | Eff/Risk | Module | One-line defect |
 |----|-----|----------|--------|-----------------|
 | **B27** ✅ | 🔴 | S/low | App composition root | ~~11 positional args to a 12-param ctor ⇒ `CoordinateLibraryStore` binds `null` ⇒ the whole Coordinate Library never persists~~ **FIXED build 2560** |
-| **B1** | 🔴 | M/med | CE teardown | CE Disable either never tears down (reported clean) **or** bricks the DLL for the session — exactly one is live, and they must be fixed together |
+| **B1** ✅ | 🔴 | M/med | CE teardown | CE Disable either never tears down (reported clean) **or** bricks the DLL for the session — exactly one is live, and they must be fixed together |
 | B2 | 🟠 | S/low | Genau | SymbolExport winner published in the AOB field ⇒ CE table / trainer / symbol all dead on modular UE builds |
 | B3 | 🟠 | S/low | CeXmlExport | `<Description>` never XML-escaped ⇒ one `&` in a game string voids the entire export |
 | B4 | 🟠 | M/med | Mimic | Mailbox thread not a background worker ⇒ a latched per-command cancel empties every CE object lookup for the session |
@@ -59,7 +59,7 @@ existing behaviour / perf.
 | B10 | 🟠 | M/med | Ubel | `WalkClassEx` has no memo despite 4 call sites commented `// cached`; deep-copies under the global lock |
 | B28 | 🟠 | M/med | Utf8Helpers | UTF-8-first gate accepts a UTF-16 CJK buffer whose byte at `n−1` is `0x00` ⇒ ASCII mojibake, UTF-16 branch unreachable |
 | B29 | 🟠 | S/low | Methode | CE-plugin "already loaded" guard matches by **filename alone** ⇒ ReShade's `dxgi.dll` makes it refuse to inject |
-| B30 | 🟠 | S/low | UE5CEDumper.CT | Every `ue5_inject()` bail-out leaves CE's record ticked ⇒ untick runs a real `UE5_Shutdown` against a proxy this script never injected |
+| B30 ✅ | 🟠 | S/low | UE5CEDumper.CT | ~~Every `ue5_inject()` bail-out leaves CE's record ticked ⇒ untick runs a real `UE5_Shutdown` against a proxy this script never injected~~ **FIXED build 2561** |
 | B31 | 🟠 | S/low | LoggingService | `fileSizeLimitBytes` without `rollOnFileSizeLimit:true` ⇒ the sink silently stops writing at 8 MB for the rest of the process |
 | B11 | 🟡 | S/low | Sein | `fprintf` on a NULL `FILE*` after a failed rotation reopen ⇒ can terminate the game |
 | B12 | 🟡 | S/low | Proxy cleanup | Confirm/status text asserts things the executed plan contradicts |
@@ -85,7 +85,7 @@ existing behaviour / perf.
 | B37 | 🟡 | S/low | LoggingService | Count-based folder eviction ranks by **directory mtime** — the signal its own sibling documents as unusable |
 | B38 | 🟡 | S/low | ProxyDeployVM | Leftover-proxy reports written to `%LOCALAPPDATA%\Reports`, not `…\UE5CEDumper\Reports` |
 | B39 | 🟡 | M/med | Flamme | Four HintCache writers share one fixed `.tmp` path; the UI writes the byte-identical path from another process |
-| B40 | 🟡 | S/low | UE5CEDumper.CT | `ue5_callDLL` uses bare `getAddress` and tests for nil — CE *throws*, aborting `[DISABLE]` and leaking the log FILE handle |
+| B40 ✅ | 🟡 | S/low | UE5CEDumper.CT | ~~`ue5_callDLL` uses bare `getAddress` and tests for nil — CE *throws*, aborting the disable block and leaking the log FILE handle~~ **FIXED build 2561** |
 | B42 | 🟡 | S/low | App | Second launch calls `Shutdown(1)` before the logger exists — no window, no dialog, no log line |
 | B43 | 🟡 | M/med | Lugner_Winmm | Exclusive SRWLOCK held across `LoadLibraryW` + Sein file I/O; the dxgi safety precondition it copies does not transfer |
 | B44 | 🟡 | S/low | Lugner_Winmm.asm | Thunk tests `mProcs[N]` before the resolver but not after ⇒ `jmp rax` with `rax==0` if a name never resolves |
@@ -213,8 +213,40 @@ A rule applied by hand-copying it to a list of sites lands at N−k: B4 + B14 (t
 
 ### B1 — CE Disable teardown: two coupled defects, exactly one is live today
 
-> **✅ SETTLED BY LIVE TEST — 2026-08-04. (a) is REAL; (b) is latent and has never fired.** Not yet
-> fixed. CE's own `celua.txt:589` gives the signature as
+> **✅ FIXED — build 2561, shipped with B30 + B40 in one commit.** Both halves together, as required.
+> **(a)** all three emitters now go through one `CeLuaHygiene.AppendCallDllHelper`, which emits
+> `pcall(executeCodeEx, 0, 5000, fn)` and — just as important — checks the *result* rather than
+> `pcall`'s status, because a wrong-arity call returns `nil` without raising. The `.CT` wrapper and its
+> misleading `:148` comment are fixed too. **(b)** `UE5_AutoStart` now calls `Tot::ResetShutdown()` +
+> `Mimic::StartThread()` at the top (both no-ops on a first start; `StartThread` was already
+> re-callable — it early-returns on `s_running` — nothing had ever called it outside `DllMain`).
+> `Tot::ResetShutdown` had to move here rather than rely on `Fern::Start`, which runs *after*
+> `UE5_Init`: a re-enable would otherwise rescan with `g_shutdown` still latched and every
+> `StartWorker*` gate would refuse to spawn.
+>
+> The re-enable path is no longer "skip everything": all three scripts now read `initState` to tell
+> **SERVING** (a proxy or another instance owns the pipe — not ours, untick so the disable can never
+> tear it down) from **PARKED** (`UE5_Shutdown` left it at IDLE — revive in place via `UE5_AutoStart`,
+> since the DLL is still mapped and re-injecting would double-map).
+>
+> **One deliberate invariant was narrowed, not quietly dropped.** `Enable_never_uses_executeCodeEx_in_code`
+> forbade `executeCodeEx` anywhere in `[ENABLE]`, justified by *"start-up is exactly when games block
+> CreateRemoteThread"*. That reason covers the **start-up path only**, and reviving a parked DLL
+> genuinely requires a remote call — the mailbox poller has been joined, so no memory-write channel
+> remains. The test is now two: no `executeCodeEx` from `injectDLL` onward (the region that runs during
+> real start-up), and every remaining use must be the shared emitter's exact text. Same narrowing, same
+> reasoning, in the autorun twin.
+>
+> Coverage added where the audit said there was none: `CeExecuteCodeExArityTests` pins the 3-argument
+> form and the finite-non-zero timeout across both generators **and reads the shipped `.CT` from disk** —
+> the first automated coverage that file has ever had. Verified by negative control: reverting the `.CT`
+> to the 2-argument form fails `Shipped_cheat_table_passes_the_address_as_argument_three`. 3124 green.
+>
+> *Delete this row after the batch is merged to main.* **Still worth doing in-game:** confirm a
+> tick → untick → re-tick cycle now shows `UE5_Shutdown: Cleaning up...` in `init-0.log` and then comes
+> back up (`UE5_AutoStart: entry` a second time).
+
+**The evidence that settled it, kept for the record.** CE's own `celua.txt:589` gives the signature as
 > **`executeCodeEx(callmethod, timeout, address, params...)`** — `callmethod` 0=stdcall/1=cdecl,
 > `timeout` in ms (`nil`/`-1` = forever, **`0` = no wait and the call memory is never freed, i.e. a
 > leak**), **address is argument 3**. So `executeCodeEx(0, fn)` binds `timeout = fn` and
@@ -888,9 +920,9 @@ gating · Mimic `LIST_FUNCTIONS`/`LIST_INSTANCES` page-index overflow ·
 1. ~~**B6 + B27 together, one commit.**~~ **✅ DONE — build 2560.** (Kept here as the record of why the
    ordering mattered: wiring persistence without the backup would have converted a currently-harmless
    finding into live data loss. B6's backup half was the load-bearing part.)
-2. **B1, both halves in one commit.** Settle it with one live test first (untick the record, check whether
-   the DLL log shows `UE5_Shutdown: Cleaning up...`) — that single observation tells you which half is
-   live and validates both fixes.
+2. ~~**B1, both halves in one commit.**~~ **✅ DONE — build 2561**, with B30 + B40. The live test came
+   first and inverted the plan: `executeCodeEx` returned `nil`, so (a) was real and (b) was latent —
+   which made "fix the arity alone" a certain brick rather than a suspected one.
 3. **B2, B3** — two small, low-risk, high-damage-avoided changes; both are "publish/emit correctly".
 4. **B31 + B37 + B38** — one `LoggingService`/reports commit (`rollOnFileSizeLimit: true` **with
    `retainedFileCountLimit: null`**, judge folders by newest file inside, one `Path.Combine` segment), and

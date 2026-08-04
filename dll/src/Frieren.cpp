@@ -698,6 +698,20 @@ bool UE5_AutoStart() {
     // Called by CEPlugin's InjectDLL after the DLL is loaded into the game.
     // Idempotent: UE5_Init checks s_initialized and skips if already done.
     LOG_INFO("UE5_AutoStart: entry");
+
+    // Re-arm after a CE Disable. UE5_Shutdown latches Tot::RequestShutdown() and
+    // joins the mailbox poller, and Mimic::StartThread's only other caller is
+    // DllMain — which never runs twice — so without these two lines a re-enable
+    // came back with no mailbox at all and the session was unrecoverable without
+    // restarting the game (audit #4 B1(b)).
+    //
+    // Both must happen HERE, not later. Tot::ResetShutdown is otherwise only
+    // reached from Fern::Start, which runs *after* UE5_Init below: a re-enable
+    // would rescan with g_shutdown still latched (cancellable loops bail early)
+    // and every module's StartWorker* would refuse to spawn, since that gate reads
+    // the same flag. Both calls are no-ops on a first start.
+    Tot::ResetShutdown();
+    Mimic::StartThread();   // early-returns when the poller is already running
     // Publish progress into the mailbox so a CE Lua poller can stop sleeping a
     // fixed budget and react the moment we are actually ready (Mimic::InitState).
     g_invokeMailbox.initState = Mimic::INIT_RUNNING;

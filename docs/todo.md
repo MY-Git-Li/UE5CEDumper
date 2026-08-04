@@ -538,9 +538,12 @@ records what the audit *is* and the two things that must not be got wrong:
   `AppComposition.BuildMainWindowViewModel` with **required** parameters (verified: dropping the argument
   is now `CS7036`, not a silent no-op), and a `.preclear.bak` + confirmation guards the wipe. See
   [dev-log.md](dev-log.md) build 2560.
-- **B1 needs one live test before either half is written.** Untick the CE record and check whether the DLL
-  log shows `UE5_Shutdown: Cleaning up...`. Fixing the `executeCodeEx` arity alone would convert a silent
-  no-op into a session-long DLL brick.
+- **✅ DONE (build 2561) — B1 + B30 + B40, one commit.** The live test ran first and inverted the plan:
+  `executeCodeEx` returned `nil` without raising, so (a) was real and (b) was *latent* — making "fix the
+  arity alone" a certain session brick rather than a suspected one. Both halves shipped together, plus the
+  serving-vs-parked split that lets a re-tick revive the DLL instead of tearing down someone else's proxy.
+  A deliberate invariant ("no `executeCodeEx` in `[ENABLE]`") was **narrowed with its reasoning stated**,
+  not dropped. See [dev-log.md](dev-log.md) build 2561.
 
 **Two root causes, both worth fixing as patterns rather than site-by-site:** 4a's is *the report and the
 reality are computed by different code paths* (a success message written by code that never observed
