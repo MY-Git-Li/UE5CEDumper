@@ -213,12 +213,42 @@ A rule applied by hand-copying it to a list of sites lands at N−k: B4 + B14 (t
 
 ### B1 — CE Disable teardown: two coupled defects, exactly one is live today
 
-**🔴 HIGH** · Effort **M** · Risk **med** · *confirmed, mechanism ambiguous until one live test*
+> **✅ SETTLED BY LIVE TEST — 2026-08-04. (a) is REAL; (b) is latent and has never fired.** Not yet
+> fixed. CE's own `celua.txt:589` gives the signature as
+> **`executeCodeEx(callmethod, timeout, address, params...)`** — `callmethod` 0=stdcall/1=cdecl,
+> `timeout` in ms (`nil`/`-1` = forever, **`0` = no wait and the call memory is never freed, i.e. a
+> leak**), **address is argument 3**. So `executeCodeEx(0, fn)` binds `timeout = fn` and
+> `address = nil`. Running the `.CT` teardown for real produced
+> `[UE5Dump ERROR] executeCodeEx returned nil for UE5_StopPipeServer` and the same for
+> `UE5_Shutdown`: **it returns `nil` without raising**, so no remote call happens and `UE5_Shutdown`
+> has never run in the field. **Fixing the arity alone therefore WILL brick the session — (b) is now
+> a certainty, not a hypothesis.**
+>
+> Three corrections to the finding text below, all of which change the fix:
+> 1. Argument 2 is **`timeout`**, not a callback/`nil` separator. The proposed
+>    `pcall(executeCodeEx, 0, nil, fn)` would be *valid* (nil = wait forever) but is the wrong choice
+>    for a teardown call — it hangs CE's UI indefinitely on a stalled game thread. Emit a **finite**
+>    timeout: `pcall(executeCodeEx, 0, 5000, fn)`. **Never `0`** — that is the documented leak.
+> 2. `scripts/UE5CEDumper.CT:148`'s comment — *"executeCodeEx: retType 0=void, 1=integer"* — is a
+>    misreading of `callmethod` (a calling convention) as a return type. That comment is how the bug
+>    got written; fix it in the same commit or it will be written again.
+> 3. **The generated scripts fail worse than the `.CT`.** `ue5_callDLL` checks for `nil` and logs an
+>    error (which is how this was caught). The generators emit
+>    `return (pcall(executeCodeEx, 0, fn))`, whose parentheses truncate to the **pcall status** — and
+>    since the call returns `nil` rather than raising, `a` and `b` are both `true`, the `if not (a and
+>    b)` branch is skipped, and the window **auto-closes reporting a clean shutdown**. A live,
+>    measured instance of this audit's own 4a root cause.
+>
+> Remaining to confirm (cheap, closes the loop): no `UE5_Shutdown: Cleaning up...` in the game's
+> `init-0.log` for that session.
+
+**🔴 HIGH** · Effort **M** · Risk **med** · *(a) confirmed in-game; (b) proven latent*
 · Module: CeInjectScriptGenerator + CeAutorunScriptGenerator + `UE5CEDumper.CT` + Frieren + Heiter
 
-- **Defect (a):** all three CE paths call `executeCodeEx(0, fn)` — 2 args. The repo's own three
-  references (`docs/lessons-learned.md:10`, `scripts/ue5_dissect.lua:44`, `dist/ue5_dissect.lua:44`) put
-  the address at **arg 3**; the `nil` separator is missing, so `fn` binds to the callback slot.
+- **Defect (a):** all three CE paths call `executeCodeEx(0, fn)` — 2 args, so the address never
+  arrives. `scripts/ue5_dissect.lua:44` (`executeCodeEx(1, nil, fn, ...)`) is the only call site in
+  the repo that puts the address in slot 3. *(The claim that `docs/lessons-learned.md:10` documented
+  the correct form was wrong — that line's own example was malformed too, and has been corrected.)*
 - **Defect (b):** if the call *did* run, `UE5_Shutdown` latches `Tot::RequestShutdown()` and calls
   `Mimic::StopThread()` — and `Mimic::StartThread()` has exactly one caller, `Heiter.cpp:194`, inside
   `DllMain(DLL_PROCESS_ATTACH)`, which never re-runs. Both re-enable guards return before `UE5_AutoStart`.
@@ -231,12 +261,14 @@ A rule applied by hand-copying it to a list of sites lands at N−k: B4 + B14 (t
   never happens, the window closes reporting clean, `ue5_shutdown()` returns true. Post-arity-fix-alone:
   pipe and mailbox gone, the dialog tells the user to connect to a pipe that no longer exists, every CE
   hotkey spins to timeout.
-- **Fix:** land together — (a) emit `pcall(executeCodeEx, 0, nil, fn)` in both generators **and** fix
-  `ue5_callDLL` in the shipped `.CT`; (b) make `Mimic::StartThread()` re-callable (it already early-returns
-  on `s_running`) and call it from `UE5_StartPipeServer`/`UE5_AutoStart`, and change the already-loaded
-  branch of both `ue5_inject()` implementations from "skip everything" to "skip `injectDLL`, still call
-  `UE5_AutoStart` and poll `initState`". Tighten the two tests to assert the full
-  `pcall(executeCodeEx, 0, nil, fn)` text.
+- **Fix:** land together — (a) emit `pcall(executeCodeEx, 0, 5000, fn)` in both generators **and** fix
+  `ue5_callDLL` + its `:148` comment in the shipped `.CT`; (b) make `Mimic::StartThread()` re-callable
+  (it already early-returns on `s_running`) and call it from `UE5_StartPipeServer`/`UE5_AutoStart`, and
+  change the already-loaded branch of both `ue5_inject()` implementations from "skip everything" to
+  "skip `injectDLL`, still call `UE5_AutoStart` and poll `initState`". Tighten the two tests to assert
+  the full three-argument text, and add one asserting the timeout is neither `0` (leak) nor absent.
+  Also make the generators stop reporting `pcall` status as success: check the call's own result, since
+  a wrong-arity call returns `nil` without raising.
 - **Note:** `CeInjectScriptGenerator.cs:170-171` already *claims* "UE5_AutoStart is idempotent and resets
   initState on the way through" — the guard returns before any such call. Documented intent vs behaviour.
 - **Where:** [`ui/UE5DumpUI/Services/CeInjectScriptGenerator.cs:163`](../ui/UE5DumpUI/Services/CeInjectScriptGenerator.cs:163),
