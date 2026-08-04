@@ -10,13 +10,15 @@
 
 ## 目前狀態（2026-08-04 第一次實機掃描，build 2622 — DQ7R / Elliot / CE 三份 log）
 
-**7 項 ✅ 已驗證 · 2 項 🔴 失敗並已重修 · 16 項 ⬜ 尚未被觸發**
+**（2026-08-04 三輪實測，build 2622 → 2638）**
+
+**10 項 ✅ 已驗證 · 1 項 🟡 一半 · 14 項 ⬜ 尚未被觸發**
 
 | 狀態 | 項目 |
 |---|---|
-| ✅ 已驗證 | B49、B31、B5（被動半）、B47、**B35**、B42、B36 |
-| 🔴 **失敗 → 已重修（build 2628，要重測）** | **B34**、**B14 + R5** |
-| ⬜ 尚未觸發 | 其餘 16 項 |
+| ✅ 已驗證 | B49、B31、B5（被動半）、B47、B35、B42、B36、**B34**、**B14 + R5** |
+| 🟡 主要路徑已驗證 | **B8**（延後還原那條路徑還沒走到） |
+| ⬜ 尚未觸發 | 其餘 14 項 |
 
 ### 兩個失敗共同的教訓
 
@@ -25,14 +27,28 @@
 - **B34** 列了三個 CE 檔名 —— 但 CE 實際的執行檔是 `cheatengine-x86_64-SSE4-AVX2.exe`，
   三個都沒中。DLL 在 CE 裡面掃了 5.8 秒，還把 pipe 開起來了。
 - **B14** 列了七個 thread proc —— 但 DLL 實際上約有 15 個地方「丟出例外 = `std::terminate`」。
-  WER dump 證明它在一條沒有任何 guard 的執行緒上 terminate。
 
-兩者對自己清單上的每一項都是對的，對世界是錯的。剩下 16 項請帶著這個教訓看。
+兩者對自己清單上的每一項都是對的，對世界是錯的。
+
+### B14 花了三輪，而失敗的那兩輪才是真正有價值的部分
+
+- **第 1 輪**：guard 補到那份「7 個」的清單上 —— WER dump 證明是在一條沒有 guard 的執行緒上 terminate。
+- **第 2 輪**：把全部約 15 個進入點都補上 guard，**又當掉了，一模一樣**。
+- **這才是答案，不是挫折**：`tick threw`、`UNCAUGHT exception` 兩代 guard 都是 0 次 ——
+  **從頭到尾就沒有任何例外被丟出來**。`~std::thread()` 對一個還 joinable 的執行緒會**直接**呼叫
+  `std::terminate()`；而使用者關掉遊戲時 `UE5_Shutdown` **根本不會被呼叫**，所以行程結束時
+  每個 worker 都還是 joinable。
+- 修法不是再列第三份清單，而是讓它變成**型別的性質**：`Routine::SafeThread`。
+
+**額外的教訓**：修正沒生效時，先回去讀**證據**，不要急著加更多同一種修正 ——
+第 2 輪的工完全花在一個從來沒有參與的機制上。
+
+剩下 14 項請帶著這兩個教訓看。
 
 ### ⬜ 不等於「應該沒問題」
 
-⬜ 的意思是**沒有人看過**。這次 16 項裡有 9 項單純是沒被觸發：沒裝第三方 wrapper、
-沒有在指令執行中砍掉 UI、Noclip 從頭到尾沒開、沒跑 Extra Scan、沒跑 Report。
+⬜ 的意思是**沒有人看過**。剩下 14 項大多單純是沒被觸發：沒裝第三方 wrapper、
+沒有在指令執行中砍掉 UI、沒跑 Extra Scan。
 
 -----
 
@@ -181,8 +197,13 @@ grep `init-0.log` 的 `UE5_Init:`
 
 > ⚠ **新行沒出現只證明「這次沒發生競爭」，不證明修好了。** 刻意觸發的版本在 ② 裡。
 
-## 🔴 B34 —— Cheat Engine 本身不會被當成遊戲來掃描
-**build 2603** · **失敗（2026-08-04 三份 session log，build 2622）→ 已重修 build 2628，要重測**
+## ✅ B34 —— Cheat Engine 本身不會被當成遊戲來掃描
+**build 2603** · **已驗證（build 2633）**
+
+重測結果：`host process is 'cheatengine-x86_64-SSE4-AVX2.exe' — Cheat Engine is never a scan
+target`，而且該資料夾的 `scan-0.log` 停在 121 bytes（只有標頭），對照失敗那次的 1.3 MB。
+
+### 當初為什麼失敗（build 2622）
 
 log 裡清楚寫著：
 
@@ -464,8 +485,17 @@ Label / Group / Map 本來就是好的，現在也必須還是好的。
 
 > 需要先打開 Experimental 開關，子選單才會存在。
 
-## 🔴 B14 + R5 —— 在 hold worker 還活著的時候關掉遊戲
-**build 2596** · **失敗（2026-08-04 三份 session log，build 2622）→ 適用範圍已修正 build 2628，要重測**
+## ✅ B14 + R5 —— 在 hold worker 還活著的時候關掉遊戲
+**build 2596** · **已驗證（build 2638）**
+
+DQ7R，bullet-time + See-through 開著，從遊戲自己的視窗關掉 —— event log 沒有任何一筆、沒有 dump。
+
+**真正的原因跟 B14 原本的診斷無關**：`~std::thread()` 對還 joinable 的執行緒直接呼叫
+`std::terminate()`，沒有任何例外被丟出來，所以兩代 exception guard 都碰不到它。
+而 `UE5_Shutdown` 在使用者關遊戲時根本不會被呼叫，於是行程結束時每個 worker 都還 joinable。
+修法是 `Routine::SafeThread`（解構時 detach），讓它變成型別的性質而不是第三份清單。
+
+### 前兩輪的經過（值得留著）
 
 DQ7R 在 21:05:06 當掉，跑的是 build 2622（所有修正都在裡面）。WER dump
 （`%LOCALAPPDATA%\CrashDumps\DQ7R-Win64-Shipping.exe.55564.dmp`）顯示：

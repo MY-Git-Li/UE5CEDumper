@@ -568,6 +568,32 @@ void Fern::Stop() {
         std::unique_lock<std::mutex> lock(m_connMutex);
         drained = m_connCv.wait_for(lock, std::chrono::seconds(5), [this] { return m_conns.empty(); });
         connsLeft = m_conns.size();
+        // Name the stragglers while we still hold the registry lock. Without this the
+        // timeout says only "N left", which is not enough to act on — the 2026-08-04
+        // run burned the full 5 s budget and the log could not say whether the threads
+        // were parked in ReadFile (the cancel missed them) or stuck inside a command
+        // (the cancel cannot help until it returns). Those need opposite fixes.
+        if (!drained) {
+            long long nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            for (const auto& c : m_conns) {
+                if (!c) continue;
+                std::string what;
+                { std::lock_guard<std::mutex> dlk(c->diagMutex); what = c->cmdName; }
+                bool busy = c->inFlight.load(std::memory_order_relaxed);
+                long long started = c->cmdStartMs.load(std::memory_order_relaxed);
+                // Build the age into a NAMED local. The obvious one-liner passes
+                // .c_str() of a temporary through a ternary — legal (the temporary
+                // outlives the full-expression) but not worth making a reader verify.
+                std::string age;
+                if (busy && started > 0) age = " for " + std::to_string(nowMs - started) + " ms";
+                LOG_WARN("PipeServer:   straggler: %s, last cmd '%s'%s",
+                         busy ? "INSIDE a command (cancel cannot reach it until it returns)"
+                              : "idle in ReadFile (the I/O cancel should have freed it)",
+                         what.empty() ? "(none yet)" : what.c_str(),
+                         age.c_str());
+            }
+        }
     }
     // Distinguish "satisfied" from "timed out" explicitly: a 5 s stall elsewhere
     // and a 5 s expiry of THIS wait produce identical wall-clock, and telling them
@@ -831,6 +857,17 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         // blocking docs/multipipe-eval.md blames for UI lag, which until now
         // nothing measured. See Sense.h.
         conn->inFlight.store(true, std::memory_order_relaxed);
+        // Record WHICH command, for Stop's drain-timeout diagnostic only. `cmd` is
+        // already parsed above for the repeat-suppression, so this costs one small
+        // string copy per command and nothing on any read path.
+        {
+            std::lock_guard<std::mutex> dlk(conn->diagMutex);
+            conn->cmdName = cmd;
+        }
+        conn->cmdStartMs.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
         // QPC, not GetTickCount64: its ~15.6 ms granularity floored every sub-tick
         // dispatch to 0, so a live run of 1397 walk_instance calls reported
         // "0 ms total, max 15 ms" — an artefact of which calls straddled a tick,

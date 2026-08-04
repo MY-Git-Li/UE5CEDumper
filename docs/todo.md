@@ -1686,20 +1686,27 @@ Pick up when the active plan finishes or when blocked.
 > sequence, a specific game, a specific third-party install). Each of these carries its exact steps
 > and the PASS/FAIL observation.
 >
-> **STATUS after the first real sweep (2026-08-04, build 2622 — DQ7R / Elliot / CE logs):**
-> **7 ✅ verified · 2 🔴 FAILED and refixed · 16 ⬜ not yet exercised.**
-> Verified: B49, B31, B5(passive), B47, B35, B42, B36. Failed: **B34** (CE's real exe is the
-> `-SSE4-AVX2` variant, which an exact-name list missed) and **B14+R5** (the guard was applied to
-> an enumeration that had counted wrong — a WER dump proved `std::terminate` on a thread no guard
-> covered). Both refixed in build 2628 and need a re-test.
+> **STATUS after three rounds of live testing (2026-08-04, builds 2622 → 2638):**
+> **10 ✅ verified · 1 🟡 half · 14 ⬜ not yet exercised.**
+> Verified: B49, B31, B5(passive), B47, B35, B42, B36, **B34**, **B14+R5**, and B8's main path.
 >
-> **The lesson both failures share, worth carrying into the remaining 16:** a fix verified against
-> the *list* it was written from is not verified. B34 listed three CE filenames; B14 listed seven
-> thread procs. Each was correct about every item on its list and wrong about the world.
+> **B14+R5 took three attempts, and the two failures are the most useful thing this audit
+> produced.** Round 1: the guard was applied to an enumeration ("2 of 7 thread procs") that had
+> counted wrong — a WER dump proved `std::terminate` on a thread no guard covered. Round 2: with
+> guards on all ~15 entry points it crashed *again*, identically. That was the answer, not a
+> setback — **there was never an exception.** `~std::thread()` on a joinable thread calls
+> `std::terminate()` directly, and `UE5_Shutdown` is never called when a user closes a game, so
+> every worker was still joinable at process exit. Fixed by making it a property of the TYPE
+> (`Routine::SafeThread`) rather than a third list.
 >
-> ⬜ does **not** mean "probably fine". It means nobody has looked. Nine of the sixteen were simply
-> not exercised by these sessions (no wrapper installed, no UI killed mid-command, Noclip never
-> switched on, no Extra Scan, no Report run).
+> **The lesson all of it shares, worth carrying into the remaining 14:** a fix verified against the
+> *list* it was written from is not verified. B34 listed three CE filenames; B14 listed seven
+> thread procs. Each was correct about every item on its list and wrong about the world. And when
+> a fix does not take, re-read the EVIDENCE before adding more of the same fix — round 2 was
+> effort spent on a mechanism that was never involved.
+>
+> ⬜ does **not** mean "probably fine". It means nobody has looked. Most of the fourteen were
+> simply not exercised (no wrapper installed, no UI killed mid-command, no Extra Scan).
 
 #### ① Log-derivable
 
@@ -1755,7 +1762,10 @@ Pick up when the active plan finishes or when blocked.
   racing). Absence of the new lines proves only that the race did not *occur*; the deliberate
   provocation is in ② below.
 
-- 🔴 **Cheat Engine is never scanned as if it were the game** (build 2603, B34) — **FAILED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622, REFIXED build 2628, needs a re-test.**
+- ✅ **Cheat Engine is never scanned as if it were the game** (build 2603, B34) — **VERIFIED
+  build 2633**: `host process is 'cheatengine-x86_64-SSE4-AVX2.exe' — Cheat Engine is never a
+  scan target`, and `scan-0.log` stayed at 121 bytes (header only) where the failing run left
+  1.3 MB. *Earlier:* **FAILED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622, REFIXED build 2628, needs a re-test.**
   The capture shows `process: …\cheatengine-x86_64-SSE4-AVX2.exe` followed by
   `DllMain AutoStart: game process — calling UE5_AutoStart` — a 5.8 s AOB scan and the pipe
   opened **inside CE** (1.3 MB `scan-0.log` in that folder). Cause: the guard was an exact-name
@@ -1818,7 +1828,14 @@ Pick up when the active plan finishes or when blocked.
   the fix did not swing the other way: **Star Trek Voyager (UE5.6)** stores its FText as UTF-8, and
   its Chinese must still read correctly.
 
-- ⬜ **Fly/Noclip no longer leaves the pawn ghosted** (build 2596, B8). The whole answer is in the
+- 🟡 **Fly/Noclip no longer leaves the pawn ghosted** (build 2596, B8) — **MAIN PATH VERIFIED**
+  (Elliot, 2026-08-04, noclip ON). The log shows the fixed ordering exactly:
+  `Fly: worker stopped` → `Fly: SetActorEnableCollision(1) invoked` → `Fly: DISABLED`. Join
+  before restore, and the restore is committed from the invoke *actually running*. **The
+  DEFERRED path is still ⬜** — the game thread stayed responsive, so
+  `DISABLED but the pawn's collision is still OFF` was never reached. To finish it, alt-tab
+  away for >500 ms before clicking Disable on a title that idles when unfocused.
+  *Original instructions:* The whole answer is in the
   log, and the trigger is the *ordinary* way to turn Fly off on an idle-when-unfocused title.
   **To test:** Teleport tab → Fly ON + Noclip → fly through a wall → **alt-tab to the UI** (wait
   >500 ms so ProcessEvent goes quiet) → click Disable. Grep `init-0.log` for `Fly:`.
@@ -1917,7 +1934,10 @@ Pick up when the active plan finishes or when blocked.
   Force submenu. Left-click a BoolProperty row, right-click it: only Force ON / OFF. FAIL = all
   four actions at once. (Needs the Experimental toggle on for the submenu to exist at all.)
 
-- 🔴 **Close the game with a hold worker live** (build 2596, B14 + R5) — **FAILED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622, SCOPE CORRECTED build 2628, needs a re-test.**
+- ✅ **Close the game with a hold worker live** (build 2596, B14 + R5) — **VERIFIED build 2638**
+  (DQ7R, bullet-time + See-through ON, closed from the game's own window: no event-log entry, no
+  dump). Took THREE attempts and the first two failures are the whole lesson — see below.
+  *Earlier:* **FAILED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622, SCOPE CORRECTED build 2628, needs a re-test.**
   DQ7R crashed at 21:05:06 on build 2622 (every fix present). The WER dump
   (`%LOCALAPPDATA%\CrashDumps\DQ7R-Win64-Shipping.exe.55564.dmp`) gives
   `0xC0000409` with **param[0] = 7 = FAST_FAIL_FATAL_APP_EXIT** — `abort()`/`std::terminate` —

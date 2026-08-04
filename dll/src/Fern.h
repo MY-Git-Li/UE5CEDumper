@@ -45,6 +45,16 @@ private:
         HANDLE             pipe{INVALID_HANDLE_VALUE};
         std::mutex         writeMutex;
         std::atomic<bool>  inFlight{false};   // true only while inside DispatchCommand
+        // What that in-flight command IS, and when it started. Written just before
+        // DispatchCommand and read ONLY by Stop's drain-timeout diagnostic, so the hot
+        // path pays one small copy per command and the teardown can finally name the
+        // connection that would not leave. "2 left" is not actionable; "2 left: lane
+        // busy 4980 ms in 'walk_instance'" is. (2026-08-04: the first Stop ever logged
+        // with connections attached timed out at the full 5 s and the log could not say
+        // why.)
+        std::mutex         diagMutex;         // guards cmdName only
+        std::string        cmdName;           // last/current command on this connection
+        std::atomic<long long> cmdStartMs{0}; // steady-clock ms when it began
         std::atomic<bool>  closed{false};     // CloseHandle done exactly once
     };
 
