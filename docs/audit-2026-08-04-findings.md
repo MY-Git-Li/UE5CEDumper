@@ -15,10 +15,11 @@
 > they land (write up in [dev-log.md](dev-log.md), then delete the row here — this file is the working
 > tracker, not history).
 
-**Tally:** 2 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **51 items** (26 from 4a, 25 from 4b).
+**Tally:** 3 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **52 items** (26 from 4a, 25 from 4b, 1 from in-game verification).
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
-**Progress: 5 shipped — B27 + B6 (build 2560), B1 + B30 + B40 (build 2561) — 46 open.**
+**Progress: 6 shipped — B27 + B6 (2560), B1 + B30 + B40 (2561), B49 (2569) — 46 open.**
+**+1 found by in-game verification** (B49), which is why 51 became 52.
 
 > ### ✅ Verification discipline
 > Nothing here is a raw finder claim. Every item survived a skeptic whose mandated default stance was
@@ -48,6 +49,7 @@ existing behaviour / perf.
 |----|-----|----------|--------|-----------------|
 | **B27** ✅ | 🔴 | S/low | App composition root | ~~11 positional args to a 12-param ctor ⇒ `CoordinateLibraryStore` binds `null` ⇒ the whole Coordinate Library never persists~~ **FIXED build 2560** |
 | **B1** ✅ | 🔴 | M/med | CE teardown | CE Disable either never tears down (reported clean) **or** bricks the DLL for the session — exactly one is live, and they must be fixed together |
+| **B49** ✅ | 🔴 | S/med | Fern | ~~`Fern::Stop` closes a SYNCHRONOUS listen handle to "unblock" the accept thread; the close instead BLOCKS until a client connects — under `m_connMutex` — so a disable with no UI connected wedges the teardown thread forever~~ **FIXED build 2569** |
 | B2 | 🟠 | S/low | Genau | SymbolExport winner published in the AOB field ⇒ CE table / trainer / symbol all dead on modular UE builds |
 | B3 | 🟠 | S/low | CeXmlExport | `<Description>` never XML-escaped ⇒ one `&` in a game string voids the entire export |
 | B4 | 🟠 | M/med | Mimic | Mailbox thread not a background worker ⇒ a latched per-command cancel empties every CE object lookup for the session |
@@ -242,9 +244,13 @@ A rule applied by hand-copying it to a list of sites lands at N−k: B4 + B14 (t
 > the first automated coverage that file has ever had. Verified by negative control: reverting the `.CT`
 > to the 2-argument form fails `Shipped_cheat_table_passes_the_address_as_argument_three`. 3124 green.
 >
-> *Delete this row after the batch is merged to main.* **Still worth doing in-game:** confirm a
-> tick → untick → re-tick cycle now shows `UE5_Shutdown: Cleaning up...` in `init-0.log` and then comes
-> back up (`UE5_AutoStart: entry` a second time).
+> **✅ IN-GAME VERIFIED 2026-08-04 (Elliot, UE 5.04) — and the verification found a regression the fix
+> itself created.** The cycle works: `UE5_Shutdown: Cleaning up...` logs, the UI's pipe drops, a re-tick
+> logs `UE5_AutoStart: entry` and the UI reconnects. Twice. **But** making `UE5_Shutdown` run for the
+> first time exposed a permanent hang inside `Fern::Stop()` that the broken call had been hiding —
+> filed and fixed as **B49** (build 2569). B1 is not safe to ship without B49.
+>
+> *Delete this row after the batch is merged to main.*
 
 **The evidence that settled it, kept for the record.** CE's own `celua.txt:589` gives the signature as
 > **`executeCodeEx(callmethod, timeout, address, params...)`** — `callmethod` 0=stdcall/1=cdecl,
@@ -312,6 +318,57 @@ A rule applied by hand-copying it to a list of sites lands at N−k: B4 + B14 (t
 ---
 
 ## 🟠 MEDIUM
+
+### B49 — `Fern::Stop` waits for a client that may never come, holding `m_connMutex`
+
+> **✅ FIXED — build 2569.** Found by in-game verification of B1, not by any audit pass: fixing B1 made
+> `UE5_Shutdown` run for the first time, and that made this reachable. **It was unreachable before,
+> which is why three audits missed it.**
+
+**🔴 HIGH** · Effort **S** · Risk **med** · *measured in-game, root cause confirmed against the logs*
+· Module: Fern
+
+- **Defect:** `Fern::Stop()` called `CloseHandle(m_listenPipe)` under a comment describing it as a
+  *"proven unblock"* for the accept thread's `ConnectNamedPipe`. The listen instance is a **synchronous**
+  handle (`AcceptLoop`'s `CreateNamedPipeW` passes no `FILE_FLAG_OVERLAPPED`), so the close does not
+  abort the parked call — it **blocks until that call completes**, i.e. until somebody connects. It did
+  so while holding `m_connMutex`, which every connection thread needs in order to unregister itself and
+  satisfy the drain wait.
+- **Failure scenario (measured, Elliot UE 5.04, 2026-08-04):** two disables where the user happened to
+  reconnect the UI took **9.4 s** and **13.3 s** — not a constant, so not a timeout. The third disable
+  came after the UI had already disconnected: `pipe-0.log` shows `UE5_Shutdown: Cleaning up...`, then
+  `Mailbox: polling thread stopped`, then **nothing — no `AcceptLoop exiting`, no `PipeServer: Stopped`,
+  ever**. That teardown thread stays parked in the game process holding `m_connMutex` for the rest of
+  the session, `UE5_Shutdown` never completes, and `s_initialized` / `initState` are never reset.
+- **Fix:** send a **wake-connect** instead — `CreateFileW` on our own pipe name, immediately closed.
+  `m_running` is already false, so `AcceptLoop` takes its `!m_running` branch and closes its **own**
+  handle. This also repairs a latent leak: `Stop()` used to null `m_listenPipe`, so the accept thread's
+  `if (m_listenPipe == pipe)` guard failed and nobody ever closed that instance. Gated on a listener
+  actually being parked, so a second instrumented game (the pipe name is machine-global) does not see a
+  phantom connect.
+- **Three more defects found on the same path, all fixed here:**
+  1. `Start()`'s only guard was `m_running`, which `Stop()` clears in its *first* statement — so the
+     whole teardown window reads as "stopped", and starting there move-assigns onto a still-joinable
+     `m_acceptThread`: a standard-mandated `std::terminate`, no log, no dump. New `m_stopping` flag.
+  2. A duplicate `StopAllWatches()` sat *before* the cancel block — exactly the ordering the surviving
+     call's own comment warns against. Deleted.
+  3. The CE teardown called `UE5_StopPipeServer` then `UE5_Shutdown`, but the latter **is** that
+     `Stop()` plus everything else, run deliberately *after* `Stark::Shutdown` so a pipe thread blocked
+     in `EnqueueInvoke` gets its −7 and unwinds. Calling it first inverted that ordering, and since the
+     CE call times out while the remote thread keeps running, it put two teardowns in the process
+     concurrently. All three emitters now call `UE5_Shutdown` alone.
+- **Instrumentation is part of the fix.** `Stop()` logged exactly one line, so a 5 s stall elsewhere and
+  a 5 s expiry of the connection-drain wait were indistinguishable from outside — which is what made
+  this expensive to diagnose. It now logs entry with the connection count, per-phase elapsed ms, and
+  explicitly whether that wait was `satisfied` or `TIMEOUT` with how many connections remained.
+- **Deliberately NOT done:** raising the CE-side timeout (no finite value bounds an unbounded wait);
+  `CancelSynchronousIo` on the connection handles (this run never exercised `CancelIoEx` there — it is
+  sequenced behind the blocking close and never executed — so there is **no evidence** it is broken;
+  re-measure with the new phase logging first); a mailbox `shutdownState` field (`Mimic::StopThread`
+  memsets the struct mid-teardown, so the flag would zero itself).
+- **Still to verify in-game:** disconnect the UI *first*, then untick — a `PipeServer: Stopped` line
+  should now appear at all, within ~100 ms.
+- **Where:** [`dll/src/Fern.cpp:450`](../dll/src/Fern.cpp:450), [`dll/src/Fern.h:51`](../dll/src/Fern.h:51)
 
 ### B2 — SymbolExport winner published as an AOB pattern
 **🟠** · S/low · Genau. Both `Genau.cpp:4720-4723` (GWorld) and `:4347-4350` (`PublishGEngineMetadata`)

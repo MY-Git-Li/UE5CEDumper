@@ -415,6 +415,14 @@ bool Fern::Start() {
         LOG_WARN("PipeServer: Already running");
         return true;
     }
+    // Stop() clears m_running in its FIRST statement, so for the whole teardown
+    // window the server reads as "stopped" while its threads are still alive.
+    // Starting there would move-assign onto a joinable m_acceptThread, which the
+    // standard defines as std::terminate — the game dies with no log and no dump.
+    if (m_stopping.load(std::memory_order_acquire)) {
+        LOG_WARN("PipeServer: Start refused — a Stop() is still in progress");
+        return false;
+    }
 
     // Clear the sticky shutdown latch left by a prior Stop()/UE5_Shutdown().
     // Without this, re-enabling the CE script in the same game process leaves
@@ -440,34 +448,98 @@ bool Fern::Start() {
 
 void Fern::Stop() {
     if (!m_running.exchange(false)) return; // Already stopped
+    // Closed only on the way out. m_running goes false in the line above, so
+    // without this the whole teardown window looks "stopped" to Start(), which
+    // would then move-assign over a still-joinable m_acceptThread — a
+    // standard-mandated std::terminate that kills the game with no log.
+    m_stopping.store(true, std::memory_order_release);
+    struct StoppingGuard {
+        std::atomic<bool>& f;
+        ~StoppingGuard() { f.store(false, std::memory_order_release); }
+    } stoppingGuard{ m_stopping };
+
+    // Phase timings: reconstructing this teardown from the outside cost a full
+    // investigation because "Stopped" was the only line Stop() ever logged, and a
+    // 5 s stall was indistinguishable from the 5 s connection-drain TIMEOUT.
+    const auto tStart = std::chrono::steady_clock::now();
+    auto elapsedMs = [&tStart] {
+        return static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - tStart).count());
+    };
+    size_t connsAtEntry;
+    {
+        std::lock_guard<std::mutex> lock(m_connMutex);
+        connsAtEntry = m_conns.size();
+    }
+    LOG_INFO("PipeServer: Stop entry (conns=%zu)", connsAtEntry);
+
     // Abort any in-flight long-running operation BEFORE joining threads, so a
     // scan blocking the accept thread bails promptly and the join below
     // completes fast (otherwise disabling the script / closing can hang while
     // a long scan finishes). Sticky — never auto-cleared.
     Tot::RequestShutdown();
-    StopAllWatches();
 
-    // Unblock everyone (Path A multi-connection teardown). Close the parked
-    // listen instance to break AcceptLoop's ConnectNamedPipe (proven unblock),
-    // and CancelIoEx every live connection so a thread blocked in ReadFile/
-    // WriteFile returns ERROR_OPERATION_ABORTED and runs its OWN cleanup (each
-    // connection handle is closed by its owning thread — no cross-thread close
-    // race). A thread inside DispatchCommand exits via the m_running loop check
-    // after it returns; Tot::RequestShutdown above makes a long scan bail first.
+    // Unblock everyone (Path A multi-connection teardown). CancelIoEx every live
+    // connection so a thread blocked in ReadFile/WriteFile returns
+    // ERROR_OPERATION_ABORTED and runs its OWN cleanup (each connection handle is
+    // closed by its owning thread — no cross-thread close race). A thread inside
+    // DispatchCommand exits via the m_running loop check after it returns;
+    // Tot::RequestShutdown above makes a long scan bail first.
+    //
+    // The listen instance is NOT closed here, and that is the whole point. This
+    // block used to call CloseHandle(m_listenPipe) under the comment "proven
+    // unblock". The logs disprove it: the listen instance is a SYNCHRONOUS handle
+    // (AcceptLoop's CreateNamedPipeW passes no FILE_FLAG_OVERLAPPED), so closing
+    // it does not abort the accept thread's parked ConnectNamedPipe — it BLOCKS
+    // until that call completes, i.e. until somebody connects. Under m_connMutex,
+    // which every connection thread needs to unregister itself.
+    //
+    // Measured on Elliot 2026-08-04: 9.4 s and 13.3 s for two disables where the
+    // user happened to reconnect the UI — and on the third, with the UI already
+    // disconnected, "PipeServer: Stopped" was NEVER logged at all. The teardown
+    // thread stayed wedged in the game process holding m_connMutex for the rest of
+    // the session. The delay was never a timeout; it was "until a client shows up".
+    bool listenerParked;
     {
         std::lock_guard<std::mutex> lock(m_connMutex);
-        if (m_listenPipe != INVALID_HANDLE_VALUE) {
-            CloseHandle(m_listenPipe);
-            m_listenPipe = INVALID_HANDLE_VALUE;
-        }
+        listenerParked = (m_listenPipe != INVALID_HANDLE_VALUE);
         for (auto& c : m_conns) {
             if (c->pipe != INVALID_HANDLE_VALUE && !c->closed.load(std::memory_order_relaxed))
                 CancelIoEx(c->pipe, nullptr);
         }
     }
 
+    // Wake the accept thread by COMPLETING its ConnectNamedPipe instead of closing
+    // its handle: connect to our own pipe and immediately drop it. m_running is
+    // already false, so AcceptLoop takes its !m_running branch, closes its OWN
+    // handle and breaks — which also repairs a leak this function used to cause,
+    // since nulling m_listenPipe made AcceptLoop's `if (m_listenPipe == pipe)`
+    // guard fail and the instance was never closed by anyone.
+    //
+    // Outside the lock on purpose: the connect can block briefly, and AcceptLoop
+    // needs m_connMutex to finish. Gated on listenerParked so we do not poke a
+    // DIFFERENT process's server — the pipe name is machine-global, so a second
+    // instrumented game would otherwise see a phantom connect.
+    if (listenerParked) {
+        HANDLE poke = CreateFileW(Grimoire::PIPE_NAME, GENERIC_READ, 0, nullptr,
+                                  OPEN_EXISTING, 0, nullptr);
+        if (poke != INVALID_HANDLE_VALUE) {
+            CloseHandle(poke);
+        } else {
+            // ERROR_FILE_NOT_FOUND: the instance is already gone. ERROR_PIPE_BUSY:
+            // every instance is taken, so nothing is parked in ConnectNamedPipe.
+            // Both mean there is nothing to wake — not a failure.
+            LOG_INFO("PipeServer: Stop wake-poke found no parked listener (err=%lu)", GetLastError());
+        }
+    }
+
+    LOG_INFO("PipeServer: Stop cancels+wake done (%lld ms)", elapsedMs());
+
     // Stop watches AFTER cancelling connection I/O so a watch-thread WriteFile
-    // can't deadlock its own join on a stuck pipe.
+    // can't deadlock its own join on a stuck pipe. This is the ONLY StopAllWatches
+    // call — the duplicate that used to sit before the cancel block was a leftover
+    // from before the Path A refactor, and it is exactly the ordering this comment
+    // says not to use.
     StopAllWatches();
 
     // Join background scan threads (they exit naturally; RunScan/RunRescan are
@@ -480,21 +552,32 @@ void Fern::Stop() {
     if (m_scan.scanThread.joinable()) {
         m_scan.scanThread.join();
     }
+    LOG_INFO("PipeServer: Stop watches+scan joins done (%lld ms)", elapsedMs());
 
     // Wait for every connection thread to self-unregister (they are detached;
     // they erase themselves from m_conns + notify on exit). Bounded so a wedged
     // handler can't hang shutdown forever.
+    bool drained;
+    size_t connsLeft;
     {
         std::unique_lock<std::mutex> lock(m_connMutex);
-        m_connCv.wait_for(lock, std::chrono::seconds(5), [this] { return m_conns.empty(); });
+        drained = m_connCv.wait_for(lock, std::chrono::seconds(5), [this] { return m_conns.empty(); });
+        connsLeft = m_conns.size();
     }
+    // Distinguish "satisfied" from "timed out" explicitly: a 5 s stall elsewhere
+    // and a 5 s expiry of THIS wait produce identical wall-clock, and telling them
+    // apart from the outside is what made the 2026-08-04 investigation expensive.
+    LOG_INFO("PipeServer: Stop conn drain %s, %zu left (%lld ms)",
+             drained ? "satisfied" : "TIMEOUT", connsLeft, elapsedMs());
 
     if (m_acceptThread.joinable()) {
         m_acceptThread.join();
     }
+    LOG_INFO("PipeServer: Stop accept join done (%lld ms)", elapsedMs());
     if (m_monitorThread.joinable()) {
         m_monitorThread.join();
     }
+    LOG_INFO("PipeServer: Stop monitor join done (%lld ms)", elapsedMs());
 
     // No handler thread is running now — free every remaining value-scan session.
     Radar::SessionManager::Instance().DropAll();

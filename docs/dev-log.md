@@ -20,6 +20,57 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - The teardown was never slow, it was waiting for a client that might never come (build 2569)
+
+Fixing B1 in build 2561 made `UE5_Shutdown` actually run for the first time — and that
+exposed a **permanent hang** that had been unreachable behind the broken call. Found by
+in-game verification of the very fix that created it.
+
+**The measurement.** Two CE disables took 9.4 s and 13.3 s. Not a constant, so not a timeout. The
+third disable — the one where the UI had already disconnected — produced **no `PipeServer: Stopped`
+line at all**. `pipe-0.log` just ends. That teardown thread is still parked inside the game process,
+holding `m_connMutex`, for the rest of the session.
+
+**The cause.** `Fern::Stop()` called `CloseHandle(m_listenPipe)` under a comment calling it a
+*"proven unblock"* for the accept thread's `ConnectNamedPipe`. It is the opposite. The listen
+instance is a **synchronous** handle (`AcceptLoop`'s `CreateNamedPipeW` passes no
+`FILE_FLAG_OVERLAPPED`), so closing it does not abort the parked call — it **blocks until that call
+completes**, i.e. until somebody connects. And it did that while holding `m_connMutex`, which every
+connection thread needs to unregister itself. The 9.4 s was how long the user took to click Connect.
+With no client left, the wait is unbounded.
+
+`Stop()` now sends a **wake-connect** instead: `CreateFileW` on our own pipe name, immediately
+closed. `m_running` is already false, so `AcceptLoop` takes its `!m_running` branch and closes its
+**own** handle — which also repairs a leak, because `Stop()` used to null `m_listenPipe` and the
+accept thread's `if (m_listenPipe == pipe)` guard then failed, so nobody closed that instance. The
+poke is gated on a listener actually being parked, so a second instrumented game (the pipe name is
+machine-global) does not see a phantom connect.
+
+**Three more defects found on the same path.** (1) `Start()`'s only guard was `m_running`, which
+`Stop()` clears in its *first* statement — so the whole teardown window reads as "stopped", and
+starting there move-assigns onto a still-joinable `m_acceptThread`: a standard-mandated
+`std::terminate` with no log and no dump. New `m_stopping` flag, RAII-cleared. (2) A duplicate
+`StopAllWatches()` sat *before* the cancel block, which is exactly the ordering the surviving call's
+own comment warns against. Deleted. (3) The CE teardown called `UE5_StopPipeServer` and then
+`UE5_Shutdown` — but `UE5_Shutdown` **is** that `Stop()` plus everything else, and runs it
+deliberately *after* `Stark::Shutdown` so a pipe thread blocked in `EnqueueInvoke` gets its −7 and
+unwinds. Calling it first inverted that, and because the CE call times out while the remote thread
+keeps running, it put two teardowns in the process at once. All three emitters now call
+`UE5_Shutdown` alone; the export and the not-loaded probe stay.
+
+**Instrumentation, because this cost a full investigation to reconstruct.** `Stop()` logged exactly
+one line, so a 5 s stall elsewhere and a 5 s expiry of the connection-drain wait were
+indistinguishable from outside. It now logs entry with the connection count, per-phase elapsed ms,
+and — explicitly — whether that wait was `satisfied` or `TIMEOUT` with how many connections remained.
+
+Deliberately NOT done: raising the CE-side timeout (no finite value bounds an unbounded wait), adding
+`CancelSynchronousIo` (this run never exercised `CancelIoEx` on the connection handles — it is
+sequenced behind the blocking close and never ran — so there is no evidence it is broken; re-measure
+first), and a mailbox `shutdownState` field (`Mimic::StopThread` memsets the struct mid-teardown, so
+the flag would zero itself). 3127 green (+3).
+
+-----
+
 ## 2026-08-04 - CE Disable tore nothing down and said it went fine; making it work first required making the DLL restartable (build 2561)
 
 Audit #4 B1 + B30 + B40, one commit because fixing any one alone was worse than

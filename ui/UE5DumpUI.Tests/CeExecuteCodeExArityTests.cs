@@ -112,6 +112,43 @@ public class CeExecuteCodeExArityTests
         Assert.Contains("Nothing loaded — nothing to shut down.", text, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("inject")]
+    [InlineData("autorun")]
+    public void Teardown_calls_only_UE5_Shutdown_never_UE5_StopPipeServer(string which)
+    {
+        // UE5_Shutdown IS s_pipeServer.Stop() plus everything else, and it runs that
+        // Stop deliberately AFTER Stark::Shutdown so a pipe thread blocked in
+        // EnqueueInvoke receives its -7 and unwinds. Calling UE5_StopPipeServer first
+        // inverted that ordering — and because the CE call times out at 5 s while the
+        // remote thread keeps running, it put a SECOND teardown into the game process
+        // concurrently with the first (measured on Elliot 2026-08-04).
+        //
+        // The export stays (third-party CE scripts use it standalone) and the
+        // getAddress PROBE stays (it is how the block detects "nothing was loaded").
+        // What must not come back is calling it.
+        var s = which == "inject"
+            ? CeInjectScriptGenerator.Generate(Dll)
+            : CeAutorunScriptGenerator.Generate(Dll);
+
+        Assert.Contains("callDLL('UE5_Shutdown')", s, StringComparison.Ordinal);
+        Assert.DoesNotContain("callDLL('UE5_StopPipeServer')", s, StringComparison.Ordinal);
+        Assert.Contains("pcall(getAddress, 'UE5_StopPipeServer')", s, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Shipped_cheat_table_teardown_calls_only_UE5_Shutdown()
+    {
+        var ct = FindRepoFile(Path.Combine("scripts", "UE5CEDumper.CT"));
+        Assert.NotNull(ct);
+        var text = File.ReadAllText(ct!);
+
+        Assert.Contains("ue5_callDLL(\"UE5_Shutdown\", \"void\")", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ue5_callDLL(\"UE5_StopPipeServer\"", text, StringComparison.Ordinal);
+        // ...and it must not report success for a call that never returned.
+        Assert.Contains("UE5_Shutdown did not return in time", text, StringComparison.Ordinal);
+    }
+
     /// <summary>Lua source lines with full-line comments dropped — the comments in
     /// these files name executeCodeEx deliberately, to explain the trap.</summary>
     private static System.Collections.Generic.IEnumerable<string> CodeLines(string lua) =>

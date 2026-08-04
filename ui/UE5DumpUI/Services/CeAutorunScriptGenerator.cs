@@ -180,10 +180,11 @@ public static class CeAutorunScriptGenerator
         Line(sb, "    return true");
         Line(sb, "  end");
         Line(sb);
-        Line(sb, "  local a = callDLL('UE5_StopPipeServer')");
+        // UE5_Shutdown alone — see the twin in CeInjectScriptGenerator for why
+        // calling UE5_StopPipeServer first was both redundant and harmful.
         Line(sb, "  local b = callDLL('UE5_Shutdown')");
-        Line(sb, "  dbg('[UE5CEDumper] shutdown: stopPipe=' .. tostring(a) .. ' shutdown=' .. tostring(b))");
-        Line(sb, "  if not (a and b) then");
+        Line(sb, "  dbg('[UE5CEDumper] shutdown: ' .. tostring(b))");
+        Line(sb, "  if not b then");
         Line(sb, "    print('[UE5CEDumper] shutdown did not complete cleanly -- check the DLL log.')");
         Line(sb, "    return false");
         Line(sb, "  end");

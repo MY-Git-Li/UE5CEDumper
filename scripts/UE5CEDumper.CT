@@ -423,9 +423,19 @@ function ue5_shutdown()
     if not (okProbe and probe and probe ~= 0) then
         ue5_log("Nothing loaded — nothing to shut down.")
     else
-        ue5_callDLL("UE5_StopPipeServer", "void")
-        ue5_callDLL("UE5_Shutdown",       "void")
-        ue5_log("UE5 Dumper stopped.")
+        -- UE5_Shutdown ALONE. It already calls s_pipeServer.Stop() itself, and it
+        -- does so deliberately AFTER Stark::Shutdown so a pipe thread blocked in
+        -- EnqueueInvoke receives its -7 and unwinds. Calling UE5_StopPipeServer
+        -- first inverted that ordering, and since the CE call times out while the
+        -- remote thread keeps running, it put two teardowns in the process at once.
+        local ok = ue5_callDLL("UE5_Shutdown", "void")
+        if ok == nil then
+            -- Do not claim success for a call that never returned. The remote
+            -- thread may still be unwinding; the DLL log is the ground truth.
+            ue5_logError("UE5_Shutdown did not return in time — check the DLL log.")
+        else
+            ue5_log("UE5 Dumper stopped.")
+        end
     end
     -- Always close the log, on every path.
     if _logHandle then

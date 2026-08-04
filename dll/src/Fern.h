@@ -49,10 +49,17 @@ private:
 
     std::thread        m_acceptThread;
     std::atomic<bool>  m_running{false};
+    // True for the duration of Stop(). m_running goes false on Stop()'s first
+    // line, so it cannot tell Start() "a teardown is still unwinding" — and
+    // starting during that window move-assigns onto a joinable thread, which is
+    // std::terminate.
+    std::atomic<bool>  m_stopping{false};
     std::atomic<bool>  m_clientConnected{false};   // mirror of (!m_conns.empty())
 
     // Registry of live connections + the instance currently parked in
-    // ConnectNamedPipe (so Stop() can close it to unblock the accept).
+    // ConnectNamedPipe. Stop() reads it only to decide whether to send a
+    // wake-connect; it must NOT close that handle (a synchronous listen instance
+    // blocks the close until somebody connects — see Fern::Stop).
     std::vector<std::shared_ptr<Connection>> m_conns;
     HANDLE                  m_listenPipe{INVALID_HANDLE_VALUE};
     std::mutex              m_connMutex;     // guards m_conns + m_listenPipe + m_clientConnected

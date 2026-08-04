@@ -192,16 +192,21 @@ public static class CeInjectScriptGenerator
         Line(sb);
         CeLuaHygiene.AppendCallDllHelper(sb);
         Line(sb);
-        Line(sb, "local a = callDLL('UE5_StopPipeServer')");
+        // UE5_Shutdown ALONE. It is `s_pipeServer.Stop()` plus everything else, and
+        // it runs that Stop deliberately AFTER Stark::Shutdown so a pipe thread
+        // blocked in EnqueueInvoke gets its -7 and unwinds. Calling
+        // UE5_StopPipeServer first inverted that ordering, and — because the CE
+        // call times out while the remote thread keeps running — put a second
+        // teardown into the process concurrently with the first.
         Line(sb, "local b = callDLL('UE5_Shutdown')");
-        Line(sb, "dbg('[UE5CEDumper] shutdown: stopPipe=' .. tostring(a) .. ' shutdown=' .. tostring(b))");
+        Line(sb, "dbg('[UE5CEDumper] shutdown: ' .. tostring(b))");
         // The DLL stays mapped: FreeLibrary on an injected DLL mid-game isn't worth
         // the risk. Re-ticking is a real restart now, not a shrug: UE5_Shutdown parks
         // initState at IDLE, [ENABLE] reads that as "parked" and calls UE5_AutoStart,
         // which re-arms Tot's shutdown latch and Mimic's poller (audit #4 B1(b) —
         // before that fix the mailbox thread could only ever be started from DllMain,
         // so a Disable was unrecoverable without restarting the game).
-        Line(sb, "if not (a and b) then");
+        Line(sb, "if not b then");
         Line(sb, "  print('[UE5CEDumper] shutdown did not complete cleanly -- check the DLL log.')");
         Line(sb, "else");
         CeLuaHygiene.AppendCloseOnSuccess(sb, indent: "  ");
