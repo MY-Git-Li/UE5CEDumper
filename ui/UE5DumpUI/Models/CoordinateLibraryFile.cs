@@ -137,10 +137,20 @@ public static class CoordPrecision
 
     /// <summary>Parse a coordinate from any wire format. AllowExponent is REQUIRED:
     /// "R" goes scientific below 1e-5, so a legitimately-exported small value comes
-    /// back as "1E-05".</summary>
+    /// back as "1E-05".
+    ///
+    /// <para><b>AllowThousands is deliberately NOT set</b> (audit #4 B21). With it, a European
+    /// decimal comma parsed silently and WRONGLY: <c>"67162,398"</c> became <b>67162398</b> — a
+    /// coordinate a thousand times out, accepted with no issue raised, because the
+    /// decimal-comma repair only ran for <c>;</c>-delimited files. Dropping the flag also
+    /// rejects Excel's grouped <c>"67,162.398"</c>, and that is the accepted trade: a rejected
+    /// row is VISIBLE in the import preview and the user can fix the file, whereas a silently
+    /// mis-scaled coordinate teleports them into the void with nothing to look at. Grouped
+    /// thousands are in any case unusual in a coordinate export — ours never emits them
+    /// (<see cref="Text"/> uses invariant "R").</para></summary>
     public static bool TryParse(string? s, out double value) =>
         double.TryParse((s ?? "").Trim(),
-                        NumberStyles.Float | NumberStyles.AllowThousands,
+                        NumberStyles.Float,
                         CultureInfo.InvariantCulture, out value);
 }
 

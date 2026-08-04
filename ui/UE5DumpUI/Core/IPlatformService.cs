@@ -80,11 +80,22 @@ public interface IPlatformService
     /// Recycle Bin is that a wrong call costs nothing; a silent downgrade to a permanent delete
     /// would remove that property while keeping the reassuring wording.</para>
     ///
-    /// <para>The Windows implementation additionally refuses on any volume that is not
-    /// <see cref="System.IO.DriveType.Fixed"/>: <c>FOF_ALLOWUNDO</c> on a volume with no recycler
-    /// silently hard-deletes, which would make the promise a lie.</para>
+    /// <para>The Windows implementation additionally refuses whenever the volume has no working
+    /// Recycle Bin — see <see cref="VolumeHasRecycleBin"/>: <c>FOF_ALLOWUNDO</c> there silently
+    /// hard-deletes and returns success, which would make the promise a lie.</para>
     /// </summary>
     bool MoveToRecycleBin(string path) => false;
+
+    /// <summary>Does the volume holding <paramref name="fullPath"/> have a working Recycle Bin?
+    ///
+    /// <para>Exposed separately so the ORPHAN SCAN can ask before the confirm dialog is built,
+    /// and mark the row <c>NotOnFixedDrive</c> rather than promising a recycle it cannot deliver.
+    /// Previously the question was first asked inside the delete call, which is after the user
+    /// has already been told what would happen. (B13/B41)</para>
+    ///
+    /// <para>Default true so non-Windows test doubles keep their existing behaviour.</para>
+    /// </summary>
+    bool VolumeHasRecycleBin(string fullPath) => true;
 
     /// <summary>
     /// Opt the running process into the Windows Restart Manager so a

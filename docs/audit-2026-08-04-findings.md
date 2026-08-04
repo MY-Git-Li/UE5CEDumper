@@ -18,9 +18,15 @@
 **Tally:** 3 HIGH · 14 MEDIUM · 32 LOW · 3 INFO — **52 items** (26 from 4a, 25 from 4b, 1 from in-game verification).
 7 findings were adversarially **refuted and dropped** (listed at the bottom — do not re-raise them).
 
-**Progress: 51 of 52 shipped.** Builds: 2560 · 2561 · 2569 · 2577 · 2581 · 2585 · 2592 · 2596 · 2599 ·
+**Progress: 52 of 52 shipped.** Builds: 2560 · 2561 · 2569 · 2577 · 2581 · 2585 · 2592 · 2596 · 2599 ·
 2603 (8 DLL + scripts) · 2610 (12 UI) · 2614 (refactor R1-R4/R6/R7) · 2617 (B39).
-**Open: 4 that need a maintainer decision** — B13/B41, B21, B25, B26 — plus R8 ("later").
+**ALL 52 SHIPPED.** The last four landed after the maintainer's decisions (2026-08-04): B13/B41
+*refuse and say why*, B21 *drop AllowThousands*, B25 *require corroboration*, B26 *both halves*.
+Only R8 remains, filed "later" by the audit itself.
+
+**What is NOT done: the verification.** Every fix is filed in
+[todo.md § Pending live-game verification](todo.md#pending-live-game-verification-verify-only--no-code),
+split into ① log-derivable and ② manual-only. None of it has been run on a real game.
 
 ---
 
@@ -81,7 +87,7 @@ rename stays last-writer-wins — that is the accepted semantics — but the sta
 shared, or one process truncates it while the other is mid-write and the loser's partial document
 gets renamed over the real cache.
 
-### Needs a decision from the maintainer before coding
+### ~~Needs a decision from the maintainer~~ ✅ ALL FOUR DECIDED AND SHIPPED (build 2621)
 **B13/B41** (which volume-recycler API), **B21** (the `AllowThousands` tradeoff — removing it rejects
 Excel's `"67,162.398"`), **B25** (should the version refusal ever fire on an uncorroborated signal),
 **B26** (should duplicate CE records be deduped at push), ~~**B43**~~ ✅ **DONE build 2620** — was not actually a decision: the finding prescribed the fix
@@ -148,7 +154,7 @@ existing behaviour / perf.
 | B31 ✅ | 🟠 | S/low | LoggingService | ~~`fileSizeLimitBytes` without `rollOnFileSizeLimit:true` ⇒ the sink silently stops writing at 8 MB for the rest of the process~~ **FIXED build 2585** |
 | B11 ✅ | 🟡 | S/low | Sein | ~~`fprintf` on a NULL `FILE*` after a failed rotation reopen ⇒ can terminate the game~~ **FIXED build 2603** |
 | B12 ✅ | 🟡 | S/low | Proxy cleanup | ~~Confirm/status text asserts things the executed plan contradicts~~ **FIXED build 2610** |
-| B13/B41 | 🟡 | M/low | Proxy cleanup | "Recycle Bin" promise unverifiable; a drive-letter test is not a recycler test |
+| B13/B41 ✅ | 🟡 | M/low | Proxy cleanup | ~~"Recycle Bin" promise unverifiable; a drive-letter test is not a recycler test~~ **FIXED build 2621** |
 | B14 ✅ | 🟡 | S/low | DLL workers | ~~Thread-proc exception guard rolled out to 2 of 7 thread procs~~ **FIXED build 2596** (with R5) |
 | B15 ✅ | 🟡 | S/low | TeleportScriptGen | ~~Mailbox timeout `break`s into the auto-close ⇒ the CE window shuts on a failure~~ **FIXED build 2610** |
 | B16 ✅ | 🟡 | S/low | TeleportPanel | ~~5 coord-grid columns sort on nested/mismatched paths ⇒ dead headers under AOT~~ **FIXED build 2610** |
@@ -156,12 +162,12 @@ existing behaviour / perf.
 | B18 ✅ | 🟡 | S/low | Genau | ~~Extra Scan ignores `Tot::Requested()` ⇒ CE UI freezes on the unbounded join~~ **FIXED build 2603** |
 | B19 ✅ | 🟡 | S/low | Sein | ~~One shared `error_code` ⇒ the first undeletable entry aborts the whole retention sweep, forever~~ **FIXED build 2603** |
 | B20 ✅ | 🟡 | S/low | TeleportVM | ~~Filter keystroke reverts an uncommitted edit; `_coordFilterMemory` never disposed~~ **FIXED build 2610** |
-| B21 | 🟡 | S–M/low | Coord parsers | Three independent import-parser holes (AllowThousands, quote-state, regex-in-literal) |
+| B21 ✅ | 🟡 | S–M/low | Coord parsers | ~~Three independent import-parser holes (AllowThousands, quote-state, regex-in-literal)~~ **FIXED build 2621** |
 | B22 ✅ | 🟡 | S/low | Laufen | ~~Base captured as 0 ⇒ the knob pins the CMC value at 0 against the game~~ **FIXED build 2603** |
 | B23 ✅ | 🟡 | S/low | CE Lua | ~~Autorun binds DEBUG at CE start (its own instruction can't work); non-finite double emitted as bare `Infinity`~~ **FIXED build 2610** |
 | B24 ✅ | 🟡 | S/low | Frieren | ~~Forced hook installs burn the automatic retry budget~~ **FIXED build 2603** |
-| B25 | 🟡 | S/med | Genau | Total scan refusal armed off an uncorroborated PE ProductVersion |
-| B26 | 🟡 | M/med | PointerQueryScriptGen | Duplicate GameEngine records: the older record's DISABLE frees the newer one's buffer |
+| B25 ✅ | 🟡 | S/med | Genau | ~~Total scan refusal armed off an uncorroborated PE ProductVersion~~ **FIXED build 2621** |
+| B26 ✅ | 🟡 | M/med | PointerQueryScriptGen | ~~Duplicate GameEngine records: the older record's DISABLE frees the newer one's buffer~~ **FIXED build 2621** |
 | B32 ✅ | 🟡 | S/low | UE5CEDumper.CT | ~~The "very old DLL" fallback is unreachable ⇒ a modal **timeout error on a healthy inject**~~ **FIXED build 2603** |
 | B33 ✅ | 🟡 | S/low | UE5CEDumper.CT + CeReadinessLua | ~~Readiness poll resolves only bare `g_invokeMailbox`, never `UE5Dumper.g_invokeMailbox`~~ **FIXED build 2603** |
 | B34 ✅ | 🟡 | S/low | Heiter | ~~CE-plugin detection is a 1 s race ⇒ AOB scan + pipe server open **inside cheatengine-x86_64.exe**~~ **FIXED build 2603** |

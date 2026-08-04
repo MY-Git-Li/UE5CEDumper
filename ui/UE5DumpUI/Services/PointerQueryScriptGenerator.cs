@@ -204,13 +204,29 @@ public static class PointerQueryScriptGenerator
         {
             Line(sb, $"-- Free the buffer ONLY when the '{bufSym}' marker says we allocated one;");
             Line(sb, "-- on the slot path the symbol points at a game address that is not ours.");
+            Line(sb, "--");
+            Line(sb, "-- AND only when it is still OUR buffer. Both symbols are global, so two of");
+            Line(sb, "-- these records in one table share them: unticking the OLDER record used to");
+            Line(sb, "-- deAlloc the NEWER one's live buffer and unregister the symbol while that");
+            Line(sb, "-- record was still ticked, leaving its pointer chain resolving to ??. The");
+            Line(sb, "-- newer ENABLE overwrote the marker, so a mismatch here means someone else");
+            Line(sb, "-- owns it now — leave both alone and let the owner clean up. (B26)");
             Line(sb, $"local mem = getAddressSafe('{bufSym}')");
-            Line(sb, $"if mem and mem ~= 0 then unregisterSymbol('{bufSym}'); deAlloc(mem) end");
+            Line(sb, $"local cur = getAddressSafe('{sym}')");
+            Line(sb, "if mem and mem ~= 0 and cur == mem then");
+            Line(sb, $"  unregisterSymbol('{bufSym}')");
+            Line(sb, $"  unregisterSymbol('{sym}')");
+            Line(sb, "  deAlloc(mem)");
+            Line(sb, "elseif mem and mem ~= 0 then");
+            Line(sb, $"  dbg('[{tag}] another record owns {sym} now -- leaving it alone')");
+            Line(sb, "end");
+            Line(sb, $"dbg('[{tag}] {sym} unregistered')");
+            Line(sb, $"if DEBUG == 0 then {CeLuaHygiene.CloseCall} end");
+            Line(sb, "{$asm}");
+            return sb.ToString();
         }
-        else
-        {
-            Line(sb, $"-- Remove the '{sym}' symbol (the slot is a game address, nothing to free).");
-        }
+
+        Line(sb, $"-- Remove the '{sym}' symbol (the slot is a game address, nothing to free).");
         Line(sb, $"if getAddressSafe('{sym}') then unregisterSymbol('{sym}') end");
         Line(sb, $"dbg('[{tag}] {sym} unregistered')");
         Line(sb, $"if DEBUG == 0 then {CeLuaHygiene.CloseCall} end");

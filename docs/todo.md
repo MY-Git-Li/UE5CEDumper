@@ -1807,6 +1807,31 @@ Pick up when the active plan finishes or when blocked.
   message, after which the UI cannot connect. Also worth eyeballing there: a game path with
   non-ASCII characters must now appear intact in that message (it used to render as `EVERSPACE? 2`).
 
+- ⬜ **Recycle-Bin refusal on a volume with no bin** (build 2621, B13/B41). Needs a volume whose
+  Recycle Bin is off: pick a spare fixed volume, `Recycle Bin Properties → Don't move files to the
+  Recycle Bin`, and put a leftover proxy on it. Run the orphan scan. **PASS** = the row is refused
+  with *"This volume has no working Recycle Bin … a delete here would be PERMANENT"*, and the
+  confirm dialog never offers to recycle it. **FAIL** = the row is offered and the file vanishes
+  permanently while the status says "moved to the Recycle Bin". Re-enable the bin afterwards and
+  confirm the same row becomes actionable again — that half proves the probe isn't just refusing
+  everything.
+
+- ⬜ **The pre-4.11 refusal no longer fires on one PE field** (build 2621, B25). Provoke it with the
+  UE-version override, or with any game whose PE ProductVersion reports a 4.0–4.10 major/minor.
+  Grep `scan-0.log` for `below the … floor — NOT accepting that on its own`. **PASS** = that line
+  appears and the scan **runs anyway** (tier 3 → low confidence → the gate does not arm). **FAIL** =
+  `SKIPPING the scan` on a game that works. Also confirm the *other* direction still works: a
+  genuinely pre-UE4 (UE3) binary must still be refused, via the marker path — grep
+  `PRE-UE4 engine POSITIVELY identified`.
+
+- ⬜ **Duplicate GameEngine records no longer break each other** (build 2621, B26). Teleport →
+  Global Pointers → *Get GameEngine*, then click it again. **PASS** = the second click says it was
+  *already pushed this session* and copies XML instead of adding a record. Then paste that XML to
+  deliberately create a second record, tick BOTH, and untick the OLDER one. **PASS** = the newer
+  record's `UE_GameEngine` still resolves and its chain still reads (set `UE5_DEBUG=1` to see
+  *"another record owns UE_GameEngine now — leaving it alone"*). **FAIL** = the newer record's
+  addresses go to `??`.
+
 - ⬜ **The five dead coord-grid sort headers** (build 2610, B16). Teleport → Coordinate Library with
   ≥3 rows. Click the **X**, **Y**, **Z**, **Yaw** and **Dist** headers. **PASS** = rows reorder on
   every one. **FAIL** = the header glyph animates and nothing moves. Must be checked on a

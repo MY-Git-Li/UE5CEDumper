@@ -2675,7 +2675,25 @@ static VersionScanResult DetectVersionDetailed() {
 
     // Fast path: PE VERSIONINFO resource (treated as Tier 1 — high confidence)
     uint32_t ver = DetectVersionFromPEResource();
-    if (ver) { r.version = ver; r.tier = 1; return r; }
+    if (ver) {
+        // ...with ONE exception: a result BELOW the support floor arms a total scan refusal, and
+        // that is the most destructive verdict this detector can reach. A single uncorroborated
+        // VS_FIXEDFILEINFO field is not enough evidence for it, and every other version signal in
+        // this file demands context. So a sub-4.11 PE reading does NOT short-circuit as tier 1 —
+        // fall through to the memory scan and let it agree or not. If it cannot corroborate, the
+        // terminal branch keeps the PE value but marks it tier 3, which sets bLowConfidence, which
+        // the refusal gate requires to be false. The cost of being wrong that way is a wasted
+        // ~4-second sweep; the cost of being wrong the other way is refusing to scan a game that
+        // works. (Audit #4 B25. Note the memory needle table floors at "4.18.", so a GENUINE
+        // 4.0-4.10 title will not be corroborated and will pay that sweep — accepted.)
+        if (ver >= Grimoire::MIN_SUPPORTED_UE_VERSION) { r.version = ver; r.tier = 1; return r; }
+        Sein::Warn("SCAN:Ver", "DetectVersion: PE VERSIONINFO says UE %u, below the %u floor — "
+                   "NOT accepting that on its own (it would refuse the whole scan). "
+                   "Corroborating against the memory string scan.",
+                   ver, Grimoire::MIN_SUPPORTED_UE_VERSION);
+        r.version = ver;
+        r.tier    = 3;   // downgraded unless the memory scan below agrees
+    }
 
     Sein::Warn("SCAN:Ver", "DetectVersion: PE resource failed, falling back to memory string scan");
 
@@ -4629,6 +4647,14 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
     // Deliberately gated on a CONFIDENT detection only. A low-confidence or publisher-biased
     // version is a guess, and a user override is the user's call — misreading a working game as
     // "too old" and refusing to scan it is a far worse failure than wasting four seconds.
+    //
+    // That gate is only as good as what counts as confident, and case (a) used to slip through:
+    // DetectVersionFromPEResource's `major == 4` branch returned tier 1 off a single
+    // uncorroborated VS_FIXEDFILEINFO field, so bLowConfidence was false and this refusal armed
+    // on one PE value. It no longer short-circuits below the floor — see the note in
+    // DetectVersionDetailed — so reaching here with case (a) now means the memory scan agreed, or
+    // at least did not contradict it with a tier 1/2 hit. Case (b) is unchanged: the pre-UE4
+    // sentinel is a POSITIVE 2-of-4 marker identification and is deliberately tier 1. (B25)
     if (out.UEVersion < Grimoire::MIN_SUPPORTED_UE_VERSION
         && out.bVersionDetected && !out.bLowConfidence && !out.bUserOverride) {
         out.bVersionTooOld = true;

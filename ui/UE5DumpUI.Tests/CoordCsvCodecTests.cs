@@ -506,4 +506,31 @@ public class CoordCsvFieldSplitTests
         Assert.Equal(';', CoordCsvCodec.SniffDelimiter("a;b;c;d"));
         Assert.Equal('\t', CoordCsvCodec.SniffDelimiter("a\tb\tc\td"));
     }
+
+    /// <summary>
+    /// B21 — a European decimal comma must NOT parse as a grouped-thousands number.
+    /// "67162,398" used to become 67162398: a coordinate a thousand times out, accepted with
+    /// no issue raised, because the decimal-comma repair only ran for ';'-delimited files.
+    /// The accepted cost is that Excel's grouped "67,162.398" is now rejected — a rejected row
+    /// is visible in the import preview; a silently mis-scaled one is not.
+    /// </summary>
+    [Theory]
+    [InlineData("67162,398")]      // European decimal comma — the bug
+    [InlineData("67,162.398")]     // Excel grouped thousands — the accepted casualty
+    [InlineData("1,234")]
+    public void CoordPrecision_RejectsAnyCommaInANumber(string text)
+        => Assert.False(CoordPrecision.TryParse(text, out _));
+
+    /// <summary>The formats that MUST keep working, including the exponent form our own
+    /// exporter emits below 1e-5.</summary>
+    [Theory]
+    [InlineData("67162.398", 67162.398)]
+    [InlineData("-1234.5", -1234.5)]
+    [InlineData("1E-05", 1e-5)]
+    [InlineData("  42  ", 42.0)]
+    public void CoordPrecision_StillParsesInvariantForms(string text, double expected)
+    {
+        Assert.True(CoordPrecision.TryParse(text, out double v));
+        Assert.Equal(expected, v, 9);
+    }
 }

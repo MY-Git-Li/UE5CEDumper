@@ -295,7 +295,8 @@ internal static class ProxyOrphanScanner
         IReadOnlySet<string> liveBinariesDirs,
         DirProbe probe,
         OwnedFileProbe isOurs,
-        LivenessProbe liveness)
+        LivenessProbe liveness,
+        RecyclerProbe? hasRecycler = null)
     {
         var noFiles = Array.Empty<string>();
         var noDirs = Array.Empty<string>();
@@ -310,6 +311,21 @@ internal static class ProxyOrphanScanner
         if (liveBinariesDirs.Contains(leaf))
             return new PrunePlan(OrphanVerdict.LiveGameFolder, noFiles, noDirs, null,
                 new List<string> { "This is the binaries folder of a game that is currently installed." }, "");
+
+        // Ask about the RECYCLE BIN here, at scan time, so the confirm dialog never offers a
+        // recycle this volume cannot perform. The question used to be asked first inside
+        // MoveToRecycleBin — after the user had already been told what would happen — and it was
+        // asked as a drive-LETTER test, which a fixed volume with NukeOnDelete=1 passes while
+        // FOF_ALLOWUNDO silently hard-deletes and returns success. NotOnFixedDrive kept its name
+        // (it is in the shipped enum) but now means "no usable Recycle Bin here". (B13/B41)
+        if (hasRecycler != null && !hasRecycler(leaf))
+            return new PrunePlan(OrphanVerdict.NotOnFixedDrive, noFiles, noDirs, null,
+                new List<string>
+                {
+                    "This volume has no working Recycle Bin (removable/network, or the bin is " +
+                    "disabled for it), so a delete here would be PERMANENT. Refused — remove the " +
+                    "file by hand if that is what you want.",
+                }, "");
 
         DirSnapshot? leafSnap = probe(leaf);
         OrphanVerdict content = ClassifyLeaf(leafSnap, isOurs, out var ourNames, out var blockers,

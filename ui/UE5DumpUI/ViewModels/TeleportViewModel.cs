@@ -692,6 +692,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             // Refresh pose. Same disconnect branch as B9's missing clear. (B17)
             ClearPoseDisplay();
             ApplyCoordFilter();
+            _pushedQuerySymbols.Clear();   // new game, new CE table (B26)
             // Reset the Stealth card too — otherwise a reconnect (possibly to a DIFFERENT
             // game) shows the old game's hold and Hold @0 would send its stale
             // class::field. (L13)
@@ -1718,10 +1719,19 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                   "otherwise to a UEngine* snapshot you re-tick to refresh."
                 : "";
 
-            bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
+            // Do not push the SAME symbol twice. Both symbols this record registers are global,
+            // so a second record shares them — and while its DISABLE is now safe (it checks
+            // ownership before freeing), a duplicate pair of records is still confusing and there
+            // is no reason to create one. A repeat click falls through to the clipboard instead of
+            // being refused, because the legitimate reason to click again is "I deleted the record
+            // and want it back", and pasting satisfies that without a second AOBMaker push. (B26)
+            bool alreadyPushed = _pushedQuerySymbols.Contains(sym);
+            bool available = !alreadyPushed
+                             && _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
             if (available && await _aobMaker!.CreateAAScriptAsync(
                     desc, script, autoActivate: false, group: CeGroupDll))
             {
+                _pushedQuerySymbols.Add(sym);
                 StatusText = $"Added '{desc}' to Cheat Engine via AOBMaker — enable it in-game to " +
                              $"register the '{sym}' symbol, disable to free it." + backing;
                 _log.Info($"Teleport query-ptr -> CE via AOBMaker: {desc}");
@@ -1731,7 +1741,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             // No AOBMaker (or it refused) — fall back to the clipboard as paste-able CE XML.
             await _platform.CopyToClipboardAsync(
                 UE5DumpUI.Services.CheatTableBuilder.WrapAaScriptXml(desc, script));
-            StatusText = (available
+            StatusText = (alreadyPushed
+                ? $"'{desc}' was already pushed to Cheat Engine this session — copied it as CE " +
+                  "memory-record XML instead of adding a second record. "
+                : available
                 ? $"AOBMaker refused '{desc}' — copied it as CE memory-record XML instead. "
                 : $"AOBMaker not connected — copied '{desc}' as CE memory-record XML to the clipboard. ")
                 + $"Paste into Cheat Engine's address list (right-click → Paste), then enable it to register '{sym}'.";
@@ -2950,6 +2963,12 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     // Set only while ApplyCoordFilter re-selects the equivalent row after rebuilding
     // CoordResults, so the editor fields are not rewritten from the stored entry. (B20)
     private bool _suppressCoordEditorSync;
+
+    /// <summary>Global-pointer symbols already pushed to CE via AOBMaker this session. Both
+    /// symbols such a record registers are GLOBAL, so a second record for the same symbol shares
+    /// them; one push per symbol per session is enough, and a repeat click gets the clipboard
+    /// fallback instead. Cleared on disconnect — a new game is a new table. (B26)</summary>
+    private readonly HashSet<string> _pushedQuerySymbols = new(StringComparer.Ordinal);
 
     /// <summary>Card open/closed. Collapsed by default (R4).</summary>
     [ObservableProperty] private bool _coordLibraryExpanded;

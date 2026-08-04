@@ -20,6 +20,60 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - The last four audit items, each one a decision rather than a bug (build 2621)
+
+Audit #4 closes at 52/52. These four were held back on purpose: each had a defensible answer in
+both directions, so they went to the maintainer rather than being decided by whoever was typing.
+
+**B13/B41 - "Moved to the Recycle Bin" was a promise the guard could not keep.** `FOF_ALLOWUNDO` is
+best-effort: on a volume with the recycler disabled (`NukeOnDelete=1`, or policy) it hard-deletes
+and returns 0. The only precondition was a `Path.GetPathRoot` **drive-letter** test, which is not a
+recycler test at all - and `OrphanVerdict.NotOnFixedDrive` existed in the enum with **no producer**,
+because the question was first asked inside the delete call, after the user had already been told
+what would happen.
+
+*Decision: refuse, and say why.* `SHQueryRecycleBin` on the volume root now answers it, reached
+through `GetVolumePathName` rather than `GetPathRoot` so a mount-point volume is asked about
+ITSELF instead of its host disk. The scan asks at plan time, so the verdict finally has a producer
+and the confirm dialog never offers a recycle the volume cannot perform.
+
+**B21 - a European decimal comma parsed silently and wrongly.** `AllowThousands` made
+`"67162,398"` into **67162398** - a coordinate a thousand times out, accepted with no issue raised,
+because the decimal-comma repair only ran for `;`-delimited files.
+
+*Decision: drop the flag.* It also rejects Excel's grouped `"67,162.398"`, and that is the accepted
+trade: a rejected row is VISIBLE in the import preview and the user can fix the file, whereas a
+silently mis-scaled coordinate teleports them into the void with nothing to look at. Our own
+exporter never emits grouped thousands. Seven assertions pin both directions.
+
+**B25 - the most destructive verdict in the detector armed off one uncorroborated field.**
+`DetectVersionFromPEResource`'s `major == 4` branch returned **tier 1** off a single
+`VS_FIXEDFILEINFO` read, so `bLowConfidence` stayed false and the pre-4.11 total-scan refusal could
+fire on it alone. Every other version signal in Genau demands context.
+
+*Decision: require corroboration.* A sub-floor PE reading no longer short-circuits - it falls
+through to the memory scan and is kept at **tier 3** unless that scan agrees, and tier 3 sets
+`bLowConfidence`, which the refusal gate requires to be false. The residual is stated in the code:
+the needle table floors at `"4.18."`, so a genuine 4.0-4.10 title will not be corroborated and pays
+a ~4-second sweep. That is the right direction to be wrong in. **The pre-UE4 sentinel path is
+untouched** - it is a positive 2-of-4 marker identification and stays tier 1 by design.
+
+**B26 - duplicate CE records sharing one global buffer marker.** Unticking the OLDER record
+deAlloc'd the NEWER one's live buffer and unregistered `UE_GameEngine` while that record was still
+ticked, leaving its chain at `??`.
+
+*Decision: both halves.* DISABLE now verifies `getAddressSafe(sym) == mem` before freeing - a
+mismatch means the newer ENABLE overwrote the marker, so the older record leaves both alone and
+says so. And the push is deduped per session: a repeat click falls through to the **clipboard**
+rather than being refused, because the legitimate reason to click again is "I deleted the record
+and want it back", and pasting satisfies that without creating a second record.
+
+**Audit #4 is complete as work.** What remains is verification: every fix is filed in
+[todo.md](todo.md)'s pending-verification register, split into log-derivable and manual-only as the
+maintainer asked, and none of it has been run on a real game yet. 81 utf8 + 949 dll + 3212 C# green.
+
+-----
+
 ## 2026-08-04 - The rest of audit #4: 26 small defects, six refactors, and a measurement that said no (builds 2603 / 2610 / 2614 / 2617)
 
 The tail of audit #4 - everything that was not a HIGH or a concurrency defect. Four commits, split

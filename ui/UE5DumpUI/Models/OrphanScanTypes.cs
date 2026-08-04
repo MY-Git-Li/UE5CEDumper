@@ -118,6 +118,12 @@ public delegate DirSnapshot? DirProbe(string path);
 /// <summary>Decides whether one file is ours.</summary>
 public delegate FileOwnership OwnedFileProbe(string fullPath);
 
+/// <summary>Does the volume holding this path have a working Recycle Bin? Asked at SCAN time so a
+/// row can be refused before the confirm dialog promises a recycle the volume cannot perform —
+/// the question used to be asked first inside the delete call, and as a drive-LETTER test rather
+/// than a recycler test. (B13/B41)</summary>
+public delegate bool RecyclerProbe(string path);
+
 /// <summary>
 /// Answers "is this game actually gone?" for a Steam game folder. Two independent signals are
 /// checked by the real implementation (no appmanifest naming the install dir, and no executable
