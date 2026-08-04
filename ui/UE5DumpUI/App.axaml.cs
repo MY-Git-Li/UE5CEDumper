@@ -71,6 +71,23 @@ public class App : Application
             _logging.Info(Constants.LogCatInit, $"Arch:      {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
             _logging.Info(Constants.LogCatInit, $"Log dir:   {logDir}");
 
+            // Leave a breadcrumb for scripts/UE5CEDumper.CT. A CE table script cannot
+            // read its own .CT path, so it infers the folder from CE's Open/Save
+            // dialogs — which a double-click in Explorer never fills in, leaving the
+            // DLL undiscoverable even when it sits right beside the .CT. We know
+            // exactly where it is, so record it. Only when it really is there: a
+            // breadcrumb pointing at nothing would just add a dead search slot.
+            try
+            {
+                var exeDir = AppContext.BaseDirectory;
+                if (File.Exists(Path.Combine(exeDir, "UE5Dumper.dll")))
+                    new DumperDllPathStore(_platform).Record(exeDir);
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn(Constants.LogCatInit, $"DLL path breadcrumb not written: {ex.Message}");
+            }
+
             // Create main window
             var globalHotkeys = new WindowsGlobalHotkeyService();
             // Wiring lives in AppComposition so a test can exercise this exact call.

@@ -15,6 +15,15 @@ public static class Constants
 
     // Logging — category-routed to separate files
     public const string LogFolderName = "UE5CEDumper";
+
+    /// <summary>
+    /// Breadcrumb file naming the folder that holds UE5Dumper.dll, so
+    /// scripts/UE5CEDumper.CT can find the DLL when Cheat Engine gives it nothing
+    /// to infer from. Lives at the %LOCALAPPDATA%\UE5CEDumper ROOT, deliberately
+    /// NOT under Logs\ — the retention sweep walks only the Logs directory and
+    /// globs only *.log, so this is outside it on both counts.
+    /// </summary>
+    public const string DllPathBreadcrumbFile = "dll-path.txt";
     public const string LogSubFolder = "Logs";
     public const string LogSubfolderName = "UE5DumpUI";      // UI module subfolder under Logs/
     public const string MirrorLogPrefix = "ui";               // Prefix for mirror files in game folders
