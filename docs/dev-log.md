@@ -20,6 +20,69 @@ builds ≤696 in
 
 -----
 
+## 2026-08-04 - A table script cannot know where it lives, and "documented" is not "verified" (build 2576)
+
+A user opened `dist/UE5CEDumper.CT` from Cheat Engine's recent-files menu with `UE5Dumper.dll`
+in the **same folder**, and the script reported it missing — then told them to *"place
+UE5Dumper.dll in the same folder as this CT file"*, which is precisely what they had done.
+
+**Cause.** The `.CT` has no slot for "the folder this file lives in", only proxies for it:
+`getMainForm().OpenDialog1.FileName` and `SaveDialog1.FileName`. Those are filled by
+`File > Open` / `File > Save` and by nothing else, so a double-click or a recent-files pick
+leaves both empty and only CE's install folder and `%LOCALAPPDATA%` get searched. Predates all
+recent work (blame: `3e3c253`).
+
+**Three rounds of being wrong, each corrected by a probe rather than by re-reading the docs.**
+First I told the user CE exposes no registry API — wrong: `getSettings()` is documented at
+`celua.txt:3504`. Then I built the fix on `getBinaryValue`, which `celua.txt:3516` advertises as
+returning a bytetable. The user asked for evidence, and the measurement settled it:
+
+| call | result |
+|---|---|
+| `getSettings()` | ✅ `TLuaSettings` |
+| `Value["Recent Files"]` (REG_MULTI_SZ) | string of **length 0** |
+| `getBinaryValue("Recent Files")` | **`nil`** |
+| `getSettings("Plugins64").Value["00000000 A"]` (REG_SZ) | ✅ plugin path |
+
+The control row is what makes it conclusive: the API, subkey selection and `Value[]` all work —
+the **type** is unreadable. The File menu is no alternative either; probing
+`getMainForm().Menu.Items` showed recent tables are not File-menu children, because `Load Recent`
+is a submenu. What does work is `reg.exe` (measured, 1829 bytes), which renders MULTI_SZ
+separators as the **literal two characters** `\0`.
+
+**Shipped.** The candidate list is now a slot table ordered by confidence, and **every slot stays
+in the report even when it had nothing to offer** — `[NOT SEARCHED]` now reads differently from
+`[no DLL]`, which is the distinction whose absence made this hard to diagnose. Table-derived
+folders rank above CE's install folder: a DLL there can only have been hand-placed and is likely
+a stale build, and loading a mismatched build silently is worse than failing.
+
+The recent-files read is **deferred** — it runs only after every cheap slot misses, because
+shelling out flashes a console — and **self-healing**: a hit is written to the breadcrumb so no
+later run needs it. Only the slot matched by this table's own filename earns that; "most recently
+opened table" could be any game's folder.
+
+New `DumperDllPathStore`: the UI records the folder it launched from (where the DLL ships beside
+it) in `%LOCALAPPDATA%\UE5CEDumper\dll-path.txt`. Plain text, not JSON — the consumer is CE Lua,
+which has no JSON parser, and it stays trivially AOT-safe. At the app-data **root**, not under
+`Logs\`: verified that every `LoggingService` sweep is rooted at the log directory **and** globs
+only `*.log`, so it is out of reach on both counts.
+
+A miss is no longer fatal at `[ENABLE]`. The old code returned out of that chunk, leaving
+`ue5_inject`/`ue5_shutdown`/`ue5_log` undefined, so the next tick died with *"attempt to call a nil
+value"* — a second error that looked unrelated to the first. Enforcement moved into `ue5_inject()`,
+where returning false unticks the record, with a file picker as the last resort. The dialog now
+names the real cause and gives three ways out. And a failed run finally leaves something **in the
+log**: it used to bail before `ue5_logInit()`, and since the log opens with `"w"`, the previous
+*successful* run's log survived and read as if nothing had gone wrong.
+
+**✅ VERIFIED in-game:** running `UE5DumpUI.exe` once, then opening the `.CT` from recent files,
+resolves the DLL. **Still unverified:** the `reg.exe` fallback (delete `dll-path.txt` to exercise
+it) — see [todo.md](todo.md#pending-live-game-verification-verify-only--no-code).
+
+3150 green.
+
+-----
+
 ## 2026-08-04 - The teardown was never slow, it was waiting for a client that might never come (build 2569)
 
 Fixing B1 in build 2561 made `UE5_Shutdown` actually run for the first time — and that

@@ -7,6 +7,25 @@
 ## Cheat Engine Integration
 
 - `executeCodeEx` internally uses `CreateRemoteThread` — games with thread injection protection will block it silently (returns nil, not an error code)
+- **CE's Settings API cannot read a `REG_MULTI_SZ` value — measured 2026-08-04, and `celua.txt` says otherwise.**
+  Probed live in CE's Lua console against `HKCU\Software\Cheat Engine`:
+  | call | result |
+  |---|---|
+  | `getSettings()` | ✅ `TLuaSettings` |
+  | `s.Value["Recent Files"]` (REG_MULTI_SZ) | string of **length 0** |
+  | `s:getBinaryValue("Recent Files")` | **`nil`** — despite `celua.txt:3516` documenting `getBinaryValue(name): bytetable` |
+  | `getSettings("Plugins64").Value["00000000 A"]` (REG_SZ, subkey) | ✅ returns the plugin path |
+  The control read is the important row: the API, the subkey selection and `Value[]` all work.
+  It is the **type** that is unreadable. Use `io.popen('reg query …')` for a MULTI_SZ — measured working,
+  and note `reg.exe` renders the entry separators as the **literal two characters** `\0`, not real NULs.
+  **The general lesson, which cost three probe rounds:** for CE, "documented in `celua.txt`" is a
+  hypothesis, not a verification. Probe it in the Lua console before building on it.
+- **A CE table script cannot learn its own `.CT` path.** No API returns it — not `getSettings`, not
+  `TrainerOrigin` (trainer-launch only), not `findTableFile`/`createTableFile` (those are for files
+  *embedded in* the table), and not the File menu (recent tables live under a `Load Recent` **submenu**,
+  so they are not reachable as File-menu children). `getMainForm().OpenDialog1/SaveDialog1.FileName` are
+  proxies that only `File > Open` / `File > Save` fill in — a double-click or a recent-files pick leaves
+  both empty. If a script needs a sibling file, have something outside CE record the folder.
 - **`executeCodeEx`'s real signature — verified against CE's own `celua.txt` (2026-08-04), because every earlier statement of it in this repo was wrong:**
   `executeCodeEx(callmethod, timeout, address, params...)` where **`callmethod` 0=stdcall / 1=cdecl**, **`timeout`** is milliseconds (`nil` or `-1` = wait forever; **`0` = don't wait AND don't free the call memory — a leak**), and **`address` is argument 3**.
   Two traps this caused: passing the address in slot 2 makes CE run with `address = nil` and **return `nil` with no Lua error**, which `pcall` reports as success; and "fixing" it by dropping a `0` into the timeout slot swaps a dead call for a memory leak. The only historically correct call site is `scripts/ue5_dissect.lua:44`.

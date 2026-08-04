@@ -1665,6 +1665,16 @@ Pick up when the active plan finishes or when blocked.
 > filtered** (so `[DEBUG]` lines count), and **See-Through / Foreground-Lock evidence lands in
 > `init-0.log`**, not `walk`/`pipe`, because their categories fall through `ResolveFile`.
 
+- ⬜ **`.CT` DLL discovery — the `reg.exe` recent-files fallback** (build 2576). The breadcrumb half
+  is **✅ verified** (run `UE5DumpUI.exe` once, open the `.CT` from CE's recent-files menu, tick
+  `init` → the DLL resolves). The registry half has NOT been exercised: it only runs when every
+  cheap slot misses. **To test:** delete `%LOCALAPPDATA%\UE5CEDumper\dll-path.txt`, open the `.CT`
+  from recent files, tick `init`. PASS = a brief console flash, the DLL resolves, the slot report
+  (set `UE5_DEBUG=1`) credits *"folder of the most recent UE5CEDumper.CT in CE's recent-files
+  list"*, **and `dll-path.txt` is recreated** so a second tick does not flash again. FAIL = still
+  not found, or it flashes every time (the self-heal write did not happen).
+  *Why it can't be tested here: it is CE Lua, and `CtDllDiscoveryTests` can only pin structure.*
+
 - **Flaky: `SnapshotViewModelTests.GroupMatch_MissingValue_ShowsErrorNoCandidates`** — failed ONCE
   in a full parallel run on 2026-07-23 (build 2318), then passed 25/25 three times in isolation and
   green on an immediate full re-run. Unrelated to the winmm/proxy work that was in flight. This test
