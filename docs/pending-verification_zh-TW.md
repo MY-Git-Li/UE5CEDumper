@@ -72,9 +72,51 @@
 之後沒有再觸發過，因為 2026-08-05 兩次都沒有重現條件 ——
 兩次的 `Stop entry` 都是 `conns=0`，也就是 UI 早就斷開了。
 
-**剩下要做的只是一個 30 秒的重現，不是改 code**：把 UI 連上、**保持連著**、取消勾選 CE record。
-如果 CE 凍住了，`grep "straggler:" pipe-0.log` 就會直接說是哪一半。
-那兩半需要相反的修法，用猜的比 grep 貴。
+**2026-08-05 10:57 已解答 —— 第一次正確重現 straggler 就開火了，而且是另外那一半。**
+重現方式就是上面寫的（UI 連著、取消勾選 CE record）：
+
+```
+10:57:00.157  Stop entry (conns=2)
+10:57:00.157  Stop cancels+wake done (0 ms)
+10:57:05.160  straggler: idle in ReadFile (the I/O cancel should have freed it), last cmd 'teleport_get_markers'
+10:57:05.160  straggler: idle in ReadFile (the I/O cancel should have freed it), last cmd 'trigger_scan'
+10:57:05.160  Stop conn drain TIMEOUT, 2 left (5002 ms)
+```
+
+兩條連線都是**閒置**（`inFlight == false`）—— 沒有任何東西卡在指令裡，
+一開始那個猜測兩個方向都錯。單純就是 cancel 沒有碰到它們。
+
+**為什麼一次性的 `CancelIoEx` 會漏掉。** `Fern::ReadLine`（`Fern.cpp:758-783`）
+是**一次讀一個 byte**，所以一個 40 bytes 的指令 = 40 次獨立的 `ReadFile`、40 個空隙。
+`Stop` 只在等待開始「之前」發了**一次** `CancelIoEx`。
+剛好落在空隙裡的執行緒沒有 pending I/O 可以取消（`ERROR_NOT_FOUND`），
+接著它會發出一個**全新的** `ReadFile`，而那個再也沒有人取消 —— 就一路停到 5 秒燒完。
+Teleport 面板兩條 lane 每秒各輪詢兩次，落在空隙裡並不是罕見的競態：
+`Stop entry` 距離最後一個指令進來只有 **146 ms**。
+
+### ✅ build 2650 已修 —— 把 cancel 改成「重複主張」而不是發一次
+
+`Fern::Stop` 現在把 5 秒的 drain 等待切成
+`Grimoire::PIPE_STOP_CANCEL_REASSERT_MS`（100 ms）一段，每一段對還活著的連線重發一次
+`CancelIoEx` —— 跟那六個 re-assert worker **同一個形狀**，只是用在關閉流程上。
+常見情況零成本：沒有東西要 drain 時，迴圈在第一次等待就結束，re-assert 次數是 0。
+在 `m_connMutex` 下做是安全的，因為連線執行緒是**先**把自己從 `m_conns` 移除、
+**才** `CloseConnOnce`（`Fern.cpp:900-907`）。
+
+另外加了一行，因為舊的 log 只能說「閒置在 ReadFile，cancel 應該要放掉它」，
+**卻說不出 cancel 到底有沒有東西可以放** —— 那是兩種不同的 bug：
+`Stop cancel issued: N accepted, M had nothing pending`。
+
+**① 靠 log 就能驗，而且是同一個重現**：UI 連著、取消勾選 CE record，
+然後 `grep "Stop conn drain" pipe-0.log`。
+
+- **PASS** = `satisfied, 0 left (… ms, N cancel re-asserts)`，而且 **N ≥ 1 才是修正真的有作用的證明**
+  （N = 0 只代表那次沒有連線撐過第一次 cancel，也就是沒用到這個修正）。
+- **FAIL** = 還是 `TIMEOUT` + `straggler: idle in ReadFile` —— 那代表 `CancelIoEx`
+  對這個 handle 根本叫不醒，而不是錯過時機；新的 `Stop cancel issued:` 那行會說是哪一種
+  （`M had nothing pending` = 錯過時機；`N accepted` 但執行緒還停著 = cancel 被接受卻被忽略，要換修法）。
+
+⬜ 尚未驗證 —— 修正是在那次擷取之後才出貨的，還沒重跑。
 
 ### 兩個失敗共同的教訓
 

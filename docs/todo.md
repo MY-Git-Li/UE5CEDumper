@@ -1719,7 +1719,7 @@ Pick up when the active plan finishes or when blocked.
 > |---|---|---|
 > | **1** | **B28** — CJK FText mojibake | The only open item that shows the user **wrong data**. Needs a CJK-language game; trigger is an even-length string containing a `U+xx00` char (一, 第…一, 統一). Counter-check STVoyager (UTF-8 FText) still reads correctly — that is the regression direction. |
 > | **2** | **B4** — CE mailbox survives a dead UI client | Fails **silently**: lookups answer 0 while reporting `scanned=<full pool>`, which reads as "the object isn't there". A CE-only session stays broken for its whole life. |
-> | **3** | `Stop conn drain TIMEOUT` | Still open — but **one of the two hypotheses is now eliminated**, and no code should be written until the straggler line fires. See below. |
+> | **3** | ~~`Stop conn drain TIMEOUT`~~ | **DIAGNOSED + FIXED (build 2650). Verification is one grep — see below.** |
 >
 > The rest (B18, B19, B2, B25, B26, B13/B41 …) cannot produce wrong data or a crash, so they can wait.
 >
@@ -1750,16 +1750,51 @@ Pick up when the active plan finishes or when blocked.
 > > registry) abort invokes on the *other* lane — manufacturing a new silent-failure bug of exactly
 > > the B4 family. If it is ever wanted, it must key on `ShutdownRequested()` alone.
 >
-> **What is left, and why it needs no cleverness.** The straggler diagnostic shipped in build 2641
-> (`Fern.cpp:576-595`) prints, per surviving connection, `INSIDE a command (cancel cannot reach it
-> until it returns)` vs `idle in ReadFile (the I/O cancel should have freed it)` plus the command
-> name and its age. **The 22:19:45 capture predates it (build 2638), which is why the question is
-> still open.** It has not fired since because neither 2026-08-05 run reproduced the condition —
-> both logged `conns=0` at `Stop entry`, i.e. the UI was already disconnected.
+> **ANSWERED 2026-08-05 10:57 — the straggler line fired on the first proper repro, and it is the
+> OTHER half.** Repro was exactly as filed (UI connected, untick the CE record):
 >
-> **The whole remaining task is a 30-second repro, not a code change:** connect the UI, leave it
-> connected, untick the CE record. If CE freezes, `grep "straggler:" pipe-0.log` names which half it
-> is. Those two need opposite fixes, and guessing costs more than the grep.
+> ```
+> 10:57:00.157  Stop entry (conns=2)
+> 10:57:00.157  Stop cancels+wake done (0 ms)
+> 10:57:05.160  straggler: idle in ReadFile (the I/O cancel should have freed it), last cmd 'teleport_get_markers'
+> 10:57:05.160  straggler: idle in ReadFile (the I/O cancel should have freed it), last cmd 'trigger_scan'
+> 10:57:05.160  Stop conn drain TIMEOUT, 2 left (5002 ms)
+> ```
+>
+> Both connections were **idle** (`inFlight == false`) — so nothing was stuck in a command, and the
+> guess that started this whole thread was wrong in both directions. The cancel simply did not reach
+> them.
+>
+> **Why a one-shot `CancelIoEx` misses.** `Fern::ReadLine` (`Fern.cpp:758-783`) reads **one byte per
+> `ReadFile` call**, so a 40-byte command is 40 separate reads with 40 gaps between them. `Stop`
+> fired `CancelIoEx` **once**, before the drain wait began. A thread sitting in a gap at that instant
+> has no pending I/O to cancel (`ERROR_NOT_FOUND`) and then issues a **fresh** `ReadFile` that
+> nothing will ever cancel — parked until the 5 s budget expires. With the Teleport panel polling
+> twice a second on both lanes, landing in a gap is not a rare race: `Stop entry` came **146 ms**
+> after the last command arrived.
+>
+> ### ✅ FIXED build 2650 — re-assert the cancel instead of firing it once
+>
+> `Fern::Stop` now slices its 5 s drain wait into `Grimoire::PIPE_STOP_CANCEL_REASSERT_MS` (100 ms)
+> and re-issues `CancelIoEx` on every surviving connection each slice — the same *assert the state
+> you want repeatedly* shape as the six re-assert workers, applied to teardown. Zero cost in the
+> common case: with nothing left to drain the loop exits on its first wait with zero re-asserts.
+> Safe under `m_connMutex` because a connection thread erases itself from `m_conns` **before**
+> `CloseConnOnce` (`Fern.cpp:900-907`), so anything still in the registry has an open handle.
+>
+> A second line was added because the old log could say the threads were *"idle in ReadFile (the I/O
+> cancel should have freed it)"* but **not whether the cancel had anything to free** — those are
+> different bugs: `Stop cancel issued: N accepted, M had nothing pending`.
+>
+> **① Log-derivable. Verification is one grep, and it needs the same repro:** UI connected, untick
+> the CE record. `grep "Stop conn drain" pipe-0.log`.
+> **PASS** = `satisfied, 0 left (… ms, N cancel re-asserts)` — and **N ≥ 1 is the proof the fix did
+> work**, because N = 0 only means no connection ever survived the first cancel (the fix was not
+> needed that run). **FAIL** = `TIMEOUT` still, with `straggler: idle in ReadFile` — that would mean
+> `CancelIoEx` cannot wake this handle at all rather than having missed a window, and the new
+> `Stop cancel issued:` line says which (`M had nothing pending` = missed window; `N accepted` with
+> the thread still parked = the cancel is accepted and ignored, a different fix).
+> ⬜ unverified — shipped after the capture, not yet re-run.
 >
 > ⬜ does **not** mean "probably fine". It means nobody has looked. Most of the fourteen were
 > simply not exercised (no wrapper installed, no UI killed mid-command, no Extra Scan).

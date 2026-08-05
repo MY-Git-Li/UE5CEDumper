@@ -500,14 +500,43 @@ void Fern::Stop() {
     // disconnected, "PipeServer: Stopped" was NEVER logged at all. The teardown
     // thread stayed wedged in the game process holding m_connMutex for the rest of
     // the session. The delay was never a timeout; it was "until a client shows up".
+    // Cancel every live connection's I/O. MUST be called with m_connMutex held:
+    // a connection thread erases itself from m_conns (under this lock) BEFORE it
+    // calls CloseConnOnce, so anything still in the registry has an open handle.
+    //
+    // Returns how many cancels the kernel ACCEPTED. The rest came back
+    // ERROR_NOT_FOUND — "no I/O was pending on this handle right now" — which is
+    // the reading that matters: the thread was between two ReadFile calls (this
+    // server reads a byte at a time, so a 40-byte command is 40 chances to be in
+    // the gap) and will issue a FRESH read that this one-shot cancel can never
+    // reach. That is why the cancel is re-asserted in the drain loop below rather
+    // than fired once and trusted. Measured 2026-08-05: two connections idle in
+    // ReadFile survived the single cancel and burned the whole 5 s budget.
+    auto cancelLiveConns = [this](int& accepted, int& notFound) {
+        accepted = notFound = 0;
+        for (auto& c : m_conns) {
+            if (!c || c->pipe == INVALID_HANDLE_VALUE ||
+                c->closed.load(std::memory_order_relaxed))
+                continue;
+            if (CancelIoEx(c->pipe, nullptr)) ++accepted;
+            else                              ++notFound;
+        }
+    };
+
     bool listenerParked;
+    int cancelAccepted = 0, cancelNotFound = 0;
     {
         std::lock_guard<std::mutex> lock(m_connMutex);
         listenerParked = (m_listenPipe != INVALID_HANDLE_VALUE);
-        for (auto& c : m_conns) {
-            if (c->pipe != INVALID_HANDLE_VALUE && !c->closed.load(std::memory_order_relaxed))
-                CancelIoEx(c->pipe, nullptr);
-        }
+        cancelLiveConns(cancelAccepted, cancelNotFound);
+    }
+    // One line per Stop — cold, and it is the line that was missing when the
+    // 2026-08-05 drain timeout could say the threads were "idle in ReadFile (the
+    // I/O cancel should have freed it)" but not whether the cancel had anything
+    // to free. Those are different bugs.
+    if (cancelAccepted || cancelNotFound) {
+        LOG_INFO("PipeServer: Stop cancel issued: %d accepted, %d had nothing pending",
+                 cancelAccepted, cancelNotFound);
     }
 
     // Wake the accept thread by COMPLETING its ConnectNamedPipe instead of closing
@@ -564,9 +593,29 @@ void Fern::Stop() {
     // handler can't hang shutdown forever.
     bool drained;
     size_t connsLeft;
+    int reasserts = 0;
     {
         std::unique_lock<std::mutex> lock(m_connMutex);
-        drained = m_connCv.wait_for(lock, std::chrono::seconds(5), [this] { return m_conns.empty(); });
+        // Slice the 5 s budget and RE-ASSERT the cancel each slice instead of
+        // waiting on one shot fired before the wait began. A thread parked in
+        // ReadFile that the first cancel missed (it was between reads) is
+        // otherwise unreachable for the whole budget — which is exactly what the
+        // 2026-08-05 capture showed: 2 stragglers, both "idle in ReadFile", 5002 ms.
+        // Same write-on-drift shape as the re-assert workers: assert the state you
+        // want repeatedly rather than assuming one assertion landed.
+        //
+        // Cheap: each slice is one CancelIoEx per surviving connection, and the
+        // loop only runs while connections survive — the common case exits on the
+        // first wait with zero re-asserts.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        for (;;) {
+            drained = m_connCv.wait_for(lock, std::chrono::milliseconds(Grimoire::PIPE_STOP_CANCEL_REASSERT_MS),
+                                        [this] { return m_conns.empty(); });
+            if (drained || std::chrono::steady_clock::now() >= deadline) break;
+            int acc = 0, nf = 0;
+            cancelLiveConns(acc, nf);   // safe: lock is held again after wait_for returns
+            ++reasserts;
+        }
         connsLeft = m_conns.size();
         // Name the stragglers while we still hold the registry lock. Without this the
         // timeout says only "N left", which is not enough to act on — the 2026-08-04
@@ -598,8 +647,13 @@ void Fern::Stop() {
     // Distinguish "satisfied" from "timed out" explicitly: a 5 s stall elsewhere
     // and a 5 s expiry of THIS wait produce identical wall-clock, and telling them
     // apart from the outside is what made the 2026-08-04 investigation expensive.
-    LOG_INFO("PipeServer: Stop conn drain %s, %zu left (%lld ms)",
-             drained ? "satisfied" : "TIMEOUT", connsLeft, elapsedMs());
+    // The re-assert count is the ONLY externally visible difference between "the
+    // first cancel worked" and "the first cancel missed and a later one caught it".
+    // Both print `satisfied`; without the count a fix for the missed-window case
+    // could not be told from it never having been needed.
+    LOG_INFO("PipeServer: Stop conn drain %s, %zu left (%lld ms, %d cancel re-assert%s)",
+             drained ? "satisfied" : "TIMEOUT", connsLeft, elapsedMs(),
+             reasserts, reasserts == 1 ? "" : "s");
 
     if (m_acceptThread.joinable()) {
         m_acceptThread.join();

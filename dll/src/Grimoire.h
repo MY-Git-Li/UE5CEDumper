@@ -29,6 +29,13 @@ constexpr const wchar_t* HINT_CACHE_PREFIX = L"UE5CEDumper";  // File: UE5CEDump
 constexpr const wchar_t* PIPE_NAME        = L"\\\\.\\pipe\\UE5DumpBfx";
 constexpr const char*    PIPE_NAME_NARROW  = "\\\\.\\pipe\\UE5DumpBfx";
 constexpr unsigned long  PIPE_BUF_SIZE    = 65536;
+// Slice of Fern::Stop's 5 s connection-drain wait. Each slice re-asserts
+// CancelIoEx on the surviving connections, because a single cancel fired before
+// the wait can miss a thread that is BETWEEN two reads and will then park in a
+// fresh, uncancelled ReadFile (Fern::ReadLine reads one byte per call, so every
+// command offers many such gaps). 100 ms: 50 chances inside the budget, and the
+// cost when nothing survives is zero — the loop exits on the first wait.
+constexpr int            PIPE_STOP_CANCEL_REASSERT_MS = 100;
 
 // --- Userspace pointer plausibility ---
 // A candidate x64 pointer is "plausible userspace" iff it sits in the canonical
