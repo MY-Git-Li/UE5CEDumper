@@ -10,14 +10,25 @@ namespace UE5DumpUI.Services;
 
 /// <summary>
 /// SQLite snapshot store (raw ADO.NET — no EF Core, for trim/AOT safety). One DB
-/// per game at %LOCALAPPDATA%\UE5CEDumper\snapshots.&lt;pe_hash&gt;.db. The
+/// per game at %LOCALAPPDATA%\UE5CEDumper\Snapshots\snapshots.&lt;pe_hash&gt;.db. The
 /// <c>fields</c> table is denormalised (identity columns per row) so the SPC / Pivot
 /// / Diff self-joins hit a single-table covering index (ix_strict/loose/insession) —
 /// the fast path. Schema: docs/experimental-snapshot-spc-pivot.md §6.
+///
+/// <para>The <c>Snapshots\</c> subfolder, the one-time move of DB sets still at the old
+/// flat root (as a GROUP — a <c>.db</c> without its <c>-wal</c> has lost data), and the
+/// age-out of games nobody has connected to in <see cref="Constants.DataMaxAgeDays"/>
+/// days are all <see cref="AppDataFolderMaintenance"/>'s — running from this
+/// constructor so no connection can open before the folder has been migrated.</para>
 /// </summary>
 public sealed class SnapshotStore : ISnapshotStore
 {
     private readonly string _dir;
+    // The pre-subfolder location (%LOCALAPPDATA%\UE5CEDumper itself). Kept only so the
+    // "Remove All Snapshot Data" wipe can also sweep a DB set that migration had to
+    // leave behind — that button promises "for EVERY game", and a file it cannot see is
+    // a file it silently keeps.
+    private readonly string _legacyDir;
     private readonly ILoggingService? _log;
     // Active game's pe_hash (sanitised for use in the filename). Empty until
     // SetActiveGame is called — falls back to a shared "default" db.
@@ -66,14 +77,23 @@ public sealed class SnapshotStore : ISnapshotStore
     public SnapshotStore(IPlatformService platform, ILoggingService? log = null)
     {
         _log = log;
-        _dir = Path.Combine(platform.GetAppDataPath(), Constants.LogFolderName);
-        Directory.CreateDirectory(_dir);
+        _legacyDir = Path.Combine(platform.GetAppDataPath(), Constants.LogFolderName);
+        _dir = AppDataFolderMaintenance.Prepare(
+            _legacyDir,
+            Constants.SnapshotSubFolder,
+            Constants.SnapshotDbPrefix,
+            Constants.DataMaxAgeDays,
+            log);
         EnsureProviderInitialised();
     }
 
     public void SetActiveGame(string? peHash)
     {
         _peHash = SanitizePeHash(peHash);
+        // Connecting to a game IS use of its DB. Stamped here rather than at open
+        // because the age sweep has to see the game as live even in a session where
+        // the user never opens the experimental Snapshot tab.
+        AppDataFolderMaintenance.TouchUsed(DatabasePath);
         _log?.Info(Constants.LogCatView, $"SnapshotStore: active DB -> {DatabasePath}");
     }
 
@@ -2491,6 +2511,11 @@ public sealed class SnapshotStore : ISnapshotStore
     // stall on a locked file or a network share) runs on a thread-pool thread so the
     // calling [RelayCommand] doesn't freeze the UI. (bookmarks.*.json belong to the
     // Live Walker bookmark feature, not the snapshot DB, so they are left alone.)
+    //
+    // Sweeps the LEGACY flat root as well as Snapshots\. Migration moves a game's files
+    // only as an all-or-nothing group, so a set it had to leave behind (a name collision
+    // with an already-migrated copy) is still on disk and still this button's problem:
+    // "for EVERY game" cannot quietly mean "for every game in the new folder".
     public Task<SnapshotWipeResult> DeleteAllSnapshotDatabasesAsync(CancellationToken ct = default)
         => Task.Run(() =>
         {
@@ -2506,6 +2531,10 @@ public sealed class SnapshotStore : ISnapshotStore
             int deleted = 0, skipped = 0;
             // Order matters only for tidiness: drop sidecars/denylists alongside each .db.
             // The .db count is what we report; sidecar/denylist removal is silent cleanup.
+            var dirs = string.Equals(_dir, _legacyDir, StringComparison.OrdinalIgnoreCase)
+                ? new[] { _dir }
+                : new[] { _dir, _legacyDir };
+            foreach (var dir in dirs)
             foreach (var pattern in new[]
             {
                 $"{Constants.SnapshotDbPrefix}.*.db",
@@ -2515,7 +2544,7 @@ public sealed class SnapshotStore : ISnapshotStore
             })
             {
                 List<string> files;
-                try { files = Directory.EnumerateFiles(_dir, pattern).ToList(); }
+                try { files = Directory.EnumerateFiles(dir, pattern).ToList(); }
                 catch { continue; }   // directory gone / unreadable — nothing to do for this pattern
 
                 foreach (var f in files)

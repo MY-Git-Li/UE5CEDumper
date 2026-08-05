@@ -934,7 +934,8 @@ public class SnapshotStoreTests : IDisposable
         _store.SetClassDenylist(DenylistScope.Spc, new HashSet<string>(StringComparer.Ordinal) { "A" });
 
         // Only ASCII alphanumerics survive in the filename.
-        var expected = Path.Combine(_tempDir, "UE5CEDumper", "snapshots.escape.denylist.json");
+        var expected = Path.Combine(_tempDir, Constants.LogFolderName,
+                                    Constants.SnapshotSubFolder, "snapshots.escape.denylist.json");
         Assert.True(File.Exists(expected));
     }
 

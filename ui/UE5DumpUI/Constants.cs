@@ -97,7 +97,8 @@ public static class Constants
     public const string UiOptionsFile = "ui-options.json";
 
     // Per-game Live-Walker bookmarks — one file per game, bookmarks.<pe_hash>.json
-    // under %LOCALAPPDATA%\UE5CEDumper (same per-game convention as the snapshot DB).
+    // under %LOCALAPPDATA%\UE5CEDumper\Bookmarks (same per-game convention as the
+    // snapshot DB). See BookmarkSubFolder.
     public const string BookmarkFilePrefix = "bookmarks";
 
     // Number of Live-Walker bookmark slots.
@@ -115,9 +116,49 @@ public static class Constants
     public const int CoordLibraryExportWarnCount = 2000;
 
     // Experimental Snapshot store — per-game SQLite DB under
-    // %LOCALAPPDATA%\UE5CEDumper, named snapshots.<pe_hash>.db so each game's
-    // snapshots stay isolated (no cross-game mixing / growth / corruption).
+    // %LOCALAPPDATA%\UE5CEDumper\Snapshots, named snapshots.<pe_hash>.db so each
+    // game's snapshots stay isolated (no cross-game mixing / growth / corruption).
+    // See SnapshotSubFolder.
     public const string SnapshotDbPrefix = "snapshots";
+
+    // ---- Per-game data SUBFOLDERS under %LOCALAPPDATA%\UE5CEDumper ----------------
+    //
+    // Both families used to sit at the folder ROOT. They are the only files there whose
+    // count grows without bound — one set per game, and a new PE hash on every game
+    // patch — so they buried the handful of app-wide files (dll-path.txt,
+    // experimental.json, ui-options.json, teleport-hotkeys.txt, window-state.txt) that
+    // someone actually has to find by hand.
+    //
+    // Sibling folders of Logs\ and Reports\, PascalCase to match them. Files still at
+    // the old root location are MOVED here once, at first use, by
+    // Services.AppDataFolderMaintenance — see that file for why a game's files move as
+    // a GROUP (a .db that arrives without its -wal has silently lost every transaction
+    // the WAL held).
+    //
+    // Same folder scheme, DIFFERENT retention: Snapshots\ is swept at DataMaxAgeDays,
+    // Bookmarks\ is never swept. See DataMaxAgeDays for why.
+    public const string SnapshotSubFolder = "Snapshots";
+    public const string BookmarkSubFolder = "Bookmarks";
+
+    // Age-out window for the SNAPSHOT folder only. Same 21 days as LogMaxAgeDays, and by
+    // AGE for the same reason a file count could not express the policy — but a SEPARATE
+    // constant on purpose: this is user data, not logs, so the two windows must be free
+    // to diverge without one silently dragging the other along.
+    //
+    // BOOKMARKS ARE DEDUCTIBLY EXEMPT — BookmarkStore passes maxAgeDays: 0. A snapshot DB
+    // is a regenerable multi-GB capture, which is what makes a disk-reclaiming sweep worth
+    // its risk; a bookmark file is a few KB of hand-placed navigation nobody can replay
+    // their way back to. Same folder scheme, deliberately different retention.
+    //
+    // "Unused" is honest rather than "unmodified", but NOT via last-access time: NTFS
+    // last-access updates are on by default here (fsutil DisableLastAccess = 2), so AV /
+    // backup / indexer reads keep every file looking like today and the sweep would never
+    // fire. Instead SnapshotStore RECORDS use — AppDataFolderMaintenance.TouchUsed stamps
+    // the write time when a game becomes active — so connecting to a game resets its
+    // window even in a session that never opens the Snapshot tab. Aged out per GAME, not
+    // per file: the newest timestamp in a game's set governs the whole set, so a
+    // 30-day-old denylist sibling never outlives (or drags down) the .db it belongs to.
+    public const int DataMaxAgeDays = 21;
     // Objects streamed per snapshot_chunk pipe round-trip. 8192 (raised 200 -> 1000
     // -> 8192) for two reasons on huge games (FF7 Rebirth ~433K objects: ~53 chunks):
     //   (a) fewer pipe round-trips + SQLite write transactions;

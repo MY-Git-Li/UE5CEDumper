@@ -455,7 +455,7 @@
     <sys:String x:Key="str.System.OpenLogFolderTip">Open the application log folder (%LOCALAPPDATA%\UE5CEDumper\Logs) in the file browser.</sys:String>
     <sys:String x:Key="str.System.OpenLogFolder.Error">Could not open log folder: {0}</sys:String>
     <sys:String x:Key="str.System.RemoveAllSnapshots">Remove All Snapshot Data</sys:String>
-    <sys:String x:Key="str.System.RemoveAllSnapshotsTip">Permanently delete the snapshot database FILES for EVERY game (snapshots.*.db and their sidecars) from disk — not a row purge. Files currently in use by an active capture are skipped. Experimental feature; irreversible.</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshotsTip">Permanently delete the snapshot database FILES for EVERY game (snapshots.*.db and their sidecars, in %LOCALAPPDATA%\UE5CEDumper\Snapshots) from disk — not a row purge. Files currently in use by an active capture are skipped. Bookmarks are not touched. Experimental feature; irreversible.</sys:String>
     <sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmTitle">Remove all snapshot data</sys:String>
     <sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmMessage">Permanently delete ALL snapshot database files for EVERY game? This deletes the files from disk and cannot be undone.</sys:String>
     <sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmYes">Delete Files</sys:String>
@@ -500,7 +500,7 @@
     <sys:String x:Key="str.Snapshot.DeleteAll">Delete All</sys:String>
     <sys:String x:Key="str.Snapshot.DeleteAllTip">Delete EVERY snapshot for this game and reclaim the disk (truncate + VACUUM). Irreversible.</sys:String>
     <sys:String x:Key="str.Snapshot.OpenDbFolder">Open DB folder</sys:String>
-    <sys:String x:Key="str.Snapshot.OpenDbFolderTip">Reveal this game's snapshot database (snapshots.&lt;pe_hash&gt;.db) in the file browser.</sys:String>
+    <sys:String x:Key="str.Snapshot.OpenDbFolderTip">Reveal this game's snapshot database (%LOCALAPPDATA%\UE5CEDumper\Snapshots\snapshots.&lt;pe_hash&gt;.db) in the file browser. A game you have not connected to for 21 days has its database deleted at startup to reclaim the disk.</sys:String>
     <sys:String x:Key="str.Snapshot.Quota">Per-game quota:</sys:String>
     <sys:String x:Key="str.Snapshot.QuotaHint">When a capture exceeds the quota, the oldest snapshots of this game are dropped automatically.</sys:String>
     <sys:String x:Key="str.Snapshot.Usage">Used:</sys:String>

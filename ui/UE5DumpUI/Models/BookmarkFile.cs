@@ -4,9 +4,10 @@ namespace UE5DumpUI.Models;
 
 /// <summary>
 /// Persisted Live-Walker bookmarks for ONE game, keyed by PE hash. Stored as
-/// %LOCALAPPDATA%\UE5CEDumper\bookmarks.{peHash}.json so each game's bookmarks are
-/// isolated and auto-follow the game (same per-game-file convention as the snapshot
-/// DB / denylist). See <see cref="Services.BookmarkStore"/>.
+/// %LOCALAPPDATA%\UE5CEDumper\Bookmarks\bookmarks.{peHash}.json so each game's bookmarks
+/// are isolated and auto-follow the game (same per-game-file convention as the snapshot
+/// DB / denylist). Never aged out, unlike the snapshot DBs — see
+/// <see cref="Services.BookmarkStore"/>.
 ///
 /// What's persisted = the navigation SPINE (breadcrumb field name+offset+class, the
 /// saved address as a same-process fast-path hint), the selected field rows, and the

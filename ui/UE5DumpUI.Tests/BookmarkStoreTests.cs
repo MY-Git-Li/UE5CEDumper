@@ -64,7 +64,8 @@ public class BookmarkStoreTests : IDisposable
     {
         var store = new BookmarkStore(_platform);
         Assert.Equal(
-            Path.Combine(_tempDir, Constants.LogFolderName, $"{Constants.BookmarkFilePrefix}.{Pe}.json"),
+            Path.Combine(_tempDir, Constants.LogFolderName, Constants.BookmarkSubFolder,
+                         $"{Constants.BookmarkFilePrefix}.{Pe}.json"),
             store.FilePathFor(Pe));
     }
 

@@ -22,6 +22,64 @@ builds ≤696 in
 
 -----
 
+## 2026-08-05 - Snapshots and bookmarks move out of the app-data root; only one of them expires (build 2726)
+
+`%LOCALAPPDATA%\UE5CEDumper` had become unreadable, and for a structural reason rather than
+an untidy one: **every file at that root is app-wide and fixed in number except two families,
+and those two grow per game AND per game patch.** A new PE hash means a new
+`snapshots.<hash>.db` set and a new `bookmarks.<hash>.json`, forever, so the handful of files
+somebody actually has to open by hand - `dll-path.txt`, `ui-options.json`, `experimental.json`,
+`teleport-hotkeys.txt`, `window-state.txt` - were buried under the two that never stop
+arriving. Both families now live in `Snapshots\` and `Bookmarks\`, siblings of the existing
+`Logs\` and `Reports\`.
+
+**Migration runs from the store constructors, not from `App`.** The store that READS a folder
+is the one that populates it, so there is no ordering to get wrong: you cannot construct a
+`SnapshotStore` or `BookmarkStore` that opens files before its folder has been migrated. A
+composition-root call site would have been one reorder away from silently reading an empty new
+folder while the user's data sat in the old one.
+
+**A game's files move as a GROUP or not at all.** Half a migration is data loss, not
+untidiness: a SQLite `.db` that lands in the new folder without the `-wal` it was
+checkpointing has dropped every transaction that WAL still held, and the abandoned `-wal` is
+then live bait for the next file to take that name. So each group is attempted `.db`-first
+(the file most likely to be locked, so a doomed move touches nothing) and rolled back on the
+first failure. A destination that already exists aborts its group rather than overwriting -
+the case that produces one is running an older build after migrating, and nothing on the
+outside can tell which of the two copies the user wants. **"Remove All Snapshot Data" now
+sweeps the legacy root too**, because a set migration had to leave behind is still that
+button's problem.
+
+**Snapshots expire at 21 days. Bookmarks never do.** Same folder scheme, deliberately
+different retention, and the asymmetry is the point: a snapshot DB is a regenerable multi-GB
+capture, which is what makes a disk-reclaiming sweep worth its risk, while a bookmark file is
+a few KB of hand-placed navigation nobody can replay their way back to. `BookmarkStore` passes
+`maxAgeDays: 0`, which disables the sweep outright - `docs/todo.md`'s old "add a bookmark
+startup sweep" item is now marked **rejected**, not pending, so nobody finishes it later.
+
+**"Unused" is RECORDED, not inferred - and last-access time is the trap.** The first cut read
+`max(LastWriteTimeUtc, LastAccessTimeUtc)` on the obvious reasoning that write time means
+"unmodified" while access time means "unused", so the max of the two can only be safer. The
+maintainer's own app-data folder refuted it in one listing: `fsutil behavior query
+DisableLastAccess` reports **2 (System Managed, updates ENABLED)**, and every file there read
+as accessed *today* against write times weeks old - a `bookmarks.*.json` last written
+2026-06-24, "accessed" 2026-08-04. Any antivirus scan, backup pass or search indexer refreshes
+it. Honouring that signal would not have made retention safer; it would have made retention
+**never fire**, a silent no-op dressed as a feature. So the sweep reads write time only, and
+`SetActiveGame` **stamps** it when a game becomes active - nothing outside this process writes
+these files, so an explicit stamp is immune to every background reader on the machine.
+Connecting to a game therefore resets its window even in a session that never opens the
+Snapshot tab. Ageing is per GAME, not per file: the newest timestamp in a set governs the whole
+set, so a 200-day-old `.denylist.json` never outlives (or drags down) the `.db` it belongs to.
+
+**Split the way `ProxyOrphanScanner` is split.** `AppDataRetentionPolicy` is pure - zero
+`System.IO`, so the rules that decide what gets DELETED are unit-testable without a disk -
+and `AppDataFolderMaintenance` does the IO. 46 new tests cover both, including the two that
+matter most: a locked `.db` leaves its `-wal` beside it, and a 4000-day-old bookmark file
+survives. 3270 C# green.
+
+-----
+
 ## 2026-08-05 - The group row shows one pairing; now you can see the other thirty-five (build 2719)
 
 Fourth report of the same shape, and the first fix that is not zero-sum. *"`TickCount=NNN,
