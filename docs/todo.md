@@ -1950,6 +1950,17 @@ and `Health.CurrentValue` falling, so the values genuinely change.
 > sequence, a specific game, a specific third-party install). Each of these carries its exact steps
 > and the PASS/FAIL observation.
 >
+> **STATUS after the 2026-08-05 DumperTest sessions (builds 2622 → 2701):** the self-built sample
+> closed **B28, V1a, V1c and NumericAll** — three of them ⬜ since builds 796/927/942 purely for
+> want of a game containing the right UPROPERTY — and exposed **three dumper defects** nothing else
+> had (D1/D2/D3 above, all fixed). **13 ⬜ bullets remain.**
+>
+> **Still the two that can produce silently wrong data:** **B4** (CE mailbox after the UI dies) and
+> the **drain straggler** (below — four attempts deep, now proven to be genuinely parked in
+> `ReadFile` with both cancel APIs failing; the next move is structural, not another guess).
+> **B8 is blocked** behind the PE-hook misdetection reproduced on stock UE 5.4.
+>
+> *Earlier line kept for the record:*
 > **STATUS after five rounds of live testing (2026-08-04 → 08-05, builds 2622 → 2650):**
 > **11 ✅ verified · 2 🟡 half (B8, Dump Explorer) · 14 ⬜ not yet exercised.**
 > *(Dump Explorer's ⬜→🟡 came out of the "shipped but unproven" list below, not out of the 14 — an
