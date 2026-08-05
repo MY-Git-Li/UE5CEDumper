@@ -1,0 +1,54 @@
+﻿// ============================================================
+// DumperTestTypes — enum + structs for the dumper verification actor.
+//
+// Split from DumperTestActor.h so the struct/enum shapes can be reused (and so
+// a UHT failure on one of them is easy to isolate).
+//
+// Every value here is DELIBERATE. Nothing is a placeholder — each field exists
+// to settle a specific ⬜ row in docs/todo.md § Pending live-game verification.
+// If you change a literal, change the expectation in tools/ue-sample/README.md
+// with it, or the next person will scan for a number that is no longer there.
+// ============================================================
+#pragma once
+
+#include "CoreMinimal.h"
+#include "DumperTestTypes.generated.h"
+
+/// Deliberately NON-contiguous so an enum-name lookup cannot pass by accident
+/// through "index == value". Legend=7 leaves a hole at 3..6.
+UENUM(BlueprintType)
+enum class EDumperTestGrade : uint8
+{
+	Rookie  = 0   UMETA(DisplayName = "Rookie"),
+	Veteran = 1   UMETA(DisplayName = "Veteran"),
+	Elite   = 2   UMETA(DisplayName = "Elite"),
+	Legend  = 7   UMETA(DisplayName = "Legend"),
+};
+
+/// Two-float struct in the shape of a GAS `FGameplayAttributeData`
+/// (BaseValue / CurrentValue). Exists for the nested-StructProperty capture and
+/// the "Flatten GAS attributes" CE-export toggle, which special-cases exactly
+/// this shape. CurrentValue is driven by the actor's 1 Hz timer; BaseValue is
+/// held still on purpose — see the group-scan note in the README.
+USTRUCT(BlueprintType)
+struct FDumperTestAttribute
+{
+	GENERATED_BODY()
+
+	UPROPERTY() float BaseValue = 0.f;
+	UPROPERTY() float CurrentValue = 0.f;
+};
+
+/// Struct used as a CONTAINER ELEMENT (`TArray<FDumperTestStat>`). That is the
+/// one-struct-element-deep container level the opt-in deep descent walks, and it
+/// carries an FText so the deep path has an FText to mis-decode if B28 ever
+/// regresses inside a container.
+USTRUCT(BlueprintType)
+struct FDumperTestStat
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FName StatName;
+	UPROPERTY() int32 Value = 0;
+	UPROPERTY() FText Label;
+};

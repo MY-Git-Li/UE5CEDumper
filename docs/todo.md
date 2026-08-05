@@ -357,6 +357,18 @@ UE reflection by NAME (`CanBeDamaged`, `CustomTimeDilation`, `CharacterMovement`
 authoritative than a PDB — it is the data the game itself uses, so it tracks licensee forks a PDB
 cannot. Using a PDB to "correct" an offset would be a step down, not up.
 
+> **▶ THE SAMPLE IS WRITTEN — [`tools/ue-sample/`](../tools/ue-sample/README.md) (2026-08-05).**
+> A stock **UE 5.4 Third Person** project plus one `ADumperTestActor` carrying a deliberate property
+> zoo, spawned by a `UWorldSubsystem` so **no binary level asset has to be edited**. It exists
+> because a large share of the ⬜ register is blocked not on effort but on *finding a game that
+> happens to contain the right UPROPERTY*: `TSet`/`TMap` (⬜ since build **927**), `TOptional`
+> (**942**), the NumericAll byte family (**796**), **B28** CJK FText, and **B8**, whose blocker was
+> *"needs a game that actually goes quiet when backgrounded"* — solved outright by
+> `t.IdleWhenNotForeground=1`, which also turns Grausam's foreground lock into a **positive** test
+> rather than "it seemed to keep working". Expected values are written down in that README, so a
+> disagreement is a defect rather than a discussion. **Still to do: package it** (Shipping +
+> Development, ~20 min in the editor) — the source is versioned, the binaries are not.
+
 **The real win is a reproducible live test target.** Today every one of these features is verified
 ad hoc on a commercial title — *"LIVE-VERIFIED P3R"*, *"VERIFIED Tower of Mask + DQ7R"*, *"NO-OP on
 FF7R"* — one-shot, unrepeatable, and gated on owning and launching that game. The self-built samples

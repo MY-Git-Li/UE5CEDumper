@@ -1,0 +1,34 @@
+; ============================================================
+; MERGE these sections into the generated Config/DefaultEngine.ini.
+; Do NOT replace the file — the Third Person template writes a working
+; DefaultEngine.ini (default map, renderer settings, project ID) and losing it
+; gives you a project that packages but boots to a black screen.
+;
+; If a section below already exists, add the keys to it rather than adding a
+; second section header; the last duplicate section silently wins.
+; ============================================================
+
+[SystemSettings]
+; ------------------------------------------------------------
+; THE ONE SETTING THIS SAMPLE EXISTS FOR, besides the actor.
+;
+; FEngineLoop::ShouldUseIdleMode() (Runtime/Launch/Private/LaunchEngineLoop.cpp)
+; returns true when ALL of these hold:
+;     FApp::IsGame() && FPlatformProperties::SupportsWindowedMode()
+;     && t.IdleWhenNotForeground != 0 && !FApp::HasFocus()
+; The first two are automatic for a packaged Windows build, so this cvar plus
+; alt-tab is a GUARANTEED game-thread stall. Default is 0, and most commercial
+; titles ship it off — which is exactly why "find a game that idles when
+; backgrounded" had been blocking B8's deferred-restore path.
+;
+; It cuts both ways, and that is the point:
+;   * B8   — alt-tab away, wait >500 ms, click Disable on the Fly card. The
+;            deferred collision-restore path is now reachable on demand.
+;   * Grausam (foreground lock) — with the lock ON, the WM_ACTIVATEAPP rewrite
+;            should keep FApp::HasFocus() true, so idle mode NEVER engages and
+;            the game keeps ticking while backgrounded. That is a positive,
+;            observable test of the lock rather than "it seemed to keep working".
+;
+; Set to 0 to turn the sample back into an ordinary always-ticking game.
+; ------------------------------------------------------------
+t.IdleWhenNotForeground=1
