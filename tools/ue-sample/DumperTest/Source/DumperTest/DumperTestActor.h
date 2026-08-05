@@ -59,6 +59,7 @@ public:
 	ADumperTestActor();
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	// ========================================================
@@ -215,6 +216,12 @@ private:
 	/// the object walked -- and a scan that finds nothing changed is indistinguishable
 	/// from a game that is not ticking. -DumperTestNoHud suppresses it.
 	void DrawHeartbeat() const;
+
+	/// Frames since BeginPlay. Driven by Tick, so it advances even if the 1 Hz timer
+	/// never fires -- which is the entire point: a blank screen and a dead timer used
+	/// to look identical, because the heartbeat was drawn BY the thing it was meant to
+	/// be testing. Not a UPROPERTY: it must not become another scan target.
+	int32 FrameCount = 0;
 
 	FTimerHandle TickHandle;
 };

@@ -54,7 +54,10 @@ void UDumperTestPayload::Populate()
 
 ADumperTestActor::ADumperTestActor()
 {
-	PrimaryActorTick.bCanEverTick = false;   // the 1 Hz timer drives everything
+	// Tick is ON only to drive the on-screen readout. The VALUES are still driven by
+	// the 1 Hz timer -- keeping the two on separate clocks is what makes "timer dead"
+	// distinguishable from "nothing is drawing at all".
+	PrimaryActorTick.bCanEverTick = true;
 
 	// --- B28: FText ---
 	Text_Even2_OneNull  = FText::FromString(DumperTestStrings::Even2_OneNull);
@@ -175,6 +178,13 @@ void ADumperTestActor::BeginPlay()
 	       this, Payload.Get());
 }
 
+void ADumperTestActor::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	++FrameCount;
+	DrawHeartbeat();
+}
+
 void ADumperTestActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (UWorld* W = GetWorld())
@@ -201,7 +211,6 @@ void ADumperTestActor::OnSecondTick()
 
 	// FrozenInt and BaseValue are deliberately NOT touched.
 
-	DrawHeartbeat();
 }
 
 /// Put the two ticking values ON SCREEN.
@@ -227,7 +236,9 @@ void ADumperTestActor::DrawHeartbeat() const
 	// A fixed key so each line REPLACES its previous self instead of scrolling a wall of
 	// text off the screen -- these fire once a second for the life of the process.
 	GEngine->AddOnScreenDebugMessage(/*Key*/ 1001, /*Time*/ 1.5f, FColor::Green,
-		FString::Printf(TEXT("[DumperTest] TickCount=%d  (must climb)"), TickCount));
+		FString::Printf(TEXT("[DumperTest] frames=%d   TickCount=%d  "
+		                    "(frames must ALWAYS climb; TickCount climbs only if the 1 Hz timer runs)"),
+		                    FrameCount, TickCount));
 	GEngine->AddOnScreenDebugMessage(1002, 1.5f, FColor::Yellow,
 		FString::Printf(TEXT("[DumperTest] Health.CurrentValue=%.0f  (must fall, wraps to %.0f)"),
 		                Health.CurrentValue, Health.BaseValue));

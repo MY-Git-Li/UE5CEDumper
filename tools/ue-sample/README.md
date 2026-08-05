@@ -72,10 +72,21 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
 5. Press Play. **Three green/yellow lines appear top-left once a second:**
 
    ```
-   [DumperTest] TickCount=17  (must climb)
+   [DumperTest] frames=1042   TickCount=17  (frames must ALWAYS climb; TickCount climbs only if the 1 Hz timer runs)
    [DumperTest] Health.CurrentValue=83  (must fall, wraps to 100)
    [DumperTest] Health.BaseValue=100  FrozenInt=424242  (both must NOT move)
    ```
+
+   **`frames` is on a different clock from everything else, deliberately.** It is driven by
+   `Tick`; the values are driven by the 1 Hz timer. The first draft drew the heartbeat *from the
+   timer* — so if the timer was dead the screen stayed blank, which looks exactly like the readout
+   itself being broken. A diagnostic must not be driven by the thing it is diagnosing.
+
+   | on screen | means |
+   |---|---|
+   | `frames` climbing, `TickCount` climbing | sample is fully alive — a `0 results` belongs to the scan |
+   | `frames` climbing, `TickCount` **frozen** | the 1 Hz timer is dead — the sample's bug |
+   | **nothing at all** | the readout never ran: wrong package, or the actor never spawned |
 
    **That readout IS the health check.** `ADumperTestActor` is invisible by design — no mesh, no
    HUD, no gameplay — so without it *"is the timer actually running?"* cannot be answered without
