@@ -1,6 +1,9 @@
 # Experimental: Snapshot / SPC Query / Class Pivot — Design
 
-> **Status: PLAN ONLY (no code yet).** Ported in concept from the Unity sister
+> **Status: SHIPPED — C1 / C3 / C4 / C5 / C6 (builds 873–1727); C2 and the heavier C3 scorer
+> are still open.** The per-phase status lines further down are accurate and are cited by
+> section from the source — trust those over this summary. This header read "PLAN ONLY (no code
+> yet)" until 2026-08-05. Ported in concept from the Unity sister
 > project `discrete` (Phases 29b–29i). This document is the design of record;
 > `docs/todo.md` carries the phased work block.
 

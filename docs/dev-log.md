@@ -118,6 +118,78 @@ records two paragraphs up. **"All fields" also toggles** — second press collap
 
 -----
 
+## 2026-08-05 - docs tidy: the rot was stale STATUS HEADERS on live docs, not misfiled files
+
+Asked to archive what is out of date and to consider a `docs/evaluations/` subfolder for old
+evaluations. A three-way survey said **don't create the subfolder** and I agree: after fixing the
+headers, the set of "decision record for something deliberately not built" is **n = 1**
+(`text-translation-eval.md`). Everything else that *looked* like a dead evaluation is a shipped
+feature wearing a stale header. Moving ~40 files would also have meant regenerating two CI-compared
+golden artifacts that embed doc paths (`tools/pe/aob-specificity-baseline.tsv`,
+`tools/ghidra/blocks/blocks.json`) and breaking links inside archived files the convention forbids
+repairing. **Zero files moved; zero link churn.**
+
+**The most dangerous line was in CLAUDE.md**, and it was about code that does not exist: the index
+claimed multipipe **"Phase 0 SHIPPED (scan thread-priority guard, build 1834)"**. `grep -rn
+SetThreadPriority dll/src/` returns **0 hits** — Phase 0 was shipped and then *reverted* (build
+1840) for starving scans ~20×, which `multipipe-eval.md` itself says and the index never learned.
+That row would have sent a session hunting a guard that is not there. The same row also repeated
+the head-of-line-blocking root cause **that §10 measured and refuted** (dispatcher idle ~70% of
+wall-clock; worst single dispatch out of 24,178 = 14.3 ms; Phase 1 = WON'T DO). Both fixed, and
+`multipipe-eval.md`'s own TL;DR now points at §10 instead of contradicting it.
+
+Nine more headers said "not built" about shipped work — `native-c-value-scan-spec.md`
+("DESIGN ONLY"), `experimental-snapshot-spc-pivot.md` ("PLAN ONLY (no code yet)"),
+`ce-export-drilldown-spec.md` ("PROPOSAL (awaiting approval)"), `aob-block-library-eval.md`
+("NOT BUILT" while two of its proposals are CI-gated), the Teleport Coordinate Library index row,
+and `todo.md`'s "Time / Timer control … not yet built" (L1 + E shipped and live-verified).
+
+**Every number I touched, I re-derived rather than inherited** — and each is now labelled as
+derived so the next drift is a regeneration, not an edit: pipe commands **31 → 99**
+(`grep -c 'constexpr const char* CMD' dll/src/Renge.h`), C ABI exports 57 → **59**, Avalonia
+12.0.2 → **12.1.0**, DLL sources 28/33 → **31/36**, UI files ~245 → **~269**, tests "496 across 16
+files" → ~3200 across 135. `roadmap.md`'s hand-maintained `dev = main @ build 2252` line was 57
+commits stale; deleted rather than refreshed, because it rots on the next commit — ask
+`git rev-list --count main..dev`.
+
+Also: three `todo.md` bullets carrying their own *"Delete after the batch merges to main"* trigger
+were removed (their batches merged long ago), and `docs/archive/README.md` now documents that
+relative links **inside** archived files are knowingly broken — converting an invisible defect into
+a stated one without violating "nothing was edited, only moved".
+
+-----
+
+## 2026-08-05 - Vendor sync: zydis +1, minhook current, and the RE-UE4SS diff that was not ours
+
+Pre-merge vendor pass. Two of the three answers were "no action", but the third question was the
+one worth asking.
+
+**`git describe` lies about the zydis version.** It says `v4.0.0-121-ga95bb71` because the v5 tag is
+not in the fetched tag set, so it walks back to the nearest reachable v4 tag. `Zydis.h:89` is the
+fact: `ZYDIS_VERSION 0x0005000000000000` = v5.0.0, and `Denken.cpp:155` uses the v5 API
+(`op.mem.disp.size == 0`). The memory file that tracks this had a SHA that matched neither. Check
+the header, never a label.
+
+**zydis `85d7518` → `a95bb71`** — "Decoder patch for variable-position decoder-tree filters" (#638):
+a decoder fix plus a full table regen, +34.9k/−45.7k lines. Same shape as the v4→v5 bump, which was
+judged to warrant an in-game check. DLL rebuild clean, 81 + 996 green — and that is evidence rather
+than "it compiled", because **five `Test_Denken_*` tests decode real x64 byte sequences through
+Zydis**, including `Test_Denken_ExcludesStackAndZeroDisp`, which is exactly the `disp.size == 0`
+path the v5 migration touched. ⬜ The in-game Path-2 smoke test is still not done. minhook is 0
+behind.
+
+**RE-UE4SS `6c26f038..662df915` — not applicable, and the useful half was the inverse question.**
+Upstream fixed "Can't write .usmap file if path is wide" (`fopen_s` → `_wfopen_s`). Our USMAP writer
+is C# (`UsmapExportService.cs`), where .NET strings are UTF-16 and the file APIs are W-variants, so
+that bug cannot occur. **The question worth asking was whether WE carry the same bug class in the
+C++ DLL** — a CJK Windows username would be enough to trigger it. Swept `dll/src/`: every
+`ifstream`/`ofstream` in `Flamme.cpp` takes an `fs::path` (`GetCacheFilePath()` returns one), and
+MSVC opens `std::filesystem::path` through its wide `native()`. Clean. Second time an RE-UE4SS diff
+has come up needing zero code change; the pattern is that their runtime concerns rarely reach a
+read-only dumper, but the bug *class* sometimes does and is worth the five-minute sweep.
+
+-----
+
 ## 2026-08-05 - The DumperTest sample's on-screen heartbeat is a no-op in Shipping (sample source; docs only)
 
 Reported alongside the group-scan verification: the Development package prints the heartbeat, the
@@ -139,9 +211,38 @@ blank screen in a Shipping package proves nothing about the sample** — use the
 for "is the timer running?", or read `TickCount` at `0x518` in Live Walker, which is authoritative
 in both.
 
-A Shipping-capable heartbeat needs a real draw path (an `AHUD` subclass overriding `DrawHUD()` +
-`DrawText()`, set as the GameMode's `HUDClass`). **Not built** — it needs a re-cook to verify, and
-nothing may claim to work here without one.
+**BUILT the same day, after the maintainer re-cooked and reported it still missing** (correctly —
+the first pass had changed only the comment). `ADumperTestHUD : AHUD` overriding `DrawHUD()` now
+draws the three lines, installed at runtime by `ADumperTestActor::EnsureHeartbeatHud()` via
+`APlayerController::ClientSetHUD` — **not** the GameMode's `HUDClass` as first sketched, because
+that is a binary asset and the sample's whole design avoids those (same reason the actor is spawned
+by a subsystem rather than placed in a level).
+
+The entire chain was read in the 5.4 source before a line was written, since this environment
+cannot compile UE and a wrong guess costs a cook-and-package cycle: `ClientSetHUD` executes locally
+in a standalone game (`Actor.cpp:4923-4935`, `NM_Standalone` → `FunctionCallspace::Local`) →
+`ClientSetHUD_Implementation` spawns and assigns `MyHUD` (`PlayerController.cpp:1332`) → the
+viewport calls `MyHUD->PostRender()` (`GameViewportClient.cpp:1936`, no `UE_BUILD_*` gate anywhere
+in 1700-1940) → `AHUD::PostRender` (`HUD.cpp:149`) → `DrawHUD` (`:638`) → `DrawText` (`:929`), with
+`bShowHUD = true` from the ctor (`:75`).
+
+**Installed from `Tick`, never from the 1 Hz timer** — the first draft used the timer and that
+recreates the exact ambiguity the split-clock design exists to end: a dead timer would show as a
+blank screen, indistinguishable from "the sample never spawned". Caught before the maintainer saw
+it; the adversarial review caught six more, all documentation-vs-code splits, including the old
+already-refuted paragraph that had survived the README rewrite and still named the deleted
+`DrawHeartbeat`.
+
+**A third wrong Shipping assertion fell out of the review, this one pre-existing:**
+`UE_LOG(..., Warning, ...)` does *not* survive a Shipping build. `Build.h:328` sets
+`NO_LOGGING = !USE_LOGGING_IN_SHIPPING` (0 by default) and `LogMacros.h:146-158` reduces `UE_LOG`
+to Fatal-only under it — so `[DumperTest] ADumperTestActor ready at 0x…`, documented as the
+without-the-dumper existence check, prints in Development only. Corrected in the source and the
+README. All three misreads in this one file share a cause: **inferring a gate from a sibling
+instead of opening it.**
+
+⬜ **Needs the maintainer's re-cook to verify** — it cannot be compiled or run here, and nothing
+about it is claimed to work until that run.
 
 -----
 

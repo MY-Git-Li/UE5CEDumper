@@ -10,6 +10,9 @@
 // ============================================================
 
 #include "DumperTestActor.h"
+
+#include "DumperTestHUD.h"
+#include "GameFramework/PlayerController.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/CommandLine.h"
@@ -149,6 +152,16 @@ ADumperTestActor::ADumperTestActor()
 
 	TickCount = 0;
 	FrozenInt = 424242;   // never written again — the Unchanged control
+
+	// --- ticking numerics: the prev-value targets the sample never had ---
+	// Distinctive starting values so a first Exact scan is selective on its own; the
+	// static F32/F64/Raw* above stay put because they are documented acceptance criteria.
+	F32_Ticking = 1000.5f;
+	F64_Ticking = 20000.125;
+
+	RawInt_Ticking    = 700000;
+	RawFloat_Ticking  = 300.25f;
+	RawDouble_Ticking = 50000.5;
 }
 
 void ADumperTestActor::BeginPlay()
@@ -169,9 +182,16 @@ void ADumperTestActor::BeginPlay()
 		W->GetTimerManager().SetTimer(TickHandle, this, &ADumperTestActor::OnSecondTick, 1.0f, /*loop*/ true);
 	}
 
-	// Warning level so it survives a Shipping build's default log verbosity \u2014
-	// this line is how you confirm the actor exists WITHOUT attaching the dumper,
-	// which matters the first time you run the package and nothing shows up.
+	// Confirms the actor exists WITHOUT attaching the dumper -- but ONLY in Development/Test.
+	//
+	// This comment used to read "Warning level so it survives a Shipping build's default log
+	// verbosity". That is FALSE, verified 2026-08-05: the Shipping branch of Build.h:328 sets
+	// NO_LOGGING = !USE_LOGGING_IN_SHIPPING (0 unless the Target.cs opts in), and
+	// LogMacros.h:146-158 reduces UE_LOG to Fatal-only under NO_LOGGING -- so this call
+	// compiles to nothing in the package that actually gets tested. THIRD wrong assertion in
+	// this file about what a Shipping build keeps, all three made by inferring a gate rather
+	// than opening it. The on-screen HUD readout is the Shipping-safe check; set
+	// bUseLoggingInShipping = true in the Target.cs if you want this line as well.
 	UE_LOG(LogTemp, Warning,
 	       TEXT("[DumperTest] ADumperTestActor ready at %p, Payload=%p. ")
 	       TEXT("Find it via Instances -> 'DumperTestActor'."),
@@ -181,8 +201,15 @@ void ADumperTestActor::BeginPlay()
 void ADumperTestActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	++FrameCount;
-	DrawHeartbeat();
+	++FrameCount;   // the HUD reads this; drawing happens in ADumperTestHUD::DrawHUD
+
+	// Installed from TICK, never from the 1 Hz timer. Putting it on the timer would make
+	// the readout depend on the very thing it exists to measure: a dead timer would show
+	// as a BLANK SCREEN, which is indistinguishable from "the sample never spawned" -- the
+	// exact confusion the split-clock design was built to end. From Tick, a dead timer
+	// shows as a frozen TickCount beside a climbing frames, which is the diagnosis.
+	// Cheap after the first success: a cached bool, two derefs and an IsA.
+	EnsureHeartbeatHud();
 }
 
 void ADumperTestActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -211,69 +238,81 @@ void ADumperTestActor::OnSecondTick()
 
 	// FrozenInt and BaseValue are deliberately NOT touched.
 
+	// Ticking float / double, one falling and one rising, so BOTH directions of the
+	// prev-value predicates have a target at both widths. The fall wraps, which is what
+	// makes Increased reachable on F32_Ticking too -- at ~96 s, chosen so the wrap happens
+	// INSIDE a normal session. Every step is a power-of-two fraction (10.25 = 41/4,
+	// 3.25 = 13/4, 0.25, 0.5), so the values stay exactly representable and what the HUD
+	// prints is exactly what a scan must match -- no accumulated drift to explain away.
+	F32_Ticking -= 10.25f;
+	if (F32_Ticking <= 10.25f)
+	{
+		F32_Ticking = 1000.5f;
+	}
+	F64_Ticking += 0.25;
+
+	// The RAW (non-UPROPERTY) ones move on the same clock. Reflection cannot see these
+	// at all -- they exist so the opt-in Native-C scan has something that CHANGES, which
+	// the static RawInt/RawFloat/RawDouble could never provide.
+	RawInt_Ticking += 7;
+	RawFloat_Ticking -= 3.25f;
+	if (RawFloat_Ticking <= 3.25f)
+	{
+		RawFloat_Ticking = 300.25f;
+	}
+	RawDouble_Ticking += 0.5;
 }
 
-/// Put the two ticking values ON SCREEN.
+/// Put the two ticking values ON SCREEN -- through a path that survives SHIPPING.
 ///
-/// WHY. This actor is invisible by design -- no mesh, no HUD, it exists only to be read
-/// by the dumper -- so "is the timer actually running?" was unanswerable without
+/// WHY. This actor is invisible by design -- no mesh, no gameplay, it exists only to be
+/// read by the dumper -- so "is the timer actually running?" was unanswerable without
 /// attaching the dumper and walking the object. That question came up three times in one
-/// session and cost several rounds of log forensics, because a group scan finding nothing
-/// CHANGED and a game that is not ticking look identical from the outside.
+/// session, because a group scan finding nothing CHANGED and a game that is not ticking
+/// look identical from the outside.
 ///
-/// Now it is a glance. If the numbers on screen are moving, the sample is alive and any
-/// "0 results" belongs to the scan; if they are frozen, the sample is the problem.
-/// That is the whole diagnostic, available before the dumper is even injected.
+/// This USED to call GEngine->AddOnScreenDebugMessage, which is a no-op in a Shipping
+/// package (UnrealEngine.cpp:11397 wraps the whole body in
+/// `#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)`). It printed in Development and not in
+/// Shipping, and that difference was misread twice -- once as "Shipping strips it" and
+/// once as "config" -- before anyone opened the function. The drawing now lives in
+/// ADumperTestHUD, which uses AHUD::DrawText: verified ungated in the same source.
 ///
-/// -DumperTestNoHud turns it off for a clean screenshot.
-void ADumperTestActor::DrawHeartbeat() const
+/// Called from Tick, never from the 1 Hz timer -- see the header for why that distinction
+/// is the whole point of this readout.
+///
+/// -DumperTestNoHud turns it off for a clean screenshot, and is also the opt-out for the
+/// ClientSetHUD side effect described in the header.
+void ADumperTestActor::EnsureHeartbeatHud()
 {
-	if (!GEngine || FParse::Param(FCommandLine::Get(), TEXT("DumperTestNoHud")))
+	// Parsed ONCE. FParse::Param scans the whole command line, and this runs every frame --
+	// the early-outs below are only cheap if the expensive test is not in front of them.
+	static const bool bNoHud = FParse::Param(FCommandLine::Get(), TEXT("DumperTestNoHud"));
+	if (bNoHud)
 	{
 		return;
 	}
 
-	// ⚠ THIS READOUT DOES NOT WORK IN A SHIPPING BUILD, AND CANNOT BE MADE TO.
-	// Verified 2026-08-05 against the installed 5.4 source, after the packaged
-	// Shipping exe stayed silent while Development printed fine:
-	//
-	//     Engine/Source/Runtime/Engine/Private/UnrealEngine.cpp:11397
-	//     void UEngine::AddOnScreenDebugMessage(uint64 Key, ...)
-	//     {
-	//     #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-	//
-	// The whole BODY is compiled out, so the message never enters the list and no
-	// amount of flag-setting can bring it back. The three stores below are kept
-	// because they are correct and free for Development/Test (a console command or
-	// a screenshot request can flip GAreScreenMessagesEnabled underneath us), but
-	// they are NOT what makes Shipping quiet.
-	//
-	// This comment previously claimed the opposite -- "not compiled out of Shipping,
-	// the display call site is gated `#if !(UE_BUILD_TEST)`". That read the DISPLAY
-	// gate and missed the ADD gate, and the flag-setting fix built on it could never
-	// have worked. Second wrong assertion about this same function; the rule the repo
-	// already has applies -- read the gate, do not infer it from a sibling.
-	//
-	// To get a Shipping heartbeat, draw it yourself: a tiny AHUD subclass overriding
-	// DrawHUD() + DrawText(), set as the GameMode's HUDClass. AHUD::DrawHUD runs in
-	// Shipping. NOT DONE -- it needs a re-cook to verify and nothing may claim to work
-	// here without one.
-	GEngine->bEnableOnScreenDebugMessages        = true;
-	GEngine->bEnableOnScreenDebugMessagesDisplay = true;
-	GAreScreenMessagesEnabled                    = true;
+	UWorld* W = GetWorld();
+	if (!W)
+	{
+		return;
+	}
 
-	// A fixed key so each line REPLACES its previous self instead of scrolling a wall of
-	// text off the screen -- these fire once a second for the life of the process.
-	GEngine->AddOnScreenDebugMessage(/*Key*/ 1001, /*Time*/ 1.5f, FColor::Green,
-		FString::Printf(TEXT("[DumperTest] frames=%d   TickCount=%d  "
-		                    "(frames must ALWAYS climb; TickCount climbs only if the 1 Hz timer runs)"),
-		                    FrameCount, TickCount));
-	GEngine->AddOnScreenDebugMessage(1002, 1.5f, FColor::Yellow,
-		FString::Printf(TEXT("[DumperTest] Health.CurrentValue=%.0f  (must fall, wraps to %.0f)"),
-		                Health.CurrentValue, Health.BaseValue));
-	GEngine->AddOnScreenDebugMessage(1003, 1.5f, FColor::Silver,
-		FString::Printf(TEXT("[DumperTest] Health.BaseValue=%.0f  FrozenInt=%d  (both must NOT move)"),
-		                Health.BaseValue, FrozenInt));
+	// Not up yet is NORMAL, not an error: this actor is spawned by a UWorldSubsystem and
+	// routinely beats the PlayerController into existence. Tick retries next frame.
+	APlayerController* PC = W->GetFirstPlayerController();
+	if (!PC)
+	{
+		return;
+	}
+
+	if (PC->MyHUD && PC->MyHUD->IsA<ADumperTestHUD>())
+	{
+		return;   // already ours -- do NOT respawn it every second
+	}
+
+	PC->ClientSetHUD(ADumperTestHUD::StaticClass());
 }
 
 #undef LOCTEXT_NAMESPACE

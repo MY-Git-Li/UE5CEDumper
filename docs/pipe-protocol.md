@@ -3,7 +3,9 @@
 Named pipe: `\\.\pipe\UE5DumpBfx`
 Format: JSON, newline-delimited (one message per `\n`)
 Direction: bidirectional — Request/Response + async push Events
-Total commands: 31 (command name constants live in `dll/src/Renge.h`)
+Total commands: **99** — a DERIVED number, regenerate it, never hand-edit:
+`grep -c 'constexpr const char\* CMD' dll/src/Renge.h`. (It read 31 from build ~547 until
+2026-08-05, i.e. it was wrong by a factor of three for most of this project's life.)
 
 -----
 

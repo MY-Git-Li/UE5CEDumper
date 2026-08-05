@@ -7,6 +7,15 @@ For up-to-date information, see the active docs in [`../`](..) — start with
 [`../dev-log.md`](../dev-log.md) (running milestone log) and the docs index
 in [`../../CLAUDE.md`](../../CLAUDE.md).
 
+> **Relative links INSIDE archived files are knowingly broken.** The convention here is
+> *nothing was edited, only moved*, so a `[x](todo.md)` written when the file lived in `docs/`
+> still says `todo.md` and now resolves to `docs/archive/todo.md`, which does not exist. Read any
+> such link as `../<name>.md`. (8 in `dev-log-2026-07-pre-build-2200.md`, 3 in
+> `dev-log-2026-06-pre-build-940.md`, 1 in `todo-closed-2026-08-build-2715.md`.) The table below
+> uses correct `../` links because it was written here, not moved here. Repairing the links inside
+> the archived files would break the one property that makes them trustworthy — that they are
+> byte-identical to what shipped.
+
 ## Files
 
 | File | Original purpose | Why archived |

@@ -69,12 +69,14 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
    > `VisualStudio2022` (`UEBuildWindows.cs:138`), so if you ever *do* need the IDE, open the solution
    > with **VS 2022** and build **only the `DumperTest` project** (right-click → Build), never
    > *Build Solution*. The `.sln` is disposable — regenerate it from the `.uproject` context menu.
-5. Press Play. **Three green/yellow lines appear top-left once a second:**
+5. Press Play. **Five lines appear top-left once a second:**
 
    ```
    [DumperTest] frames=1042   TickCount=17  (frames must ALWAYS climb; TickCount climbs only if the 1 Hz timer runs)
    [DumperTest] Health.CurrentValue=83  (must fall, wraps to 100)
    [DumperTest] Health.BaseValue=100  FrozenInt=424242  (both must NOT move)
+   [DumperTest] F32_Ticking=826.500 (falls 10.25, wraps)  F64_Ticking=20004.250 (rises 0.25)
+   [DumperTest] native (non-UPROPERTY): RawInt_Ticking=700119  RawFloat_Ticking=245.500  RawDouble_Ticking=50008.500
    ```
 
    **`frames` is on a different clock from everything else, deliberately.** It is driven by
@@ -86,12 +88,12 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
    |---|---|
    | `frames` climbing, `TickCount` climbing | sample is fully alive — a `0 results` belongs to the scan |
    | `frames` climbing, `TickCount` **frozen** | the 1 Hz timer is dead — the sample's bug |
-   | **nothing at all** | Development/Test: the readout never ran (wrong package, or the actor never spawned). **Shipping: expected — see below** |
+   | **nothing at all** | a genuine failure **in BOTH configurations** — wrong package, `-DumperTestNoHud` still on the command line, the actor never spawned, or the HUD never installed. (Before build 2719 a blank Shipping screen was *expected*; it no longer is — see below.) |
 
-   > ### ⚠ The heartbeat is invisible in a SHIPPING package, and cannot be fixed by config
+   > ### The heartbeat is drawn by `ADumperTestHUD`, because the obvious way does not work in Shipping
    >
-   > Verified 2026-08-05 against the installed 5.4 source after a packaged Shipping exe stayed
-   > silent while Development printed normally:
+   > It used to call `GEngine->AddOnScreenDebugMessage`. That prints in Development and is a
+   > **no-op in a Shipping package** — verified 2026-08-05 against the installed 5.4 source:
    >
    > ```
    > Engine/Source/Runtime/Engine/Private/UnrealEngine.cpp:11397
@@ -100,16 +102,30 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
    > #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
    > ```
    >
-   > The whole function body is compiled out, so the message never enters the list —
-   > `bEnableOnScreenDebugMessages` / `GAreScreenMessagesEnabled` are irrelevant there.
-   > **A blank screen in Shipping proves nothing about the sample**; use the Development
-   > package for the "is the timer running?" question, or read `TickCount` in Live Walker
-   > (`ADumperTestActor` @ `0x518`), which is authoritative in both.
+   > The whole body is compiled out, so the message never enters the list and
+   > `bEnableOnScreenDebugMessages` / `GAreScreenMessagesEnabled` cannot bring it back. That
+   > difference was misread twice — once as "Shipping strips the readout", once as "config" —
+   > before anyone opened the function.
    >
-   > A Shipping-capable heartbeat needs a real draw path — a small `AHUD` subclass overriding
-   > `DrawHUD()` + `DrawText()`, set as the GameMode's `HUDClass` (`AHUD::DrawHUD` runs in
-   > Shipping). **Not built**: it needs a re-cook to verify, and nothing here may claim to work
-   > without one.
+   > **`AHUD` is the path that is not gated**, and every step was checked in the same source
+   > before writing it: `AHUD::PostRender` (`HUD.cpp:149`) → `DrawHUD` (`:638`) → `DrawText`
+   > (`:929`), none carrying a `UE_BUILD_*` gate, with `bShowHUD = true` from the ctor (`:75`).
+   > **Development uses the same path on purpose** — a readout that works in one configuration
+   > and not the other is what hid this for two rounds.
+   >
+   > The HUD is installed at runtime by `ADumperTestActor::EnsureHeartbeatHud()` via
+   > `APlayerController::ClientSetHUD` (`PlayerController.h:1212`), re-asserted from **`Tick`** —
+   > never from the 1 Hz timer, which is the thing the readout exists to measure; installing from
+   > there would make a dead timer show as a blank screen again. **No `.uproject`, GameMode or
+   > other binary asset is touched**, which is the same
+   > reason the actor is spawned by a subsystem rather than placed in a level.
+   >
+   > ⚠ **`ClientSetHUD` destroys the current HUD** (documented on the declaration). The Third
+   > Person template ships no custom HUD so nothing is lost; a project that has one would lose
+   > it. `-DumperTestNoHud` opts out of the whole thing.
+   >
+   > Whatever the screen says, `TickCount` at `+0x518` in Live Walker is authoritative in both
+   > configurations.
 
    **That readout IS the health check.** `ADumperTestActor` is invisible by design — no mesh, no
    HUD, no gameplay — so without it *"is the timer actually running?"* cannot be answered without
@@ -119,16 +135,14 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
    `0 results` belongs to the scan; if they are frozen, the sample is the problem.
    `-DumperTestNoHud` suppresses it for a clean screenshot.
 
-   > **It works in Shipping too, and the reason it did not is worth knowing.** On-screen debug
-   > messages are *not* compiled out of a Shipping build — the display call site is gated
-   > `#if !(UE_BUILD_TEST)`, which excludes TEST only, and `GAreScreenMessagesEnabled` is a plain
-   > runtime bool in Core. What silences them is **config**: `UEngine::bEnableOnScreenDebugMessages`
-   > is read from `[/Script/Engine.Engine]` in `GEngineIni`, and `AddOnScreenDebugMessage` early-outs
-   > on it. `DrawHeartbeat` now sets all three flags every draw — three bool stores, re-asserted
-   > because a console command or a screenshot request can flip them underneath a readout whose
-   > whole point is that it cannot go quiet for reasons unrelated to what it measures.
-
-   The output log also carries `[DumperTest] ADumperTestActor ready at 0x…`.
+   > ⚠ **`[DumperTest] ADumperTestActor ready at 0x…` does NOT print in a Shipping package.**
+   > `UE_LOG(..., Warning, ...)` is compiled to nothing there: the Shipping branch of `Build.h:328`
+   > sets `NO_LOGGING = !USE_LOGGING_IN_SHIPPING` (0 by default), and `LogMacros.h:146-158` reduces
+   > `UE_LOG` to Fatal-only under `NO_LOGGING`. This README claimed the opposite ("Warning level so
+   > it survives a Shipping build's default log verbosity") until 2026-08-05 — the **third** wrong
+   > assertion in this file about what a Shipping build keeps, all three made by inferring a gate
+   > instead of opening it. The line is real and useful in Development/Test only. Set
+   > `bUseLoggingInShipping = true` in the Target.cs if you want it in Shipping too.
 6. **Package twice**: Platforms → Windows → Build Configuration → **Shipping**, Package Project;
    then again with **Development**.
 
@@ -312,6 +326,8 @@ stored `00 4E` — a NUL at an even byte offset.
 | `Health` — `BaseValue` / `CurrentValue` | Base 100, Current ticking | nested StructProperty in GAS-attribute shape → also the "Flatten GAS attributes" CE-export toggle |
 | `Payload` → `PayloadText` / `PayloadString` / `PayloadValue` | 統一言語, same as FString, 909090 | Related Objects edge · Locate-in-GWorld through a pointer · Solide force-to-null (strong ptr, so allowed) |
 | `RawInt` / `RawFloat` / `RawDouble` | 0x5A5A5A5A / 777.75 / 31415.926535 | **not** UPROPERTY — the interior holes "Guess What" and the Native-C scan must find |
+| `F32_Ticking` / `F64_Ticking` | start 1000.5 / 20000.125 | the only float and double that **move** — see the temporal table below |
+| `RawInt_Ticking` / `RawFloat_Ticking` / `RawDouble_Ticking` | start 700000 / 300.25 / 50000.5 | **not** UPROPERTY *and* they move — a Native-C scan that can be refined, which the static three above cannot support |
 
 ### Group Scan / Snapshot Mode B (temporal)
 
@@ -323,6 +339,25 @@ A 1 Hz timer drives exactly the documented hard case — *groups need `Unchanged
 | `Health.BaseValue` | **never moves** — the `Unchanged` slot a group match needs |
 | `TickCount` | rises monotonically |
 | `FrozenInt` | 424242, never written again |
+| `F32_Ticking` | falls 10.25/sec from 1000.5, wraps after ~96 s — **Decreased** every second, **Increased** on the wrap |
+| `F64_Ticking` | rises 0.25/sec from 20000.125 — **Increased**, never wraps |
+| `RawInt_Ticking` | rises 7/sec from 700000 — **native, non-UPROPERTY** |
+| `RawFloat_Ticking` | falls 3.25/sec from 300.25, wraps after ~91 s — **native, non-UPROPERTY** |
+| `RawDouble_Ticking` | rises 0.5/sec from 50000.5 — **native, non-UPROPERTY** |
+
+**Why the ticking numerics exist.** `F32` / `F64` and `RawInt` / `RawFloat` / `RawDouble` are
+STATIC by design — `F32 = 513.36` is the Round/Trunc/Ceil worked example and the raw three are the
+documented interior holes — so before build 2721 the sample had **no float, double or native-C
+target that a `Changed` / `Increased` / `Decreased` refine could survive**. A Native-C first scan
+could be run and then had nothing to converge on. These five move on the same 1 Hz clock and are
+all **on the HUD**, which for the raw three is the only way to learn their value at all: there is
+no reflection to ask, so you need the number off the screen before you can search for it.
+
+They are appended at the END of the class so every offset quoted elsewhere (`TickCount` +0x518,
+`FrozenInt` +0x51C, `Opt_Int_Set` +0x468, `Set_Int` +0x358) still points at the same field. That
+makes the raw three a **trailing** hole rather than an interior one — the easier case for hole
+detection, but still inside `PropertiesSize`, and the interior case is already covered by the
+static `RawInt` / `RawFloat` / `RawDouble`.
 
 ### B8 / Grausam — the backgrounding pair
 

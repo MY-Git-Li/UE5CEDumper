@@ -8,9 +8,10 @@
 > for the full mapping. The interfaces below show the **logical** shape of each
 > module; the headers in `dll/src/` are the ground truth and have grown beyond
 > what is reproduced here. Bullet points and counts are kept in sync with
-> build 547.
+> the build shown in `build_number.txt`. The headers are ground truth; this doc trails them.
 >
-> For the JSON pipe protocol (31 commands), see [pipe-protocol.md](pipe-protocol.md).
+> For the JSON pipe protocol (**99** commands — derive it, never hand-edit:
+`grep -c 'constexpr const char* CMD' dll/src/Renge.h`), see [pipe-protocol.md](pipe-protocol.md).
 > For drill-down phase / Find Refs / OptionalProperty layout details, see
 > [technical-notes.md](technical-notes.md).
 

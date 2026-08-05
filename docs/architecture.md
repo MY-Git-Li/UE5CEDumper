@@ -17,7 +17,7 @@ UE5CEDumper/
 │
 ├── dll/                            ← C++ DLL (injected into game process)
 │   ├── CMakeLists.txt              ← DLL build config (versioning, git hash, deps)
-│   └── src/                        ← 28 .cpp + 33 .h as of build 2168 (Frieren-themed; see naming-convention.md)
+│   └── src/                        ← 31 .cpp + 36 .h as of build 2721 (Frieren-themed; see naming-convention.md)
 │       ├── Heiter.cpp              ← dllmain — DLL_PROCESS_ATTACH, AutoStartThreadProc
 │       ├── Methode.cpp             ← CEPlugin — CE plugin Type 5 main menu
 │       ├── BuildStamp.cpp / .h     ← build/version metadata accessors (only TU that includes generated BuildInfo.h), build 1817
@@ -92,7 +92,7 @@ UE5CEDumper/
 │   ├── UE5DumpUI.sln
 │   ├── UE5DumpUI.Tests/            ← xUnit test project (~102 .cs test files, 2436 tests as of build 2142; runs under Microsoft.Testing.Platform via global.json opt-in)
 │   └── UE5DumpUI/
-│       ├── UE5DumpUI.csproj        ← .NET 10 windows, Avalonia 12.0.2, Native AOT
+│       ├── UE5DumpUI.csproj        ← .NET 10 windows, Avalonia 12.1.0, Native AOT
 │       ├── Program.cs              ← Avalonia entry point
 │       ├── App.axaml / .cs         ← Service creation + DI (incl. AobMakerBridgeService)
 │       ├── app.manifest
@@ -207,7 +207,7 @@ UE5CEDumper/
 | Property | Value |
 |----------|-------|
 | .NET | 10.0 (windows) |
-| Avalonia | 12.0.2 (Themes.Fluent + Controls.DataGrid 12.0.0) |
+| Avalonia | 12.1.0 (Themes.Fluent + Controls.DataGrid 12.0.0) |
 | UI pattern | ReactiveUI + CommunityToolkit.Mvvm 8.* (source generators) |
 | Logging | Serilog 4.3.1 (file + console sinks) |
 | Publish | Single-file self-contained / Native AOT trimmed (`PublishSingleFile=true`) |

@@ -1,6 +1,9 @@
 # Native-C Value Scan — Spec & Design
 
-> **Status: DESIGN ONLY — not implemented.** This is the durable reference for an
+> **Status: P0–P3 SHIPPED; only the in-game verify of P3 remains** (see § below and `docs/todo.md`). The
+> `Native-C (raw)` opt-in is live in Value Search, Group Scan and Snapshot. This header read
+> "DESIGN ONLY — not implemented" until 2026-08-05, long after the feature shipped.
+> This remains the durable reference for an
 > **opt-in** feature that scans the *unmanaged* (non-`UPROPERTY`) bytes inside a
 > `UObject` for native C++ gameplay values (HP / MP / stats), in **single Value
 > Search**, **Group / multi Value Search**, and **Snapshot** (so downstream **SPC
