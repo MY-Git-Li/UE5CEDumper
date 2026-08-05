@@ -7,11 +7,23 @@ using UE5DumpUI.Models;
 namespace UE5DumpUI.Services;
 
 /// <summary>
-/// Persists Live-Walker bookmarks PER GAME to %LOCALAPPDATA%\UE5CEDumper\bookmarks.{peHash}.json.
+/// Persists Live-Walker bookmarks PER GAME to
+/// %LOCALAPPDATA%\UE5CEDumper\Bookmarks\bookmarks.{peHash}.json.
 /// One file per game (keyed by PE hash) so a game's bookmarks are isolated and a
 /// "clear all" is a single file delete — same per-game-file convention as the snapshot
 /// DB / denylist. Source-gen JSON (AOT-safe), atomic temp+rename, swallow-and-log on
 /// failure, defaults on missing/corrupt. Synchronous (a handful of tiny records).
+///
+/// <para>The <c>Bookmarks\</c> subfolder and the one-time move of files still at the old
+/// flat root are <see cref="AppDataFolderMaintenance"/>'s, running from this constructor
+/// so no caller can read the folder before it has been migrated.</para>
+///
+/// <para><b>These files are NEVER aged out.</b> The snapshot DBs next door are swept at
+/// <see cref="Constants.DataMaxAgeDays"/> because they are the thing that grows to
+/// gigabytes; a bookmark file is a few KB of HAND-PLACED navigation the user cannot
+/// regenerate by replaying anything. The disk argument that justifies the snapshot sweep
+/// simply does not apply, and the cost of being wrong is not symmetric. Clearing them
+/// stays an explicit action (<see cref="Delete"/>, the Live Walker's "clear all").</para>
 ///
 /// See <see cref="BookmarkFile"/> for what is / isn't persisted.
 /// </summary>
@@ -26,8 +38,13 @@ public sealed class BookmarkStore
     public BookmarkStore(IPlatformService platform, ILoggingService? log = null)
     {
         _log = log;
-        _dir = Path.Combine(platform.GetAppDataPath(), Constants.LogFolderName);
-        Directory.CreateDirectory(_dir);
+        _dir = AppDataFolderMaintenance.Prepare(
+            Path.Combine(platform.GetAppDataPath(), Constants.LogFolderName),
+            Constants.BookmarkSubFolder,
+            Constants.BookmarkFilePrefix,
+            // NO age sweep, deliberately — see the class doc. Migration only.
+            maxAgeDays: 0,
+            log);
     }
 
     private string PathFor(string peHash) =>
@@ -48,6 +65,8 @@ public sealed class BookmarkStore
             {
                 if (!File.Exists(path)) return new BookmarkFile { PeHash = peHash };
                 var json = File.ReadAllText(path);
+                // No TouchUsed here: nothing sweeps this folder, so a last-used stamp
+                // would be a metadata write on every load that no reader consumes.
                 return JsonSerializer.Deserialize(json, s_jsonCtx.BookmarkFile)
                        ?? new BookmarkFile { PeHash = peHash };
             }

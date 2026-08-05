@@ -43,6 +43,23 @@ public sealed class UiOptionsSettings
     public ConsoleUiOptions Console { get; set; } = new();
     public GameClassFilterUiOptions GameClassFilter { get; set; } = new();
     public ProxyDeployUiOptions ProxyDeploy { get; set; } = new();
+    public SystemUiOptions System { get; set; } = new();
+}
+
+/// <summary>System-tab maintenance preferences.</summary>
+public sealed class SystemUiOptions
+{
+    /// <summary>
+    /// Compress archived logs older than <c>Constants.LogAutoCompressMinAgeDays</c> at
+    /// startup. <b>Default OFF</b> — opt-in. It is cheap (2.8 s for a 102 MB backlog, idle
+    /// priority) and reversible (<c>compact /u</c>), but it rewrites files on disk without
+    /// being asked, and a launch that silently touches the user's logs is not something to
+    /// turn on for them. The manual button next to it does the same work on demand.
+    ///
+    /// <para>Read directly by <c>App.OnFrameworkInitializationCompleted</c> as well as by
+    /// the checkbox, because the sweep has to start before the window exists.</para>
+    /// </summary>
+    public bool AutoCompressLogs { get; set; }
 }
 
 /// <summary>Top-bar display controls (master — fan out to child VMs on change).</summary>

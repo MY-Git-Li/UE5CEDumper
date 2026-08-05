@@ -39,9 +39,10 @@ internal static class AppComposition
         ISnapshotStore? snapshotStore,
         IGlobalHotkeyService? globalHotkeys,
         BookmarkStore? bookmarks,
-        CoordinateLibraryStore? coordLibrary)
+        CoordinateLibraryStore? coordLibrary,
+        ILogCompressionService? logCompression)
         => new MainWindowViewModel(
             pipeClient, dump, log, platform, aobUsage, aobMaker,
             proxyDeploy, experimentalGate, snapshotStore, globalHotkeys, bookmarks,
-            coordLibrary);
+            coordLibrary, logCompression);
 }

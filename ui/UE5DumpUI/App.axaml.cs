@@ -23,6 +23,7 @@ public class App : Application
     private UiOptionsStore? _uiOptions;
     private BookmarkStore? _bookmarkStore;
     private CoordinateLibraryStore? _coordLibraryStore;
+    private WindowsLogCompressionService? _logCompression;
 
     public override void Initialize()
     {
@@ -68,6 +69,7 @@ public class App : Application
             _uiOptions = new UiOptionsStore(_platform, _logging);
             _bookmarkStore = new BookmarkStore(_platform, _logging);
             _coordLibraryStore = new CoordinateLibraryStore(_platform, _logging);
+            _logCompression = new WindowsLogCompressionService(_logging);
 
             _logging.Info(Constants.LogCatInit, "UE5DumpUI starting...");
             _logging.Info(Constants.LogCatInit, $"Version:   {typeof(App).Assembly.GetName().Version}");
@@ -102,12 +104,44 @@ public class App : Application
             var mainVm = AppComposition.BuildMainWindowViewModel(
                 _pipeClient, _dumpService, _logging, _platform, _aobUsage, _aobMakerBridge,
                 _proxyDeploy, _experimentalGate, _snapshotStore, globalHotkeys, _bookmarkStore,
-                _coordLibraryStore);
+                _coordLibraryStore, _logCompression);
 
             // Load + apply persisted panel options, then track changes for
             // debounced save-on-change. Done before the window is shown so the
             // restored values are in place for the first render.
             mainVm.InitializeOptionsPersistence(_uiOptions);
+
+            // Opt-in startup log compression (default OFF). Read from the VM rather than
+            // re-loading ui-options.json, so what runs is exactly what the checkbox shows.
+            //
+            // Fire-and-forget on a thread-pool thread: it must not delay the window, and
+            // nothing downstream depends on it. LoggingService's constructor has already
+            // rotated and age-pruned by now, so this never compresses a file that is about
+            // to be deleted. Errors are the service's own to log — a failed sweep must not
+            // surface as a startup exception.
+            if (mainVm.Pointers.AutoCompressLogs)
+            {
+                var svc = _logCompression;
+                var dir = logDir;
+                var logger = _logging;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var r = await svc.CompressAsync(
+                            dir,
+                            TimeSpan.FromDays(Constants.LogAutoCompressMinAgeDays),
+                            Constants.LogCompressMinSizeBytes);
+                        logger.Info(Constants.LogCatInit,
+                            $"Auto log compression: {r.Compressed} file(s), " +
+                            $"{r.BytesSaved / 1024}KB saved, {r.Failed} failed");
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Warn(Constants.LogCatInit, $"Auto log compression failed: {ex.Message}");
+                    }
+                });
+            }
 
             // Restore last-session window placement (position / size / maximized,
             // validated against the monitors present this session). Attached

@@ -37,6 +37,51 @@ public static class Constants
     public const int MaxProcessFolders = 20;           // Clean up oldest beyond this
     public const int LogMaxAgeDays = 21;               // Keep this in sync with Grimoire::LOG_RETENTION_DAYS
 
+    // ---- Log compression (compact /C /EXE:LZX, in place) -------------------------
+    //
+    // Retention bounds the AGE of the log corpus, not its SIZE: 21 days of multi-game
+    // sessions measured 111.9 MB. LZX took the eligible 102.05 MB of that to 7.98 MB
+    // (12.8:1) in 2.8 s, and left LastWriteTime untouched on all 289 files — which is why
+    // PruneAgedLogs needs no change. Numbers + traps: docs/log-compression-eval.md.
+    //
+    // Size floor: 347 of 698 files were <= 4 KB and held 0.4 MB between them — half the
+    // work for 0.4% of the bytes.
+    public const long LogCompressMinSizeBytes = 4096;
+
+    // Idle window for the MANUAL button: don't touch a file something may still be
+    // appending to. The -0.log name guard is the real protection; this covers the
+    // DLL-written per-game categories whose names the UI does not know.
+    public const int LogCompressMinIdleHours = 1;
+
+    // Extra idle time a `<cat>-0.log` must have before it counts as finished — applied on
+    // BOTH triggers, on top of the ordinary idle window.
+    //
+    // `-0.log` is a SLOT NAME, not a liveness fact: a game last played 13 days ago still
+    // owns a walk-0.log that nothing will ever append to again. Excluding those outright
+    // was stricter than LoggingService.PurgeOrphanedLogs, which passes a live-name set only
+    // for the UI's own folder and sweeps every GAME folder on age alone — i.e. we were
+    // refusing to COMPRESS files the same subsystem is willing to DELETE. Measured cost of
+    // the old rule on a real folder: 36 files / 5 MB permanently uncompressed, and the set
+    // only grows, one final log per game ever tested.
+    //
+    // Compressing them is durable: Sein archives a `-0.log` by RENAME on the next
+    // injection, and a rename preserves LZX (verified 335,872 bytes on disk before and
+    // after). A game that really is running keeps its log's mtime fresh, and the file lock
+    // is the backstop if it somehow does not.
+    public const int LogCompressLiveFileMinAgeDays = 7;
+
+    // Age floor for the AUTOMATIC startup sweep (opt-in, default OFF). Deliberately longer
+    // than the manual window: an unattended pass should only ever touch logs that are
+    // plainly historical, and a log you might still be reading about yesterday's session
+    // is not.
+    public const int LogAutoCompressMinAgeDays = 7;
+
+    // compact.exe batching. The CHARACTER budget is the binding one — Windows caps a
+    // command line at 32,767 and these paths are long (a per-game folder is named after
+    // the game EXE). Set well under the cap; overflowing fails a whole batch.
+    public const int LogCompressBatchSize = 40;
+    public const int LogCompressMaxArgChars = 24000;
+
     // Leftover-proxy cleanup reports (Reports/leftover-proxies-<stamp>.txt).
     //
     // AGE, not a generation count, for the same reason the logs above use age — and the flaw is the
@@ -97,7 +142,8 @@ public static class Constants
     public const string UiOptionsFile = "ui-options.json";
 
     // Per-game Live-Walker bookmarks — one file per game, bookmarks.<pe_hash>.json
-    // under %LOCALAPPDATA%\UE5CEDumper (same per-game convention as the snapshot DB).
+    // under %LOCALAPPDATA%\UE5CEDumper\Bookmarks (same per-game convention as the
+    // snapshot DB). See BookmarkSubFolder.
     public const string BookmarkFilePrefix = "bookmarks";
 
     // Number of Live-Walker bookmark slots.
@@ -115,9 +161,49 @@ public static class Constants
     public const int CoordLibraryExportWarnCount = 2000;
 
     // Experimental Snapshot store — per-game SQLite DB under
-    // %LOCALAPPDATA%\UE5CEDumper, named snapshots.<pe_hash>.db so each game's
-    // snapshots stay isolated (no cross-game mixing / growth / corruption).
+    // %LOCALAPPDATA%\UE5CEDumper\Snapshots, named snapshots.<pe_hash>.db so each
+    // game's snapshots stay isolated (no cross-game mixing / growth / corruption).
+    // See SnapshotSubFolder.
     public const string SnapshotDbPrefix = "snapshots";
+
+    // ---- Per-game data SUBFOLDERS under %LOCALAPPDATA%\UE5CEDumper ----------------
+    //
+    // Both families used to sit at the folder ROOT. They are the only files there whose
+    // count grows without bound — one set per game, and a new PE hash on every game
+    // patch — so they buried the handful of app-wide files (dll-path.txt,
+    // experimental.json, ui-options.json, teleport-hotkeys.txt, window-state.txt) that
+    // someone actually has to find by hand.
+    //
+    // Sibling folders of Logs\ and Reports\, PascalCase to match them. Files still at
+    // the old root location are MOVED here once, at first use, by
+    // Services.AppDataFolderMaintenance — see that file for why a game's files move as
+    // a GROUP (a .db that arrives without its -wal has silently lost every transaction
+    // the WAL held).
+    //
+    // Same folder scheme, DIFFERENT retention: Snapshots\ is swept at DataMaxAgeDays,
+    // Bookmarks\ is never swept. See DataMaxAgeDays for why.
+    public const string SnapshotSubFolder = "Snapshots";
+    public const string BookmarkSubFolder = "Bookmarks";
+
+    // Age-out window for the SNAPSHOT folder only. Same 21 days as LogMaxAgeDays, and by
+    // AGE for the same reason a file count could not express the policy — but a SEPARATE
+    // constant on purpose: this is user data, not logs, so the two windows must be free
+    // to diverge without one silently dragging the other along.
+    //
+    // BOOKMARKS ARE DEDUCTIBLY EXEMPT — BookmarkStore passes maxAgeDays: 0. A snapshot DB
+    // is a regenerable multi-GB capture, which is what makes a disk-reclaiming sweep worth
+    // its risk; a bookmark file is a few KB of hand-placed navigation nobody can replay
+    // their way back to. Same folder scheme, deliberately different retention.
+    //
+    // "Unused" is honest rather than "unmodified", but NOT via last-access time: NTFS
+    // last-access updates are on by default here (fsutil DisableLastAccess = 2), so AV /
+    // backup / indexer reads keep every file looking like today and the sweep would never
+    // fire. Instead SnapshotStore RECORDS use — AppDataFolderMaintenance.TouchUsed stamps
+    // the write time when a game becomes active — so connecting to a game resets its
+    // window even in a session that never opens the Snapshot tab. Aged out per GAME, not
+    // per file: the newest timestamp in a game's set governs the whole set, so a
+    // 30-day-old denylist sibling never outlives (or drags down) the .db it belongs to.
+    public const int DataMaxAgeDays = 21;
     // Objects streamed per snapshot_chunk pipe round-trip. 8192 (raised 200 -> 1000
     // -> 8192) for two reasons on huge games (FF7 Rebirth ~433K objects: ~53 chunks):
     //   (a) fewer pipe round-trips + SQLite write transactions;

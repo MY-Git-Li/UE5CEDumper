@@ -22,6 +22,161 @@ builds ≤696 in
 
 -----
 
+## 2026-08-05 - Logs compress in place; the 21-day purge does not notice (build 2730)
+
+Retention bounds the AGE of the log corpus, not its SIZE. Three weeks of multi-game sessions
+measured **111.9 MB**, and the fix is not a shorter window - it is that 102 MB of that is
+archived text nobody will open again, sitting uncompressed.
+
+**`compact /C /EXE:LZX`, in place: 102.05 MB -> 7.98 MB (12.8:1) in 2.8 s.** LZX is Windows'
+"Compact OS" WOF algorithm, designed for write-once/read-many files, which is exactly what an
+archived log is. `compact /c` (LZNT1) manages 4.4:1 against LZX's 25.1:1 on the same 8 MB file
+and is not competitive.
+
+**The purge rule needed no change, and that was measured rather than assumed.** `compact`
+preserves `LastWriteTime` and `CreationTime` and moves only `LastAccessTime` - **0 of 289 files
+had their write time change**. `PruneAgedLogs` keys on `GetLastWriteTime` and globs
+`{prefix}-*.log`, so it deletes exactly what it would have. (Same shape as build 2726's snapshot
+sweep: last-access is noise on Windows, last-write is the signal - and compression touches only
+the noise.)
+
+**gz/zip was measured, not dismissed.** `GZipStream` reaches 6.57 MB at `Optimal` and 6.26 MB at
+`SmallestSize` - **1.6 % of the original corpus better than LZX** - and costs both purge globs,
+every grep workflow `log-verification-checklist.md` is built on, "Open Log Folder", and owning
+decompression for the DLL-written per-game mirror logs forever. An LZX file keeps its name and
+extension and decompresses on read: `rg`, `Select-String` and Notepad are unaffected. 1.7 MB is
+not worth that.
+
+**Two triggers, different age floors, both honest about it.** The System-tab **button** uses a
+1-hour idle floor - the user pressed it, so "compress anything nobody is writing to" is the
+instruction. The **startup sweep** uses 7 days and is **opt-in, default OFF**: it is cheap and
+reversible, but a launch that rewrites the user's files unasked is not a default to pick for
+them.
+
+**Six traps, each of which silently produces a wrong result.** They are why this took
+measurement rather than reading:
+
+- **Per-game log folders are game EXE names, and those contain spaces.** The first benchmark run
+  built its own command line, printed `...\REMASTERED\: The system cannot find the file
+  specified.`, **reported success, and had skipped 23 files.** Shipped code uses
+  `ProcessStartInfo.ArgumentList` (which quotes for you) and decides success by re-measuring
+  `GetCompressedFileSizeW` per file - `compact` exits 1 on partial failure while still printing
+  "compressed".
+- **LZX does not set `FileAttributes.Compressed`** (only `/c` does). An 8,441,784-byte file
+  sitting at 335,872 on disk still reported `Archive` alone. Detecting "already done" by
+  attribute would re-compress everything, forever. `GetCompressedFileSizeW < Length` is the
+  signal - and 0 from it means "unreadable", not "compressed", which the policy distinguishes.
+- **Appending to an LZX file fully decompresses it** (335,872 -> 8,441,799 measured). Harmless,
+  but `-0.log` must never be compressed.
+- A file **held open by a logger is safely skipped** (exit 1, nothing touched). The eligibility
+  rules are a courtesy; the filesystem is the real guard.
+- **Compress files, never the directory** - `compact /c <dir>` would route every future log
+  write through the compressor.
+- **NTFS only.** The button and checkbox hide on other volumes rather than offering something
+  that can only answer "unsupported".
+
+**No I/O-priority throttling, deliberately.** `PriorityClass = Idle` is CPU-only and that is
+enough at 2.8 s for the whole backlog. This repo already shipped the opposite reflex once:
+multipipe Phase 0 dropped the scan thread's priority, starved scans ~20x, and was reverted
+(build 1840).
+
+Policy is pure (`LogCompressionPolicy`, zero `System.IO`) and the process spawn plus P/Invoke sit
+behind `Core/ILogCompressionService`. 29 new tests; the load-bearing one compresses a real folder
+whose per-game subfolder name contains spaces and asserts `LastWriteTimeUtc` is unchanged. 3300
+C# green, AOT-trimmed publish clean. Full numbers + method: `docs/log-compression-eval.md`.
+
+**IN-APP VERIFIED same day**: both triggers run on the maintainer's machine - **180 files,
+85.1 MB -> 6.5 MB on disk, 78.6 MB saved, 0 failed**. The folder is now 111.9 MB logical against
+17.8 MB on disk.
+
+### Follow-up, build 2732: `-0.log` is a slot name, not a liveness fact
+
+That first real run is what exposed it. Excluding every `*-0.log` outright looked obviously
+right and was wrong: a game last played 13 days ago still owns
+`SEED BATTLE DESTINY REMASTERED\walk-0.log` at 3.64 MB, and nothing will append to it again
+until that game is injected once more. **36 files / 5.03 MB** were being held uncompressed
+permanently, and the set grows by one final log per game ever tested.
+
+Two facts decided it, and the first is the interesting one:
+
+- **The sibling sweep already trusts age over the name — for DELETION.**
+  `LoggingService.PurgeOrphanedLogs` passes a live-name set only for the UI's own folder; every
+  game folder goes through `PruneOrphanedLogs(dir, maxAgeDays)` with none at all, taking the file
+  lock as the real guard (*"Locked - a running game's DLL still owns it. Retry next startup."*).
+  So the policy was refusing to **compress** files the same subsystem is willing to **delete**.
+  The inconsistency was the argument.
+- **Compressing them is durable.** `Sein` archives a `-0.log` by RENAME on the next injection,
+  and a rename preserves LZX - verified 335,872 bytes on disk before the rename and after. The
+  compression rides into the dated archive instead of being undone.
+
+The rule now: a `-0.log` in `Logs\UE5DumpUI\` is skipped on IDENTITY (a Serilog sink holds it all
+session - the one place liveness is a fact rather than an inference), and a `-0.log` anywhere
+else becomes eligible once idle for `LogCompressLiveFileMinAgeDays` = 7 days, on BOTH triggers
+including the manual button. A running game keeps its log's mtime fresh, so age covers it; the
+lock is the backstop, and a locked file is safely skipped.
+
+3304 C# green. **In-app verified** the same day.
+
+-----
+
+## 2026-08-05 - Snapshots and bookmarks move out of the app-data root; only one of them expires (build 2726)
+
+`%LOCALAPPDATA%\UE5CEDumper` had become unreadable, and for a structural reason rather than
+an untidy one: **every file at that root is app-wide and fixed in number except two families,
+and those two grow per game AND per game patch.** A new PE hash means a new
+`snapshots.<hash>.db` set and a new `bookmarks.<hash>.json`, forever, so the handful of files
+somebody actually has to open by hand - `dll-path.txt`, `ui-options.json`, `experimental.json`,
+`teleport-hotkeys.txt`, `window-state.txt` - were buried under the two that never stop
+arriving. Both families now live in `Snapshots\` and `Bookmarks\`, siblings of the existing
+`Logs\` and `Reports\`.
+
+**Migration runs from the store constructors, not from `App`.** The store that READS a folder
+is the one that populates it, so there is no ordering to get wrong: you cannot construct a
+`SnapshotStore` or `BookmarkStore` that opens files before its folder has been migrated. A
+composition-root call site would have been one reorder away from silently reading an empty new
+folder while the user's data sat in the old one.
+
+**A game's files move as a GROUP or not at all.** Half a migration is data loss, not
+untidiness: a SQLite `.db` that lands in the new folder without the `-wal` it was
+checkpointing has dropped every transaction that WAL still held, and the abandoned `-wal` is
+then live bait for the next file to take that name. So each group is attempted `.db`-first
+(the file most likely to be locked, so a doomed move touches nothing) and rolled back on the
+first failure. A destination that already exists aborts its group rather than overwriting -
+the case that produces one is running an older build after migrating, and nothing on the
+outside can tell which of the two copies the user wants. **"Remove All Snapshot Data" now
+sweeps the legacy root too**, because a set migration had to leave behind is still that
+button's problem.
+
+**Snapshots expire at 21 days. Bookmarks never do.** Same folder scheme, deliberately
+different retention, and the asymmetry is the point: a snapshot DB is a regenerable multi-GB
+capture, which is what makes a disk-reclaiming sweep worth its risk, while a bookmark file is
+a few KB of hand-placed navigation nobody can replay their way back to. `BookmarkStore` passes
+`maxAgeDays: 0`, which disables the sweep outright - `docs/todo.md`'s old "add a bookmark
+startup sweep" item is now marked **rejected**, not pending, so nobody finishes it later.
+
+**"Unused" is RECORDED, not inferred - and last-access time is the trap.** The first cut read
+`max(LastWriteTimeUtc, LastAccessTimeUtc)` on the obvious reasoning that write time means
+"unmodified" while access time means "unused", so the max of the two can only be safer. The
+maintainer's own app-data folder refuted it in one listing: `fsutil behavior query
+DisableLastAccess` reports **2 (System Managed, updates ENABLED)**, and every file there read
+as accessed *today* against write times weeks old - a `bookmarks.*.json` last written
+2026-06-24, "accessed" 2026-08-04. Any antivirus scan, backup pass or search indexer refreshes
+it. Honouring that signal would not have made retention safer; it would have made retention
+**never fire**, a silent no-op dressed as a feature. So the sweep reads write time only, and
+`SetActiveGame` **stamps** it when a game becomes active - nothing outside this process writes
+these files, so an explicit stamp is immune to every background reader on the machine.
+Connecting to a game therefore resets its window even in a session that never opens the
+Snapshot tab. Ageing is per GAME, not per file: the newest timestamp in a set governs the whole
+set, so a 200-day-old `.denylist.json` never outlives (or drags down) the `.db` it belongs to.
+
+**Split the way `ProxyOrphanScanner` is split.** `AppDataRetentionPolicy` is pure - zero
+`System.IO`, so the rules that decide what gets DELETED are unit-testable without a disk -
+and `AppDataFolderMaintenance` does the IO. 46 new tests cover both, including the two that
+matter most: a locked `.db` leaves its `-wal` beside it, and a 4000-day-old bookmark file
+survives. 3270 C# green.
+
+-----
+
 ## 2026-08-05 - The group row shows one pairing; now you can see the other thirty-five (build 2719)
 
 Fourth report of the same shape, and the first fix that is not zero-sum. *"`TickCount=NNN,

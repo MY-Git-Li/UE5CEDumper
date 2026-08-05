@@ -189,6 +189,26 @@ identity columns needed for cross-session join, plus array elements (§4).
   isolated growth, isolated corruption blast radius. The store's active game is
   set on connect (`SetActiveGame`); pe_hash is sanitised to ASCII alphanumerics
   (no path traversal).
+- **Folder + retention** (build 2726): the DB set lives in
+  `%LOCALAPPDATA%\UE5CEDumper\Snapshots\`, not at the app-data root, and a game
+  whose set has gone unused for `Constants.DataMaxAgeDays` (21) days is DELETED
+  at startup — file-level, to reclaim what a dead game's multi-GB capture is
+  holding. Both are `Services/AppDataFolderMaintenance`, called from the
+  `SnapshotStore` constructor so nothing can open a connection before the folder
+  has been migrated. Three properties worth knowing before touching it:
+  - **A game's files move and expire as a GROUP** (`.db`, `-wal`, `-shm`,
+    `.denylist.json`). A `.db` migrated without its `-wal` has silently dropped
+    every transaction that WAL held, so a blocked move rolls the whole group
+    back and leaves it at the old location.
+  - **"Unused" is the WRITE time, which `SetActiveGame` stamps — never
+    last-access.** NTFS last-access updates are on by default on Windows
+    (`fsutil behavior query DisableLastAccess` = 2), so AV / backup / indexer
+    reads keep every file looking like today; honouring them makes the sweep a
+    permanent no-op. Connecting to a game resets its window even in a session
+    that never opens this tab.
+  - **Bookmarks deliberately do NOT expire.** `Bookmarks\` uses the same folder
+    scheme with the sweep disabled (`maxAgeDays: 0`) — a few KB of hand-placed
+    navigation is not what the disk-reclaim argument is about.
 - Session identity: store `pe_hash` + `ModuleBase` (ASLR, per-launch) →
   `game_session_id` distinguishes restarts WITHIN a game's file.
 - New gated "Snapshot" tab: capture controls (scope / caps), snapshot list,
@@ -461,7 +481,7 @@ HP / money) lives on the stable anchors, so it joins well.
 
 
 
-> One DB file **per game**: `%LOCALAPPDATA%\UE5CEDumper\snapshots.<pe_hash>.db`.
+> One DB file **per game**: `%LOCALAPPDATA%\UE5CEDumper\Snapshots\snapshots.<pe_hash>.db`.
 > `game_session_id` (pe_hash + ModuleBase) distinguishes restarts within that
 > file. Cross-game isolation is by file; cross-session join is by the columns
 > below.
