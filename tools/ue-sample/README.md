@@ -137,9 +137,30 @@ The repo already has the right pattern and it is worth copying exactly: the AOB 
 * **binary** → outside, e.g. `D:\UE_Analyze_Data\DumperTest\5.4\{Shipping,Development}\`
   (**not** in `Varies Version builds\` — `inventory_builds.py`/`preflight.py` treat that tree as the
   AOB corpus and CI asserts its row counts).
-* **repo** → this source, plus a note of the engine version, the exact build command and the packaged
-  exe's hash, so *"is the package I am testing built from this source?"* has an answer. Without that,
-  a stale package silently tests yesterday's property zoo and looks like a dumper regression.
+* **repo** → this source, plus **`package-identity.json`** — engine version, source commit, build
+  command and both exes' SHA-256 — so *"is the package I am testing built from this source?"* has an
+  answer. Without it a stale package silently tests yesterday's property zoo, and the failure does
+  not look like staleness: it looks like the dumper reading the wrong value.
+
+  ```bash
+  py tools/ue-sample/capture_package_identity.py "D:\UE_Analyze_Data\For Testing\DumperTest" --check
+  ```
+
+  `--check` compares instead of writing, so a rebuilt package is caught in one second **before** a
+  test session rather than halfway through one. Drop `--check` to re-record after a deliberate
+  rebuild.
+
+  The record also asserts the **absences**, which is the half worth having: `RawInt` / `RawFloat` /
+  `RawDouble` must appear **zero** times in either binary. They are the non-UPROPERTY holes the
+  Native-C scan exists to find, so if they ever start appearing someone has reflected them and that
+  test is dead without anything failing.
+
+  *Captured 2026-08-05 from commit `8b812a5`: Development 279,200,256 B · Shipping 132,302,848 B,
+  every reflected name present in both, all three raw members absent in both, zero problems.*
+
+  > **Trap:** class names are emitted as **UTF-16** (from `TEXT()` in the UHT registration) while
+  > property names are narrow strings. An ASCII-only search therefore reports every class name as
+  > missing from a Shipping build — the first grep run against this package did exactly that.
 
 **Not in CI, and size is the lesser reason.** CI has no UE 5.4 install (tens of GB), no GPU and no
 display — but the real blocker is that **what this sample tests is a live process being injected into
