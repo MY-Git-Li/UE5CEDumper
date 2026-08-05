@@ -645,7 +645,8 @@
                   Foreground="#D4D4D4"
                   FontSize="12"
                   FontFamily="Consolas, Menlo, monospace"
-                  HorizontalScrollBarVisibility="Auto">
+                  HorizontalScrollBarVisibility="Auto"
+                  ToolTip.Tip="{StaticResource str.Tip.VS.Group.Matched}">
           <DataGrid.Columns>
             <DataGridTextColumn Header="Class" Binding="{Binding LocationLabel}" Width="280"/>
             <DataGridTextColumn Header="Instance" Binding="{Binding InstanceName}" Width="180"/>

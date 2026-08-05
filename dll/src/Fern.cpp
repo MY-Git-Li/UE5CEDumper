@@ -365,6 +365,9 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
     // shows a genuine ASSIGNMENT rather than each slot's independent first choice.
     std::vector<uintptr_t> shownLeaves;
     shownLeaves.reserve(gc.slotMatches.size());
+    // Defining class/struct of each shown leaf, so later slots can prefer a SIBLING.
+    std::vector<std::string> shownDefiningClasses;
+    shownDefiningClasses.reserve(gc.slotMatches.size());
     for (size_t s = 0; s < gc.slotMatches.size(); ++s) {
         const Radar::SlotSpec& spec = slots[s];
         const auto& matches = gc.slotMatches[s];
@@ -418,10 +421,30 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
                     }
                 }
             }
-            // Pass 2: any free leaf.
+            // Pass 2: a free leaf DEFINED BY THE SAME CLASS/STRUCT as the one already
+            // shown for an earlier slot.
+            //
+            // A group scan is looking for values that belong TOGETHER, so the useful
+            // witness is one from the same struct — `Health.CurrentValue` beside
+            // `Health.BaseValue`, `TickCount` beside `FrozenInt`. Taking the first free
+            // leaf instead produced pairings like `Health.CurrentValue=98,
+            // PrimaryActorTick.TickInterval=0`, which is a VALID assignment and a useless
+            // one: it reads as though the actor's health matched against an engine tick
+            // field, and it hid the pairing the user was actually looking for. Reported
+            // as "Health那一組有找到，424242 找不到" when both had matched all along.
+            if (!picked && !shownDefiningClasses.empty()) {
+                for (size_t k = 0; k < matches.size() && !picked; ++k) {
+                    if (!isFree(k)) continue;
+                    const std::string& dc = descriptors[matches[k].descriptorIdx].definingClassName;
+                    for (const auto& shown : shownDefiningClasses)
+                        if (!dc.empty() && dc == shown) { pick = k; picked = true; break; }
+                }
+            }
+            // Pass 3: any free leaf.
             for (size_t k = 0; k < matches.size() && !picked; ++k)
                 if (isFree(k)) { pick = k; picked = true; }
             shownLeaves.push_back(matches[pick].leafAddr);
+            shownDefiningClasses.push_back(descriptors[matches[pick].descriptorIdx].definingClassName);
             // How many leaves this slot actually holds. `locked` already says "exactly
             // one"; this says how much the single displayed value is standing in for, so
             // a row can no longer imply the candidate matched on one field when it
