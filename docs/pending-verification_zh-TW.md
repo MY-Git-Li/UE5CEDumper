@@ -10,25 +10,64 @@
 
 ## 目前狀態（2026-08-04 第一次實機掃描，build 2622 — DQ7R / Elliot / CE 三份 log）
 
-**（2026-08-04 四輪實測，build 2622 → 2643）**
+**（2026-08-04 → 08-05 五輪實測，build 2622 → 2645）**
 
-**11 項 ✅ 已驗證 · 1 項 🟡 一半 · 14 項 ⬜ 尚未被觸發**
+**11 項 ✅ 已驗證 · 2 項 🟡 一半 · 13 項 ⬜ 尚未被觸發**
 
 | 狀態 | 項目 |
 |---|---|
 | ✅ 已驗證 | B49、B31、B5（被動半）、B47、B35、B42、B36、**B34**、**B14 + R5**、**B38**、乾淨掃描也產生 report |
-| 🟡 主要路徑已驗證 | **B8**（延後還原那條路徑還沒走到，而且**關遊戲永遠走不到**，見下） |
-| ⬜ 尚未觸發 | 其餘 14 項 |
+| 🟡 一半 | **B8**（延後還原那條路徑還沒走到，而且**關遊戲永遠走不到**，見下）· **Dump Explorer**（case 1 有證據了，case 2/3 還沒） |
+| ⬜ 尚未觸發 | 其餘 13 項 |
 
-### ⚠ 下一個 session 最值得先測的三項
+> **2026-08-05 那次 DQ7R 動到三件事，而且沒有一件是它原本要測的三項：**
+> `Stop conn drain TIMEOUT` 的根因是從**早就躺在硬碟上**的一份 log 掉出來的（不需要它再發生一次）；
+> **B47 之前的 ✅ 被發現是記在一個「那段程式碼根本沒被編進去」的手動注入 session 上**，
+> 當天真正的 proxy session 才重新把它掙回來；
+> 而 **B28 沒有測到** —— 看的那幾列是 `StrProperty`，不是 FText。
+> R8 則被維護者直接推翻（見 [audit-2026-08-04-findings.md](audit-2026-08-04-findings.md)）。
+
+### ⚠ 下一個 session 最值得先測的兩項
 
 | 優先 | 項目 | 為什麼 |
 |---|---|---|
-| **1** | **B28** CJK FText 亂碼 | **唯一會讓使用者看到錯誤資料**的項目。中日文遊戲的 FText 值，偶數字數且含 `U+xx00`（一、第…一、統一）是觸發點。同時要反向確認 STVoyager（UTF-8 FText）的中文還是對的 |
+| **1** | **B28** CJK FText 亂碼 | **唯一會讓使用者看到錯誤資料**的項目。**要找 Type 欄位寫著 `TextProperty` 的列**，`StrProperty` 不算（見下面 B28 那段）。同時要反向確認 STVoyager（UTF-8 FText）的中文還是對的 |
 | **2** | **B4** CE mailbox 在 UI 死掉後仍可用 | 失敗時是**無聲的**：查詢回 0 卻寫 `scanned=<全部>`，看起來像「物件不存在」。CE-only session 會一直壞下去 |
-| **3** | `Stop conn drain TIMEOUT` | 新觀察，不是回歸。UI 連著時按 Disable 會**凍住 CE 五秒**。已加診斷，下次發生會直接指出是哪條連線、卡在哪個指令 |
 
 其餘（B18、B19、B2、B25、B26、B13/B41…）都不會造成錯誤資料或當機，可以慢慢來。
+
+### ✅ `Stop conn drain TIMEOUT` —— 根因已確定（不必再等它發生）
+
+原本的兩個假設是「卡在 `ReadFile`（cancel 沒攔到）」對「卡在指令裡（cancel 幫不上忙）」。
+**答案是第二個。** 全部的答案就是 `pipe-20260804-221945.log`（build 2638）裡連續五行：
+
+```
+22:19:39.590  Received: {"cmd":"teleport_get_pose","id":291}   <- 從來沒回覆
+22:19:39.591  Received: {"cmd":"teleport_get_pov","id":292}    <- 從來沒回覆
+22:19:40.034  Stop entry (conns=2)
+22:19:40.034  Stop cancels+wake done (0 ms)        <- cancel 有跑，而且完全沒作用
+22:19:45.035  Stop conn drain TIMEOUT, 2 left (5000 ms)
+```
+
+兩條連線都**卡在指令裡面**，而且已經進去 0.44 秒，兩個都沒有回覆。
+原因在 `Wirbel.cpp:835`：`teleport_get_pov` 會做 `InvokeRetVec(GetCameraLocation)` +
+`InvokeRetVec(GetCameraRotation)`，兩個 **5 秒 timeout** 的 game-thread invoke ——
+那段程式碼上面的註解其實早就預言了這個形狀（「two per poll = a ~10s stall」）。
+invoke 從 39.59 開始，drain 在 45.035 放棄；兩個 5 秒是同一個 5 秒。
+
+**`Tot` 的取消機制在這裡幫不上忙** —— 卡在 Stark dispatch queue 上的執行緒不是處在可取消的等待，
+這正是為什麼 `cancels+wake done (0 ms)` 後面接的是一個完整長度的 drain。
+上面那個 `IsGameThreadResponsive()` 只在「已知卡住」時才跳過 invoke；
+一個還在 tick、只是很慢的執行緒仍然要付完整的 timeout。
+
+**重現方式（很便宜，不需要懂遊戲）**：Teleport 分頁**開著自動更新**
+（它會輪詢 `teleport_get_pose` + `teleport_get_pov`），UI 連著，然後取消勾選 CE record。
+
+**兩個候選修法，而且都不是「ReadFile 的 cancel」那個方向**：
+(a) 讓 Stark 的 invoke 等待會看 `Tot::Requested()`，這樣關閉時 5 秒 timeout 會直接塌掉；
+(b) 讓 drain 不要等一條「已知正在 dispatch 裡面」的連線。
+**(a) 才是真正的修法** —— 它同時縮短所有「關閉時剛好有 invoke 在飛」的情況。
+Effort **S–M** · Risk 中（動到所有 game-thread 指令共用的那個等待）。
 
 ### 兩個失敗共同的教訓
 
@@ -191,12 +230,11 @@ log 也有對應行：`Leftover report written: …\UE5CEDumper\Reports\…（0 
 讓那段文字永遠走不到、按鈕也是灰的。現在改成看 `OrphanScanRan`，而且空報告會寫出涵蓋範圍：
 *「No leftover proxy DLLs were found. 67 folder(s) were examined.」*
 
-> **一個待決定的 UX 問題（不是 bug）**：原本的預期是「按 **Find leftovers** 就會產生報告，
-> **Report…** 只是用 ShellExecute 把它打開」。這個想法有道理，甚至可能更好 ——
-> 因為「證明掃描跑過」的證據目前只有在有人記得多按一次時才存在。
-> 現在的設計則是刻意讓「寫檔」是一個明確的動作（不寫使用者沒要求的檔案）。
-> 兩種都說得通，**目前沒有動任何一邊**。如果要改成自動產生，
-> 在 `ScanOrphansAsync` 裡是個小改動。
+> **~~待決定的 UX 問題~~ —— 維護者已於 2026-08-05 決定：維持現狀，不自動寫檔。**
+> **Find leftovers** 把結果顯示在畫面上，**Report…** 才寫檔；寫檔仍然是一個明確的動作。
+> 「不好發現」那一半已經在 build 2645 處理掉了 —— 掃描結果現在會逐字點名按鈕
+> （*「press "Report…" to save this result as a file」*），乾淨的情況還會講出涵蓋範圍。
+> **不要再重開這個討論。**
 
 原本的測試步驟：
 
@@ -290,11 +328,21 @@ DllMain AutoStart: game process — calling UE5_AutoStart
 > 讓 21 天保留機制從此失效。
 
 ## ✅ B47 —— proxy 去重的防護會講出「它其實沒生效」
-**build 2603** · **已驗證（2026-08-04 三份 session log，build 2622）**
+**build 2603** · **已驗證（2026-08-05，build 2645）· 08-04 那次的 ✅ 記在錯的 session 上**
 
-DQ7R 是透過 `version.dll` 跑的（真正的 proxy session，所以這段防護有被編進去），而
-`first-loaded-wins guard is NOT armed` 出現 **0 次** —— `Local` + PID 的名稱成功了，
-而舊的 `Global` 名稱需要遊戲沒有的權限。
+> **這個更正跟 B34、B14 是同一個陷阱，所以留下來。** 08-04 的紀錄寫「DQ7R 是透過
+> `version.dll` 跑的（真正的 proxy session，所以這段防護有被編進去）」—— **不是**。
+> 那行在 `#ifdef UE5_PROXY_BUILD` 裡面（`Heiter.cpp:262-270`），而 08-04 的 DQ7R session
+> **沒有任何一次**出現 `DllMain ProxyStart` 或 `Loaded real version.dll` —— 全部都是手動注入，
+> 那段程式碼根本沒有被編進當時載入的 binary。它「不存在」什麼都證明不了。
+>
+> **一個東西的「缺席」只有在你先證明「會產生它的程式碼有被編進去而且有跑」之後才算證據。**
+>
+> **真正的證據是 2026-08-05 10:29:30 那次**，那是真的 proxy session ——
+> `DllMain ProxyStart: proxy DLL mode — starting pipe server only (no scan)` →
+> `Loaded real version.dll: C:\WINDOWS\system32\version.dll` —— 而
+> `first-loaded-wins guard is NOT armed` 在那份 log 裡出現 **0 次**。
+> `Local\…_<PID>` 成功了，而舊的 `Global\` 名稱需要遊戲沒有的權限。這次是用對的理由 PASS。
 
 任何 proxy session：grep `init-0.log` 的 `first-loaded-wins guard is NOT armed`
 
@@ -320,6 +368,30 @@ wall 5,256.2 ms … split dll 2,733.5 / ipc 692.4 / ui 1,830.3 ms
 
 ## ⬜ B28 —— CJK FText 不再顯示成 ASCII 亂碼
 **build 2599** · 不需要 log，證據直接在畫面上
+
+> **❌ 2026-08-05 的 DQ7R 那次「沒有測到」，而且差在哪裡值得記下來，免得下次再走一樣的路。**
+>
+> 看到的那幾列（`Name` / `DisplayName` / `ListName` = 忘名）型別是 **`StrProperty`**，
+> 也就是 FString —— 走純 UTF-16 的讀取路徑，**從來就沒有這個 bug**。
+> B28 只活在 `ReadFTextString` 裡面。
+>
+> hex 只證明了 FString 那條路是對的，對 B28 什麼都沒說：
+> `D8 5F | 0D 54 | 00 00 | 6F 00 | 78 00 | 00 00`
+> = 忘(U+5FD8) 名(U+540D) NUL 'o' 'x' NUL，`ArrayNum=6`。
+> 也就是遊戲存的是一個固定 6 個 TCHAR 的欄位，**第 2 個位置就是 NUL**；
+> 我們的讀取在 NUL 停下來、顯示「忘名」—— 正確。
+>
+> **第二個沒中的地方**：忘(U+5FD8) 和 名(U+540D) 的**低位元組都不是 0x00**，
+> 所以就算它真的是 FText，也踩不到觸發條件。
+>
+> **下次要怎麼做**：找 Type 欄位真的寫著 **`TextProperty`** 的那一列。
+> DQ7R 2026-08-05 的 walk log 裡 **一次 FText 欄位讀取都沒有**
+> （唯一的 `TextProperty` 字樣是類別名 `TextPropertyTestObject` 和 `TextProperty` 這個 meta-class），
+> 所以要自己去找：用 Property Search 在 UI／對話／道具說明類別上找 TextProperty。
+>
+> **低位元組是 0x00、而且日／中文常見的觸發字**：
+> **一** U+4E00 · **最** U+6700 · **言** U+8A00 · **退** U+9000 · **紀** U+7D00
+> —— 而且字串長度要是**偶數**。
 
 只影響 **FText 型別的值**（`ReadFTextString`）；FString 走的是純 UTF-16 的讀取路徑，從來沒有這個問題。
 

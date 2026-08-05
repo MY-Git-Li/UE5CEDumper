@@ -211,7 +211,7 @@ existing behaviour / perf.
 | R5 ✅ | done | S–M/low | ~~One `ReassertWorker` helper for the six hold modules~~ **DONE build 2596** — new `Routine.h` (`ReassertLoop` / `RunTickGuarded` / `SleepSliced`) + `Grimoire::WORKER_SLEEP_SLICE_MS` |
 | R6 ✅ | done | S/low | `en.axaml` — 24 inert keys, 2 shadowed by hardcoded C#; **zero dangling references** |
 | R7 ✅ | done | S/low | `aob_specificity.py` docstring says "NOT WIRED INTO CI" 3 days after `6f594fa` wired it in as a blocking gate |
-| R8 | later | S/low | `build.ps1` dist native payload never refreshed or pruned outside `-Clean` |
+| ~~R8~~ | **refuted** | — | ~~`build.ps1` dist native payload never refreshed outside `-Clean`~~ — **the refresh half is false** (`build.ps1:514-516` re-copies every native with `-Force` each Publish; the old mtimes are the NuGet packages' own). Raised on an mtime proxy — the audit's own 4b root cause. Prune-only remainder is benign. Closed 2026-08-05 |
 | — | later | — | `RunGuardedAsync` over TeleportVM's 55 busy/error blocks · LiveWalkerVM's hand-rolled debounce → `KeywordSearchMemory` · 135 hardcoded AXAML strings · the 12-generator mailbox emitter (after B15) · `ValidateAndFixOffsets` Step extraction · `Fern::DispatchCommand` handler table |
 | — | **never as filed** | — | The 8-copy player-chain extraction *with* "fixing" Schlacht's omission (it is deliberate — the fallback is a 486K full-pool scan on a 10 Hz timer) · the `Aura.cpp` split beyond steps 1–2 · `MovementKnobCardViewModel` (33 binding paths, silent AOT failure, zero user gain) |
 
@@ -1190,11 +1190,29 @@ detected architecture. S/low. [`scripts/gen_proxy_forwarders.py:332`](../scripts
   `try`). Step (a) alone — a `string_view → handler` table — forces each body out into a named function.
   Lift the duplicated 17-line exe-name block (`:1268-1284`, `:1324-1340`) regardless; that duplication is
   *how* the monolith reproduces itself.
-- **R8** — `build.ps1:556/563`: make the dist native payload authoritative per run. Verified stale on
-  disk (`libSkiaSharp.dll` Jul 14, `e_sqlite3.dll` Jul 5, `av_libglesv2.dll` Apr 20, next to an Aug 4
-  exe). **The claimed shipping harm does not hold** — the Release exe is a self-contained single-file
-  publish carrying its own natives, and both `ci.yml:105` and `release.yml:70` pass `-Clean`. Net effect:
-  leftover unused files in a developer's local dist.
+- ~~**R8**~~ — **REFUTED 2026-08-05 by the maintainer, and the refutation is the more useful finding.**
+  The claim was "the dist native payload is never refreshed outside `-Clean`", evidenced by mtimes
+  (`libSkiaSharp.dll` Jul 14, `e_sqlite3.dll` Jul 5, `av_libglesv2.dll` Apr 20, next to an Aug 4 exe).
+  **`build.ps1:514-516` copies EVERY `.exe`/`.dll` out of `$publishDir` with `-Force` on each Publish
+  run**, so they are refreshed every time; the old dates are the **NuGet package's own timestamps**,
+  preserved by `dotnet publish` → `Copy-Item`. Measured — every dist native is byte-for-byte the
+  package currently referenced:
+
+  | dist file | size | resolves to |
+  |---|---|---|
+  | `libSkiaSharp.dll` | 12,254,048 | `skiasharp.nativeassets.win32` **4.150.1** (newest in cache) |
+  | `e_sqlite3.dll` | 1,978,880 | `sourcegear.sqlite3` **3.53.3** |
+  | `av_libglesv2.dll` | 5,394,096 | `avalonia.angle.windows.natives` **2.1.27548.20260419** |
+  | `libHarfBuzzSharp.dll` | 2,038,112 | `harfbuzzsharp.nativeassets.win32` **14.2.1.1** |
+
+  **This finding used file mtime as a proxy for content freshness — which is verbatim the 4b root
+  cause this same audit named** ("a cheap proxy signal substituted for a predicate the codebase
+  already computes"). It shipped as a finding *about* that pattern while being an instance of it.
+  Worth keeping visible: the audit's own method was not immune to the defect it was cataloguing.
+
+  All that survives is **prune**: drop a native dependency and its DLL lingers in a *developer's local*
+  dist until the next `-Clean`. It cannot reach a shipped artifact (CI passes `-Clean`; the non-AOT
+  Release exe is a self-extracting single file carrying its own natives). Not worth code. **Closed.**
 
 ### NEVER as filed — the proposed fix is worse than the defect
 - **Extracting the 8-copy player-resolution chain *and* "fixing" Schlacht's missing fallback.**

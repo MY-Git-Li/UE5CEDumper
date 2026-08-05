@@ -1686,10 +1686,17 @@ Pick up when the active plan finishes or when blocked.
 > sequence, a specific game, a specific third-party install). Each of these carries its exact steps
 > and the PASS/FAIL observation.
 >
-> **STATUS after four rounds of live testing (2026-08-04, builds 2622 → 2643):**
-> **11 ✅ verified · 1 🟡 half (B8) · 14 ⬜ not yet exercised.**
+> **STATUS after five rounds of live testing (2026-08-04 → 08-05, builds 2622 → 2645):**
+> **11 ✅ verified · 2 🟡 half (B8, Dump Explorer) · 13 ⬜ not yet exercised.**
 > Verified: B49, B31, B5(passive), B47, B35, B42, B36, **B34**, **B14+R5**, **B38**,
 > the clean-scan report, and B8's main path.
+>
+> **The 2026-08-05 DQ7R pass moved three things and none of them were the three it aimed at:**
+> the `Stop conn drain TIMEOUT` root cause fell out of a capture *already on disk* (see below —
+> it needed no recurrence); **B47's earlier ✅ was found to be credited to a hand-injected session
+> where the guard was not even compiled in**, and re-earned properly on that day's real proxy run;
+> and **B28 was NOT tested** — the rows inspected were `StrProperty`, not FText. R8 was refuted
+> outright by the maintainer (see [audit-2026-08-04-findings.md](audit-2026-08-04-findings.md)).
 >
 > **B14+R5 took three attempts, and the two failures are the most useful thing this audit
 > produced.** Round 1: the guard was applied to an enumeration ("2 of 7 thread procs") that had
@@ -1712,9 +1719,44 @@ Pick up when the active plan finishes or when blocked.
 > |---|---|---|
 > | **1** | **B28** — CJK FText mojibake | The only open item that shows the user **wrong data**. Needs a CJK-language game; trigger is an even-length string containing a `U+xx00` char (一, 第…一, 統一). Counter-check STVoyager (UTF-8 FText) still reads correctly — that is the regression direction. |
 > | **2** | **B4** — CE mailbox survives a dead UI client | Fails **silently**: lookups answer 0 while reporting `scanned=<full pool>`, which reads as "the object isn't there". A CE-only session stays broken for its whole life. |
-> | **3** | `Stop conn drain TIMEOUT` | New observation, not a regression: disabling with the UI connected **freezes CE for 5 s**. Now instrumented — the next occurrence names the connection and whether it was parked in `ReadFile` (cancel missed it) or inside a command (cancel cannot help). Those need opposite fixes. |
+> | **3** | ~~`Stop conn drain TIMEOUT`~~ | **ANSWERED 2026-08-05 — the capture was already on disk, no recurrence needed. It is the "inside a command" half.** See below. |
 >
 > The rest (B18, B19, B2, B25, B26, B13/B41 …) cannot produce wrong data or a crash, so they can wait.
+>
+> ### ✅ `Stop conn drain TIMEOUT` — root cause, from `pipe-20260804-221945.log` (build 2638)
+>
+> The two hypotheses were "parked in `ReadFile` (cancel missed it)" vs "inside a command (cancel
+> cannot help)". **It is the second.** The whole answer is five consecutive lines:
+>
+> ```
+> 22:19:39.590  Received: {"cmd":"teleport_get_pose","id":291}   <- never answered
+> 22:19:39.591  Received: {"cmd":"teleport_get_pov","id":292}    <- never answered
+> 22:19:40.034  Stop entry (conns=2)
+> 22:19:40.034  Stop cancels+wake done (0 ms)        <- the cancel ran, and did nothing
+> 22:19:45.035  Stop conn drain TIMEOUT, 2 left (5000 ms)
+> ```
+>
+> Both connections were **inside a command**, 0.44 s deep, and neither logged a response.
+> `Wirbel.cpp:835` is why: `teleport_get_pov` does `InvokeRetVec(GetCameraLocation)` +
+> `InvokeRetVec(GetCameraRotation)`, two game-thread invokes at the **5 s** invoke timeout — the
+> comment right above it already predicted this shape ("two per poll = a ~10s stall that serializes
+> behind every other pipe command"). The invokes started at 39.59 and the drain gave up at 45.035;
+> the two 5 s timeouts are the same 5 s.
+>
+> **`Tot` cancellation cannot help here** — a thread blocked on the Stark dispatch queue is not in a
+> cancellable wait, which is exactly why `cancels+wake done (0 ms)` is followed by a full-length
+> drain. The `IsGameThreadResponsive()` guard above it only skips the invoke when the thread is
+> *known* stalled; a thread that is ticking but slow still pays the full timeout.
+>
+> **Repro (cheap, no game knowledge needed):** Teleport tab with **auto-refresh ON** (it polls
+> `teleport_get_pose` + `teleport_get_pov`), UI connected, then untick the CE record. The freeze is
+> the drain waiting on the in-flight poll.
+>
+> **Two candidate fixes, and they are not the ReadFile-cancel one:** (a) make the Stark invoke wait
+> observe `Tot::Requested()` so a shutdown collapses the 5 s timeout, or (b) have the drain not wait
+> on a connection already known to be inside a dispatch. (a) is the real fix — it also shortens every
+> other shutdown that catches an invoke in flight. Effort **S–M** · Risk med (touches the invoke wait
+> that every game-thread command shares).
 >
 > ⬜ does **not** mean "probably fine". It means nobody has looked. Most of the fourteen were
 > simply not exercised (no wrapper installed, no UI killed mid-command, no Extra Scan).
@@ -1772,12 +1814,11 @@ Pick up when the active plan finishes or when blocked.
   the button out. Now gated on `OrphanScanRan`, and the empty report states the coverage:
   *"No leftover proxy DLLs were found. 67 folder(s) were examined."*
 
-  > **Open UX question, NOT a defect — for the maintainer to decide.** The expectation was that
-  > *Find leftovers* produces the report and *Report…* merely opens it. That is a reasonable
-  > model, and arguably a better one: the evidence-that-the-scan-ran only exists today if someone
-  > remembers to ask for it. The current design makes writing a file an explicit act on purpose
-  > (don't write files nobody asked for). Both are defensible; nothing has been changed either
-  > way. If auto-write is wanted, it is a small change in `ScanOrphansAsync`.
+  > **~~Open UX question~~ — CLOSED 2026-08-05 by the maintainer: keep the current behaviour.**
+  > *Find leftovers* shows its findings on screen; *Report…* writes the file. Writing a file stays
+  > an explicit act. The discoverability half was already handled in build 2645 — the scan result
+  > now names the button verbatim (*"press "Report…" to save this result as a file"*) and the clean
+  > case states its coverage. **No auto-write. Do not re-open.**
 
 - ✅ **The `UE5_Init` guard did not break ordinary init** (build 2592, B5) — *passive half* —
   **VERIFIED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622.** `Starting initialization...` and `Complete (UE…)` are one-for-one in
@@ -1830,11 +1871,21 @@ Pick up when the active plan finishes or when blocked.
   **FAIL** = both remain — the sweep aborted at the held file, which it did on every launch because
   enumeration order is stable.
 
-- ✅ **The proxy dedup guard says when it is not armed** (build 2603, B47) — **VERIFIED 2026-08-04 session logs (DQ7R / Elliot / CE), build 2622.**
-  DQ7R ran through `version.dll` (a real proxy session, so the guard is compiled in) and
-  `first-loaded-wins guard is NOT armed` appears **zero** times: `Local\…_<PID>` succeeded where
-  `Global\` needed a privilege the game does not have. *Original instructions below.*
-  Any proxy session:
+- ✅ **The proxy dedup guard says when it is not armed** (build 2603, B47) — **VERIFIED 2026-08-05,
+  build 2645 — and the 2026-08-04 ✅ was credited to the WRONG SESSION.**
+  > **The correction, because it is the same trap as B34 and B14.** The 08-04 note said *"DQ7R ran
+  > through `version.dll` (a real proxy session, so the guard is compiled in)"*. It did not. That
+  > line is inside `#ifdef UE5_PROXY_BUILD` (`Heiter.cpp:262-270`), and **not one 08-04 DQ7R session
+  > logged `DllMain ProxyStart` or `Loaded real version.dll`** — every one was hand-injected, so the
+  > guard was not in the loaded binary at all. Its absence proved nothing. *An absence is only
+  > evidence once you have shown the producing code was present and running.*
+  >
+  > **The real evidence is the 2026-08-05 10:29:30 run**, which IS a proxy session —
+  > `DllMain ProxyStart: proxy DLL mode — starting pipe server only (no scan)` →
+  > `Loaded real version.dll: C:\WINDOWS\system32\version.dll` — and
+  > `first-loaded-wins guard is NOT armed` is absent there. `Local\…_<PID>` succeeded where `Global\`
+  > needed a privilege the game does not have. PASS, for the right reason this time.
+  *Original instructions below.* Any proxy session:
   grep `init-0.log` for `first-loaded-wins guard is NOT armed`. **PASS** = the line is ABSENT
   (`Local\` + PID succeeds where `Global\` needed a privilege the game does not have). Its presence
   is not a failure of this fix — it is the fix reporting a condition that used to be silent — but
@@ -1850,7 +1901,24 @@ Pick up when the active plan finishes or when blocked.
   [multipipe-eval.md](multipipe-eval.md) reasons from.
 
 - ⬜ **CJK FText no longer renders as ASCII mojibake** (build 2599, B28) — *no log needed; the
-  evidence is on screen.* Affects **FText-typed values only** (`ReadFTextString`); FString goes
+  evidence is on screen.*
+  > **❌ NOT tested by the 2026-08-05 DQ7R pass, and the near-miss is worth recording so the next
+  > attempt does not repeat it.** The rows inspected (`Name` / `DisplayName` / `ListName` = 忘名)
+  > are **`StrProperty`** — FString, which goes through the UTF-16-only reader and **never had this
+  > bug**. B28 lives in `ReadFTextString` alone. The hex confirms the FString path is fine and says
+  > nothing about B28: `D8 5F | 0D 54 | 00 00 | 6F 00 | 78 00 | 00 00` = 忘(U+5FD8) 名(U+540D) NUL
+  > 'o' 'x' NUL, `ArrayNum=6`, i.e. the game stores a fixed 6-TCHAR field with an **embedded NUL at
+  > index 2**; the reader stops at the NUL and renders 忘名 — correct. Second miss: neither 忘
+  > (U+5FD8) nor 名 (U+540D) has a **low byte of 0x00**, so this string could not have tripped the
+  > trigger even as an FText.
+  >
+  > **What to do instead:** find a row whose Type column literally reads **`TextProperty`**. DQ7R's
+  > 2026-08-05 walk logs contain **zero FText field reads** (the only `TextProperty` hits are the
+  > class names `TextPropertyTestObject` / the `TextProperty` meta-class), so one has to be hunted:
+  > Property Search for a TextProperty on a UI/dialogue/item-description class. Trigger characters
+  > whose low byte IS 0x00, all common in JP/CN: **一** U+4E00 · **最** U+6700 · **言** U+8A00 ·
+  > **退** U+9000 · **紀** U+7D00 — and the string must be an **even** number of characters.
+  Affects **FText-typed values only** (`ReadFTextString`); FString goes
   through the UTF-16-only reader and never had the bug. **To test:** any game with Chinese/Japanese
   UI text — set the game to a CJK language, find an FText property in Live Walker or Property
   Search. **PASS** = the value reads as CJK. **FAIL** = short ASCII punctuation soup (`,{1`, `-N?e`)
@@ -2069,7 +2137,13 @@ Shipped + unit-tests-pass but unproven on real games:
   an X patch → matches WITH the "Different build" caveat. Case (1) is the regression risk — a false
   refusal there breaks the feature for its main use. **No log marker** for the pass; the refusal
   logs `DumpExplorer live match refused: dump module '…' != live module '…'`.
-  ⬜ unverified.
+  🟡 **Case (1) has evidence (2026-08-05, DQ7R).** The maintainer loaded a **different session's dump
+  of the same game** and it matched; `DumpExplorer live match refused` appears **zero** times across
+  every DQ7R log. That is the regression risk retired — `EngineState.ModuleName` and the dump's
+  `meta.module` do agree on the same game despite coming from different producers. **Cases (2) and
+  (3) are still ⬜**: (2) load that dump with a *different* game connected → must refuse and name both
+  sides; (3) load a pre-patch dump of the same game → must match **with** the "Different build" caveat.
+  Note (3) needs an actual DQ7R patch to come along, so it is opportunistic, not schedulable.
 
 - **Solide pool-truncation badge — `⚠ capped` / "cap reached, more exist unheld"** (build 2531+;
   DLL `Solide`/`Fern` + Property Search + Teleport Stealth card). `Aura` already computed
