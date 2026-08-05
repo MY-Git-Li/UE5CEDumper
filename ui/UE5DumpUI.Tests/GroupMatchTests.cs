@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using Xunit;
@@ -292,5 +292,23 @@ public class GroupMatchTests
             new[] { Abs(GroupMatch.Predicate.Exact, 80), Abs(GroupMatch.Predicate.Exact, 5) }, out _));
         Assert.False(GroupMatch.Run(leaves,
             new[] { Abs(GroupMatch.Predicate.Exact, 100), Abs(GroupMatch.Predicate.Exact, 5) }, out _));
+    }
+
+    [Fact]
+    public void PerSlotCap_DefaultsToTheSharedConstant_NotEight()
+    {
+        // The snapshot corpus and the live Group Scan answer the same question, so a
+        // different cap here would make the same object match on one page and not the
+        // other. 8 was the DLL's old value and the bug: leaves arrive base-class-first,
+        // so it stored only inherited fields and a temporal pass saw nothing change.
+        var leaves = new List<GroupMatch.Leaf>();
+        for (int i = 0; i < 40; i++) leaves.Add(L(i * 4, "IntProperty", 100 + i));
+        var slots = new List<GroupMatch.Slot> { Between(0, 100000), Between(0, 100000) };
+
+        Assert.True(GroupMatch.Run(leaves, slots, out var perSlot));
+        Assert.Equal(40, perSlot[0].Count);      // every satisfying leaf kept
+
+        Assert.True(GroupMatch.Run(leaves, slots, out var capped, perSlotCap: 8));
+        Assert.Equal(8, capped[0].Count);        // an explicit cap still bounds it
     }
 }

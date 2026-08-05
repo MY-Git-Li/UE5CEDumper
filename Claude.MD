@@ -8,6 +8,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Deploy
 - After making code changes, always do a full rebuild and verify the build output is actually updated before testing. Never assume a build succeeded without checking.
+- **Hand over an AOT-TRIMMED build, not the plain one.** `build.ps1` with no `-Mode` produces a
+  self-contained **non-trimmed** exe (~107 MB); `-Mode Publish` produces the Native-AOT **trimmed**
+  binary that ships (~54 MB). They are not the same program: reflection-shaped code — JSON without a
+  source-generated context, MVVM bindings, `ComboBox.SelectedItem` bound to a boxed value, the
+  reflection-based DataGrid column sort — compiles and runs fine untrimmed and fails **only** after
+  trimming. **Every AOT bug in this repo's history was found by the maintainer re-compiling with AOT
+  after being handed a non-trimmed build**, which costs a round trip every time.
+  Use plain `build.ps1` / `-Target DLL` / `-Target Test` for fast iteration, then run
+  `-Mode Publish` **before saying a UI change is ready to test**. It enters the VS DevShell itself
+  (Native AOT links with MSVC's `link.exe`; without it ILCompiler dies with `exited with code 9009`,
+  which reads like a broken toolchain rather than a missing environment).
 
 -----
 

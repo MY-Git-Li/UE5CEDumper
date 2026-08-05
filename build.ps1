@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     UE5CEDumper unified build script — C++ DLL + C# Avalonia UI
 
@@ -451,6 +451,20 @@ if ($cppTargets.Count -gt 0) {
 
 if ($Target -in "All", "UI", "Test") {
     Write-Banner "C# Avalonia UI  |  $CSharpConfig ($Mode)"
+
+    # Native AOT links with MSVC's link.exe. `-Mode Publish` on its own (or with
+    # -Target UI) never touched the C++ path, so the DevShell was never entered and
+    # ILCompiler died with `link ... exited with code 9009` -- command not found, which
+    # reads like a broken toolchain rather than a missing environment. Entering it here
+    # is idempotent (Enter-VsDevEnvironment early-outs on $script:vsDevShellLoaded and on
+    # an already-active VCINSTALLDIR) and costs nothing for a non-AOT build, so it is
+    # unconditional rather than gated on yet another combination of flags.
+    if ($Mode -eq "Publish") {
+        if (-not (Enter-VsDevEnvironment)) {
+            Write-Fail "Native AOT needs the MSVC linker; VS DevShell could not be loaded"
+            $exitCode = 1
+        }
+    }
 
     # Always do a clean build — remove bin/obj to force full recompile
     $uiProjDir = Split-Path $UI_PROJ -Parent

@@ -225,20 +225,6 @@
             <TextBlock Text="{Binding ScanTimeoutSeconds, StringFormat='{}{0}s'}"
                        Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
                        VerticalAlignment="Center" MinWidth="28"/>
-            <!-- Group-only leaf budget. A ComboBox of powers of two rather than a spinner:
-                 the useful values are 8/16/.../4096 and nothing between them means anything,
-                 so a free-typed 250 would only invite a clamp. -->
-            <TextBlock Text="{StaticResource str.VS.PerSlotCap}"
-                       Foreground="#CCCCCC" FontSize="12"
-                       VerticalAlignment="Center" Margin="12,0,4,0"
-                       IsVisible="{Binding IsGroupMode}"
-                       ToolTip.Tip="{StaticResource str.Tip.VS.PerSlotCap}"/>
-            <ComboBox ItemsSource="{Binding PerSlotCapChoices}"
-                      SelectedItem="{Binding GroupPerSlotCap}"
-                      Width="86" FontSize="12"
-                      VerticalAlignment="Center"
-                      IsVisible="{Binding IsGroupMode}"
-                      ToolTip.Tip="{StaticResource str.Tip.VS.PerSlotCap}"/>
           </StackPanel>
 
           <!-- Row 2: action buttons -->
@@ -553,6 +539,19 @@
           <TextBlock Text="{Binding ScanTimeoutSeconds, StringFormat='{}{0}s'}"
                      Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
                      VerticalAlignment="Center" MinWidth="28"/>
+                     <!-- Group-only leaf budget. Powers of two, not a spinner: nothing between
+                          8/16/.../4096 changes behaviour, so free entry only invites a clamp.
+                          Lives in the GROUP options row - the first attempt put it in the
+                          SINGLE-mode row, where group mode never renders it. -->
+                     <TextBlock Text="{StaticResource str.VS.PerSlotCap}"
+                                Foreground="#CCCCCC" FontSize="12"
+                                VerticalAlignment="Center" Margin="12,0,4,0"
+                                ToolTip.Tip="{StaticResource str.Tip.VS.PerSlotCap}"/>
+                     <ComboBox ItemsSource="{Binding PerSlotCapChoices}"
+                               SelectedItem="{Binding GroupPerSlotCap}"
+                               Width="86" FontSize="12"
+                               VerticalAlignment="Center"
+                               ToolTip.Tip="{StaticResource str.Tip.VS.PerSlotCap}"/>
         </StackPanel>
 
         <!-- Rounding-mode hint for group mode. -->
