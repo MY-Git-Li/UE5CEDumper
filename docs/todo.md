@@ -1674,6 +1674,37 @@ Pick up when the active plan finishes or when blocked.
 
 ### 🔴 NEW 2026-08-05 — two defects the DumperTest sample found on its first real use
 
+**D3 — `FUObjectItem` stride detected as HALF its real size on a Development build.** Effort **M** ·
+Risk med. **This is the one to fix next: it is upstream of D2 and of every result on this config.**
+
+The tell is arithmetic, not a guess. `UE5_Init` prints its name-sanity probes:
+
+```
+Shipping      Sanity obj[0] … obj[1] … obj[2]      -> 10/10 resolved
+Development   Sanity obj[0] … obj[2] … obj[4]      ->  5/10 resolved
+```
+
+**Only even indices resolve.** The Object Tree agrees to the decimal: *"12,588 named objects of
+25,175 total, **50.0%**"*. Reading with a stride of 16 where the real one is 32 makes every second
+entry garbage, and 50.0% is what that looks like.
+
+The detector already said so and nothing acted on it:
+`ObjectArray: FUObjectItem size tentatively set to 16 bytes, object-ptr offset +0x00 (**only 27
+items validated**)`. On a healthy game that validation count is in the thousands. **"Tentative" plus
+27 was the warning; the scan continued as though it were an answer.**
+
+**It also explains D2's newest symptom.** With half the pool garbage, the Group Scan's
+`Game classes only` / `Skip Engine/System noise` filter rejects nearly everything —
+`0 matching objects in 17 ms (**scanned 0 objects**, 13 classes)` where the same scan on Shipping
+walked 1731. So the group-scan investigation must **re-run on Shipping, or after D3 is fixed**;
+measurements taken on this config are measuring the stride, not the matcher.
+
+**Fix shape:** when the stride probe's validated-item count is this low, do not accept the first
+candidate — try the larger strides (24 / 32) and keep whichever validates the most items. The
+machinery exists (see the FUObjectItem layout axis work in the corpus notes); what is missing is
+refusing to settle for "tentative". ⬜
+
+
 Both came out of the config-only A/B (**same source, Shipping vs Development**) that this file has
 called the highest-value first cell since 2026-07-29. It produced them on day one.
 

@@ -2067,7 +2067,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             ClearError();
-            StatusText = "Connecting...";
+            // Skipped while a retry loop owns the message: otherwise every attempt
+            // overwrites the countdown with "Connecting..." and the user sees no
+            // progress at all -- which is what widening the window to 45 s looked like.
+            if (!SuppressConnectErrors) StatusText = "Connecting...";
             LiveWalker.ClearAllBookmarks();
 
             await _pipeClient.ConnectAsync();
@@ -2119,7 +2122,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Set while something is deliberately retrying <c>ConnectCommand</c> and owns
-    /// the user-facing message itself (see ProxyDeployViewModel's post-inject retry).</summary>
+    /// the user-facing message itself (see ProxyDeployViewModel's post-inject retry).
+    /// Suppresses BOTH the red "Connection Error" on an expected failure and the
+    /// "Connecting..." status — the latter because it repaints once per attempt and would
+    /// otherwise erase the countdown a moment after it appears.</summary>
     public bool SuppressConnectErrors { get; set; }
 
     [RelayCommand]
