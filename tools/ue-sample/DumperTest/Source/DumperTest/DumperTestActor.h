@@ -208,6 +208,48 @@ public:
 	UPROPERTY() int32 TickCount;
 	UPROPERTY() int32 FrozenInt;
 
+	// ========================================================
+	// TICKING float / double. The F32 / F64 above are STATIC on purpose -- F32 is the
+	// repo's Round/Trunc/Ceil worked example (513.36) and moving it would break that --
+	// so until now a Changed / Increased / Decreased scan had no float or double target
+	// anywhere in the sample. These two move every second, one down and one up, so each
+	// prev-value predicate has a guaranteed hit at each width.
+	//
+	// Appended at the END of the class, not slotted next to their static twins, so that
+	// every offset the docs quote (TickCount +0x518, FrozenInt +0x51C, Opt_Int_Set
+	// +0x468, Set_Int +0x358) still points at the same field.
+	// ========================================================
+
+	/// Falls 10.25/sec from 1000.5, wraps after ~96 s -- Decreased every second, and the
+	/// wrap makes Increased reachable INSIDE a normal session (a 0.5 step would have taken
+	/// 33 minutes, so that half would never have been observed).
+	UPROPERTY() float  F32_Ticking;
+
+	/// Rises 0.25/sec from 20000.125 -- Increased, always, never wraps.
+	UPROPERTY() double F64_Ticking;
+
+	// ========================================================
+	// TICKING RAW members -- NOT UPROPERTY, so the ordinary scan cannot see them and
+	// only the opt-in "Native-C (raw)" scan can. The static RawInt / RawFloat / RawDouble
+	// above are the INTERIOR-hole case; these are trailing, which is the easier case for
+	// hole detection but still inside PropertiesSize, and it is the price of not shifting
+	// every documented offset. What they add is the half the static ones cannot test:
+	// they MOVE, so a Native-C first scan can be refined with Changed / Increased /
+	// Decreased instead of dying at the first prev-value pass.
+	//
+	// They are also on the HUD, so the value to search for can be read off the screen --
+	// which for a raw member is the only way to know it, there being no reflection to ask.
+	// ========================================================
+
+	/// Rises 7/sec from 700000.
+	int32  RawInt_Ticking;
+
+	/// Falls 3.25/sec from 300.25, wraps after ~91 s.
+	float  RawFloat_Ticking;
+
+	/// Rises 0.5/sec from 50000.5.
+	double RawDouble_Ticking;
+
 	/// Frames since BeginPlay, for the on-screen readout (ADumperTestHUD).
 	/// An accessor, NOT a UPROPERTY -- see the member below.
 	int32 GetFrameCount() const { return FrameCount; }

@@ -69,12 +69,14 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
    > `VisualStudio2022` (`UEBuildWindows.cs:138`), so if you ever *do* need the IDE, open the solution
    > with **VS 2022** and build **only the `DumperTest` project** (right-click → Build), never
    > *Build Solution*. The `.sln` is disposable — regenerate it from the `.uproject` context menu.
-5. Press Play. **Three green/yellow lines appear top-left once a second:**
+5. Press Play. **Five lines appear top-left once a second:**
 
    ```
    [DumperTest] frames=1042   TickCount=17  (frames must ALWAYS climb; TickCount climbs only if the 1 Hz timer runs)
    [DumperTest] Health.CurrentValue=83  (must fall, wraps to 100)
    [DumperTest] Health.BaseValue=100  FrozenInt=424242  (both must NOT move)
+   [DumperTest] F32_Ticking=826.500 (falls 10.25, wraps)  F64_Ticking=20004.250 (rises 0.25)
+   [DumperTest] native (non-UPROPERTY): RawInt_Ticking=700119  RawFloat_Ticking=245.500  RawDouble_Ticking=50008.500
    ```
 
    **`frames` is on a different clock from everything else, deliberately.** It is driven by
@@ -324,6 +326,8 @@ stored `00 4E` — a NUL at an even byte offset.
 | `Health` — `BaseValue` / `CurrentValue` | Base 100, Current ticking | nested StructProperty in GAS-attribute shape → also the "Flatten GAS attributes" CE-export toggle |
 | `Payload` → `PayloadText` / `PayloadString` / `PayloadValue` | 統一言語, same as FString, 909090 | Related Objects edge · Locate-in-GWorld through a pointer · Solide force-to-null (strong ptr, so allowed) |
 | `RawInt` / `RawFloat` / `RawDouble` | 0x5A5A5A5A / 777.75 / 31415.926535 | **not** UPROPERTY — the interior holes "Guess What" and the Native-C scan must find |
+| `F32_Ticking` / `F64_Ticking` | start 1000.5 / 20000.125 | the only float and double that **move** — see the temporal table below |
+| `RawInt_Ticking` / `RawFloat_Ticking` / `RawDouble_Ticking` | start 700000 / 300.25 / 50000.5 | **not** UPROPERTY *and* they move — a Native-C scan that can be refined, which the static three above cannot support |
 
 ### Group Scan / Snapshot Mode B (temporal)
 
@@ -335,6 +339,25 @@ A 1 Hz timer drives exactly the documented hard case — *groups need `Unchanged
 | `Health.BaseValue` | **never moves** — the `Unchanged` slot a group match needs |
 | `TickCount` | rises monotonically |
 | `FrozenInt` | 424242, never written again |
+| `F32_Ticking` | falls 10.25/sec from 1000.5, wraps after ~96 s — **Decreased** every second, **Increased** on the wrap |
+| `F64_Ticking` | rises 0.25/sec from 20000.125 — **Increased**, never wraps |
+| `RawInt_Ticking` | rises 7/sec from 700000 — **native, non-UPROPERTY** |
+| `RawFloat_Ticking` | falls 3.25/sec from 300.25, wraps after ~91 s — **native, non-UPROPERTY** |
+| `RawDouble_Ticking` | rises 0.5/sec from 50000.5 — **native, non-UPROPERTY** |
+
+**Why the ticking numerics exist.** `F32` / `F64` and `RawInt` / `RawFloat` / `RawDouble` are
+STATIC by design — `F32 = 513.36` is the Round/Trunc/Ceil worked example and the raw three are the
+documented interior holes — so before build 2721 the sample had **no float, double or native-C
+target that a `Changed` / `Increased` / `Decreased` refine could survive**. A Native-C first scan
+could be run and then had nothing to converge on. These five move on the same 1 Hz clock and are
+all **on the HUD**, which for the raw three is the only way to learn their value at all: there is
+no reflection to ask, so you need the number off the screen before you can search for it.
+
+They are appended at the END of the class so every offset quoted elsewhere (`TickCount` +0x518,
+`FrozenInt` +0x51C, `Opt_Int_Set` +0x468, `Set_Int` +0x358) still points at the same field. That
+makes the raw three a **trailing** hole rather than an interior one — the easier case for hole
+detection, but still inside `PropertiesSize`, and the interior case is already covered by the
+static `RawInt` / `RawFloat` / `RawDouble`.
 
 ### B8 / Grausam — the backgrounding pair
 

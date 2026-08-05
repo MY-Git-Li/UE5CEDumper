@@ -152,6 +152,16 @@ ADumperTestActor::ADumperTestActor()
 
 	TickCount = 0;
 	FrozenInt = 424242;   // never written again — the Unchanged control
+
+	// --- ticking numerics: the prev-value targets the sample never had ---
+	// Distinctive starting values so a first Exact scan is selective on its own; the
+	// static F32/F64/Raw* above stay put because they are documented acceptance criteria.
+	F32_Ticking = 1000.5f;
+	F64_Ticking = 20000.125;
+
+	RawInt_Ticking    = 700000;
+	RawFloat_Ticking  = 300.25f;
+	RawDouble_Ticking = 50000.5;
 }
 
 void ADumperTestActor::BeginPlay()
@@ -227,6 +237,30 @@ void ADumperTestActor::OnSecondTick()
 	}
 
 	// FrozenInt and BaseValue are deliberately NOT touched.
+
+	// Ticking float / double, one falling and one rising, so BOTH directions of the
+	// prev-value predicates have a target at both widths. The fall wraps, which is what
+	// makes Increased reachable on F32_Ticking too -- at ~96 s, chosen so the wrap happens
+	// INSIDE a normal session. Every step is a power-of-two fraction (10.25 = 41/4,
+	// 3.25 = 13/4, 0.25, 0.5), so the values stay exactly representable and what the HUD
+	// prints is exactly what a scan must match -- no accumulated drift to explain away.
+	F32_Ticking -= 10.25f;
+	if (F32_Ticking <= 10.25f)
+	{
+		F32_Ticking = 1000.5f;
+	}
+	F64_Ticking += 0.25;
+
+	// The RAW (non-UPROPERTY) ones move on the same clock. Reflection cannot see these
+	// at all -- they exist so the opt-in Native-C scan has something that CHANGES, which
+	// the static RawInt/RawFloat/RawDouble could never provide.
+	RawInt_Ticking += 7;
+	RawFloat_Ticking -= 3.25f;
+	if (RawFloat_Ticking <= 3.25f)
+	{
+		RawFloat_Ticking = 300.25f;
+	}
+	RawDouble_Ticking += 0.5;
 }
 
 /// Put the two ticking values ON SCREEN -- through a path that survives SHIPPING.

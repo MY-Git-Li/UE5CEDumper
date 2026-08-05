@@ -59,11 +59,11 @@ void ADumperTestHUD::DrawHUD()
 		return;
 	}
 
-	// Same three lines, same meaning as the old on-screen-debug version, and the same
-	// deliberate split of clocks: `frames` is driven by Tick, everything else by the
-	// 1 Hz timer, so a dead timer shows as a frozen TickCount against a climbing
-	// frames -- not as a blank screen. A diagnostic must not be driven by the thing it
-	// is diagnosing.
+	// Five lines: the original three, plus the ticking float/double and the ticking
+	// NATIVE (non-UPROPERTY) trio. Same deliberate split of clocks throughout: `frames`
+	// is driven by Tick, every value by the 1 Hz timer, so a dead timer shows as a frozen
+	// TickCount against a climbing frames -- not as a blank screen. A diagnostic must not
+	// be driven by the thing it is diagnosing.
 	const float X = 16.f;
 	float       Y = 16.f;
 	const float LineHeight = 18.f;
@@ -83,4 +83,22 @@ void ADumperTestHUD::DrawHUD()
 	DrawText(FString::Printf(TEXT("[DumperTest] Health.BaseValue=%.0f  FrozenInt=%d  (both must NOT move)"),
 	                         Actor->Health.BaseValue, Actor->FrozenInt),
 	         FLinearColor::White, X, Y, Font);
+	Y += LineHeight;
+
+	// Ticking float / double -- the prev-value targets the sample lacked at these widths.
+	// Printed at 3 decimals because the point is to watch them MOVE by 0.5 and 0.25; %.0f
+	// would round both to a value that looks frozen.
+	DrawText(FString::Printf(TEXT("[DumperTest] F32_Ticking=%.3f (falls 10.25, wraps)  F64_Ticking=%.3f (rises 0.25)"),
+	                         Actor->F32_Ticking, Actor->F64_Ticking),
+	         FLinearColor(0.4f, 0.8f, 1.f), X, Y, Font);   // light blue
+	Y += LineHeight;
+
+	// NATIVE-C: not UPROPERTY, so no scan except the opt-in raw one can see them and no
+	// reflection can tell you what they hold. The screen is the ONLY place their value is
+	// readable, which is exactly why they are drawn -- you need the number before you can
+	// search for it.
+	DrawText(FString::Printf(
+		         TEXT("[DumperTest] native (non-UPROPERTY): RawInt_Ticking=%d  RawFloat_Ticking=%.3f  RawDouble_Ticking=%.3f"),
+		         Actor->RawInt_Ticking, Actor->RawFloat_Ticking, Actor->RawDouble_Ticking),
+	         FLinearColor(1.f, 0.5f, 0.9f), X, Y, Font);   // magenta — "reflection cannot see this"
 }
