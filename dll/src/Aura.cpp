@@ -8107,12 +8107,18 @@ void AppendRawHoleLeaves(uintptr_t obj, uintptr_t cls, const std::string& classN
 GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                                   bool gameOnly, int32_t maxResults, bool deep,
                                   bool crossObject, bool nativeC, bool newestFirst,
-                                  int32_t deadlineMs, bool preFilterNoise) {
+                                  int32_t deadlineMs, bool preFilterNoise,
+                                  int perSlotCap) {
     GroupScanResult result;
     auto t0 = std::chrono::steady_clock::now();
     const auto kDeadline = std::chrono::milliseconds(deadlineMs > 0 ? deadlineMs : 15000);
 
     const size_t nSlots = slots.size();
+    // Set if any object had more satisfying leaves than the per-slot cap. Reported once
+    // at the end: a truncated set is still a correct FIRST scan, but a later
+    // Changed/Decreased refine can only re-read what was kept -- which is how a cap of 8
+    // hid every derived-class field behind AActor's.
+    bool capHit = false;
     if (nSlots < 2) return result;                       // a group needs >= 2 values
     for (const auto& sp : slots)
         if (sp.targets.entries.empty()) return result;   // a slot that fits no width => no hits
@@ -8332,7 +8338,8 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         if (nativeC)
             AppendRawHoleLeaves(obj, cls, className, slots, nativeWidths, nativeWinBuf,
                                 leaves, metas, kLeafCap);
-        if (leaves.size() >= nSlots && Orden::MatchGroup(leaves, ordenSlots, matchOut))
+        if (leaves.size() >= nSlots && Orden::MatchGroup(leaves, ordenSlots, matchOut,
+                                                        perSlotCap, &capHit))
             emitGroupCandidate(obj, objIdx, name, className, leaves, metas, matchOut);
 
         // --- Deep blocks (opt-in): each numeric container / struct-array element
@@ -8345,7 +8352,8 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
             for (auto& kv : deepBlocks) {
                 GroupBlock& blk = kv.second;
                 if (blk.leaves.size() < nSlots) continue;
-                if (Orden::MatchGroup(blk.leaves, ordenSlots, matchOut))
+                if (Orden::MatchGroup(blk.leaves, ordenSlots, matchOut,
+                                      perSlotCap, &capHit))
                     emitGroupCandidate(obj, objIdx, name, className, blk.leaves, blk.metas, matchOut);
                 if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
             }
@@ -8357,6 +8365,12 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         }
     }
 
+    if (capHit) {
+        LOG_WARN("ScanForValueGroup: at least one object had more than %d leaves matching a slot "
+                 "- the extras were dropped, and a later Changed/Decreased refine can only "
+                 "re-read what was kept. Narrow the first scan's range if an expected field is "
+                 "missing.", perSlotCap);
+    }
     result.stats.scannedObjects = scanned;
     result.stats.scannedClasses = static_cast<int32_t>(eligible.size());
     result.stats.durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(

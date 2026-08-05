@@ -14,7 +14,8 @@
 #include <vector>
 
 #include "Ubel.h"   // For ::ClassInfo (defined at global scope in Ubel.h, despite the filename) used by WalkClassesBatch
-#include "Radar.h"  // For Radar::Candidate / DataType / ScanType used by ScanForValue / RefineCandidates
+#include "Radar.h"
+#include "Orden.h"  // For Radar::Candidate / DataType / ScanType used by ScanForValue / RefineCandidates
 #include "GraphPath.h"   // GraphPathResult / GraphPathStep + the pure BFS core used by FindObjectGraphPath
 
 // FUObjectItem structure (in FChunkedFixedUObjectArray)
@@ -1249,7 +1250,16 @@ GroupScanResult ScanForValueGroup(
     // candidate set. Same gameplay guardrail as ScanForValue / snapshot capture
     // (Actor/Pawn/component/... force-kept via SnapshotGameplayKeepBases), so a
     // player Pawn / its components / AttributeSets are never source-skipped.
-    bool                                preFilterNoise = false);
+    bool                                preFilterNoise = false,
+    // How many satisfying leaves to KEEP PER SLOT on each object. This is NOT a
+    // performance knob -- it decides what a later Changed/Decreased refine can re-read,
+    // because the kept list IS the refine's input. Leaves arrive in field-declaration
+    // order (base class first), so too small a value silently excludes a derived class's
+    // OWN fields behind its base class's: at the old default of 8 every AActor stored
+    // just PrimaryActorTick/CustomTimeDilation, and a Changed refine pruned every
+    // candidate to zero. Raise it for objects with unusually many numeric fields. The
+    // scan WARNs when it truncates rather than dropping the extras silently.
+    int                                 perSlotCap = Orden::kDefaultPerSlotCap);
 
 // Next scan (P1: exact per slot). Re-reads each candidate's per-slot
 // convergence offsets, keeps those still equal to the slot's NEW target,

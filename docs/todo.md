@@ -1818,7 +1818,8 @@ scalars declared on the derived class, all of which the **single-value** scan fi
 change, a follow-up `Changed`/`Decreased` refine returns **0**, which is what made this look like a
 Mode-B problem for three rounds.
 
-**Not a leaf cap:** `Aura.cpp` `kLeafCap = 4096`; the actor has 121 fields.
+~~**Not a leaf cap:**~~ **It WAS a cap — just not the one I checked.** `Aura.cpp`'s `kLeafCap = 4096`
+is fine; the one that bit is `Orden::MatchGroup`'s **`perSlotCap = 8`**.
 **The sample is not at fault** — its on-screen heartbeat shows `frames=5971 TickCount=101` climbing
 and `Health.CurrentValue` falling, so the values genuinely change.
 **Sharpest repro, no timing involved:** Group First Scan, both slots `Exact` — `1234567` and
@@ -1852,6 +1853,32 @@ and `Health.CurrentValue` falling, so the values genuinely change.
 > wrong; `entered=` far below the object's field count means the leaves were never stored; the
 > DISTINCT-assignment verdict means the matcher, not the predicate. Those are three different fixes
 > and the log now separates them. ⬜
+>
+> ### ✅ ANSWERED + FIXED build 2680 — the diagnostic named it on its first run
+>
+> ```
+> RefineGroup cand[0]: DROPPED (a slot has no surviving leaf) | leaves entered=8 kept=0 |
+>   dropped: unreadable=0 bad-width=0 no-target-for-width=0 predicate-said-no=8
+> ```
+>
+> **`entered=8` IS the answer.** `Orden::MatchGroup` kept `perSlotCap = 8` satisfying leaves per
+> slot — and leaves arrive in **field-declaration order, base class first**. On any `AActor` the
+> first eight are `PrimaryActorTick.*`, `CustomTimeDilation` and friends, so a derived class's own
+> fields — `I32`, `TickCount`, `Health.*`, `FrozenInt`, the ones a user actually searches for —
+> **never made the list.** The kept list is also what the refine re-reads, so a `Changed` pass
+> compared only never-changing engine fields and pruned all 618 candidates. The screen showed the
+> same thing once the values were identical: *both* slots reporting `Set_Int[0][0]=1337`.
+>
+> **One list was serving two purposes.** The assignment check needs a handful; the refine needs
+> everything. The cap now sizes for the refine (**256**), truncation is **reported** instead of
+> silent, and it is an opt-in `per_slot_cap` on `begin_group_scan` (clamped 8–4096) so an object
+> with unusually many numeric fields can be raised without a rebuild.
+>
+> Regression test `Test_Orden_PerSlotCap`: 40 satisfying leaves must all be kept, and an explicit
+> small cap must both bound the list **and** set the truncation flag. 972 dll tests green.
+>
+> **Remaining half:** the UI has no control for `per_slot_cap` yet — the pipe accepts it, nothing
+> sends it. Add a numeric box beside the Group Scan's Timeout slider. Effort **S**.
 
 
 > 🇹🇼 **繁體中文版：[pending-verification_zh-TW.md](pending-verification_zh-TW.md)** — a standalone

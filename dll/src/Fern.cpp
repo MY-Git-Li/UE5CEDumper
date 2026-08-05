@@ -3175,7 +3175,13 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             }
             const int slotCount = static_cast<int>(slots.size());
 
-            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC, newestFirst, deadlineMs, autoSkipNoise);
+            // Opt-in leaf budget per slot. Clamped, not trusted: too small silently hides
+            // a derived class's own fields (the old fixed 8 did exactly that), too large
+            // is a memory footgun on a 500-field object x 4 slots x every candidate.
+            int perSlotCap = request.value("per_slot_cap", Orden::kDefaultPerSlotCap);
+            if (perSlotCap < 8)    perSlotCap = 8;
+            if (perSlotCap > 4096) perSlotCap = 4096;
+            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC, newestFirst, deadlineMs, autoSkipNoise, perSlotCap);
 
             uint64_t sessionId = Radar::GroupSessionManager::Instance().Begin(
                 std::move(slots), std::move(scanResult.candidates),

@@ -1936,7 +1936,9 @@ static Denken::MemReader MakeReader(const std::vector<DenkenRegion>* regions) {
                 return n;
             }
         }
-        return 0;
+        
+
+    return 0;
     };
 }
 
@@ -2683,6 +2685,37 @@ static Orden::Leaf OrdenLeafI16(int32_t pos, int16_t v) {
 }
 static Orden::Leaf OrdenLeafFloat(int32_t pos, float v) {
     return OrdenLeaf(Radar::DataType::Float, pos, &v, 4);
+}
+
+static void Test_Orden_PerSlotCap() {
+    // The cap decides what a LATER refine can re-read, and leaves arrive in field
+    // declaration order (base class first). A cap of 8 therefore stored only AActor's
+    // early fields for every DumperTestActor candidate, and a Changed refine pruned all
+    // 618 of them to zero -- which read as "group scan cannot see my property".
+    // Measured 2026-08-05; the diagnostic said `leaves entered=8 ... predicate-said-no=8`.
+    std::vector<Orden::Leaf> leaves;
+    for (int i = 0; i < 40; ++i) leaves.push_back(OrdenLeafI32(i * 4, 100 + i));
+
+    Radar::NumericTargetSet lo, hi;
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "0",      lo);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "100000", hi);
+    Orden::SlotTarget st{};
+    st.targets = &lo; st.st = Radar::ScanType::Between; st.targets2 = &hi;
+    std::vector<Orden::SlotTarget> slots = { st, st };
+
+    std::vector<Orden::SlotMatches> out;
+    bool truncated = false;
+    EXPECT("cap: 40 leaves still match",
+           Orden::MatchGroup(leaves, slots, out, Orden::kDefaultPerSlotCap, &truncated));
+    EXPECT("cap: every satisfying leaf kept (the refine re-reads this list)",
+           out[0].leafIdx.size() == 40);
+    EXPECT("cap: nothing dropped under the default", !truncated);
+
+    std::vector<Orden::SlotMatches> capped;
+    bool tr2 = false;
+    Orden::MatchGroup(leaves, slots, capped, 8, &tr2);
+    EXPECT("cap: an explicit small cap still bounds the list", capped[0].leafIdx.size() == 8);
+    EXPECT("cap: and truncation is REPORTED, not silent", tr2);
 }
 
 static void Test_Orden_DistinctValues() {
@@ -3508,6 +3541,7 @@ int main() {
     Test_Neu_Edge();
 
     // Orden — multi-value group scan SDR matcher (synthetic leaves, no game)
+    Test_Orden_PerSlotCap();
     Test_Orden_DistinctValues();
     Test_Orden_MissingValueRejected();
     Test_Orden_DuplicateValuesSDR();
