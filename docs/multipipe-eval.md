@@ -1,9 +1,16 @@
 # Multi-pipe IPC Evaluation (UI / DLL / CE contention)
 
-> **Status (2026-06-28): Phase 0 + Phase 1 were SHIPPED then REVERTED** after in-game testing
-> regressed badly (build 1840). Baseline restored. The analysis below (§1–§6) is still correct;
-> only the *implementation* was wrong. **See §8 Postmortem.** A correct Phase 1 needs
-> **overlapped (async) pipe I/O** — not attempted yet.
+> **Status (2026-07-23, build 2324): the conclusion still holds, but §1–§6's REASON for it does
+> not. Read §10 first.** This document's core claim — that DLL-side serial-dispatch head-of-line
+> blocking is what makes the UI lag — was reasoned and never measured. §10 measured it on two games
+> across both engine generations and **refuted it**: the dispatcher is idle ~70% of wall-clock, and
+> the worst single dispatch out of 24,178 was **14.3 ms**. There is no head-of-line spike to remove,
+> so **Phase 1 = WON'T DO** (§10.1). Treat §1–§6 as the historical argument, not as current fact.
+>
+> **Phase 0 + Phase 1 were SHIPPED then REVERTED** (build 1840, §8) after in-game testing regressed
+> badly — Phase 0's scan thread-priority drop starved scans ~20× when the game was busy, and it is
+> **not in the tree today** (`grep -rn SetThreadPriority dll/src/` = 0 hits; a stale index row said
+> otherwise until 2026-08-05). What DID ship is the two-connection **lane split** (PR #396).
 > **TL;DR:** Do **NOT** add more named pipes. The reported lag is **head-of-line blocking on
 > the DLL's single serial command loop**. But both attempted fixes regressed: (a) the Phase 0
 > scan thread-priority drop **starved scans ~20× when the game is busy**; (b) Phase 1's

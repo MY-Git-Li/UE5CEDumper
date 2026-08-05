@@ -828,6 +828,43 @@ unchanged 欄位裡，FrozenInt 和 `I16` / `FixedArr` / `I8_Neg` 在資料上�
 
 -----
 
+# ④ Vendor 更新帶來的
+
+## ⬜ Z1 —— zydis `a95bb71`：Path-2 原生反組譯還解得出 `[this+off]`
+**2026-08-05 bump** · **① 靠 log 就能驗**，但需要一個刻意動作
+
+zydis 從 `85d7518` 升到 `a95bb71`（"Decoder patch for variable-position decoder-tree filters" #638）
+是 decoder 修正**加上整份 decoder table 重新生成** —— +34.9k / −45.7k 行。這正是當初 v4→v5
+被判定「值得做一次 in-game 檢查」的同一種形狀，理由也一樣：**離線測試解的是我們自己寫的位元組，
+而 table 重生會改變「任意遊戲程式碼」怎麼被解碼**。
+
+**離線證據已經涵蓋的部分**（所以這一項不是重做）：5 個 `Test_Denken_*` 把真實 x64 序列餵進
+Zydis 解碼且全過，含 `Test_Denken_ExcludesStackAndZeroDisp`（正是 v5 遷移動到的
+`disp.size == 0` 那條）。81 + 996 全綠，DLL 建置乾淨。
+
+**沒涵蓋的部分**：真實 UE 執行檔的編譯器輸出。
+
+**怎麼做**：注入任一 UE 遊戲，跑一次 Path-2 property xref（Interesting Funcs 挑一個原生
+getter/setter，或 Property Search 的 xref 按鈕），然後 grep **`offsets-0.log`**
+（category `OARR` → `LF_Offsets`，見 `Sein.cpp` 的 `s_catMap`）：
+
+```
+AnalyzeNativeFunctionProps: 0x… exec=0x… -> N mapped props (U unmapped, I instrs, C calls)
+FindPropertyXrefs: N xrefs (scanned … functions, … with script, …ms)
+```
+
+- **PASS** = `I instrs` 是合理的函式長度（v5 基準是每個函式 17–65），至少有些函式的
+  `N mapped props` 非零，而且**沒有 decode error**。
+- **FAIL** = `instrs` 塌到接近 0（decoder 提早放棄），或原本 v5 有數字的函式現在全部
+  `-> 0 mapped props`。
+- **不算 FAIL**：結果大多是空的是 Path 2 的**本質**，不是回歸 —— 只有原生的常數
+  `[this+off]` getter 才映射得到，純 script 的屬性根本沒有機器碼。v5 那次驗證也是同一個結論。
+
+*比較基準：2026-06-23 的 v5 smoke test（SEED + TQ2，皆 UE5）—— 每函式 17–65 instrs、
+1–5 個 `[this+off]` access、很多 `→ 1 mapped props`、TQ2 `2 xrefs`、零 decode error。*
+
+-----
+
 ## 附記：不是 audit #4、但同樣待驗證的項目
 
 英文版 todo.md 同一節底下還有一段

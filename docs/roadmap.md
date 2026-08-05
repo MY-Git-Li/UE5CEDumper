@@ -6,8 +6,10 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
-> build 2252 (PR #452, 2026-07-22).** Newer work lives in [dev-log.md](dev-log.md):
+> **Last refreshed**: 2026-05-29 (build 797) for the rows below. **Branch parity is not tracked
+> here** — a hand-maintained "dev = main @ build N" line is stale on the next commit, and this one
+> was 57 commits out by 2026-08-05. Ask git: `git rev-list --count main..dev`.
+> Newer work lives in [dev-log.md](dev-log.md):
 > - builds **2301–2335 (2026-07-23)** — **the measurement cycle**, and a 4th proxy.
 >   **`winmm.dll` proxy** (LIVE-VERIFIED on Elliot UE5.4 + SEED UE4.27, 180/180 exports
 >   forwarded lazily): built as a spare *slot*, not for coverage — an n=24 census

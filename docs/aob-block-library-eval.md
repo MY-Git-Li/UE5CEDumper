@@ -1,4 +1,11 @@
-# AOB code-block library — EVALUATED 2026-07-29, NOT BUILT (decision pending)
+# AOB code-block library — §4 and §6 BUILT and CI-gated; ONE decision still open
+
+> **Status (2026-08-05).** The title said "NOT BUILT (decision pending)" while two of its
+> proposals were already shipped *and enforced by CI*: the **§4 block library**
+> (`tools/ghidra/blocks/blocks.json`, `.github/workflows/ci.yml`) and the **§6 n-gram
+> specificity index** (same workflow). The genuinely open item is **build-order step 5** —
+> whether to gate pattern authoring on the pre-filter (`docs/todo.md`). Do not read this as a
+> flat SHIPPED either.
 
 > **2026-07-29 late addendum — the density half is now SOLVED and measured; see §6.**
 > §3 below says a block library "structurally cannot" answer *"how many spurious hits will this take

@@ -1,6 +1,9 @@
 # CE/CSX Export Drilldown Redesign — Design Spec
 
-> Status: **PROPOSAL (awaiting approval)** — 2026-06-13.
+> Status: **SHIPPED — Phases A / B / C (builds 1085 / 1098).** Open follow-ups live in
+> `docs/todo.md` § "CE export drilldown". This read "PROPOSAL (awaiting approval)" until
+> 2026-08-05. Where this doc cites `CeXmlExportService.cs` by line number, prefer the FUNCTION
+> NAME — the line numbers drifted by ~1700 and will drift again.
 > Author: design draft for review before implementation. Nothing here is shipped yet.
 
 ## 1. Design contract (the rule we are restoring)

@@ -668,14 +668,6 @@ the per-finding detail was always in [audit-2026-07-14-findings.md](audit-2026-0
   Open sub-question: the packed **SerialNumber** offset (currently best-effort `0x0C`) is unpinned.
   *Parent: PackedItem.h + Aura packed mode + set_packed_consts shipped build 1108 (dev-log 2026-06-14).*
 
-- **✅ DONE — DLL cancellation live-verified (Elliot 2026-07-23).** (a) **Closing the game while a
-  snapshot streamed** ended with a clean DLL-side `PipeServer: Stopped` 5 s after the last answered
-  chunk, and the UI tore both lanes down and deleted the partial instead of hanging. (b) closing the
-  UI mid-scan + prompt reconnect was already covered by the two back-to-back sessions earlier that
-  evening (disconnect at 22:25:11 → reconnect at 22:25:13, 2 s). *Delete after the batch merges to
-  main. Parent: cooperative cancel + shutdown-abort + disconnect monitor shipped build 936-937,
-  PR #238 (dev-log 2026-06-06).*
-
 - **Guess? "missing" mid-object data — RESOLVED (working as designed; diagnostic kept).** The
   `WALK:guess` diagnostic (build 1364+, `Ubel.cpp` `WalkInstance` fillGaps block, one line per
   Guess? walk, opt-in-gated) confirmed it **live on Elliot `LSGameWork`**: `0x170=16(ArrayProperty)`
@@ -949,11 +941,6 @@ Write-up: [dev-log.md](dev-log.md) 2026-07-23. All five phases are on `dev`, 277
 > rows are the ones that pass was not aimed at. *(Which title the standalone failed on still needs
 > filling in here.)*
 
-- **✅ VERIFIED — the emitted picker, DLL flavour (2026-07-23).** Form opens, ListView fills, filter
-  narrows, Teleport works from the picker. That confirms the CE control/property set lifted from
-  `CrimsonDesert.CT` (`lv.ItemIndex`, `readString(mb + params + 48, 127, false)`, `rgGroup.Items.add`)
-  against a real CE — the highest-risk unknown in P3/P5. *Delete after the batch merges to main.*
-
 - **✅ VERIFIED — CSV export/import (2026-07-23).** Round trip exercised. NOT separately confirmed:
   the two deliberate hostile cases (a group named `1-2` that Excel mangles into a date; a label
   starting `=` surviving the formula armouring). Retry those only if a real library corrupts.
@@ -972,11 +959,6 @@ Write-up: [dev-log.md](dev-log.md) 2026-07-23. All five phases are on `dev`, 277
   Still open: save current pos → move → Teleport selected → land back, then the **map guard** (save on
   map A, load map B; plain Teleport must refuse and Force must be the only way through). Watch for
   `Tier == 2` (raw-write fallback) in the status line. *Parent: P1.*
-
-- **✅ VERIFIED — the quick-jump menu label (2026-07-23).** The Teleport tab's right-click menu shows
-  "Coordinate Library" and the user has been navigating with it, so the `SemiBold`-TextBlock walk still
-  resolves a card whose label lives inside an `Expander.Header` (spec §7's worry). *Delete after the
-  batch merges to main.*
 
 - **VERIFY — DataGrid behaviour at scale** — Effort: **S** · Risk: med.
   The grid carries `MaxHeight="260"` precisely because `ContentRoot` is a vertically unbounded
@@ -1228,7 +1210,7 @@ direction, both shipped (dev-log builds 838-872).
 
 -----
 
-## Time / Timer control (Hemmung) — feasibility evaluated (2026-07-13), not yet built
+## Time / Timer control (Hemmung) — L1 + E SHIPPED and live-verified (builds 2151/2158); L2/L3 deferred
 
 Eval memo: memory `project-timer-feature-eval`. Multi-agent + adversarially verified.
 User ask = auto/manual-assisted discovery of game **time/timer components**, list the
@@ -1839,6 +1821,43 @@ and `Health.CurrentValue` falling, so the values genuinely change.
 > `[DumperTest] ADumperTestActor ready at 0x…` prints in Development only. All three misreads
 > came from inferring a gate from a sibling instead of opening it.
 
+
+**Z1 — zydis `a95bb71`: Path-2 native disassembly still resolves `[this+off]`.** ⬜ Effort **S** ·
+Risk low · **① log-verifiable**, one deliberate action.
+
+The bump (`85d7518` → `a95bb71`, "Decoder patch for variable-position decoder-tree filters" #638)
+is a decoder fix **plus a full table regen** — +34.9k/−45.7k lines. That is the same shape as the
+v4→v5 bump, which was judged to warrant an in-game check for exactly this reason: the offline
+tests decode byte sequences *we wrote*, and a table regen changes how *arbitrary game code*
+decodes.
+
+**What the offline evidence already covers** (so this check is not re-doing it): five
+`Test_Denken_*` tests decode real x64 sequences through Zydis and all pass, including
+`Test_Denken_ExcludesStackAndZeroDisp`, which exercises the `disp.size == 0` path the v5 migration
+touched. 81 + 996 green, DLL builds clean.
+
+**What it does NOT cover:** a real UE binary's compiler output.
+
+**How to verify** — inject into any UE game, then run a Path-2 property xref (Interesting Funcs →
+a native getter/setter, or Property Search's xref button) and grep **`offsets-0.log`** (category
+`OARR` → `LF_Offsets`, `Sein.cpp` s_catMap):
+
+```
+AnalyzeNativeFunctionProps: 0x… exec=0x… -> N mapped props (U unmapped, I instrs, C calls)
+FindPropertyXrefs: N xrefs (scanned … functions, … with script, …ms)
+```
+
+- **PASS** = `I instrs` is a plausible function length (the v5 baseline was 17–65 per function),
+  `N mapped props` is non-zero on at least some functions, and there are **no decode errors**.
+- **FAIL** = `instrs` collapses toward 0 (the decoder is bailing early) or every function reports
+  `-> 0 mapped props` where the v5 run reported some.
+- **NOT a failure:** mostly-empty results are Path 2's *nature*, not a regression — only native
+  constant-`[this+off]` getters map at all; script-only properties have no machine code. The
+  v5 verification run made the same point.
+
+*Baseline to compare against: the 2026-06-23 v5 smoke test on SEED + TQ2 (both UE5) — 17–65
+instrs/func, 1–5 `[this+off]` accesses, many `→ 1 mapped props`, TQ2 `2 xrefs`, zero decode
+errors. See [[project-vendor-zydis-ue58-status]] in memory.*
 
 > 🇹🇼 **繁體中文版：[pending-verification_zh-TW.md](pending-verification_zh-TW.md)** — a standalone
 > translation of THIS section, reorganised by how much effort each check costs (seven of the ①
@@ -2757,6 +2776,8 @@ time-control evals above.*
 Shipped as a free *slot* (dxgi/version are taken by ReShade and ASI loaders), not for coverage.
 The census and rationale moved to
 [archive/todo-closed-2026-08-build-2715.md](archive/todo-closed-2026-08-build-2715.md).
+
+-----
 
 ## UE performance counters in the UI — EVALUATED (2026-07-23), tiered
 
