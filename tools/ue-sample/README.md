@@ -31,8 +31,9 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
    `DumperTest` → Create. Let it compile and open once, then close the editor.
 2. Copy `DumperTest/Source/DumperTest/*.h` and `*.cpp` from this folder into the generated
    `Source/DumperTest/`.
-3. Merge `DumperTest/Config/DefaultEngine.ini.add` into the generated `Config/DefaultEngine.ini`.
-   **Merge, do not replace** — the template's own file holds the default map and the project ID.
+3. **Nothing to merge into `Config/`.** There is deliberately no ini change — an earlier draft put
+   `t.IdleWhenNotForeground=1` in `DefaultEngine.ini` and it made the project **impossible to
+   package**. See *The cook-breaking ini* below; the setting now lives in code behind a switch.
 4. **Build from the command line. Do not build the solution in Visual Studio** — see the trap below.
 
    ```bash
@@ -83,6 +84,33 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
 ```bash
 DumperTest.exe -windowed -ResX=1280 -ResY=720
 ```
+
+Add **`-DumperTestIdle`** *only* for the B8 / Grausam pair — it makes the game thread stall whenever
+the window loses focus, which is also what makes every game-thread dispatch (Teleport, invoke, POV)
+time out while you are working in the dumper UI. Leave it off for everything else. The startup log
+says which mode you are in either way:
+
+```bash
+DumperTest.exe -windowed -ResX=1280 -ResY=720 -DumperTestIdle
+```
+
+> ### ⚠ The cook-breaking ini — do not put this back
+>
+> `t.IdleWhenNotForeground` is registered **`ECVF_Cheat`**, and `ConfigUtilities.cpp:245` refuses a
+> cheat cvar from any ini except `consolevariables.ini` with an `ensureMsgf(false, …)`. In the
+> editor that is a message you can ignore; **in a cook it is 22 errors and
+> `Cook failed / ExitCode=25 (Error_UnknownCookFailure)`**. Measured 2026-08-05: it was the *only*
+> distinct error in a 198 KB packaging log.
+>
+> `ConsoleVariables.ini` is not the escape hatch either — `ConfigCacheIni.cpp:4305` reads it from
+> **`FPaths::EngineDir()`**, so it is a machine-wide developer file shared by every project and it
+> is never packaged.
+>
+> Setting it **from C++** is a different path and is not blocked. `DISABLE_CHEAT_CVARS`
+> (`Build.h:416`) hides cheat cvars from the **console** in Shipping — `IConsoleManager.h` says
+> *"hidden in the console and cannot be changed by the user"* — and `ProcessUserConsoleInput` is the
+> only place that refuses them. So `UDumperTestSubsystem` sets it with `ECVF_SetByCode`, gated on
+> the switch.
 
 **Why two configs.** Shipping vs Development on the *same source* is the config-only A/B that
 [todo.md's self-built-samples section](../../docs/todo.md) calls the highest-value first cell: it
@@ -220,9 +248,10 @@ A 1 Hz timer drives exactly the documented hard case — *groups need `Unchanged
 
 ### B8 / Grausam — the backgrounding pair
 
-`t.IdleWhenNotForeground=1` is set in the ini, so alt-tabbing away **guarantees** the game thread
-stops ticking (`ShouldUseIdleMode()` needs only `IsGame() && SupportsWindowedMode() && cvar &&
-!HasFocus()`, and the first two are automatic).
+Launch with **`-DumperTestIdle`** (see above) and alt-tabbing away **guarantees** the game thread
+stops ticking: `ShouldUseIdleMode()` needs only `IsGame() && SupportsWindowedMode() && cvar &&
+!HasFocus()`, and the first two are automatic for a packaged build. Without the switch the cvar
+stays 0 and neither check below can be staged — the startup log line tells you which you have.
 
 * **B8** — Teleport → Fly ON + Noclip → fly through a wall → alt-tab to the UI, wait >500 ms →
   Disable. **PASS** = `Fly: DISABLED but the pawn's collision is still OFF (game thread

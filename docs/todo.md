@@ -363,9 +363,11 @@ cannot. Using a PDB to "correct" an offset would be a step down, not up.
 > because a large share of the ⬜ register is blocked not on effort but on *finding a game that
 > happens to contain the right UPROPERTY*: `TSet`/`TMap` (⬜ since build **927**), `TOptional`
 > (**942**), the NumericAll byte family (**796**), **B28** CJK FText, and **B8**, whose blocker was
-> *"needs a game that actually goes quiet when backgrounded"* — solved outright by
-> `t.IdleWhenNotForeground=1`, which also turns Grausam's foreground lock into a **positive** test
-> rather than "it seemed to keep working". Expected values are written down in that README, so a
+> *"needs a game that actually goes quiet when backgrounded"* — solved by setting
+> `t.IdleWhenNotForeground` **from code** behind a `-DumperTestIdle` switch, which also turns
+> Grausam's foreground lock into a **positive** test rather than "it seemed to keep working".
+> (Not from an ini: that cvar is `ECVF_Cheat`, and an ini that sets one makes the project
+> **impossible to cook** — 22 errors, `ExitCode=25`. Measured, not guessed.) Expected values are written down in that README, so a
 > disagreement is a defect rather than a discussion. **Still to do: package it** (Shipping +
 > Development, ~20 min in the editor) — the source is versioned, the binaries are not.
 
