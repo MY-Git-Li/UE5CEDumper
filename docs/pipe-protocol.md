@@ -350,12 +350,43 @@ Object-aware "group scan": find objects (blocks) that **simultaneously** hold AL
 
 // Window query (server-side filter/sort/page over the OBJECT-level rows).
 // sort_key: "" / "scan" / "class" / "instance" / "value" (first slot) / "offset" (first slot).
+// `filter` is SPACE = AND (build 2719): whitespace-separated terms are ANDed, each may
+// match a different field (class / instance / field name / value). This is also how a
+// caller asks for a SPECIFIC pairing — "tickcount frozenint" both keeps the candidate
+// AND puts one named field in each slot's displayed witness. Before it, the filter was
+// one substring, so a two-field request could not be expressed at all.
 { "id": 62, "cmd": "query_group_candidates", "session_id": 99,
   "offset": 0, "limit": 1000, "filter": "", "sort_key": "class", "sort_desc": false }
 
 // End — drop the session (idempotent).
 { "id": 63, "cmd": "end_group_scan", "session_id": 99 }
 ```
+
+#### `query_group_slot_leaves` (build 2719) — name the fields a row cannot show
+
+A candidate usually satisfies the group in **many** ways at once, and a row displays exactly **one** assignment (see `match_count` below). Every other matching field existed on the wire only as a raw integer inside `matched_offsets`, and an integer cannot tell anyone that offset `1308` is `FrozenInt` — so correctly-matched fields were repeatedly read as misses. This names them.
+
+```jsonc
+{ "id": 64, "cmd": "query_group_slot_leaves", "session_id": 99,
+  "instance_addr": "0x112FBCB4600",  // the candidate's owning UObject
+  "slot_index": 1,                   // 0-based; which value's kept fields to name
+  "leaf_addr": "0x112FBCB4B04",      // optional tie-breaker — SEND IT (see below)
+  "offset": 0, "limit": 4096 }       // optional; server ceiling 4096
+// → { "ok": true, "session_id": 99, "instance_addr": "0x112FBCB4600", "slot_index": 1,
+//     "total": 36, "offset": 0, "count": 36,
+//     "leaves": [ { "field_name": "FrozenInt", "field_offset": 1308,
+//                   "field_type": "IntProperty", "bool_field_mask": 255,
+//                   "leaf_value": "424242", "addr": "0x112FBCB4B1C",
+//                   "owner_addr": "0x112FBCB4600", "owner_class": "DumperTestActor" }, … ] }
+```
+
+- Each element is emitted by the **same encoder** as the row's representative leaf inside `candidates[].slots[]`, so the two can never disagree about a field's name, value or address.
+- **Ordered: the object's OWN declared fields first**, inherited/struct-nested after (`Radar::OrderGroupSlotLeaves`, stable within each tier so scan order survives). Leaves are collected base-class-first, so without this an actor's list opens with `PrimaryActorTick.*` / `InitialLifeSpan` / `CustomTimeDilation` / `AttachmentReplication.*` and the field the user came for sits thirty rows down.
+- **On demand only.** A page carries up to `limit` (default 1000) candidates × N slots × `per_slot_cap` (up to 4096) leaves; inlining them is a non-starter. Because the request ceiling equals `per_slot_cap`'s maximum, a slot's whole list always fits in one response — `offset` / `limit` are a server-side bound, not a paging protocol the client must loop.
+- **`leaf_addr` matters with `deep`.** One UObject owns one candidate *per container block* and they share an instance address, so `instance_addr` alone is ambiguous and the server would answer with whichever block it met first. Send the displayed leaf's `addr`; a leaf address belongs to exactly one block. (A candidate *index* would not work — `refine_group_scan` rebuilds the candidate vector.) Omitted ⇒ first match wins. If the hint matches nothing the row is stale (a refine dropped that leaf): with a single candidate at that address the fallback is exact, but where several share it the server returns **`stale_leaf_addr`** rather than guessing — re-query the row and retry.
+- Errors: `session_not_found`, `candidate_not_found`, `stale_leaf_addr`, `slot_index out of range`, plus the malformed-argument cases.
+- No game memory is read: every field is already resident in the session. The query does not rebuild or invalidate the cached ordered view.
+- UI: the **All fields** button in the group row's expanded details (Value Search → Group mode).
 
 A group candidate is **object-level** with nested per-slot matches:
 
@@ -369,7 +400,8 @@ A group candidate is **object-level** with nested per-slot matches:
       "bool_field_mask": 255, "leaf_value": "24", "addr": "7FF6..C0",
       "owner_addr": "7FF6..A0",                         // own-block leaf -> owner == the candidate actor
       "owner_class": "BP_PlayerStats_C",               // ...so owner_class == class_name here
-      "matched_offsets": [32], "locked": true },      // locked once a single offset remains
+      "matched_offsets": [32], "locked": true,        // locked once a single offset remains
+      "match_count": 1 },                              // (2690) how many fields this slot really kept
     { "slot_index": 1, "value": "10", "scan_type": "Exact",
       "field_name": "HealthComp.CurrentHealth",        // cross_object leaf: path from the actor
       "field_offset": 64, "field_type": "FloatProperty",
@@ -380,6 +412,8 @@ A group candidate is **object-level** with nested per-slot matches:
   ]
 }
 ```
+
+**`field_name` / `leaf_value` on a slot are ONE WITNESS, not the whole match.** A slot keeps every field that satisfied it (up to `per_slot_cap`, default 256, clamp 8–4096 on `begin_group_scan` — that kept list is also what a later prev-value refine re-reads). The row picks one leaf per slot such that no two slots show the same one, preferring a field from the same struct and, when a filter is active, the field that matched it (`Radar::PickGroupWitnessAssignment` — deliberately in `Radar`, beside the filter it must agree with). **`match_count` (build 2690) says how many that one field is standing in for**, and `query_group_slot_leaves` (above) names the rest. `leaf_value` is the last-scanned snapshot of the leaf, not a live read.
 
 `scan_type` echoes each slot's stored predicate (`Radar::NameOf(ScanType)`); a prev-value slot carries an empty `value` and its `leaf_value` is the current bytes; a Between slot additionally echoes `value2` (the upper bound). `addr` / `field_offset` / `field_name` on each slot drive the same Live Walker / Locate-in-GWorld / Copy handoffs as a single-value candidate. `owner_addr` (P4) is the object directly holding the leaf — the candidate actor for an own-block leaf, or an owned sub-object for a cross-object leaf; the per-slot handoffs target it. `owner_class` (P4 inc 2) is that owning object's class (== `class_name` for an own-block leaf, the owned sub-object's class for a cross-object leaf) and drives the per-slot **Pivot** handoff so it lands on the class that declares the field, not the actor. The object's `class_name` drives Instance Finder / Class Pivot at the candidate level. Once every slot's `locked` is true the UI shows the **locked-offset table** (class + each value's offset).
 

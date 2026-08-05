@@ -14,7 +14,9 @@
 // ============================================================
 
 #include <Windows.h>
-#include <Psapi.h>   // EnumProcessModulesEx, GetModuleFileNameExA
+#include <Psapi.h>   // EnumProcessModulesEx, GetModuleFileNameExW
+#include <vector>
+#include "Utf8Helpers.h"
 #include <cstddef>   // offsetof
 #include <cstring>
 #include <string>
@@ -106,32 +108,98 @@ static char g_AutoStartFn[]  = "UE5_AutoStart";
 
 // ── Proxy DLL file names we ship ─────────────────────────────────────────────
 //
-// A hijacked copy lives in the GAME folder; the genuine Windows DLL of the same
-// name lives under System32/SysWOW64 and is filtered out by path at the call
-// site. Keep this list in sync with `ue5_isAlreadyLoaded` in
-// scripts/UE5CEDumper.CT and with Models/ProxyType.cs — a flavour missing here
-// means the double-inject guard silently does nothing for it.
-static const char* const kProxyDllNames[] = {
-    "version.dll",
-    "dinput8.dll",
-    "dxgi.dll",
-    "winmm.dll",
+// A hijacked copy lives in the GAME folder. This list is only a cheap PRE-FILTER
+// for the module walk — the genuine Windows DLL of the same name, and every
+// third-party wrapper that uses the same trick, are rejected by PE ProductName
+// in IsOurModule, not by their path. Keep it in sync with `ue5_isAlreadyLoaded`
+// in scripts/UE5CEDumper.CT and with Models/ProxyType.cs — a flavour missing
+// here means the double-inject guard silently does nothing for it.
+static const wchar_t* const kProxyDllNames[] = {
+    L"version.dll",
+    L"dinput8.dll",
+    L"dxgi.dll",
+    L"winmm.dll",
 };
 
-static bool IsProxyDllName(const char* fileName) {
-    for (const char* name : kProxyDllNames) {
-        if (_stricmp(fileName, name) == 0) return true;
+static bool IsProxyDllName(const wchar_t* fileName) {
+    for (const wchar_t* name : kProxyDllNames) {
+        if (_wcsicmp(fileName, name) == 0) return true;
+    }
+    return false;
+}
+
+// ── Identity: is this module actually OURS? ──────────────────────────────────
+//
+// The file NAME cannot answer that. Every proxy flavour we ship is named after
+// the Windows DLL it hijacks, so "there is a dxgi.dll loaded from the game
+// folder" is equally true of ReShade, Ultimate ASI Loader, SpecialK and every
+// other wrapper — a configuration this repo's own docs describe as common. The
+// PE ProductName can answer it: every one of our binaries sets it to
+// "UE5CEDumper" (dll/src/version.rc), and no third-party wrapper does.
+//
+// This is deliberately the SAME rule the C# side already uses
+// (Services/DumperModuleDetector.cs), so the two detectors cannot disagree
+// about whether we are loaded.
+//
+// A false negative here is safe: UE5_StartPipeServer detects an existing pipe
+// and returns INIT_SKIPPED, so at worst we map a second copy that then declines
+// to serve. A false POSITIVE is not — it tells the user "already loaded, no
+// injection needed" when nothing is loaded, and the pipe never appears.
+static bool IsOurModule(const wchar_t* modulePath)
+{
+    DWORD ignored = 0;
+    DWORD size = GetFileVersionInfoSizeW(modulePath, &ignored);
+    if (size == 0) return false;   // no VERSIONINFO at all → not one of ours
+
+    std::vector<uint8_t> buf(size);
+    if (!GetFileVersionInfoW(modulePath, 0, size, buf.data())) return false;
+
+    // Read the ProductName from whichever language block the file actually has,
+    // rather than assuming 040904B0 — a fixed codepage guess is why this kind of
+    // check usually "works on my machine".
+    struct LangCodePage { WORD language; WORD codePage; };
+    LangCodePage* langs = nullptr;
+    UINT langBytes = 0;
+    if (!VerQueryValueW(buf.data(), L"\\VarFileInfo\\Translation",
+                        reinterpret_cast<void**>(&langs), &langBytes) || !langs) {
+        return false;
+    }
+
+    const UINT langCount = langBytes / sizeof(LangCodePage);
+    for (UINT i = 0; i < langCount; ++i) {
+        wchar_t sub[64];
+        swprintf_s(sub, L"\\StringFileInfo\\%04x%04x\\ProductName",
+                   langs[i].language, langs[i].codePage);
+
+        wchar_t* value = nullptr;
+        UINT valueLen = 0;
+        if (VerQueryValueW(buf.data(), sub,
+                           reinterpret_cast<void**>(&value), &valueLen)
+            && value && valueLen > 0
+            && _wcsicmp(value, L"UE5CEDumper") == 0) {
+            return true;
+        }
     }
     return false;
 }
 
 // ── Helper: detect if UE5CEDumper is already present in the target process ───
 //
-// Catches two cases that would otherwise cause a redundant inject:
-//   1. UE5Dumper.dll already injected (e.g. user clicked menu twice)
-//   2. A proxy DLL (see kProxyDllNames) hijacked from the game folder
-//      — distinguished from the genuine Windows DLL by checking the load path
-//      is NOT under System32 / SysWOW64.
+// Catches the two cases that would otherwise cause a redundant inject:
+//   1. UE5Dumper.dll already injected (e.g. the user clicked the menu twice)
+//   2. One of our proxy DLLs (see kProxyDllNames) hijacked from the game folder
+//
+// Both are confirmed by PE ProductName, never by file name alone — see
+// IsOurModule. This used to accept ANY module named version/dinput8/dxgi/winmm
+// that was not under System32, which made ReShade's dxgi.dll look exactly like
+// our proxy: the menu then reported "already loaded, no injection needed", let
+// the user go away happy, and no pipe ever appeared (audit #4 B29).
+//
+// Wide throughout: the previous ANSI enumeration rendered every character the
+// code page could not represent as '?', so a perfectly good path like
+// D:\Games\EVERSPACE™ 2\... was displayed and logged as EVERSPACE? 2 — an
+// unpasteable path in the one message that is supposed to help. The sibling in
+// Heiter.cpp was fixed the same way.
 //
 // CE has already attached to the target process by the time the menu callback
 // runs, so we use the OpenedProcessHandle to enumerate its modules.
@@ -139,12 +207,6 @@ static bool IsAlreadyLoadedInTarget(HANDLE hProcess, std::string& outName,
                                     std::string& outPath)
 {
     if (!hProcess) return false;
-
-    // System directory prefix — used to exclude the genuine Windows copies of
-    // the kProxyDllNames entries from the proxy detection.
-    char sysDir[MAX_PATH] = {};
-    GetSystemDirectoryA(sysDir, MAX_PATH);
-    const size_t sysDirLen = strlen(sysDir);
 
     HMODULE modules[1024];
     DWORD cbNeeded = 0;
@@ -158,29 +220,31 @@ static bool IsAlreadyLoadedInTarget(HANDLE hProcess, std::string& outName,
     if (count > _countof(modules)) count = _countof(modules);
 
     for (DWORD i = 0; i < count; ++i) {
-        char modPath[MAX_PATH] = {};
-        if (!GetModuleFileNameExA(hProcess, modules[i], modPath, MAX_PATH))
+        wchar_t modPath[MAX_PATH] = {};
+        if (!GetModuleFileNameExW(hProcess, modules[i], modPath, MAX_PATH))
             continue;
 
-        const char* slash = strrchr(modPath, '\\');
-        const char* fileName = slash ? slash + 1 : modPath;
+        const wchar_t* slash = wcsrchr(modPath, L'\\');
+        const wchar_t* fileName = slash ? slash + 1 : modPath;
 
-        // Case 1: our injected DLL — match anywhere
-        if (_stricmp(fileName, "UE5Dumper.dll") == 0) {
-            outName = fileName;
-            outPath = modPath;
-            return true;
+        // Name is only a cheap PRE-FILTER, to avoid reading version info for
+        // every module in the process. It never decides anything on its own.
+        const bool nameLooksLikeOurs =
+            (_wcsicmp(fileName, L"UE5Dumper.dll") == 0) || IsProxyDllName(fileName);
+        if (!nameLooksLikeOurs) continue;
+
+        if (!IsOurModule(modPath)) {
+            // A same-named module that is NOT ours: the genuine Windows copy, or
+            // a third-party wrapper (ReShade, Ultimate ASI Loader, SpecialK…).
+            // Worth logging — it is exactly the case that used to be misread.
+            LOG_INFO("CEPlugin: '%ls' is loaded but is not ours (path=%ls) — not a UE5CEDumper proxy",
+                     fileName, modPath);
+            continue;
         }
 
-        // Case 2: proxy DLL — only count if NOT loaded from System32/SysWOW64
-        if (IsProxyDllName(fileName)) {
-            if (sysDirLen == 0 ||
-                _strnicmp(modPath, sysDir, sysDirLen) != 0) {
-                outName = fileName;
-                outPath = modPath;
-                return true;
-            }
-        }
+        outName = Utf8Helpers::EncodeUtf16(fileName, wcslen(fileName));
+        outPath = Utf8Helpers::EncodeUtf16(modPath, wcslen(modPath));
+        return true;
     }
 
     return false;
@@ -267,6 +331,14 @@ __declspec(dllexport)
 BOOL __stdcall CEPlugin_GetVersion(CePluginVersion* pv, int /*sizeofpluginversion*/)
 {
     if (!pv) return FALSE;
+    // Claim CE-plugin identity HERE, not only in InitializePlugin. CE calls
+    // InitializePlugin only when the plugin is ENABLED, so a registered-but-unticked
+    // plugin used to get DllMain + GetVersion and nothing else — and DllMain's 1 s
+    // wait cannot be beaten by a human ticking a checkbox. The auto-start thread then
+    // ran a full AOB scan and opened \\.\pipe\UE5DumpBfx INSIDE cheatengine-x86_64.exe.
+    // GetVersion is called for enabled and disabled plugins alike, and it is called
+    // early, which is exactly the signal the race needed. (B34)
+    g_isCEPlugin.store(true);
     pv->version    = CESDK_VERSION;
     pv->pluginname = g_PluginName;
     return TRUE;

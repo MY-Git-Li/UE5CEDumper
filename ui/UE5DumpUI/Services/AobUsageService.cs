@@ -128,7 +128,15 @@ public sealed class AobUsageService
     /// <summary>Save the usage file atomically (write to temp, then rename).</summary>
     private async Task SaveFileAsync(AobUsageFile file)
     {
-        var tempPath = _filePath + ".tmp";
+        // PER-PROCESS temp name. The DLL's Flamme::SaveResults writes the SAME cache file
+        // from the game process, and both sides used to stage through the byte-identical
+        // "<file>.tmp" with truncate — so one could truncate the staging file while the
+        // other was mid-write, and whichever renamed last published a half-written
+        // document over the real cache. The in-process semaphore around this method
+        // cannot see the other process. The final rename stays last-writer-wins (the
+        // existing, accepted semantics); only the staging file must not be shared. Kept
+        // byte-compatible with the DLL's MakeTempPath so the two are obviously a pair. (B39)
+        var tempPath = _filePath + ".tmp." + Environment.ProcessId;
         var json = JsonSerializer.Serialize(file, s_jsonCtx.AobUsageFile);
         await File.WriteAllTextAsync(tempPath, json);
         File.Move(tempPath, _filePath, overwrite: true);

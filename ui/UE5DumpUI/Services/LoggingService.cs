@@ -264,6 +264,24 @@ public sealed class LoggingService : ILoggingService, IDisposable
             .WriteTo.File(
                 filePath,
                 fileSizeLimitBytes: Constants.LogMaxSizeBytes,
+                // WITHOUT this, fileSizeLimitBytes is a KILL switch, not a cap: Serilog
+                // defaults rollOnFileSizeLimit to false and rollingInterval to Infinite,
+                // so the sink has no roll point and silently drops every event once the
+                // limit is reached — for the rest of the process, with no error and no
+                // SelfLog. Measured against these exact package versions: 1 file created,
+                // frozen at the limit, 69 of 500 events kept, and the post-limit warnings
+                // and errors simply absent. Meanwhile docs/architecture.md and the
+                // CLAUDE.md log rule both promise the 8 MB cap ARCHIVES mid-session, and
+                // the DLL half (Sein::RotateIfNeeded) genuinely does. Audit #4 B31.
+                rollOnFileSizeLimit: true,
+                // Serilog defaults this to 31 as soon as rolling is enabled. A COUNT limit
+                // is precisely the retention policy this project deliberately replaced with
+                // an age-based one, so leaving it defaulted would reinstate generation-count
+                // eviction by the back door. Retention stays owned by PruneAgedLogs, which
+                // still sees the rolled files: they are named "{prefix}-0_001.log", which
+                // matches its "{prefix}-*.log" glob and does not end in "-0.log", so the
+                // live-file guard correctly leaves only the active file alone.
+                retainedFileCountLimit: null,
                 outputTemplate: OutputTemplate)
             .CreateLogger();
     }
@@ -501,6 +519,54 @@ public sealed class LoggingService : ILoggingService, IDisposable
         return string.IsNullOrWhiteSpace(name) ? "unknown" : name;
     }
 
+    /// <summary>
+    /// Last-write time of the newest file anywhere under <paramref name="dir"/>, falling
+    /// back to the directory's own timestamp only when it is empty. Shared by both
+    /// sweeps so they cannot disagree about which folder is "recent".
+    /// </summary>
+    private static DateTime NewestWriteUtc(DirectoryInfo dir)
+    {
+        try
+        {
+            var files = dir.GetFiles("*", SearchOption.AllDirectories);
+            return files.Length > 0 ? files.Max(f => f.LastWriteTimeUtc) : dir.LastWriteTimeUtc;
+        }
+        catch
+        {
+            // Unreadable → treat as brand new, so an access error can never be the
+            // reason a folder gets deleted.
+            return DateTime.UtcNow;
+        }
+    }
+
+    /// <summary>
+    /// Which per-process log folders the count cap should evict, newest kept.
+    /// Pure policy so the rule is testable without touching the disk — the same shape as
+    /// <see cref="ProxyOrphanScanner.SelectExpiredReports"/>.
+    ///
+    /// <para><b>The caller must pass the newest write time of the files INSIDE each
+    /// folder, never the directory's own mtime.</b> Windows bumps a directory timestamp
+    /// when entries are added or removed but NOT when an existing child is appended to —
+    /// which is exactly what a live game's log folder does all session. Ranking by it can
+    /// sink an ACTIVE folder below a batch of stale ones and delete it out from under a
+    /// running game. The age-based sweep already documented this and got it right; the
+    /// count-based one was the outlier (audit #4 B37).</para>
+    /// </summary>
+    internal static IReadOnlyList<string> SelectFoldersToEvict(
+        IReadOnlyList<(string Name, DateTime Newest)> folders, string uiFolderName, int keep)
+    {
+        // The UI's own folder is never a candidate — the same exemption the age-based
+        // sweep makes, and for the same reason. Excluded BEFORE the cap so it cannot
+        // consume one of the kept slots either.
+        var candidates = folders
+            .Where(f => !string.Equals(f.Name, uiFolderName, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(f => f.Newest)
+            .ToList();
+
+        if (candidates.Count <= keep) return Array.Empty<string>();
+        return candidates.Skip(keep).Select(f => f.Name).ToList();
+    }
+
     private void CleanupProcessFolders()
     {
         try
@@ -508,13 +574,18 @@ public sealed class LoggingService : ILoggingService, IDisposable
             var dirs = Directory.GetDirectories(_logDirectory)
                 .Select(d => new DirectoryInfo(d))
                 .Where(d => d.Name != "." && d.Name != "..")
-                .OrderByDescending(d => d.LastWriteTimeUtc)
                 .ToList();
 
-            if (dirs.Count <= Constants.MaxProcessFolders) return;
+            var doomed = SelectFoldersToEvict(
+                dirs.Select(d => (d.Name, NewestWriteUtc(d))).ToList(),
+                Constants.LogSubfolderName,
+                Constants.MaxProcessFolders);
+            if (doomed.Count == 0) return;
 
-            foreach (var old in dirs.Skip(Constants.MaxProcessFolders))
+            var byName = dirs.ToDictionary(d => d.Name, StringComparer.OrdinalIgnoreCase);
+            foreach (var name in doomed)
             {
+                if (!byName.TryGetValue(name, out var old)) continue;
                 try
                 {
                     old.Delete(true);
@@ -555,23 +626,11 @@ public sealed class LoggingService : ILoggingService, IDisposable
                         StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                // Judge by the NEWEST file inside, not the directory's own mtime.
-                // Windows bumps a directory's timestamp when entries are added or
-                // removed, but NOT when an existing child is written — so a folder
-                // whose logs are appended in place can look stale and be deleted
-                // out from under a running game. Falls back to the directory's own
-                // timestamp only when it is empty.
-                DateTime newest;
-                try
-                {
-                    var files = dir.GetFiles("*", SearchOption.AllDirectories);
-                    newest = files.Length > 0
-                        ? files.Max(f => f.LastWriteTimeUtc)
-                        : dir.LastWriteTimeUtc;
-                }
-                catch { continue; }
-
-                if (newest < cutoff)
+                // Judge by the NEWEST file inside, not the directory's own mtime —
+                // see NewestWriteUtc for why. Shared with CleanupProcessFolders so the
+                // two sweeps cannot disagree about which folder is "recent"; they used
+                // to, and the count-based one was the wrong half.
+                if (NewestWriteUtc(dir) < cutoff)
                 {
                     try
                     {

@@ -1338,7 +1338,8 @@ public sealed class ProxyDeployService : IProxyDeployService
 
                 PrunePlan plan = ProxyOrphanScanner.PlanPrune(
                     dir, commonRoots, liveBinariesDirs,
-                    RealProbe, ClassifyFileOwnership, ProbeSteamLiveness);
+                    RealProbe, ClassifyFileOwnership, ProbeSteamLiveness,
+                    _platform.VolumeHasRecycleBin);
 
                 // Only surface rows that either can be acted on, or that hold something of ours and
                 // are blocked for a reason worth telling the user about. A folder with nothing of
@@ -1473,7 +1474,8 @@ public sealed class ProxyDeployService : IProxyDeployService
             // the scan that authorised it, which is the wrong direction for a re-check.
             PrunePlan plan = ProxyOrphanScanner.PlanPrune(
                 row.DllDirectory, commonRoots, liveBinariesDirs,
-                RealProbe, ClassifyFileOwnership, ProbeSteamLiveness);
+                RealProbe, ClassifyFileOwnership, ProbeSteamLiveness,
+                _platform.VolumeHasRecycleBin);
 
             if (plan.Verdict is not (OrphanVerdict.Deletable or OrphanVerdict.FileOnly))
             {

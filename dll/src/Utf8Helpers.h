@@ -206,6 +206,39 @@ inline bool LooksLikeDecodedText(const std::string& s) {
     return bad * 3 < total;
 }
 
+// Strict UTF-8 well-formedness (RFC 3629): correct lead/continuation shapes, no
+// overlong encodings, no surrogates, nothing past U+10FFFF. `hasMultiByte` reports
+// whether any multi-byte sequence was present — that flag, not the byte count, is the
+// decisive half of the width decision in DecodeFStringBuffer.
+//
+// This is the structural test that a replacement-RATIO guess cannot be: the first n
+// bytes of a UTF-16 CJK buffer contain lone continuation bytes (a UTF-16 low byte like
+// 0x87 is a continuation byte with no lead), which is not a "mostly text" question but
+// a "this cannot be UTF-8" one. (B28)
+inline bool IsWellFormedUtf8(const uint8_t* p, size_t n, bool& hasMultiByte) {
+    hasMultiByte = false;
+    for (size_t i = 0; i < n; ) {
+        const uint8_t c = p[i];
+        if (c < 0x80) { ++i; continue; }         // ASCII
+        size_t need; uint32_t cp, lo, hi;
+        if      ((c & 0xE0) == 0xC0) { need = 1; cp = c & 0x1Fu; lo = 0x80;    hi = 0x7FF; }
+        else if ((c & 0xF0) == 0xE0) { need = 2; cp = c & 0x0Fu; lo = 0x800;   hi = 0xFFFF; }
+        else if ((c & 0xF8) == 0xF0) { need = 3; cp = c & 0x07u; lo = 0x10000; hi = 0x10FFFF; }
+        else return false;                       // lone continuation, or a 5/6-byte form
+        if (i + need >= n) return false;         // truncated sequence
+        for (size_t k = 1; k <= need; ++k) {
+            const uint8_t cc = p[i + k];
+            if ((cc & 0xC0) != 0x80) return false;
+            cp = (cp << 6) | (cc & 0x3Fu);
+        }
+        if (cp < lo || cp > hi) return false;                // overlong / out of range
+        if (cp >= 0xD800 && cp <= 0xDFFF) return false;      // surrogate half
+        hasMultiByte = true;
+        i += need + 1;
+    }
+    return true;
+}
+
 // ============================================================
 // DecodeFStringBuffer — decode a raw FString / FUtf8String buffer whose
 // element WIDTH is unknown, choosing UTF-8 (1-byte: FUtf8String, or a game
@@ -217,36 +250,61 @@ inline bool LooksLikeDecodedText(const std::string& s) {
 //   numUnits  the FString header's Num — a code-UNIT count INCLUDING the
 //             trailing null (Len = Num - 1)
 //
-// Width is decided by where the null terminator sits, gated by an interior-null
-// check:
-//   * UTF-8  : byte[numUnits-1] == 0 AND no 0x00 in [0, numUnits-1). The
-//              interior-null gate is what separates a genuine 1-byte buffer
-//              from a UTF-16 ASCII buffer, whose high bytes are 0x00.
-//   * UTF-16 : the unit at index numUnits-1 is 0x0000 (bytes at 2*(N-1)).
-// UTF-8 is tried first because its gate is stricter; a real UTF-16 string
-// (CJK high bytes non-zero, or ASCII with interspersed 0x00 interior nulls)
-// never satisfies it. This is what lets the FText reader recover UTF-8 display
-// strings that a blind UTF-16 decode turns into 亂碼.
+// Candidate terminator positions:
+//   * UTF-8  : byte[numUnits-1] == 0 AND no 0x00 in [0, numUnits-1)
+//   * UTF-16 : the unit at index numUnits-1 is 0x0000 (bytes at 2*(N-1))
 //
-// Returns sanitized UTF-8, or "" if neither hypothesis yields a
-// null-terminated, mostly-textual string.
+// Both hypotheses are EVALUATED BEFORE EITHER IS RETURNED. Returning on the first one
+// that merely passed was wrong, because the two pieces of evidence are not equally
+// strong (audit #4 B28):
+//
+//   * The UTF-8 evidence (byte n-1 == 0) sits INSIDE a UTF-16 string's own payload
+//     (n-1 < 2n-2 for every n > 1), so UTF-16 text produces it routinely — any U+xx00
+//     character, and every ASCII character's high byte. "中文一二" hits it exactly.
+//   * The UTF-16 evidence (a zero unit at byte 2n-2) sits OUTSIDE an n-byte UTF-8
+//     string's payload, in unrelated heap. It can only be satisfied by chance.
+//
+// So the decision is, in order:
+//   1. Reject the UTF-8 hypothesis unless the bytes are STRICTLY well-formed UTF-8.
+//      This alone kills the reported CJK failures: a UTF-16 prefix carries lone
+//      continuation bytes. A replacement-RATIO test could not — "中文一二" decodes to
+//      "-N?e", one bad char in four, which any sane ratio accepts.
+//   2. Well-formed AND containing a multi-byte sequence ⇒ UTF-8, decided. A UTF-16
+//      prefix essentially cannot produce a valid multi-byte sequence, and this is the
+//      shipped real-world case (an FText holding UTF-8 CJK).
+//   3. Otherwise the UTF-8 candidate is pure ASCII, which a UTF-16 prefix explains just
+//      as well ("第1章" → ",{1", "中A文" → "-NA"), so prefer UTF-16 when it decodes
+//      cleanly — the stronger evidence wins.
+//
+// KNOWN RESIDUAL: an ASCII-only UTF-8 buffer whose adjacent heap happens to be 0x00
+// 0x00 at exactly [2n-2] and whose whole 2n-byte reading still looks textual would be
+// read as UTF-16. Both conditions must hold — LooksLikeDecodedText rejects a binary
+// tail — and no ASCII-only case is known in the wild, where FUtf8String FText is used
+// precisely for non-ASCII. Rule 2 protects every multi-byte case regardless of heap.
+//
+// Returns sanitized UTF-8, or "" if neither hypothesis yields a null-terminated,
+// mostly-textual string.
 // ============================================================
 inline std::string DecodeFStringBuffer(const uint8_t* buf, size_t bufLen, int32_t numUnits) {
     if (!buf || numUnits < 2) return "";   // < 2 units = empty (just the null)
     const size_t n = static_cast<size_t>(numUnits);
 
     // --- UTF-8 hypothesis: n bytes, terminator at [n-1], no interior null ---
+    std::string utf8Decoded;
+    bool utf8Ok = false, utf8HasMultiByte = false;
     if (bufLen >= n && buf[n - 1] == 0) {
         bool interiorNull = false;
         for (size_t i = 0; i + 1 < n; ++i) {
             if (buf[i] == 0) { interiorNull = true; break; }
         }
-        if (!interiorNull) {
-            std::string decoded =
-                Sanitize(std::string(reinterpret_cast<const char*>(buf), n - 1));
-            if (LooksLikeDecodedText(decoded)) return decoded;
+        if (!interiorNull && IsWellFormedUtf8(buf, n - 1, utf8HasMultiByte)) {
+            utf8Decoded = Sanitize(std::string(reinterpret_cast<const char*>(buf), n - 1));
+            utf8Ok = LooksLikeDecodedText(utf8Decoded);
         }
     }
+
+    // Step 2: a well-formed multi-byte sequence settles the width on its own.
+    if (utf8Ok && utf8HasMultiByte) return utf8Decoded;
 
     // --- UTF-16 hypothesis: n wchar_t units, terminating unit at [n-1] ---
     if (bufLen >= n * 2) {
@@ -262,11 +320,12 @@ inline std::string DecodeFStringBuffer(const uint8_t* buf, size_t bufLen, int32_
                 w.push_back(static_cast<wchar_t>(u));
             }
             std::string decoded = Sanitize(EncodeUtf16(w.data(), w.size()));
+            // Step 3: stronger evidence wins the ASCII-ambiguous case.
             if (LooksLikeDecodedText(decoded)) return decoded;
         }
     }
 
-    return "";
+    return utf8Ok ? utf8Decoded : std::string();
 }
 
 } // namespace Utf8Helpers

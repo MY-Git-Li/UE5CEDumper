@@ -4,6 +4,7 @@
 // ============================================================
 
 #include "Genau.h"
+#include "Utf8Helpers.h"
 #include "Flamme.h"
 #include "Macht.h"
 #include "Stark.h"
@@ -14,6 +15,7 @@
 #include "Aura.h"
 #include "Serie.h"
 #include "Neu.h"     // UEnum::Names layout parse (legacy TArray vs UE5.6+ FNameData)
+#include "Tot.h"     // Tot::Requested — Extra Scan must bail so Fern::Stop's join is bounded (B18)
 
 #include <string>
 #include <cstring>
@@ -931,6 +933,72 @@ static uintptr_t TryResolveMatch(uintptr_t matchAddr, const AobSignature& sig, V
 // per batch instead of once per pattern.
 static constexpr int kBatchSize = 8;
 
+// ── Module anchor for the multi-module fallback (D1) ─────────────────────────
+//
+// GObjects resolves FIRST, so by the time GNames/GWorld/GEngine scan we know which
+// module the engine's globals actually live in. That fact is worth more than any list.
+//
+// THE BUG THIS EXISTS FOR (measured 2026-08-05, stock UE 5.4 Development package):
+// every in-executable GNames pattern missed — the tables are Shipping-tuned — so the
+// multi-module fallback ran and matched a data pattern inside
+// `Engine\Binaries\Win64\EOSSDK-Win64-Shipping.dll`, whose pointer happened to reach a
+// plausible name pool. ValidateGNames accepted it, and GObjects (in the exe, 0x7FF675…)
+// and GNames (0x7FFCEF…) ended up in different modules on a MONOLITHIC build, which
+// cannot be right. Everything downstream failed from that one address: no Guid/Vector
+// struct -> offsets fell back to defaults wrong for this build -> GWorld would not
+// deref -> Start-from-GWorld and Value Search both failed. One misresolution, four
+// symptoms, and the scan reported success throughout.
+//
+// The rule is structural, NOT a denylist of SDK names. A denylist is a list, and this
+// repo has been bitten three times by fixes verified against their own list rather than
+// against the world (B34's CE filenames, B14's thread procs, B47's session). "The engine
+// globals are all in one module unless the build is modular" needs no maintenance and
+// cannot go stale.
+//
+// Multi-module support itself stays: a genuinely modular build puts GNames in
+// CoreUObject.dll, which is exactly why the pattern that won here is named GNAM_SAT425
+// (Satisfactory 4.25). When the anchor is a DLL we only REORDER; we refuse nothing.
+static uintptr_t s_moduleAnchor = 0;
+
+static HMODULE ModuleOfAddress(uintptr_t addr) {
+    HMODULE h = nullptr;
+    if (!addr) return nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCWSTR>(addr), &h);
+    return h;
+}
+
+static std::string ModuleNameOf(HMODULE h) {
+    wchar_t path[MAX_PATH] = {};
+    if (!h || !GetModuleFileNameW(h, path, MAX_PATH)) return "(unknown)";
+    std::wstring w(path);
+    auto slash = w.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) w = w.substr(slash + 1);
+    return Utf8Helpers::EncodeUtf16(w.c_str(), w.size());
+}
+
+/// Should a multi-module candidate at `resolved` be refused?
+/// Only when the anchor says the build is monolithic and the candidate is elsewhere.
+///
+/// Does NOT log: a pattern with N matches all resolving to the same foreign pointer would
+/// print N identical lines, and the first live run did exactly that -- 8 to 11 copies per
+/// pattern, five patterns deep. The caller accumulates and prints one line per pattern.
+static bool RefuseForeignModule(uintptr_t resolved, std::string* outModule) {
+    if (!s_moduleAnchor || !resolved) return false;
+    const HMODULE mainExe   = GetModuleHandleW(nullptr);
+    const HMODULE anchorMod = ModuleOfAddress(s_moduleAnchor);
+    if (!anchorMod || anchorMod != mainExe) return false;   // modular build — allow
+
+    const HMODULE candMod = ModuleOfAddress(resolved);
+    if (candMod == mainExe) return false;
+
+    if (outModule && outModule->empty()) *outModule = ModuleNameOf(candMod);
+    return true;
+}
+
+void SetModuleAnchor(uintptr_t gobjects) { s_moduleAnchor = gobjects; }
+
 static uintptr_t ScanForTarget(
     const AobSignature* patterns, size_t count,
     ValidatorFn validate, ScanReport& report,
@@ -1222,15 +1290,47 @@ static uintptr_t ScanForTarget(
                     continue;
                 }
 
+                // Try candidates in the ANCHOR's module first. On a monolithic build a
+                // match anywhere else is then refused outright rather than merely
+                // deprioritised — see the s_moduleAnchor block above for the EOSSDK
+                // misresolution this prevents.
+                if (s_moduleAnchor) {
+                    const HMODULE anchorMod = ModuleOfAddress(s_moduleAnchor);
+                    std::stable_sort(multiMatches.begin(), multiMatches.end(),
+                        [&](uintptr_t a, uintptr_t b) {
+                            const bool aIn = ModuleOfAddress(a) == anchorMod;
+                            const bool bIn = ModuleOfAddress(b) == anchorMod;
+                            return aIn && !bIn;   // same-module first, order otherwise kept
+                        });
+                }
+
                 uintptr_t bestResult = 0;
                 uintptr_t bestMatchAddr = 0;
+                int         refusedCount = 0;
+                uintptr_t   refusedAddr  = 0;
+                std::string refusedModule;
                 for (uintptr_t matchAddr : multiMatches) {
                     uintptr_t resolved = TryResolveMatch(matchAddr, *sig, validate);
+                    // Gate on the RESOLVED address, not the match site: the match is only
+                    // where the instruction sits, while `resolved` is the pointer we are
+                    // about to hand the whole dumper.
+                    if (resolved && RefuseForeignModule(resolved, &refusedModule)) {
+                        ++refusedCount;
+                        refusedAddr = resolved;
+                        continue;
+                    }
                     if (resolved) {
                         bestResult = resolved;
                         bestMatchAddr = matchAddr;
                         break;
                     }
+                }
+                if (refusedCount) {
+                    Sein::Warn("SCAN", "[%s] %s: REFUSED %d match(es) resolving to 0x%llX in '%s' "
+                               "— GObjects resolved inside the main executable, so this build is "
+                               "monolithic and the engine globals cannot live in another module",
+                               report.targetName, sig->id, refusedCount,
+                               (unsigned long long)refusedAddr, refusedModule.c_str());
                 }
 
                 if (g_validationDbgCount > kMaxValidationDbgLogs) {
@@ -1375,6 +1475,16 @@ uintptr_t FindGObjects(const char* hintPatternId) {
         Sein::Warn("SCAN:GObj", "FindGObjects: All patterns failed, trying data-section scan fallback...");
         result = FindGObjectsByDataScan();
         if (result) s_gobjectsMethod = "data_scan";
+    }
+
+    // Anchor every LATER target's multi-module fallback to whichever module GObjects
+    // came from. This is the only place that knows it, and it must be set however
+    // GObjects was found -- the data-scan fallback anchors just as well as the AOB.
+    if (result) {
+        SetModuleAnchor(result);
+        Sein::Info("SCAN:GObj", "Module anchor set to '%s' — later targets must resolve there "
+                   "unless this build is modular",
+                   ModuleNameOf(ModuleOfAddress(result)).c_str());
     }
 
     if (!result) {
@@ -1822,6 +1932,10 @@ static uintptr_t FindGNamesByPointerScan() {
         int diagCount = 0;  // Limit diagnostic dumps to first few candidates
         for (size_t off = 0; off + 8 <= secSize; off += 8) {
             uintptr_t ptr = 0;
+            // Cooperative cancel. UE5_Shutdown runs on the CE Lua caller's thread and
+            // joins the accept thread, so an unbounded sweep here freezes CE's UI for its
+            // whole duration. Aura's idiom: poll cheaply every 4096 slots. (B18)
+            if ((off & 0xFFF) == 0 && Tot::Requested()) return 0;
             if (!Macht::ReadSafe(secBase + off, ptr)) continue;
 
             // Plausible user-space 64-bit address (exclude null, low, kernel)
@@ -2670,7 +2784,25 @@ static VersionScanResult DetectVersionDetailed() {
 
     // Fast path: PE VERSIONINFO resource (treated as Tier 1 — high confidence)
     uint32_t ver = DetectVersionFromPEResource();
-    if (ver) { r.version = ver; r.tier = 1; return r; }
+    if (ver) {
+        // ...with ONE exception: a result BELOW the support floor arms a total scan refusal, and
+        // that is the most destructive verdict this detector can reach. A single uncorroborated
+        // VS_FIXEDFILEINFO field is not enough evidence for it, and every other version signal in
+        // this file demands context. So a sub-4.11 PE reading does NOT short-circuit as tier 1 —
+        // fall through to the memory scan and let it agree or not. If it cannot corroborate, the
+        // terminal branch keeps the PE value but marks it tier 3, which sets bLowConfidence, which
+        // the refusal gate requires to be false. The cost of being wrong that way is a wasted
+        // ~4-second sweep; the cost of being wrong the other way is refusing to scan a game that
+        // works. (Audit #4 B25. Note the memory needle table floors at "4.18.", so a GENUINE
+        // 4.0-4.10 title will not be corroborated and will pay that sweep — accepted.)
+        if (ver >= Grimoire::MIN_SUPPORTED_UE_VERSION) { r.version = ver; r.tier = 1; return r; }
+        Sein::Warn("SCAN:Ver", "DetectVersion: PE VERSIONINFO says UE %u, below the %u floor — "
+                   "NOT accepting that on its own (it would refuse the whole scan). "
+                   "Corroborating against the memory string scan.",
+                   ver, Grimoire::MIN_SUPPORTED_UE_VERSION);
+        r.version = ver;
+        r.tier    = 3;   // downgraded unless the memory scan below agrees
+    }
 
     Sein::Warn("SCAN:Ver", "DetectVersion: PE resource failed, falling back to memory string scan");
 
@@ -3929,6 +4061,11 @@ uintptr_t ExtraScanGObjects() {
                   (size_t)(sec.end - sec.start));
 
         for (uintptr_t addr = sec.start; addr + 0x20 < sec.end; addr += 4) {
+            if ((addr & 0xFFF) == 0 && Tot::Requested()) {
+                Sein::Warn("SCAN:GObj", "ExtraScanGObjects: cancelled (%d candidates tested)",
+                           candidatesTested);
+                return 0;   // (B18)
+            }
             // Mode 1: Inline — the FUObjectArray struct starts at addr
             if (ValidateGObjects(addr)) {
                 Sein::Info("SCAN:GObj", "ExtraScanGObjects: Found inline FUObjectArray at 0x%llX (%d candidates tested)",
@@ -4032,6 +4169,7 @@ uintptr_t ExtraScanGWorld() {
     // skipped) — and prefer the highest-index world (most recently created = the active map).
     std::vector<std::pair<uintptr_t, int32_t>> worlds;   // (instance addr, index), sorted by addr
     for (int32_t i = 0; i < count; ++i) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) return 0;   // (B18)
         uintptr_t obj = Aura::GetByIndex(i);
         if (!obj) continue;
         uintptr_t cls = 0;
@@ -4074,6 +4212,7 @@ uintptr_t ExtraScanGWorld() {
         size_t    secSize = section->Misc.VirtualSize;
         for (size_t off = 0; off + sizeof(uintptr_t) <= secSize; off += sizeof(uintptr_t)) {
             uintptr_t val = 0;
+            if ((off & 0xFFF) == 0 && Tot::Requested()) return 0;   // (B18)
             if (!Macht::ReadSafe(secBase + off, val) || val < 0x10000) continue;
             auto it = std::lower_bound(worlds.begin(), worlds.end(), std::make_pair(val, 0));
             if (it != worlds.end() && it->first == val) {
@@ -4344,7 +4483,9 @@ static void PublishGEngineMetadata(EnginePointers& out) {
     out.gengineAob    = nullptr;
     out.gengineAobPos = 0;
     out.gengineAobLen = 0;
-    if (auto* es = s_gengineReport.winningSig) {
+    // Same replayability gate as the GWorld triple above — a symbol/call-follow winner
+    // is a perfectly good way for US to find &GEngine, and a useless thing to hand CE.
+    if (auto* es = s_gengineReport.winningSig; es && IsCeReplayableAob(es->resolve)) {
         out.gengineAob    = es->pattern;
         out.gengineAobPos = es->instrOffset + es->opcodeLen;
         out.gengineAobLen = es->instrOffset + es->totalLen;
@@ -4615,6 +4756,14 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
     // Deliberately gated on a CONFIDENT detection only. A low-confidence or publisher-biased
     // version is a guess, and a user override is the user's call — misreading a working game as
     // "too old" and refusing to scan it is a far worse failure than wasting four seconds.
+    //
+    // That gate is only as good as what counts as confident, and case (a) used to slip through:
+    // DetectVersionFromPEResource's `major == 4` branch returned tier 1 off a single
+    // uncorroborated VS_FIXEDFILEINFO field, so bLowConfidence was false and this refusal armed
+    // on one PE value. It no longer short-circuits below the floor — see the note in
+    // DetectVersionDetailed — so reaching here with case (a) now means the memory scan agreed, or
+    // at least did not contradict it with a tier 1/2 hit. Case (b) is unchanged: the pre-UE4
+    // sentinel is a POSITIVE 2-of-4 marker identification and is deliberately tier 1. (B25)
     if (out.UEVersion < Grimoire::MIN_SUPPORTED_UE_VERSION
         && out.bVersionDetected && !out.bLowConfidence && !out.bUserOverride) {
         out.bVersionTooOld = true;
@@ -4716,8 +4865,13 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
     ExtractScanStats(s_gnamesReport,   out.gnamesPatternsTried,   out.gnamesPatternsHit);
     ExtractScanStats(s_gworldReport,   out.gworldPatternsTried,   out.gworldPatternsHit);
 
-    // GWorld winning pattern AOB metadata (for CE symbol registration via CreateSymbolScript)
-    if (auto* ws = s_gworldReport.winningSig) {
+    // GWorld winning pattern AOB metadata (for CE symbol registration via CreateSymbolScript).
+    // Published ONLY when the winner is a form CE can actually replay — see
+    // IsCeReplayableAob. A SymbolExport winner (e.g. Satisfactory, which resolves
+    // GWorld through ?GWorld@@3VUWorldProxy@@A) stores a mangled NAME here, and shipping it
+    // as if it were a byte pattern makes the UI's "AOB available" checkbox light up for an
+    // export in which every address then resolves to `??`.
+    if (auto* ws = s_gworldReport.winningSig; ws && IsCeReplayableAob(ws->resolve)) {
         out.gworldAob    = ws->pattern;
         out.gworldAobPos = ws->instrOffset + ws->opcodeLen;
         out.gworldAobLen = ws->instrOffset + ws->totalLen;

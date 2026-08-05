@@ -71,6 +71,19 @@ ResolveAll proc
 ResolveAll endp
 
 ; fN: jump through mProcs[N]; on first use (mProcs[N]==0) resolve, then jump.
+;
+; NOTE -- there is deliberately NO post-resolve null test. If the resolver could
+; not fill this slot (the name does not exist in the host System32 DLL), rax is
+; still 0 and the `jmp rax` faults with RIP=0. That is a KNOWN, ACCEPTED tradeoff,
+; not an oversight: a stub returning 0 would be worse for winmm, where
+; 0 == TIMERR_NOERROR, so a missing timeBeginPeriod would SILENTLY no-op the 1 ms
+; tick instead of saying anything (dll/CMakeLists.txt records the same rejection).
+; A crash at least names the problem.
+;
+; The real defence is upstream, in this file's generator: it now asserts the
+; source DLL is a 64-bit PE. A 32-bit Python run used to read the SysWOW64 copy
+; via WOW64 redirection and emit permanently-null slots pointing straight at this
+; instruction, with a build that stayed internally consistent. (B44 / B48)
 LAZY_THUNK macro idx
 f&idx& proc
     mov  rax, qword ptr mProcs[8*idx]

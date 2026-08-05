@@ -571,6 +571,39 @@ public class ProxyOrphanScannerTests
         Assert.DoesNotContain("folder", msg, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// B12 — the exact counts from the finding. <c>ProxyDeployService</c> counts a
+    /// vanished file into <c>allFilesGone</c> and then still prunes the chain, so this
+    /// combination is reachable: the file was already gone, and four directories really
+    /// were removed. The old wording put "Already gone — nothing left to remove." in
+    /// success green over a run that had just deleted four folders.
+    /// </summary>
+    [Fact]
+    public void ResolveRemovalOutcome_AlreadyGoneStillReportsFoldersThatWereRemoved()
+    {
+        var (ok, msg) = ProxyOrphanScanner.ResolveRemovalOutcome(
+            filesRecycled: 0, filesAlreadyGone: 1, dirsRemoved: 4, dirsPlanned: 4,
+            Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
+
+        Assert.True(ok);
+        Assert.Contains("4", msg, StringComparison.Ordinal);
+        Assert.Contains("folder", msg, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("nothing left to remove", msg, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The other half: with no directories removed the original wording is
+    /// correct and must be kept.</summary>
+    [Fact]
+    public void ResolveRemovalOutcome_AlreadyGoneWithNoFoldersKeepsTheShortMessage()
+    {
+        var (ok, msg) = ProxyOrphanScanner.ResolveRemovalOutcome(
+            filesRecycled: 0, filesAlreadyGone: 1, dirsRemoved: 0, dirsPlanned: 4,
+            Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
+
+        Assert.True(ok);
+        Assert.Contains("Already gone", msg, StringComparison.Ordinal);
+    }
+
     // ── The dry-run report ───────────────────────────────────────────────────
 
     private static OrphanProxy SampleRow(bool selected = true) => new()
@@ -752,4 +785,32 @@ public class ProxyOrphanScannerTests
 
     private static IReadOnlySet<string> Empty()
         => new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A CLEAN scan must still produce a report. Without the file, "scanned everything and
+    /// found nothing" and "the scan never ran, or looked in the wrong place, or failed
+    /// silently" are indistinguishable a week later — and the VM used to make the empty text
+    /// unreachable by gating Report on `Orphans.Count > 0`.
+    /// </summary>
+    [Fact]
+    public void BuildReport_EmptyScanStillReportsWhatItExamined()
+    {
+        string txt = ProxyOrphanScanner.BuildReport(
+            Array.Empty<OrphanProxy>(), "2026-08-04 22:00:00", "2633", foldersExamined: 1487);
+
+        Assert.Contains("No leftover proxy DLLs were found.", txt, StringComparison.Ordinal);
+        // The evidence half: it has to say what it LOOKED AT.
+        Assert.Contains("1487 folder(s) were examined", txt, StringComparison.Ordinal);
+        Assert.Contains("DRY RUN", txt, StringComparison.Ordinal);
+    }
+
+    /// <summary>Unknown count (-1) omits the line rather than printing a misleading "0".</summary>
+    [Fact]
+    public void BuildReport_UnknownExaminedCountOmitsTheLine()
+    {
+        string txt = ProxyOrphanScanner.BuildReport(
+            Array.Empty<OrphanProxy>(), "t", "1");
+        Assert.Contains("No leftover proxy DLLs were found.", txt, StringComparison.Ordinal);
+        Assert.DoesNotContain("folder(s) were examined", txt, StringComparison.Ordinal);
+    }
 }

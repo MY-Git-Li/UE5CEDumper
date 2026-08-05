@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -113,9 +113,14 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task CheckForCompetingDumperHostsAsync(EngineState state)
     {
         if (_proxyDeployForChecks == null) return;
+        // Process enumeration is slow, so this can land after the user has disconnected
+        // and reconnected — or after the disconnect that just cleared the banner. Publish
+        // only into the session we were started for. Same shape as ScheduleProxyConfirmation.
+        int epoch = _sessionEpoch;
         try
         {
             var procs = await _proxyDeployForChecks.ListGameProcessesAsync();
+            if (epoch != _sessionEpoch) return;
             var hosts = procs.Where(p => p.DumperLoaded).ToList();
             if (hosts.Count <= 1) { MultipleDumperHostsWarning = ""; return; }
 
@@ -622,6 +627,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log, platform);
             // Auto-connect the pipe after a successful in-UI DLL injection.
             ProxyDeploy.RequestConnectAsync = () => ConnectCommand.ExecuteAsync(null);
+            // Lets the post-inject retry ASK whether it worked instead of assuming.
+            ProxyDeploy.IsConnectedProbe = () => IsConnected;
+            ProxyDeploy.SetConnectErrorSuppression = v => SuppressConnectErrors = v;
             // Persist the remembered-proxy map (a Dictionary mutation isn't caught
             // by the [ObservableProperty] change-tracking save).
             ProxyDeploy.RequestOptionSave = ScheduleOptionSave;
@@ -2002,6 +2010,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     _proxyConfirmTimer?.Dispose();
                     _proxyConfirmTimer = null;
                     LiveFuncs.ResetOnDisconnect();   // clear stuck "recording" UI state (L16)
+                    // The banner names a PID. Left standing it pins a dead one for the
+                    // rest of the session and keeps warning about a conflict that ended
+                    // when the game closed. (B9)
+                    MultipleDumperHostsWarning = "";
                 }
             });
         };
@@ -2055,7 +2067,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             ClearError();
-            StatusText = "Connecting...";
+            // Skipped while a retry loop owns the message: otherwise every attempt
+            // overwrites the countdown with "Connecting..." and the user sees no
+            // progress at all -- which is what widening the window to 45 s looked like.
+            if (!SuppressConnectErrors) StatusText = "Connecting...";
             LiveWalker.ClearAllBookmarks();
 
             await _pipeClient.ConnectAsync();
@@ -2091,11 +2106,27 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            // During the post-inject retry window a failed attempt is EXPECTED -- the DLL
+            // has not opened its pipe yet -- so shouting "Connection Error" in red is a lie
+            // that then resolves itself a few seconds later. The retry owns the message
+            // while it is running; a real failure still lands here once it gives up.
+            if (SuppressConnectErrors)
+            {
+                _log.Info(Constants.LogCatInit, $"Connect attempt failed while waiting for the DLL: {ex.Message}");
+                return;
+            }
             StatusText = "Connection Error";
             SetError(ex);
             _log.Error(Constants.LogCatInit, "Connection failed", ex);
         }
     }
+
+    /// <summary>Set while something is deliberately retrying <c>ConnectCommand</c> and owns
+    /// the user-facing message itself (see ProxyDeployViewModel's post-inject retry).
+    /// Suppresses BOTH the red "Connection Error" on an expected failure and the
+    /// "Connecting..." status — the latter because it repaints once per attempt and would
+    /// otherwise erase the countdown a moment after it appears.</summary>
+    public bool SuppressConnectErrors { get; set; }
 
     [RelayCommand]
     private async Task DisconnectAsync()
@@ -2609,6 +2640,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         // confirmed-working — but only after the session proves stable (guards a
         // proxy that loads + connects then crashes the game seconds into play).
         ScheduleProxyConfirmation(state);
+
+        // Warn when more than one process has the dumper loaded. This is where every
+        // other post-connect action lives, and both ConnectAsync and the proxy
+        // TriggerScanAsync funnel through here — the check used to run ONLY from the
+        // Pointers.RescanApplied lambda, i.e. only after a UE-override apply or an Extra
+        // Scan, so an ordinary Connect never raised it. The pipe name is shared, so
+        // Connect lands on whichever server is free: the tree fills with the WRONG
+        // GAME'S data and nothing else on screen reveals it. ADDED here rather than
+        // moved — RescanApplied is a duplicated hand-rolled fan-out that never reaches
+        // this method, so moving the call would delete the one path that already worked.
+        // The check is idempotent. (B9)
+        _ = CheckForCompetingDumperHostsAsync(state);
 
         StatusText = $"Connected — UE{state.UEVersion} ({state.ObjectCount} objects)";
 

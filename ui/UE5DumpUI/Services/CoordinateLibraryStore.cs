@@ -19,11 +19,14 @@ namespace UE5DumpUI.Services;
 ///     orphan a hand-curated list.
 ///  2. <see cref="CoordinateLibraryJsonContext"/> does NOT use
 ///     <c>WhenWritingDefault</c>, so a legitimate 0.0 coordinate is written.
-///  3. Keeps a rolling <c>.bak</c> of the previous good file, and
-///     <see cref="SavePreImportBackup"/> writes a distinct <c>.preimport.bak</c>
-///     before an import commits. This is hand-curated data; a crash-on-write or a
-///     botched Replace-import is by far the worst failure mode in this feature, and
-///     it is the one thing <see cref="BookmarkStore"/> does not defend against.
+///  3. Keeps a rolling <c>.bak</c> of the previous good file, plus two distinct
+///     one-shot backups: <see cref="SavePreImportBackup"/> (<c>.preimport.bak</c>)
+///     before an import commits, and <see cref="SavePreClearBackup"/>
+///     (<c>.preclear.bak</c>) before a "Clear all". This is hand-curated data; a
+///     crash-on-write, a botched Replace-import or a mis-clicked clear are by far the
+///     worst failure modes in this feature, and they are the ones
+///     <see cref="BookmarkStore"/> does not defend against. The rolling <c>.bak</c>
+///     cannot stand in for either: the next Save overwrites it.
 /// </summary>
 public sealed class CoordinateLibraryStore
 {
@@ -169,6 +172,27 @@ public sealed class CoordinateLibraryStore
         {
             var path = PathFor(key);
             var bak = path + ".preimport.bak";
+            return TryRollToBackup(path, bak) ? bak : "";
+        }
+    }
+
+    /// <summary>
+    /// Snapshot the current on-disk library to <c>.preclear.bak</c>. Called immediately
+    /// before <see cref="Delete"/> so a mis-clicked "Clear all" is recoverable.
+    /// Returns the backup path, or "" when nothing was backed up.
+    ///
+    /// A DISTINCT file from both the rolling <c>.bak</c> and <c>.preimport.bak</c> on
+    /// purpose: the rolling one is overwritten by the very next Save — and
+    /// <c>OnCoordZToleranceChanged</c> saves on every spinner nudge — so after a clear
+    /// it survives about two clicks. This one is only ever written by a clear.
+    /// </summary>
+    public string SavePreClearBackup(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return "";
+        lock (_ioLock)
+        {
+            var path = PathFor(key);
+            var bak = path + ".preclear.bak";
             return TryRollToBackup(path, bak) ? bak : "";
         }
     }

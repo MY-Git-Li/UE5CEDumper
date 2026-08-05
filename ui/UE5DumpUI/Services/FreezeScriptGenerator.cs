@@ -214,36 +214,12 @@ public static class FreezeScriptGenerator
     /// Escape a string for embedding inside single-quoted Lua literals.
     /// Mirrors BakedScriptGenerator's escape rules.
     /// </summary>
-    public static string EscapeLua(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return "";
-        var sb = new StringBuilder(s.Length + 8);
-        for (int i = 0; i < s.Length; i++)
-        {
-            char ch = s[i];
-            switch (ch)
-            {
-                case '\\': sb.Append("\\\\"); break;
-                case '\'': sb.Append("\\'"); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '\t': sb.Append("\\t"); break;
-                case ']':
-                {
-                    // See BakedScriptGenerator.EscapeLua: a closing long bracket of
-                    // any level would terminate AOBMaker's [==[ ... ]==] wrapper
-                    // around the whole script. Inputs here are engine-derived today,
-                    // but the escapers are documented mirrors -- keep them mirrors.
-                    int j = i + 1;
-                    while (j < s.Length && s[j] == '=') j++;
-                    sb.Append(j < s.Length && s[j] == ']' ? "\\093" : "]");
-                    break;
-                }
-                default:   sb.Append(ch);    break;
-            }
-        }
-        return sb.ToString();
-    }
+    public static string EscapeLua(string s) => CeLuaHygiene.EscapeLuaString(s);
+
+    // R2: the body used to live here, hand-copied. Its own comment said "keep them
+    // mirrors" — which is a divergence being maintained by hand, and there is no
+    // reason for two implementations of one escape table. The name stays so callers
+    // and tests do not churn; the behaviour is now defined in exactly one place.
 
     private static void Line(StringBuilder sb, string s = "") => sb.Append(s).Append('\n');
 }

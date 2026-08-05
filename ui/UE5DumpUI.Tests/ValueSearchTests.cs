@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json.Nodes;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
@@ -1281,7 +1281,8 @@ public class ValueSearchTests
             int maxResults = 50000, bool deep = false, bool crossObject = false,
             bool nativeC = false, bool newestFirst = false, int pageSize = 1000,
             int deadlineMs = 15000, bool autoSkipNoise = false,
-            FloatRoundMode roundMode = FloatRoundMode.Round, CancellationToken ct = default)
+            FloatRoundMode roundMode = FloatRoundMode.Round, int perSlotCap = 256,
+        CancellationToken ct = default)
         {
             GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject, nativeC, newestFirst));
             LastGroupDeadlineMs = deadlineMs;
@@ -1309,6 +1310,19 @@ public class ValueSearchTests
         {
             LastGroupQueryExclude = excludeClasses;
             return Task.FromResult(NextGroupWindowResult);
+        }
+
+        /// <summary>Leaves handed back by <c>QueryGroupSlotLeavesAsync</c>, and a count of
+        /// how many times it was actually called — the toggle must NOT re-query to collapse.</summary>
+        public List<GroupSlotMatch> NextSlotLeaves { get; } = new();
+        public int SlotLeafQueries { get; private set; }
+
+        public override Task<IReadOnlyList<GroupSlotMatch>> QueryGroupSlotLeavesAsync(
+            ulong sessionId, GroupSlotMatch slot, string instanceAddr, string className,
+            int offset = 0, int limit = 0, CancellationToken ct = default)
+        {
+            SlotLeafQueries++;
+            return Task.FromResult<IReadOnlyList<GroupSlotMatch>>(NextSlotLeaves.ToList());
         }
 
         public override Task EndGroupScanAsync(ulong sessionId, CancellationToken ct = default)
@@ -1633,6 +1647,237 @@ public class ValueSearchTests
         // Defensive fallback: when LeafValue is empty, the target is used.
         var noLeaf = new GroupCandidate { Slots = { new GroupSlotMatch { FieldName = "Str", Value = "24", LeafValue = "" } } };
         Assert.Equal("Str=24", noLeaf.SlotSummary);
+    }
+
+    [Fact]
+    public void GroupCandidate_SlotSummary_AnnotatesTheFieldsItIsNotShowing()
+    {
+        // A row displays ONE assignment out of the many an object may satisfy. On
+        // the DumperTest sample slot 0 kept {Health.CurrentValue, TickCount} and
+        // slot 1 kept 36 leaves including FrozenInt; the row showed the Health pair
+        // and the TickCount/FrozenInt pair was reported as a missed match. The
+        // "(+N)" annotation is what stops a valid row reading as an exhaustive one.
+        var gc = new GroupCandidate
+        {
+            Slots =
+            {
+                new GroupSlotMatch { FieldName = "Health.CurrentValue", LeafValue = "19",  MatchCount = 2  },
+                new GroupSlotMatch { FieldName = "Health.BaseValue",    LeafValue = "100", MatchCount = 36 },
+            },
+        };
+        Assert.Equal("Health.CurrentValue=19 (+1), Health.BaseValue=100 (+35)", gc.SlotSummary);
+
+        // A slot that matched exactly one field says nothing extra.
+        var single = new GroupCandidate
+        {
+            Slots = { new GroupSlotMatch { FieldName = "Str", LeafValue = "24", MatchCount = 1 },
+                      new GroupSlotMatch { FieldName = "Def", LeafValue = "10", MatchedOffsets = { 0x24 } } },
+        };
+        Assert.Equal("Str=24, Def=10", single.SlotSummary);
+
+        // The Snapshot / SPC shape: MatchCount stays 0 but MatchedOffsets carries one
+        // entry per distinct matching field, so those panels get the SAME annotation.
+        // Fixing this in Value Search alone is what turned the last round into a
+        // second, separate report.
+        var snapshotShape = new GroupCandidate
+        {
+            Slots = { new GroupSlotMatch { FieldName = "Hp",  LeafValue = "23",
+                                           MatchedOffsets = { 0x40, 0x44 } },
+                      new GroupSlotMatch { FieldName = "Max", LeafValue = "100",
+                                           MatchedOffsets = { 0x44, 0x48, 0x4C } } },
+        };
+        Assert.Equal("Hp=23 (+1), Max=100 (+2)", snapshotShape.SlotSummary);
+    }
+
+    [Fact]
+    public void GroupSlotMatch_DisplayLabel_ShowsAnAddressOnlyWhenItIsTheLeafsOwn()
+    {
+        // A deep / container leaf has no object-relative offset, so the DLL stores 0.
+        // On the LIVE path `Addr` is that leaf's real address, so show it.
+        var live = new GroupSlotMatch
+        {
+            FieldName = "Tunes[2]", FieldOffset = 0, FieldType = "IntProperty",
+            ScanType = "Changed", Locked = true,
+            Addr = "0x1F2A3B4C700", HasLeafAddress = true,
+        };
+        Assert.Equal("Tunes[2]  ≠ changed → 0x1F2A3B4C700  (IntProperty)", live.DisplayLabel);
+
+        // On the SNAPSHOT path the element's heap address was never captured and
+        // `Addr` is the OWNING OBJECT's base. Printing it would name the UObject
+        // header as the place the value lives — a plausible, copyable, wrong address.
+        // Say nothing instead. (Before the leaf-address flag existed this rendered
+        // "→ 0x1F2A3B4C500", which is the defect this test exists to hold shut.)
+        var snapshot = new GroupSlotMatch
+        {
+            FieldName = "Tunes[2]", FieldOffset = 0, FieldType = "IntProperty",
+            ScanType = "Changed", Locked = true,
+            Addr = "0x1F2A3B4C500", HasLeafAddress = false,
+        };
+        Assert.Equal("Tunes[2]  ≠ changed  (IntProperty)", snapshot.DisplayLabel);
+        Assert.DoesNotContain("0x", snapshot.DisplayLabel);
+
+        // A real offset always wins over either.
+        var direct = new GroupSlotMatch
+        {
+            FieldName = "Hp", FieldOffset = 0x40, FieldType = "FloatProperty",
+            ScanType = "Changed", Locked = true,
+            Addr = "0x1F2A3B4C540", HasLeafAddress = true,
+        };
+        Assert.Equal("Hp  ≠ changed → 0x40  (FloatProperty)", direct.DisplayLabel);
+    }
+
+    [Fact]
+    public void GroupSlotMatch_DisplayLabel_UnlockedStillNamesTheDisplayedField()
+    {
+        // Before: "= unchanged: 36 candidate offset(s)" — a count, no name. The
+        // expanded row was therefore no help at all in finding out that one of
+        // those 36 offsets was FrozenInt.
+        var slot = new GroupSlotMatch
+        {
+            FieldName = "Health.BaseValue", FieldOffset = 0x504, FieldType = "FloatProperty",
+            ScanType = "Unchanged", Locked = false,
+            MatchedOffsets = { 52, 100, 1284, 1308 },
+        };
+        Assert.Equal("Health.BaseValue  = unchanged → 0x504  — 1 of 4 matching field(s)",
+                     slot.DisplayLabel);
+        Assert.Equal("×4", slot.LockLabel);
+    }
+
+    [Fact]
+    public async Task QueryGroupCandidatesAsync_ReadsMatchCount()
+    {
+        var svc = MakeService(out var pipe);
+        pipe.SetHandler(req => new JsonObject
+        {
+            ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true,
+            ["session_id"] = 1UL, ["total"] = 1, ["filtered_total"] = 1,
+            ["candidates"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["instance_addr"] = "0x112FBCB4600",
+                    ["class_name"]    = "DumperTestActor",
+                    ["slots"] = new JsonArray
+                    {
+                        new JsonObject
+                        {
+                            ["slot_index"] = 0, ["scan_type"] = "Changed",
+                            ["field_name"] = "Health.CurrentValue", ["leaf_value"] = "19",
+                            ["match_count"] = 2,
+                            ["matched_offsets"] = new JsonArray { 1288, 1304 },
+                        },
+                    },
+                },
+            },
+        });
+
+        var res = await svc.QueryGroupCandidatesAsync(1UL, 0, 100, ct: TestContext.Current.CancellationToken);
+
+        var slot = Assert.Single(Assert.Single(res.Candidates).Slots);
+        Assert.Equal(2, slot.MatchCount);
+        Assert.True(slot.HasHiddenLeaves);
+        Assert.Equal(" (+1)", slot.HiddenLeavesSuffix);
+    }
+
+    [Fact]
+    public async Task LoadGroupSlotLeaves_SecondPressCollapses_WithoutAnotherRoundTrip()
+    {
+        // "All fields" is the only control for the list, so it has to close it too:
+        // two open slots run to dozens of rows and there was no way back.
+        var (vm, fake) = MakeVm();
+        vm.GroupSessionId = 7;
+        fake.NextSlotLeaves.Add(new GroupSlotMatch { FieldName = "TickCount", LeafValue = "219" });
+        fake.NextSlotLeaves.Add(new GroupSlotMatch { FieldName = "FrozenInt", LeafValue = "424242" });
+        var slot = new GroupSlotMatch
+        {
+            SlotIndex = 0, InstanceAddr = "0x17849EC4600", ClassName = "DumperTestActor",
+        };
+
+        await vm.LoadGroupSlotLeavesCommand.ExecuteAsync(slot);
+        Assert.Equal(2, slot.Leaves.Count);
+        Assert.Equal(1, fake.SlotLeafQueries);
+
+        // Collapse is local — pressing again must not ask the DLL a second time.
+        await vm.LoadGroupSlotLeavesCommand.ExecuteAsync(slot);
+        Assert.Empty(slot.Leaves);
+        Assert.Equal(1, fake.SlotLeafQueries);
+
+        // Re-opening DOES re-query, so a live scan never shows a stale snapshot.
+        await vm.LoadGroupSlotLeavesCommand.ExecuteAsync(slot);
+        Assert.Equal(2, slot.Leaves.Count);
+        Assert.Equal(2, fake.SlotLeafQueries);
+    }
+
+    [Fact]
+    public async Task QueryGroupSlotLeavesAsync_AsksForTheSlot_AndCarriesItsIdentityOntoEveryLeaf()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true,
+                ["total"] = 2, ["count"] = 2,
+                ["leaves"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["field_name"] = "Health.BaseValue", ["field_offset"] = 1284,
+                        ["field_type"] = "FloatProperty", ["leaf_value"] = "100",
+                        ["addr"] = "0x112FBCB4B04", ["owner_addr"] = "0x112FBCB4600",
+                        ["owner_class"] = "DumperTestActor",
+                    },
+                    new JsonObject
+                    {
+                        ["field_name"] = "FrozenInt", ["field_offset"] = 1308,
+                        ["field_type"] = "IntProperty", ["leaf_value"] = "424242",
+                        ["addr"] = "0x112FBCB4B1C", ["owner_addr"] = "0x112FBCB4600",
+                        ["owner_class"] = "DumperTestActor",
+                    },
+                },
+            };
+        });
+
+        var slot = new GroupSlotMatch
+        {
+            SlotIndex = 1, ScanType = "Unchanged", Value = "0",
+            Addr = "0x112FBCB4B04",   // the displayed leaf — the deep-block tie-breaker
+        };
+        var leaves = await svc.QueryGroupSlotLeavesAsync(
+            7UL, slot, "0x112FBCB4600", "DumperTestActor",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal("query_group_slot_leaves", captured!["cmd"]?.GetValue<string>());
+        Assert.Equal(7UL, captured["session_id"]?.GetValue<ulong>());
+        Assert.Equal("0x112FBCB4600", captured["instance_addr"]?.GetValue<string>());
+        Assert.Equal(1, captured["slot_index"]?.GetValue<int>());
+        // Without this the server falls back to the first candidate sharing the
+        // instance address — with `deep` that is a DIFFERENT container block, i.e.
+        // another block's fields answering this row.
+        Assert.Equal("0x112FBCB4B04", captured["leaf_addr"]?.GetValue<string>());
+        // Paging is opt-in — an unpaged fetch must not pin a limit on the wire.
+        Assert.False(captured.ContainsKey("offset"));
+        Assert.False(captured.ContainsKey("limit"));
+
+        Assert.Equal(2, leaves.Count);
+        // The leaf a row could never show, now named — this is the whole point.
+        Assert.Equal("FrozenInt", leaves[1].FieldName);
+        Assert.Equal("424242", leaves[1].LeafValue);
+        Assert.Equal(1308, leaves[1].FieldOffset);
+        foreach (var leaf in leaves)
+        {
+            // Carries the SLOT's identity, so it renders and hands off like the
+            // representative does...
+            Assert.Equal(1, leaf.SlotIndex);
+            Assert.Equal("Unchanged", leaf.ScanType);
+            Assert.Equal("0x112FBCB4600", leaf.InstanceAddr);
+            Assert.Equal("DumperTestActor", leaf.ClassName);
+            // ...and a leaf IS one identified field, not a converging set.
+            Assert.True(leaf.Locked);
+        }
+        Assert.Equal("FrozenInt  = unchanged → 0x51C  (IntProperty)", leaves[1].DisplayLabel);
     }
 
     [Fact]

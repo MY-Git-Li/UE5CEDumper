@@ -574,7 +574,15 @@
                              ToolTip.Tip="{StaticResource str.Tip.TP.LibZTol}"/>
             </StackPanel>
 
-            <DataGrid ItemsSource="{Binding CoordResults}"
+            <!-- x:Name so the code-behind can attach AOT-safe sort comparers. Without them
+                 the X / Y / Z / Yaw / Dist headers animate and never reorder: their
+                 SortMemberPath either walks a NESTED path no column binding roots
+                 (Entry.X) or names a property whose binding is a different one
+                 (Distance vs DistanceText), so the reflection Avalonia uses to read the
+                 sort key is trimmed away. Label / Group / Map sorted fine, which made it
+                 read as an intermittent app bug. See Helpers/DataGridSortComparers. (B16) -->
+            <DataGrid x:Name="CoordGrid"
+                      ItemsSource="{Binding CoordResults}"
                       SelectedItem="{Binding SelectedCoord, Mode=TwoWay}"
                       MaxHeight="300"
                       IsReadOnly="True" CanUserResizeColumns="True"
@@ -589,15 +597,15 @@
                 <DataGridTextColumn Header="Map" Binding="{Binding Map}"
                                     Width="130" MinWidth="60" SortMemberPath="Map"/>
                 <DataGridTextColumn Header="X" Binding="{Binding XText}"
-                                    Width="90" SortMemberPath="Entry.X"/>
+                                    Width="90" SortMemberPath="Entry.X" CanUserSort="True"/>
                 <DataGridTextColumn Header="Y" Binding="{Binding YText}"
-                                    Width="90" SortMemberPath="Entry.Y"/>
+                                    Width="90" SortMemberPath="Entry.Y" CanUserSort="True"/>
                 <DataGridTextColumn Header="Z" Binding="{Binding ZText}"
-                                    Width="80" SortMemberPath="Entry.Z"/>
+                                    Width="80" SortMemberPath="Entry.Z" CanUserSort="True"/>
                 <DataGridTextColumn Header="Yaw" Binding="{Binding YawText}"
-                                    Width="70" SortMemberPath="Entry.Yaw"/>
+                                    Width="70" SortMemberPath="Entry.Yaw" CanUserSort="True"/>
                 <DataGridTextColumn Header="Dist" Binding="{Binding DistanceText}"
-                                    Width="80" SortMemberPath="Distance"/>
+                                    Width="80" SortMemberPath="Distance" CanUserSort="True"/>
               </DataGrid.Columns>
             </DataGrid>
 

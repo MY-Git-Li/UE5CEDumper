@@ -308,8 +308,20 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     /// live writes across a class's instances. When off the context submenu hides.</summary>
     public bool ForceEnabled => _experimentalGate?.IsEnabled ?? false;
 
+    /// <summary>Whether to show the Force submenu at all: the experimental gate AND a
+    /// selected row that can actually be forced. Both halves are needed and neither can
+    /// carry the other — the gate alone left the submenu open with nothing usable in it,
+    /// and the row alone would bypass the experimental gate. (B36)</summary>
+    public bool ForceMenuVisible => ForceEnabled && (SelectedResult?.CanForceAny ?? false);
+
+    partial void OnSelectedResultChanged(PropertySearchMatch? value)
+        => OnPropertyChanged(nameof(ForceMenuVisible));
+
     private void OnExperimentalGateChanged(object? sender, EventArgs e)
-        => OnPropertyChanged(nameof(ForceEnabled));
+    {
+        OnPropertyChanged(nameof(ForceEnabled));
+        OnPropertyChanged(nameof(ForceMenuVisible));
+    }
 
     /// <summary>Active force-field holds (from get_forced_fields) — the "N held"
     /// honesty list shown at the panel bottom.</summary>

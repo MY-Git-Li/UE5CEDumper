@@ -1,0 +1,227 @@
+﻿// ============================================================
+// DumperTestActor — the property zoo UE5CEDumper is verified against.
+//
+// WHY THIS EXISTS. Half of docs/todo.md § Pending live-game verification is
+// blocked not on effort but on FINDING A GAME that happens to contain the right
+// UPROPERTY. `TSet`/`TMap` scanning has been ⬜ since build 927, `TOptional`
+// since 942, the NumericAll byte family since 796 — every one of them reads
+// "needs a live game with such UPROPERTYs". This actor IS that game, and unlike
+// a commercial title it is free, repeatable, and its expected values are written
+// down.
+//
+// EVERY CJK LITERAL IS A \uXXXX ESCAPE, ON PURPOSE. A .cpp saved without a
+// UTF-8 BOM is re-interpreted by MSVC through the system code page, which would
+// silently corrupt exactly the strings B28 is about — the test would then be
+// measuring the compiler, not the dumper. Escapes are encoding-proof. The glyphs
+// are in the trailing comment so the file still reads.
+//
+// B28's trigger, restated so the literals below are checkable: an FText whose
+// character count is EVEN and which contains a character whose LOW byte is 0x00
+// (一 U+4E00, 最 U+6700, 言 U+8A00, 退 U+9000). In UTF-16LE such a character is
+// stored `00 4E` — a NUL at an even byte offset, which is what a UTF-8/ASCII
+// reader trips over.
+// ============================================================
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "DumperTestTypes.h"
+#include "DumperTestActor.generated.h"
+
+/// A plain UObject (not an Actor) owned by ADumperTestActor.
+///
+/// Three jobs: (1) give Related Objects a genuine owned sub-object edge to
+/// follow, (2) give "Locate in GWorld" a target that is only reachable THROUGH
+/// an object pointer rather than through the level's actor list, and (3) give
+/// Solide's force-ObjectProperty-to-null a strong pointer it is allowed to null
+/// (weak/soft/lazy are refused by design).
+UCLASS()
+class DUMPERTEST_API UDumperTestPayload : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	/// 統一言語 — even (4), contains U+4E00 and U+8A00. The B28 trigger, on a
+	/// non-Actor UObject, because ReadFTextString does not care what owns it.
+	UPROPERTY() FText   PayloadText;
+	UPROPERTY() FString PayloadString;
+	UPROPERTY() int32   PayloadValue = 0;
+
+	void Populate();
+};
+
+UCLASS()
+class DUMPERTEST_API ADumperTestActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ADumperTestActor();
+
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	// ========================================================
+	// B28 — FText. The whole reason this project exists.
+	// Expected: every one of these renders as CJK in Live Walker / Property
+	// Search. FAIL is short ASCII punctuation soup (`,{1`, `-N?e`).
+	// ========================================================
+
+	/// 統一 — 2 chars (EVEN), one U+xx00 (一). Primary trigger.
+	UPROPERTY() FText Text_Even2_OneNull;
+
+	/// 一言 — 2 chars (EVEN), BOTH chars are U+xx00. Strongest trigger: the
+	/// UTF-16LE bytes are `00 4E 00 8A`, i.e. NUL at offsets 0 and 2.
+	UPROPERTY() FText Text_Even2_TwoNull;
+
+	/// 統一言語 — 4 chars (EVEN), two U+xx00. Longer even case.
+	UPROPERTY() FText Text_Even4_TwoNull;
+
+	/// 走一步 — 3 chars (ODD), exactly one U+xx00 (一). CONTROL: odd length must render
+	/// correctly both before and after the fix; if only this one works, the
+	/// length parity is still being used as an encoding signal.
+	UPROPERTY() FText Text_Odd3_OneNull;
+
+	/// 日本語テスト — 6 chars (EVEN), NO U+xx00 anywhere. CONTROL: even length
+	/// alone must not trigger anything.
+	UPROPERTY() FText Text_Even6_NoNull;
+
+	/// Pure ASCII. CONTROL for the other direction — a fix that swings to
+	/// "always UTF-16" breaks this one.
+	UPROPERTY() FText Text_Ascii;
+
+	/// NSLOCTEXT, so this FText carries a DIFFERENT FTextHistory than the
+	/// FromString ones above. Same glyphs as Text_Even4_TwoNull: if the two
+	/// disagree, the bug is in history traversal, not in decoding.
+	UPROPERTY() FText Text_Localized;
+
+	/// Empty FText — the null/empty display-string path.
+	UPROPERTY() FText Text_Empty;
+
+	// ========================================================
+	// FString mirrors of the same strings. These went through the UTF-16-only
+	// reader and NEVER had B28, so they are the control group: if an FString
+	// here is wrong too, the problem is not B28 and the FText result means
+	// nothing.
+	// ========================================================
+	UPROPERTY() FString Str_Even2_OneNull;
+	UPROPERTY() FString Str_Even4_TwoNull;
+	UPROPERTY() FString Str_Odd3_OneNull;
+	UPROPERTY() FString Str_Even6_NoNull;
+
+	/// FName holding CJK — the FNamePool path (Serie), which is neither of the
+	/// two above.
+	UPROPERTY() FName Name_Cjk;
+
+	// ========================================================
+	// Value Search containers — ⬜ since builds 796 / 927 / 942 purely for want
+	// of a game containing them.
+	// ========================================================
+
+	/// V1a. Expect rows rendered as `Set[idx]`. Scan 4242.
+	UPROPERTY() TSet<int32> Set_Int;
+
+	/// V1a. Expect `Map.Key[idx]` / `Map.Value[idx]`. Scan 222.
+	UPROPERTY() TMap<FName, int32> Map_NameToInt;
+
+	/// V1a, non-FName key so the key type is not the only shape tested.
+	UPROPERTY() TMap<int32, float> Map_IntToFloat;
+
+	UPROPERTY() TArray<int32> Arr_Int;
+
+	/// The struct-element container the opt-in deep descent walks.
+	UPROPERTY() TArray<FDumperTestStat> Arr_Struct;
+
+	// ========================================================
+	// V1c — TOptional. Verified available in UE 5.4: FOptionalProperty exists
+	// (PropertyOptional.h) and UHT resolves it (UhtOptionalProperty.cs); the
+	// only inner-type rule is CanBeContainerValue, which int32/float/FString
+	// all satisfy. The engine itself ships TOptional<FBox> / TOptional<uint32>
+	// UPROPERTYs.
+	// ========================================================
+	UPROPERTY() TOptional<int32>   Opt_Int_Set;
+	UPROPERTY() TOptional<float>   Opt_Float_Set;
+	UPROPERTY() TOptional<FString> Opt_Str_Set;
+
+	/// Deliberately LEFT UNSET. The acceptance criterion is negative: a scan for
+	/// 0 must NOT surface this (the bIsSet gate). An unset optional that shows
+	/// up as a zero is the bug.
+	UPROPERTY() TOptional<int32> Opt_Int_Unset;
+
+	// ========================================================
+	// NumericAll / byte families. -5 and 255 are the exact boundary cases
+	// BuildNumericTargets' range gating is unit-tested against (300 → no
+	// Int8/UInt8; -5 → Int8 yes / UInt8 no), so a live scan here is directly
+	// comparable to the offline expectation.
+	// ========================================================
+	UPROPERTY() int8   I8_Neg;
+	UPROPERTY() uint8  U8_Small;
+	UPROPERTY() uint8  U8_Max;
+	UPROPERTY() int16  I16;
+	UPROPERTY() uint16 U16;
+	UPROPERTY() int32  I32;
+	UPROPERTY() int64  I64;
+
+	/// 513.36f is the repo's own worked example for the Round/Trunc/Ceil switch
+	/// (it renders as 513.36 / 513.4 / 513 depending on mode).
+	UPROPERTY() float  F32;
+	UPROPERTY() double F64;
+
+	// ========================================================
+	// RAW, NON-UPROPERTY members — invisible to reflection, so they become the
+	// holes "Guess What" (Ubel::GuessGapTypes) and the Native-C value scan are
+	// supposed to find. Deliberately sited HERE, in the middle of the reflected
+	// fields, so the gap is INTERIOR: a trailing raw block would still be inside
+	// PropertiesSize but is the easy case, and interior holes are what a real
+	// game's native HP/MP look like.
+	// ========================================================
+	int32  RawInt;
+	float  RawFloat;
+	double RawDouble;
+
+	// ---- bool masks: three bitfields sharing one byte, plus a full bool ----
+	UPROPERTY() uint8 bFlagA : 1;
+	UPROPERTY() uint8 bFlagB : 1;
+	UPROPERTY() uint8 bFlagC : 1;
+	UPROPERTY() bool  bPlainBool;
+
+	UPROPERTY() EDumperTestGrade Grade;
+
+	/// ArrayDim > 1 — a C array UPROPERTY, which is a different property shape
+	/// from TArray and is easy to get wrong in an exporter.
+	UPROPERTY() int32 FixedArr[8];
+
+	/// Nested StructProperty, GAS-attribute shaped.
+	UPROPERTY() FDumperTestAttribute Health;
+
+	/// Strong object pointer to the owned payload.
+	UPROPERTY() TObjectPtr<UDumperTestPayload> Payload;
+
+	// ========================================================
+	// Group Scan / Snapshot Mode B (temporal). The documented hard case is
+	// "Current HP went DOWN while Max HP stayed UNCHANGED" — groups need
+	// Unchanged. Health.CurrentValue falls 1/sec and wraps 1 → 100 (so both
+	// Decreased and Increased occur); Health.BaseValue never moves. TickCount
+	// rises monotonically; FrozenInt is the never-touched control.
+	// ========================================================
+	UPROPERTY() int32 TickCount;
+	UPROPERTY() int32 FrozenInt;
+
+private:
+	void OnSecondTick();
+
+	/// Draw TickCount / Health on screen once a second. The actor is invisible by
+	/// design, so without this "is the timer running?" needs the dumper attached and
+	/// the object walked -- and a scan that finds nothing changed is indistinguishable
+	/// from a game that is not ticking. -DumperTestNoHud suppresses it.
+	void DrawHeartbeat() const;
+
+	/// Frames since BeginPlay. Driven by Tick, so it advances even if the 1 Hz timer
+	/// never fires -- which is the entire point: a blank screen and a dead timer used
+	/// to look identical, because the heartbeat was drawn BY the thing it was meant to
+	/// be testing. Not a UPROPERTY: it must not become another scan target.
+	int32 FrameCount = 0;
+
+	FTimerHandle TickHandle;
+};

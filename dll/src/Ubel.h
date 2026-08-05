@@ -94,7 +94,13 @@ ClassInfo WalkClass(uintptr_t uclassAddr);
 // Walk a UClass/UStruct with extended type metadata per field.
 // Calls WalkClass(), then enriches each FieldInfo with struct types,
 // inner types, enum names, bool masks, etc. by reading FProperty chain.
-ClassInfo WalkClassEx(uintptr_t uclassAddr);
+//
+// MEMOIZED, and returns a REFERENCE into that memo — bind it with `const auto&`
+// unless you actually need a mutable copy. The entry is immortal for the process
+// (node-based map, never erased or cleared), so the reference stays valid; a null
+// uclassAddr yields a reference to a shared empty ClassInfo. Do not cast away the
+// const: mutating the returned object would corrupt every later caller's view.
+const ClassInfo& WalkClassEx(uintptr_t uclassAddr);
 
 // --- Shared reflection field lookup ---
 // (Extracted from the Debug Camera helpers in Frieren.cpp, build 1014;

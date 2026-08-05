@@ -218,39 +218,61 @@ static const char* const kWinmmExports[kWinmmExportCount] = {
     "waveOutWrite",                  // f179 @182
 };
 
-// Populate mProcs from the real System32 winmm.dll, once. Called from the asm
-// forwarding thunks on the FIRST forwarded call. The SRWLOCK serialises
-// concurrent first-callers so none observes a half-populated mProcs[].
+// Populate mProcs from the real System32 winmm.dll, once, on the FIRST forwarded call.
+//
+// NO LOCK, deliberately (audit #4 B43). This used to hold an EXCLUSIVE SRWLOCK across
+// LoadLibraryW AND a Sein log write. LoadLibraryW takes the loader lock, so a thunk
+// reached from a foreign DllMain -- which already holds it -- inverts the lock order
+// against any thread that took ours first. The dxgi original's safety argument was
+// explicitly CONDITIONAL on RHI init being the only entry point; this generator was
+// emitting that conclusion as a constant for every DLL, and it does not transfer --
+// winmm's timeGetTime family is callable from any thread at any time.
+//
+// A lock is not needed for correctness. mProcs[] entries are pointer-sized and
+// aligned, so a store cannot tear; two racing resolvers write IDENTICAL values (the
+// same GetProcAddress results from the same module), so the work is idempotent and
+// the worst case is doing it twice. What the lock DID buy -- nobody observes a
+// half-populated table -- is preserved by the thunk itself, which tests its own slot
+// and calls back here while it is still null.
+//
+// The 'spin until resolved' alternative is REJECTED and must stay rejected: a thread
+// created from DllMain cannot start until the loader lock is released, so a spinning
+// thunk would deadlock DETERMINISTICALLY, not occasionally.
 extern "C" void WinmmProxy_EnsureResolved()
 {
-    static SRWLOCK s_lock = SRWLOCK_INIT;
-    static bool    s_done = false;
+    // NO early-out gate either. A 'first caller wins, others return' check would let
+    // the loser return with its slot STILL NULL, and the thunk's next instruction is
+    // `jmp rax` -- an immediate AV at RIP=0. Racing resolvers are idempotent (same
+    // module, same names, same addresses), so every caller simply does the work and
+    // returns with the table populated. LoadLibraryW is refcounted; a duplicate is cheap.
 
-    AcquireSRWLockExclusive(&s_lock);
-    if (!s_done) {
-        s_done = true;
+    wchar_t sysDir[MAX_PATH] = {};
+    GetSystemDirectoryW(sysDir, MAX_PATH);
 
-        wchar_t sysDir[MAX_PATH] = {};
-        GetSystemDirectoryW(sysDir, MAX_PATH);
+    wchar_t realPath[MAX_PATH] = {};
+    wsprintfW(realPath, L"%s\\winmm.dll", sysDir);
 
-        wchar_t realPath[MAX_PATH] = {};
-        wsprintfW(realPath, L"%s\\winmm.dll", sysDir);
-
-        HMODULE real = LoadLibraryW(realPath);
-        if (real) {
-            int resolved = 0;
-            for (int i = 0; i < kWinmmExportCount; ++i) {
-                mProcs[i] = reinterpret_cast<uintptr_t>(GetProcAddress(real, kWinmmExports[i]));
-                if (mProcs[i]) ++resolved;
-            }
-            LOG_INFO("winmm proxy: lazily forwarded %d/%d exports to real System32 winmm.dll",
-                     resolved, kWinmmExportCount);
-        } else {
-            LOG_ERROR("winmm proxy: FAILED to load real System32 winmm.dll (err=%lu) -- forwarded calls will crash",
-                      GetLastError());
+    HMODULE real = LoadLibraryW(realPath);
+    int resolved = 0;
+    if (real) {
+        for (int i = 0; i < kWinmmExportCount; ++i) {
+            mProcs[i] = reinterpret_cast<uintptr_t>(GetProcAddress(real, kWinmmExports[i]));
+            if (mProcs[i]) ++resolved;
         }
     }
-    ReleaseSRWLockExclusive(&s_lock);
+
+    // Logging is the ONE thing that should happen once -- it is file I/O, and a
+    // duplicate line would misreport a race as two resolves. Claimed after the work,
+    // never around it.
+    static volatile LONG s_logged = 0;
+    if (InterlockedCompareExchange(&s_logged, 1, 0) != 0) return;
+    if (real) {
+        LOG_INFO("winmm proxy: lazily forwarded %d/%d exports to real System32 winmm.dll",
+                 resolved, kWinmmExportCount);
+    } else {
+        LOG_ERROR("winmm proxy: FAILED to load real System32 winmm.dll (err=%lu) -- forwarded calls will crash",
+                  GetLastError());
+    }
 }
 
 #endif // UE5_PROXY_WINMM_BUILD

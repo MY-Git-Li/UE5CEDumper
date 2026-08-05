@@ -214,13 +214,14 @@ the old dedup-by-offset falsely "locked" multi-element slots).
 
 ## 4. Pipe / UI surface
 
-- **Pipe** — `begin_group_scan` (`values[]`, optional `deep`, optional `cross_object`),
-  `refine_group_scan`, `query_group_candidates`, `end_group_scan`. Each input slot carries
+- **Pipe** — `begin_group_scan` (`values[]`, optional `deep`, optional `cross_object`, optional
+  `per_slot_cap`), `refine_group_scan`, `query_group_candidates`, `query_group_slot_leaves`,
+  `end_group_scan`. Each input slot carries
   `value`, `data_type`, (P2) `scan_type` (default `Exact`; begin = Exact/Bigger/Smaller/Between,
   refine also Changed/Unchanged/Increased/Decreased), and `value2` (Between upper bound only).
   Object-level candidate with nested `slots[]` (each: `value`, `scan_type`, `value2`,
   `field_name`, `field_offset`, `field_type`, `leaf_value`, `addr`, `owner_addr`, `owner_class`,
-  `matched_offsets[]`, `locked`). `owner_addr` (P4) is the object directly holding the leaf —
+  `matched_offsets[]`, `locked`, `match_count`). `owner_addr` (P4) is the object directly holding the leaf —
   the actor, or an owned sub-object for a cross-object leaf; `owner_class` (P4 inc 2) is that
   owning object's class and drives the per-slot Pivot handoff. See [pipe-protocol.md](pipe-protocol.md).
 - **UI** — Value Search tab Single/Group `ToggleSwitch`; group mode = 2–4 row editable
@@ -232,6 +233,57 @@ the old dedup-by-offset falsely "locked" multi-element slots).
   / Copy / Pivot) reuse the single-value events; a cross-object slot's object handoffs (Live
   Walker / Locate) target the owning sub-object (via `owner_addr`) and its Pivot handoff targets
   the owner's class (via `owner_class`, P4 inc 2).
+
+### 4.1 What a row shows — ONE witness, not the match
+
+This is the single most-misread part of the feature, and the source of four separate
+"the group scan missed my field" reports that were all correct results.
+
+A slot does not converge to one field. `GroupCandidate::slotMatches[s]` holds **every** leaf
+that satisfied slot `s` — up to `per_slot_cap` (default **256**, clamp 8–4096; that kept list
+is also what a later prev-value refine re-reads, so a small cap silently hides an object's own
+fields behind its inherited ones). An object with 36 unchanged numeric fields keeps 36.
+
+The results row has room for one field per slot, so `Radar::PickGroupWitnessAssignment` picks
+one leaf per slot under three rules, in order: the leaf the active filter matched; a leaf from
+the **same struct** as one already shown (`Health.CurrentValue` beside `Health.BaseValue`, not
+beside `PrimaryActorTick.TickInterval`); any leaf not already claimed by an earlier slot. The
+no-two-slots-share-a-leaf rule is what makes the row a genuine *assignment* — a row reading
+`X=0, X=0` would claim something `MatchGroup` forbids.
+
+**Inside every one of those rules, a non-zero value wins.** A zero carries almost no meaning in a
+game — engine bookkeeping fields sit at 0 by default — so the default row used to read
+`PrimaryActorTick.TickInterval=0, InitialLifeSpan=0`: a valid pairing and the least informative
+one the candidate could offer, while its real fields had matched too. `Radar::IsZeroValueText`
+is a **tie-break within** each rule, never a rule of its own: a slot whose leaves are *all* zero
+still shows one (an empty cell would be a worse lie), and a zero the user explicitly filtered for
+still wins its slot.
+
+**Every other matching field is still matched.** It just has no row. On the DumperTest sample a
+`Changed` + `Unchanged` refine kept `{Health.CurrentValue, TickCount}` for slot 0 and 36 leaves
+including `FrozenInt` for slot 1 — two equally valid pairs, one row.
+
+**And no automatic rule can produce a *particular* pairing.** With 2 kept leaves in one
+slot and 36 in the other there are 72 valid assignments, and nothing in the data
+distinguishes `FrozenInt` from the other 35 unchanged fields — the scan cannot know you
+meant it rather than `I16`. Naming the fields is the only way to say which, which is why
+the filter is **space = AND** (`Radar::SplitFilterTerms`): `tickcount frozenint` keeps the
+candidate *and* gives each named field its own slot in the row.
+
+Four things exist so a matched field never reads as a miss:
+- `match_count` on each slot, surfaced as the master row's `(+35)` annotation and the detail
+  row's `1 of 36 matching field(s)`;
+- `query_group_slot_leaves`, which names the other 35 and returns each as a full slot match, so
+  the per-slot handoffs act on them ("All fields" in the expanded row — press again to collapse).
+  The list is ordered **object's own fields first** (`OrderGroupSlotLeaves`), because leaves are
+  collected base-class-first and the engine's would otherwise fill the visible window;
+- the server-side **filter**, which walks every leaf of every slot — so typing a field name or a
+  value brings that pairing to the front of the row, and **two terms name both halves of one
+  specific pairing**.
+
+The witness rule lives in `Radar`, beside the filter, deliberately: while it lived inside
+`Fern.cpp`'s JSON encoder no test could reach it, and it kept drifting away from the filter that
+must agree with it. Keep selection/naming logic in `Radar`; leave `Fern` a thin encoder.
 
 -----
 

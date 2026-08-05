@@ -193,6 +193,25 @@ enum class AobResolve : uint8_t {
     SymbolCallFollow = 5,  // MSVC mangled symbol → address IS a function → scan body for RIP refs
 };
 
+// Can this winner's (pattern, instrOffset+opcodeLen, instrOffset+totalLen) triple be
+// replayed by a CE script? Only for the RIP forms.
+//
+//  • SymbolExport / SymbolCallFollow store an MSVC MANGLED NAME in `pattern`, not a
+//    byte string. Handing it to AOBScanModuleUE scans for the literal characters of
+//    "?GWorld@@3VUWorldProxy@@A" and finds nothing.
+//  • CallFollow's `pattern` IS a byte string, but the address comes from following the
+//    CALL and scanning the callee body — a fixed offset into the match cannot express it.
+//
+// All three also carry instrOffset/opcodeLen/totalLen = 0, so the emitted range would be
+// the degenerate [0, 0) even if the pattern were scannable. Publishing any of them makes
+// the UI's "an AOB is available" test (non-empty string) true while every address in the
+// exported table resolves to `??` — audit #4 B2.
+constexpr bool IsCeReplayableAob(AobResolve r) {
+    return r == AobResolve::RipDirect
+        || r == AobResolve::RipDeref
+        || r == AobResolve::RipBoth;
+}
+
 // Unified AOB signature descriptor.
 // All fields are POD — constexpr-constructible, stored in .rdata.
 struct AobSignature {

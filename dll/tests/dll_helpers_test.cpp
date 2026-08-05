@@ -19,6 +19,7 @@
 //     RequiredAlignment now consults ElemSize and CasePreservingName mode.
 // ============================================================
 
+#include "../src/Himmel.h"  // AobResolve + IsCeReplayableAob + the shipped pattern tables
 #include "../src/Renge.h"
 #include "../src/Scharf.h"
 #include "../src/Radar.h"
@@ -33,9 +34,13 @@
 #include "../src/Orden.h"       // Multi-value group scan: source-agnostic SDR matcher (MatchGroup)
 #include "../src/Ubel.h"        // Native-C scan P0: ComputeHoles / ComputeClassHoles / NormalizeGuessedTypeToProperty (inline, pure)
 #include "../src/Aura.h"        // IsEnginePackage (header-inline, pure) — engine/game package gate
+#include "../src/Tot.h"         // Cancellation flags: cancel-immunity vs background-worker (B4)
+#include "../src/Routine.h"    // SafeThread — detaching-on-destroy thread wrapper
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
+
+#include <thread>
 
 #include <algorithm>
 #include <cstdio>
@@ -1646,6 +1651,195 @@ static void Test_NumericFamily_Filter() {
     EXPECT("parse empty->Any",   ParseNumericFamily("")             == NumericFamily::Any);
 }
 
+// Which leaf each slot DISPLAYS. Reproduces the DumperTest sample exactly: a
+// Changed + Unchanged refine where slot 0 kept {Health.CurrentValue, TickCount}
+// and slot 1 kept {PrimaryActorTick.TickInterval, Health.BaseValue, FrozenInt}.
+// Two valid assignments, one row — and for four separate reports the pair the
+// row did not pick was read as a missed match.
+//
+// The rule used to live inside Fern.cpp's JSON builder where no test could reach
+// it, which is how it kept drifting away from the filter it must agree with.
+static void Test_Radar_PickGroupWitnessAssignment() {
+    using namespace Radar;
+
+    auto desc = [](const char* defining, const char* field) {
+        FieldDescriptor d;
+        d.className = "DumperTestActor";
+        d.definingClassName = defining;
+        d.fieldName = field;
+        d.fieldType = "IntProperty";
+        return d;
+    };
+    std::vector<FieldDescriptor> descs = {
+        desc("Actor",                "PrimaryActorTick.TickInterval"),  // 0
+        desc("DumperTestAttribute",  "Health.BaseValue"),               // 1
+        desc("DumperTestAttribute",  "Health.CurrentValue"),            // 2
+        desc("DumperTestActor",      "TickCount"),                      // 3
+        desc("DumperTestActor",      "FrozenInt"),                      // 4
+    };
+
+    auto leaf = [](uint32_t descIdx, uintptr_t addr, int32_t value) {
+        GroupSlotMatch m;
+        m.descriptorIdx = descIdx;
+        m.leafAddr      = addr;
+        m.offset        = static_cast<int32_t>(addr);
+        std::memcpy(m.prevValue, &value, sizeof(value));
+        return m;
+    };
+
+    std::vector<SlotSpec> slots(2);
+    slots[0].dt = DataType::Int32; slots[0].st = ScanType::Changed;
+    slots[1].dt = DataType::Int32; slots[1].st = ScanType::Unchanged;
+
+    // The real offsets from the 2026-08-05 session: FrozenInt @0x51C == 1308.
+    std::vector<std::vector<GroupSlotMatch>> sm = {
+        { leaf(2, 1288, 19),  leaf(3, 1304, 101) },
+        { leaf(0,   52,  0),  leaf(1, 1284, 100), leaf(4, 1308, 424242) },
+    };
+
+    // A zero is almost never the value being hunted (engine bookkeeping sits at 0
+    // by default), so `TickInterval=0, InitialLifeSpan=0` is the least useful pair
+    // a candidate can show. Non-zero wins INSIDE each rule.
+    EXPECT("zero: plain / decimal / signed / vector forms",
+           IsZeroValueText("0") && IsZeroValueText("0.0") && IsZeroValueText("-0.00") &&
+           IsZeroValueText("0, 0, 0") && IsZeroValueText(" 0 "));
+    EXPECT("zero: any non-zero digit disqualifies",
+           !IsZeroValueText("1") && !IsZeroValueText("0.5") && !IsZeroValueText("100") &&
+           !IsZeroValueText("0, 0, 1"));
+    EXPECT("zero: non-numeric text is not a zero",
+           !IsZeroValueText("") && !IsZeroValueText("-") && !IsZeroValueText("Elite"));
+
+    // No filter: slot 0 takes its first free leaf, and slot 1 then prefers a
+    // SIBLING from the same struct — Health.BaseValue, not the engine tick field
+    // that happens to come first.
+    auto plain = PickGroupWitnessAssignment(sm, slots, descs, {});
+    EXPECT("witness: slot0 -> Health.CurrentValue", plain.size() == 2 && plain[0] == 0);
+    EXPECT("witness: slot1 prefers the same struct over the first free leaf", plain[1] == 1);
+
+    // Pass 3 skips a leading zero. Reproduces the default first-scan row that read
+    // `PrimaryActorTick.TickInterval=0, InitialLifeSpan=0` — a valid pairing and a
+    // useless one, while the same object's real fields had matched too.
+    std::vector<std::vector<GroupSlotMatch>> zeroFirst = {
+        { leaf(0,   52,      0), leaf(3, 1304,    183) },   // TickInterval=0, TickCount=183
+        { leaf(0, 1216,      0), leaf(4, 1308, 424242) },   // (zero), FrozenInt=424242
+    };
+    auto nonZero = PickGroupWitnessAssignment(zeroFirst, slots, descs, {});
+    EXPECT("zero: slot0 skips the 0 and shows TickCount", nonZero[0] == 1);
+    EXPECT("zero: slot1 skips the 0 too", nonZero[1] == 1);
+
+    // But a slot with NOTHING but zeros must still show one — the fallback is a
+    // tie-break, not a filter, and an empty cell would be a worse lie.
+    std::vector<std::vector<GroupSlotMatch>> allZero = {
+        { leaf(3, 1304, 0) },
+        { leaf(4, 1308, 0) },
+    };
+    auto zeros = PickGroupWitnessAssignment(allZero, slots, descs, {});
+    EXPECT("zero: an all-zero slot still reports its leaf",
+           zeros.size() == 2 && zeros[0] == 0 && zeros[1] == 0);
+
+    // And an explicitly filtered-for zero still wins: the tie-break lives INSIDE
+    // each rule, so it can never outrank what the user actually asked for.
+    std::vector<std::vector<GroupSlotMatch>> askedForZero = {
+        { leaf(3, 1304, 183), leaf(0, 52, 0) },   // TickCount first, the 0 second
+        { leaf(4, 1308, 424242) },
+    };
+    auto asked = PickGroupWitnessAssignment(
+        askedForZero, slots, descs, SplitFilterTerms("tickinterval"));
+    EXPECT("zero: a filtered-for zero still wins its slot", asked[0] == 1);
+
+    // Filtering by NAME must bring that field to the front of its own slot...
+    auto byName = PickGroupWitnessAssignment(sm, slots, descs, SplitFilterTerms("tickcount"));
+    EXPECT("witness: filter 'tickcount' -> slot0 shows TickCount", byName[0] == 1);
+    // ...and the sibling rule then pairs it with the other field of the SAME
+    // class, which is exactly the TickCount/FrozenInt pairing that was reported
+    // missing while both had matched all along.
+    EXPECT("witness: and slot1 pairs it with FrozenInt (same defining class)", byName[1] == 2);
+
+    // Filtering by VALUE goes through GroupSlotValueString — the same call the
+    // server-side filter matches on, so a row can never show a leaf the filter
+    // did not match.
+    auto byValue = PickGroupWitnessAssignment(sm, slots, descs, SplitFilterTerms("424242"));
+    EXPECT("witness: filter '424242' -> slot1 shows FrozenInt", byValue[1] == 2);
+
+    // TWO TERMS = the only way to ask for a SPECIFIC pairing. With 2 x 3 kept
+    // leaves (2 x 36 in the real case) nothing in the data says which of the many
+    // valid pairings you meant, so naming both fields is the request. Each term
+    // must land in its OWN slot — one greedy slot taking both would put the second
+    // named field nowhere, which is the whole defect.
+    auto twoTerms = PickGroupWitnessAssignment(
+        sm, slots, descs, SplitFilterTerms("tickcount frozenint"));
+    EXPECT("witness: 'tickcount frozenint' -> slot0 = TickCount", twoTerms[0] == 1);
+    EXPECT("witness: 'tickcount frozenint' -> slot1 = FrozenInt", twoTerms[1] == 2);
+
+    // Order-independent: the user should not have to know which value is slot 0.
+    auto reversed = PickGroupWitnessAssignment(
+        sm, slots, descs, SplitFilterTerms("frozenint tickcount"));
+    EXPECT("witness: term order does not decide slot order",
+           reversed[0] == 1 && reversed[1] == 2);
+
+    // Extra whitespace must not create empty terms (an empty term matches every
+    // leaf and would silently disable the pairing).
+    EXPECT("terms: whitespace collapsed, lower-cased",
+           SplitFilterTerms("  TickCount\t frozenINT  ").size() == 2 &&
+           SplitFilterTerms("  TickCount\t frozenINT  ")[0] == "tickcount" &&
+           SplitFilterTerms("  TickCount\t frozenINT  ")[1] == "frozenint");
+    EXPECT("terms: empty filter yields no terms", SplitFilterTerms("   ").empty());
+
+    // Distinctness: when both slots keep the SAME leaf first, they must not both
+    // display it. "PrimaryActorTick.TickInterval=0, PrimaryActorTick.TickInterval=0"
+    // is a value apparently paired with itself, which MatchGroup forbids outright.
+    std::vector<std::vector<GroupSlotMatch>> shared = {
+        { leaf(0, 52, 0), leaf(1, 1284, 100) },
+        { leaf(0, 52, 0), leaf(1, 1284, 100) },
+    };
+    auto distinct = PickGroupWitnessAssignment(shared, slots, descs, {});
+    EXPECT("witness: no leaf is displayed by two slots",
+           shared[0][distinct[0]].leafAddr != shared[1][distinct[1]].leafAddr);
+
+    // An empty slot claims nothing and must not disturb the later slots. The
+    // filter picks the SECOND leaf, so an implementation that lost its place
+    // (or just returned zeros) fails here rather than passing by construction.
+    std::vector<std::vector<GroupSlotMatch>> withEmpty = {
+        {},
+        { leaf(1, 1284, 100), leaf(4, 1308, 424242) },
+    };
+    auto emptied = PickGroupWitnessAssignment(withEmpty, slots, descs, SplitFilterTerms("frozen"));
+    EXPECT("witness: an empty slot is skipped and later slots still filter",
+           emptied.size() == 2 && emptied[0] == 0 && emptied[1] == 1);
+
+    // A descriptorIdx past the pool must never index it. Slot 0 leads with a
+    // corrupt entry and the filter matches only the SECOND leaf, so the guard has
+    // to skip rather than match-or-crash — asserting index 1 is what makes this
+    // test fail on a missing bounds check instead of passing on a default 0.
+    std::vector<std::vector<GroupSlotMatch>> bad = {
+        { leaf(99, 4096, 7), leaf(1, 1284, 100) },
+        { leaf(4, 1308, 424242) },
+    };
+    auto guarded = PickGroupWitnessAssignment(bad, slots, descs, SplitFilterTerms("health"));
+    EXPECT("witness: an out-of-range descriptor is skipped, not indexed",
+           guarded.size() == 2 && guarded[0] == 1 && guarded[1] == 0);
+
+    // ---- leaf-list display order ----
+    // Leaves arrive base-class-first, so an actor's list opens with engine fields
+    // and the ones the user came for are thirty rows down a 220px scrolling box.
+    // The object's OWN declared fields come first. A leaf nested in a STRUCT
+    // reports the struct as its defining class, so it stays in the second tier —
+    // it is not a field of this class either.
+    auto ordered = OrderGroupSlotLeaves(sm[1], descs);
+    EXPECT("order: 3 leaves in, 3 out", ordered.size() == 3);
+    EXPECT("order: FrozenInt (declared by DumperTestActor) comes first",
+           descs[sm[1][ordered[0]].descriptorIdx].fieldName == "FrozenInt");
+    // ...and the two it jumped are still in their original relative order.
+    EXPECT("order: the inherited/nested tier keeps scan order",
+           descs[sm[1][ordered[1]].descriptorIdx].fieldName == "PrimaryActorTick.TickInterval" &&
+           descs[sm[1][ordered[2]].descriptorIdx].fieldName == "Health.BaseValue");
+    // Ordering must not drop or duplicate anything — it decides what is VISIBLE.
+    std::vector<size_t> seen = ordered;
+    std::sort(seen.begin(), seen.end());
+    EXPECT("order: a permutation, nothing lost or repeated",
+           seen.size() == 3 && seen[0] == 0 && seen[1] == 1 && seen[2] == 2);
+}
+
 // Group-scan server-side class filter: exclude skip + histogram bucket on the
 // candidate's OBJECT-level class (first non-empty slot's match), including the
 // defensive case where slot 0 is empty so the class comes from a later slot.
@@ -1931,7 +2125,9 @@ static Denken::MemReader MakeReader(const std::vector<DenkenRegion>* regions) {
                 return n;
             }
         }
-        return 0;
+        
+
+    return 0;
     };
 }
 
@@ -2680,6 +2876,37 @@ static Orden::Leaf OrdenLeafFloat(int32_t pos, float v) {
     return OrdenLeaf(Radar::DataType::Float, pos, &v, 4);
 }
 
+static void Test_Orden_PerSlotCap() {
+    // The cap decides what a LATER refine can re-read, and leaves arrive in field
+    // declaration order (base class first). A cap of 8 therefore stored only AActor's
+    // early fields for every DumperTestActor candidate, and a Changed refine pruned all
+    // 618 of them to zero -- which read as "group scan cannot see my property".
+    // Measured 2026-08-05; the diagnostic said `leaves entered=8 ... predicate-said-no=8`.
+    std::vector<Orden::Leaf> leaves;
+    for (int i = 0; i < 40; ++i) leaves.push_back(OrdenLeafI32(i * 4, 100 + i));
+
+    Radar::NumericTargetSet lo, hi;
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "0",      lo);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "100000", hi);
+    Orden::SlotTarget st{};
+    st.targets = &lo; st.st = Radar::ScanType::Between; st.targets2 = &hi;
+    std::vector<Orden::SlotTarget> slots = { st, st };
+
+    std::vector<Orden::SlotMatches> out;
+    bool truncated = false;
+    EXPECT("cap: 40 leaves still match",
+           Orden::MatchGroup(leaves, slots, out, Orden::kDefaultPerSlotCap, &truncated));
+    EXPECT("cap: every satisfying leaf kept (the refine re-reads this list)",
+           out[0].leafIdx.size() == 40);
+    EXPECT("cap: nothing dropped under the default", !truncated);
+
+    std::vector<Orden::SlotMatches> capped;
+    bool tr2 = false;
+    Orden::MatchGroup(leaves, slots, capped, 8, &tr2);
+    EXPECT("cap: an explicit small cap still bounds the list", capped[0].leafIdx.size() == 8);
+    EXPECT("cap: and truncation is REPORTED, not silent", tr2);
+}
+
 static void Test_Orden_DistinctValues() {
     // Four numeric leaves at scattered offsets; four slots in a DIFFERENT order.
     // Mirrors the spec example: Str 24, Def 10, Dex 14, Int 8.
@@ -3055,6 +3282,215 @@ static bool PatMatchAt(const Macht::ParsedPattern& pat,
     return true;
 }
 
+// Routine::SafeThread — the fix for the fast-fail that TWO generations of exception
+// guards could not touch, because there was never an exception: `~std::thread()` on a
+// still-joinable thread calls std::terminate() DIRECTLY.
+//
+// This test is its own negative control. Swap SafeThread back to std::thread and the
+// test EXECUTABLE dies with 0xC0000409 instead of failing an assertion — the same
+// fast-fail the game was taking. Verified that way before shipping.
+static void Test_Routine_SafeThread() {
+    std::printf("Test_Routine_SafeThread\n");
+
+    std::atomic<int> ran{0};
+
+    // 1. Destructed while STILL RUNNING. This is the game-close case: the worker is
+    //    mid-tick, nothing joined it, and the static destructor runs.
+    {
+        Routine::SafeThread t;
+        t = std::thread([&] {
+            for (int i = 0; i < 50 && ran.load() < 1000; ++i) {
+                ran.fetch_add(1);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        });
+        EXPECT("running thread is joinable", t.joinable());
+    }   // <-- std::thread would terminate() here
+    EXPECT("survived destruction of a running thread", true);
+
+    // 2. Destructed after the thread FINISHED but was never joined. Still joinable —
+    //    the object holds an id — so std::thread terminates here too. This is the more
+    //    common shape at process exit, where Windows has already killed the thread.
+    {
+        Routine::SafeThread t;
+        t = std::thread([] {});
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        EXPECT("finished-but-unjoined is still joinable", t.joinable());
+    }
+    EXPECT("survived destruction of a finished thread", true);
+
+    // 3. Move-assigned OVER a live thread. std::thread's own move-assign terminates
+    //    when the target is joinable — the exact shape Fern's m_stopping flag was
+    //    added to dodge by hand.
+    {
+        Routine::SafeThread t;
+        t = std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(30)); });
+        t = std::thread([] {});   // <-- std::thread would terminate() here
+        EXPECT("survived move-assign over a live thread", true);
+    }
+
+    // 4. The ordinary path still works: joinable, join, then no longer joinable.
+    {
+        Routine::SafeThread t;
+        std::atomic<bool> done{false};
+        t = std::thread([&] { done.store(true); });
+        t.join();
+        EXPECT("join() ran the body", done.load());
+        EXPECT("not joinable after join", !t.joinable());
+    }   // destructor on a joined thread is a no-op for both types
+
+    EXPECT("the running thread actually started", ran.load() > 0);
+}
+
+// B34 — Cheat Engine must never be auto-scanned as if it were the game.
+//
+// The first version of this guard was an exact-name list and shipped "verified". A live
+// capture then showed the DLL scanning CE for 5.8 s and opening the game pipe inside it,
+// because the real executable is cheatengine-x86_64-SSE4-AVX2.exe — a CPU-feature variant
+// none of the three listed names matched. That exact string is the first assertion here.
+static void Test_Grimoire_IsCheatEngineExeName() {
+    std::printf("Test_Grimoire_IsCheatEngineExeName\n");
+
+    // The name from the failing capture. If only one line of this test survives, this one.
+    EXPECT("SSE4-AVX2 variant (the live miss)",
+           IsCheatEngineExeName(L"cheatengine-x86_64-SSE4-AVX2.exe"));
+
+    EXPECT("plain x86_64",   IsCheatEngineExeName(L"cheatengine-x86_64.exe"));
+    EXPECT("i386",           IsCheatEngineExeName(L"cheatengine-i386.exe"));
+    EXPECT("launcher shim",  IsCheatEngineExeName(L"Cheat Engine.exe"));
+    EXPECT("case-insensitive", IsCheatEngineExeName(L"CHEATENGINE-X86_64.EXE"));
+    // A variant that does not exist yet must also match — that is the point of a prefix.
+    EXPECT("hypothetical future variant",
+           IsCheatEngineExeName(L"cheatengine-x86_64-AVX512.exe"));
+
+    // Anchored at the start, so a game that merely CONTAINS the words is not refused.
+    EXPECT("substring is not enough",  !IsCheatEngineExeName(L"MyCheatEngineClone.exe"));
+    EXPECT("unrelated game",           !IsCheatEngineExeName(L"DQ7R-Win64-Shipping.exe"));
+    EXPECT("empty",                    !IsCheatEngineExeName(L""));
+    EXPECT("null",                     !IsCheatEngineExeName(nullptr));
+}
+
+// B46 — HexToBytes could not fail, so write_mem could not report a bad pattern.
+static void Test_Renge_TryHexToBytes() {
+    std::printf("Test_Renge_TryHexToBytes\n");
+    std::vector<uint8_t> out;
+
+    EXPECT("plain hex parses", Renge::TryHexToBytes("DEADBEEF", out));
+    EXPECT("plain hex length", out.size() == 4);
+    EXPECT("plain hex bytes",
+           out.size() == 4 && out[0] == 0xDE && out[1] == 0xAD &&
+           out[2] == 0xBE && out[3] == 0xEF);
+
+    EXPECT("lowercase parses", Renge::TryHexToBytes("deadbeef", out));
+    EXPECT("lowercase bytes", out.size() == 4 && out[0] == 0xDE && out[3] == 0xEF);
+
+    // The exact string from the finding. strtoul turned every non-hex char into 0x00,
+    // so this was WRITTEN INTO THE GAME as {DE,0A,0D,BE,0E} and answered ok:true.
+    out.assign(1, 0xAA);
+    EXPECT("spaced hex is REJECTED (not silently mangled)",
+           !Renge::TryHexToBytes("DE AD BE EF", out));
+    EXPECT("rejected input leaves out untouched", out.size() == 1 && out[0] == 0xAA);
+
+    EXPECT("odd length rejected",     !Renge::TryHexToBytes("ABC", out));
+    EXPECT("0x prefix rejected",      !Renge::TryHexToBytes("0xAB", out));
+    EXPECT("non-hex letter rejected", !Renge::TryHexToBytes("ZZ", out));
+    EXPECT("empty rejected",          !Renge::TryHexToBytes("", out));
+}
+
+// B4 — the mailbox poller needs immunity from the PER-COMMAND cancel WITHOUT being
+// classified a background worker. One flag used to answer both questions; this asserts
+// they are now genuinely independent. The second EXPECT in the poller block is the
+// negative control for the tempting one-line "fix": calling MarkBackgroundWorker() on
+// the poller would satisfy the first assertion and break this one, which is what would
+// make UE5_CallProcessEventEx refuse (-8) the user's one-shot CE invokes.
+//
+// Each role runs on its own thread because the flags are thread_local; the threads are
+// joined one at a time, so the shared g_pass/g_fail counters are never raced.
+static void Test_Tot_CancelImmunityVsBackgroundWorker() {
+    std::printf("Test_Tot_CancelImmunityVsBackgroundWorker\n");
+
+    Tot::ResetPerCommand();
+    Tot::ResetShutdown();
+
+    // A fresh thread starts unmarked — the pipe-command case.
+    std::thread([] {
+        EXPECT("unmarked thread: no cancel pending",   !Tot::Requested());
+        EXPECT("unmarked thread: not a bg worker",     !Tot::IsBackgroundWorker());
+        Tot::RequestPerCommand();
+        EXPECT("unmarked thread HONOURS per-command",   Tot::Requested());
+    }).join();
+    // g_perCommand stays latched from here on — exactly the state a CE-only session is
+    // stuck in after a UI client dies mid-command (nothing clears it without Fern::Start).
+
+    // The Mimic poller: immune to the pipe's cancel, but NOT a background worker.
+    std::thread([] {
+        Tot::MarkCancelImmune();
+        EXPECT("poller IGNORES the latched per-command", !Tot::Requested());
+        EXPECT("poller is NOT a background worker",      !Tot::IsBackgroundWorker());
+        Tot::RequestShutdown();
+        EXPECT("poller still aborts on real shutdown",    Tot::Requested());
+        Tot::ResetShutdown();
+    }).join();
+
+    // A re-assert worker: unchanged on both axes (MarkBackgroundWorker sets both flags).
+    std::thread([] {
+        Tot::MarkBackgroundWorker();
+        EXPECT("bg worker ignores per-command",  !Tot::Requested());
+        EXPECT("bg worker reports as bg worker",  Tot::IsBackgroundWorker());
+        Tot::RequestShutdown();
+        EXPECT("bg worker aborts on shutdown",    Tot::Requested());
+        Tot::ResetShutdown();
+    }).join();
+
+    Tot::ResetPerCommand();
+    Tot::ResetShutdown();
+}
+
+static void Test_Sig_IsCeReplayableAob() {
+    std::printf("Test_Sig_IsCeReplayableAob\n");
+
+    // Only the RIP forms give CE a (pattern, pos, len) triple it can replay with
+    // AOBScanModuleUE + a fixed offset into the match.
+    EXPECT("RipDirect replayable",        IsCeReplayableAob(AobResolve::RipDirect));
+    EXPECT("RipDeref replayable",         IsCeReplayableAob(AobResolve::RipDeref));
+    EXPECT("RipBoth replayable",          IsCeReplayableAob(AobResolve::RipBoth));
+
+    // SymbolExport / SymbolCallFollow keep an MSVC MANGLED NAME in `pattern`. Publishing
+    // one made the UI's "an AOB is available" test (non-empty string) true, and every
+    // address in the exported CE table then resolved to `??` (audit #4 B2).
+    EXPECT("SymbolExport NOT replayable", !IsCeReplayableAob(AobResolve::SymbolExport));
+    EXPECT("SymbolCallFollow NOT repl.",  !IsCeReplayableAob(AobResolve::SymbolCallFollow));
+
+    // CallFollow's pattern IS a byte string, but the address comes from following the
+    // CALL and scanning the callee — no fixed offset into the match can express that.
+    EXPECT("CallFollow NOT replayable",   !IsCeReplayableAob(AobResolve::CallFollow));
+
+    // The structural reason the gate is needed at all: every non-replayable form also
+    // carries instrOffset/opcodeLen/totalLen = 0, so the published range would be the
+    // degenerate [0,0) even if the pattern itself were scannable. Assert that over the
+    // REAL shipped tables rather than trusting the macros.
+    int checkedExports = 0, checkedCallFollow = 0;
+    auto sweep = [&](const AobSignature* tbl, size_t n) {
+        for (size_t i = 0; i < n; ++i) {
+            const auto& sig = tbl[i];
+            if (IsCeReplayableAob(sig.resolve)) continue;
+            EXPECT("non-replayable has zero instrOffset", sig.instrOffset == 0);
+            EXPECT("non-replayable has zero opcodeLen",   sig.opcodeLen   == 0);
+            EXPECT("non-replayable has zero totalLen",    sig.totalLen    == 0);
+            if (sig.resolve == AobResolve::SymbolExport ||
+                sig.resolve == AobResolve::SymbolCallFollow) ++checkedExports;
+            if (sig.resolve == AobResolve::CallFollow) ++checkedCallFollow;
+        }
+    };
+    sweep(Sig::GOBJECTS_PATTERNS, std::size(Sig::GOBJECTS_PATTERNS));
+    sweep(Sig::GNAMES_PATTERNS,   std::size(Sig::GNAMES_PATTERNS));
+    sweep(Sig::GWORLD_PATTERNS,   std::size(Sig::GWORLD_PATTERNS));
+    sweep(Sig::GENGINE_PATTERNS,  std::size(Sig::GENGINE_PATTERNS));
+    // A gate nothing exercises is a gate that silently stops guarding.
+    EXPECT("tables still carry symbol entries",     checkedExports > 0);
+    EXPECT("tables still carry a CallFollow entry", checkedCallFollow > 0);
+}
+
 static void Test_Macht_ParsePattern_Nibble() {
     std::printf("Test_Macht_ParsePattern_Nibble\n");
     Macht::ParsedPattern p;
@@ -3246,6 +3682,7 @@ int main() {
     Test_SnapshotNoise_GuardrailAndSets();
     Test_NumericFamily_Filter();
     Test_GroupScan_ExcludeAndHistogram();
+    Test_Radar_PickGroupWitnessAssignment();
     Test_ValueScan_OrderedViewScale();
     Test_Macht_IsRipRelativeModRM();
     Test_ValueScan_SparseContainerGeometry();
@@ -3294,6 +3731,7 @@ int main() {
     Test_Neu_Edge();
 
     // Orden — multi-value group scan SDR matcher (synthetic leaves, no game)
+    Test_Orden_PerSlotCap();
     Test_Orden_DistinctValues();
     Test_Orden_MissingValueRejected();
     Test_Orden_DuplicateValuesSDR();
@@ -3314,7 +3752,20 @@ int main() {
     Test_Holes_NormalizeGuessedType();
 
     // Macht — AOB pattern parser: nibble wildcards (4? / ?5) + anchor selection
+    Test_Sig_IsCeReplayableAob();
     Test_Macht_ParsePattern_Nibble();
+
+    // Tot — per-command cancel immunity is independent of "is a background worker"
+    Test_Tot_CancelImmunityVsBackgroundWorker();
+
+    // Routine — SafeThread: ~std::thread on a joinable thread terminates the process
+    Test_Routine_SafeThread();
+
+    // Grimoire — Cheat Engine host detection (prefix, not an exact-name list)
+    Test_Grimoire_IsCheatEngineExeName();
+
+    // Renge — hex parsing has a failure channel (write_mem can refuse a bad pattern)
+    Test_Renge_TryHexToBytes();
 
     // DynOff — FFieldClass::Name probe (UE 5.8 virtual-dtor member shift)
     Test_FFieldClassName_Probe();

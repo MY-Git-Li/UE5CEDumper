@@ -8,15 +8,36 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.ViewModels;
 
 namespace UE5DumpUI.Views;
 
 public partial class TeleportPanel : UserControl
 {
+    /// <summary>AOT-safe sort comparers for the Coordinate Library grid. Five of its
+    /// columns were dead under trimming: X/Y/Z/Yaw sort on a NESTED path
+    /// (<c>Entry.X</c>) that no column binding roots, and Dist sorts on
+    /// <c>Distance</c> while binding <c>DistanceText</c> — both are exactly the trap
+    /// <c>Helpers/DataGridSortComparers</c> documents. Label/Group/Map worked, so the
+    /// symptom was "some headers do nothing", which reads as a flaky app. (B16)</summary>
+    private static readonly IReadOnlyDictionary<string, System.Collections.IComparer> CoordSortComparers =
+        new Dictionary<string, System.Collections.IComparer>
+        {
+            ["Label"]    = Helpers.DataGridSortComparers.Ordinal<CoordRow>(r => r.Label),
+            ["Group"]    = Helpers.DataGridSortComparers.Ordinal<CoordRow>(r => r.Group),
+            ["Map"]      = Helpers.DataGridSortComparers.Ordinal<CoordRow>(r => r.Map),
+            ["Entry.X"]  = Helpers.DataGridSortComparers.Double<CoordRow>(r => r.Entry.X),
+            ["Entry.Y"]  = Helpers.DataGridSortComparers.Double<CoordRow>(r => r.Entry.Y),
+            ["Entry.Z"]  = Helpers.DataGridSortComparers.Double<CoordRow>(r => r.Entry.Z),
+            ["Entry.Yaw"] = Helpers.DataGridSortComparers.Double<CoordRow>(r => r.Entry.Yaw),
+            ["Distance"] = Helpers.DataGridSortComparers.Double<CoordRow>(r => r.Distance),
+        };
+
     public TeleportPanel()
     {
         InitializeComponent();
+        this.FindControl<DataGrid>("CoordGrid")?.WireSortComparers(CoordSortComparers);
         // Tunnel KeyDown so we intercept the capture key before any focused
         // child (e.g. the BugItGo TextBox) consumes it.
         AddHandler(KeyDownEvent, OnTunnelKeyDown, RoutingStrategies.Tunnel);

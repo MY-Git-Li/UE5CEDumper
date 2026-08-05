@@ -76,6 +76,20 @@ static fs::path GetCacheFilePath() {
 }
 
 /// Get current UTC timestamp in ISO 8601 format.
+// Temp path for the write-then-rename. PER-PROCESS, and that is the whole point:
+// the four writers here and AobUsageService.SaveFileAsync on the C# side all target the
+// SAME cache file, from DIFFERENT processes, and used to build the byte-identical
+// "<file>.tmp". Each opens it with truncate. So the game's DLL could truncate the temp
+// file while the UI was mid-write, and whichever renamed last published a half-written
+// document over the real cache — losing, among other things, the user's
+// ueVersionUserOverride. The final rename is still last-writer-wins (that is the
+// existing, accepted semantics); what must not be shared is the staging file. (B39)
+static fs::path MakeTempPath(const fs::path& path) {
+    auto tmp = path;
+    tmp += L".tmp." + std::to_wstring(GetCurrentProcessId());
+    return tmp;
+}
+
 static std::string GetUtcTimestamp() {
     auto now = std::chrono::system_clock::now();
     auto t = std::chrono::system_clock::to_time_t(now);
@@ -299,8 +313,7 @@ void SaveResults(const char* peHash, const Genau::EnginePointers& ptrs,
         games[peHash] = rec;
 
         // Write atomically: temp file + rename
-        auto tempPath = path;
-        tempPath += L".tmp";
+        auto tempPath = MakeTempPath(path);
         {
             std::ofstream ofs(tempPath, std::ios::trunc);
             if (!ofs.is_open()) {
@@ -353,8 +366,7 @@ void UpdateGObjectsMethod(const char* peHash, const char* method) {
         go["patternId"] = "";   // the AOB pattern only matched a decoy — do not hint it next launch
 
         // Atomic write (temp + rename), mirroring SaveResults.
-        auto tempPath = path;
-        tempPath += L".tmp";
+        auto tempPath = MakeTempPath(path);
         {
             std::ofstream ofs(tempPath, std::ios::trunc);
             if (!ofs.is_open()) {
@@ -419,8 +431,7 @@ void SaveUserOverride(const char* peHash, uint32_t ueVersion,
 
         games[peHash] = rec;
 
-        auto tempPath = path;
-        tempPath += L".tmp";
+        auto tempPath = MakeTempPath(path);
         {
             std::ofstream ofs(tempPath, std::ios::trunc);
             if (!ofs.is_open()) {
@@ -490,8 +501,7 @@ void SaveInvokeTimeout(const char* peHash, int32_t timeoutMs,
 
         games[peHash] = rec;
 
-        auto tempPath = path;
-        tempPath += L".tmp";
+        auto tempPath = MakeTempPath(path);
         {
             std::ofstream ofs(tempPath, std::ios::trunc);
             if (!ofs.is_open()) {

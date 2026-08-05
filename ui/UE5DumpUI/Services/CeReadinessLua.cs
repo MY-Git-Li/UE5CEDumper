@@ -62,10 +62,15 @@ public static class CeReadinessLua
         Line(sb, indent, $"while waited < {ReadyTimeoutMs} do");
         Line(sb, indent, "  if mb == nil then");
         // Resolve inside the loop — CE's symbol handler may not see the fresh module yet.
-        Line(sb, indent, "    local okSym, addr = pcall(getAddress, 'g_invokeMailbox')");
-        Line(sb, indent, "    if okSym and addr and addr ~= 0 then");
-        Line(sb, indent, "      mb = addr");
-        Line(sb, indent, $"    elseif waited >= {SymbolGraceMs} then");
+        // BOTH spellings: depending on how CE picked up the module, an export is reachable
+        // bare or only as "<module>.<name>", and which one works is not predictable from
+        // here. lessons-learned.md mandates both; a single-spelling miss silently degrades
+        // this poll back to the blind fixed wait it exists to replace. (B33)
+        Line(sb, indent, "    for _, sym in ipairs({'g_invokeMailbox', 'UE5Dumper.g_invokeMailbox'}) do");
+        Line(sb, indent, "      local okSym, addr = pcall(getAddress, sym)");
+        Line(sb, indent, "      if okSym and addr and addr ~= 0 then mb = addr break end");
+        Line(sb, indent, "    end");
+        Line(sb, indent, $"    if mb == nil and waited >= {SymbolGraceMs} then");
         Line(sb, indent, "      break   -- symbol never appeared");
         Line(sb, indent, "    end");
         Line(sb, indent, "  end");

@@ -48,9 +48,19 @@ direction:
 
 To remove the bias entirely, set `UE5DUMP_PIPE_LOG_FULL=1` before launching
 UE5DumpUI (lifts the 1024-char cap), do ONE Copy CE XML, and re-run this script.
-Log rotation (4 x 8 MiB) then keeps the LAST ~32 MiB of that export as complete,
-untruncated payloads — a smaller sample than the prefixes give, but an unbiased
-one. `--coverage` reports how much of the sampled payload the cap hid.
+The pipe log rolls at 8 MiB and every rolled part is kept for the normal
+age-based retention window, so the WHOLE export is captured as complete,
+untruncated payloads. `--coverage` reports how much of the sampled payload the
+cap hid.
+
+  Corrected 2026-08-04. This used to promise "log rotation (4 x 8 MiB) keeps the
+  LAST ~32 MiB ... an unbiased one". Neither half was true: the sink was
+  configured with a size limit but no roll point, so it did not rotate at all —
+  it stopped writing at the first 8 MiB, and this script silently measured the
+  export's OPENING PREFIX, reintroducing exactly the bias the flag exists to
+  remove. Fixed in build 2585 (audit #4 B31); there is also no 4-file cap now,
+  because a generation COUNT limit is the retention policy this project
+  deliberately replaced with an age-based one.
 
 The `per scope` table is the reading to trust under truncation: sampling within
 one scope is uniform, so `field`'s used/unused ratio is sound even at 6% overall

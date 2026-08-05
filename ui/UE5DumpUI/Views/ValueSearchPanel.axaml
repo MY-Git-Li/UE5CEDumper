@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:UE5DumpUI.ViewModels"
              xmlns:m="using:UE5DumpUI.Models"
@@ -539,6 +539,19 @@
           <TextBlock Text="{Binding ScanTimeoutSeconds, StringFormat='{}{0}s'}"
                      Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
                      VerticalAlignment="Center" MinWidth="28"/>
+                     <!-- Group-only leaf budget. Powers of two, not a spinner: nothing between
+                          8/16/.../4096 changes behaviour, so free entry only invites a clamp.
+                          Lives in the GROUP options row - the first attempt put it in the
+                          SINGLE-mode row, where group mode never renders it. -->
+                     <TextBlock Text="{StaticResource str.VS.PerSlotCap}"
+                                Foreground="#CCCCCC" FontSize="12"
+                                VerticalAlignment="Center" Margin="12,0,4,0"
+                                ToolTip.Tip="{StaticResource str.Tip.VS.PerSlotCap}"/>
+                     <ComboBox ItemsSource="{Binding PerSlotCapChoices}"
+                               SelectedItem="{Binding GroupPerSlotCap}"
+                               Width="86" FontSize="12"
+                               VerticalAlignment="Center"
+                               ToolTip.Tip="{StaticResource str.Tip.VS.PerSlotCap}"/>
         </StackPanel>
 
         <!-- Rounding-mode hint for group mode. -->
@@ -582,6 +595,7 @@
           <AutoCompleteBox Grid.Column="1" Text="{Binding GroupFilterText, Mode=TwoWay}"
                    ItemsSource="{Binding GroupFilterHistory}" FilterMode="Contains"
                    PlaceholderText="{StaticResource str.VS.Group.FilterWatermark}"
+                   ToolTip.Tip="{StaticResource str.Tip.VS.Group.Filter}"
                    Padding="4,2" FontSize="12"/>
           <TextBlock Grid.Column="2" Text="{StaticResource str.VS.Sort}"
                      Foreground="#CCCCCC" VerticalAlignment="Center" Margin="12,0,6,0"/>
@@ -632,7 +646,8 @@
                   Foreground="#D4D4D4"
                   FontSize="12"
                   FontFamily="Consolas, Menlo, monospace"
-                  HorizontalScrollBarVisibility="Auto">
+                  HorizontalScrollBarVisibility="Auto"
+                  ToolTip.Tip="{StaticResource str.Tip.VS.Group.Matched}">
           <DataGrid.Columns>
             <DataGridTextColumn Header="Class" Binding="{Binding LocationLabel}" Width="280"/>
             <DataGridTextColumn Header="Instance" Binding="{Binding InstanceName}" Width="180"/>
@@ -669,14 +684,30 @@
                 <ItemsControl ItemsSource="{Binding Slots}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="m:GroupSlotMatch">
-                      <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2">
+                     <!-- Vertical: the slot's own row, then (on demand) EVERY field
+                          that slot matched. The row can show only one assignment, so
+                          without the list a matched field reads as a missed one. -->
+                     <StackPanel Margin="0,2">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
                         <TextBlock Text="{Binding LockLabel}" Width="36"
                                    Foreground="#4EC9B0" VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding DisplayLabel}" Width="380"
+                        <TextBlock Text="{Binding DisplayLabel}" Width="520"
                                    Foreground="#D4D4D4" VerticalAlignment="Center"
                                    TextTrimming="CharacterEllipsis"/>
                         <TextBlock Text="{Binding LeafValue}" Width="80"
                                    Foreground="#CE9178" VerticalAlignment="Center"/>
+                        <!-- FIRST of the buttons, not last: it is the answer to
+                             "why isn't my field here?", so it must be visible
+                             without scrolling the row sideways. Only shown when
+                             this slot stands in for more than one field. -->
+                        <Button Content="{StaticResource str.VS.Group.AllFields}"
+                                Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).LoadGroupSlotLeavesCommand}"
+                                CommandParameter="{Binding}"
+                                IsVisible="{Binding HasHiddenLeaves}"
+                                ToolTip.Tip="{StaticResource str.Tip.VS.Group.AllFields}"
+                                Foreground="#DCDCAA" Background="Transparent"
+                                BorderThickness="1" BorderBrush="#DCDCAA"
+                                Padding="6,2" FontSize="11" Cursor="Hand"/>
                         <Button Content="{StaticResource str.VS.OpenLive}"
                                 Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).OpenGroupSlotInLiveWalkerCommand}"
                                 CommandParameter="{Binding}"
@@ -711,6 +742,56 @@
                                 BorderThickness="1" BorderBrush="#C586C0"
                                 Padding="6,2" FontSize="11" Cursor="Hand"/>
                       </StackPanel>
+                      <!-- Every field this slot matched, by name. Empty until the
+                           "All fields" button fetches it (query_group_slot_leaves).
+                           Each entry is a full slot match, so the same handoffs apply.
+                           Height-capped and scrolled: per_slot_cap allows up to 4096
+                           leaves, and an uncapped list would make one expanded row
+                           thousands of pixels tall. -->
+                      <ScrollViewer MaxHeight="220" Margin="44,2,0,4"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                      <ItemsControl ItemsSource="{Binding Leaves}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="m:GroupSlotMatch">
+                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,1">
+                              <TextBlock Text="{Binding DisplayLabel}" Width="520"
+                                         Foreground="#9CDCFE" VerticalAlignment="Center"
+                                         TextTrimming="CharacterEllipsis"/>
+                              <TextBlock Text="{Binding LeafValue}" Width="80"
+                                         Foreground="#CE9178" VerticalAlignment="Center"/>
+                              <Button Content="{StaticResource str.VS.OpenLive}"
+                                      Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).OpenGroupSlotInLiveWalkerCommand}"
+                                      CommandParameter="{Binding}"
+                                      Foreground="#4EC9B0" Background="Transparent"
+                                      BorderThickness="1" BorderBrush="#4EC9B0"
+                                      Padding="6,1" FontSize="11" Cursor="Hand"/>
+                              <Button Content="{StaticResource str.VS.CopyAddr}"
+                                      Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).CopyGroupSlotAddressCommand}"
+                                      CommandParameter="{Binding}"
+                                      Foreground="#DCDCAA" Background="Transparent"
+                                      BorderThickness="1" BorderBrush="#DCDCAA"
+                                      Padding="6,1" FontSize="11" Cursor="Hand"/>
+                              <Button Content="{StaticResource str.VS.PivotThis}"
+                                      Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).PivotGroupSlotCommand}"
+                                      CommandParameter="{Binding}"
+                                      IsVisible="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).PivotEnabled}"
+                                      Foreground="#9CDCFE" Background="Transparent"
+                                      BorderThickness="1" BorderBrush="#9CDCFE"
+                                      Padding="6,1" FontSize="11" Cursor="Hand"/>
+                              <Button Content="{StaticResource str.VS.LocateGWorld}"
+                                      Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).LocateGroupSlotInGWorldCommand}"
+                                      CommandParameter="{Binding}"
+                                      ToolTip.Tip="{StaticResource str.Tip.VS.LocateGWorld}"
+                                      Foreground="#C586C0" Background="Transparent"
+                                      BorderThickness="1" BorderBrush="#C586C0"
+                                      Padding="6,1" FontSize="11" Cursor="Hand"/>
+                            </StackPanel>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      </ScrollViewer>
+                     </StackPanel>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>

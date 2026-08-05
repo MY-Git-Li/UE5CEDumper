@@ -64,11 +64,20 @@ public static class CeAutorunScriptGenerator
         Line(sb, "-- load time -- autorun runs before any process is attached.");
         Line(sb, "-- ================================================================");
         Line(sb);
-        CeLuaHygiene.AppendDebugPreamble(sb);
+        // LATE-BOUND on purpose. This file is loaded by CE's autorun at start-up, so the
+        // eager preamble would bind DEBUG to whatever UE5_DEBUG was before the Lua console
+        // even existed — making line 61's own instruction ("set UE5_DEBUG = 1 in the Lua
+        // console") impossible to follow. (B23)
+        CeLuaHygiene.AppendLateBoundDebugPreamble(sb);
         Line(sb);
         Line(sb, $"local DLL_PATH = '{CeLuaHygiene.EscapeLuaString(dllPath)}'");
         Line(sb);
 
+        // Emitted INSIDE each function, not hoisted to file scope. The helper's body
+        // names executeCodeEx, and this file's load-time invariant is checked
+        // textually ("nothing process-dependent at top level"): a definition does not
+        // run, but it does read as top-level work, and that invariant is worth more
+        // than the handful of duplicated lines it costs.
         EmitInject(sb);
         Line(sb);
         EmitShutdown(sb);
@@ -89,28 +98,52 @@ public static class CeAutorunScriptGenerator
         Line(sb, "-- Inject UE5Dumper.dll and wait until its pipe server is actually up.");
         Line(sb, "-- Returns true on success, false (after showing why) on failure.");
         Line(sb, "function ue5_inject()");
+        CeLuaHygiene.AppendCallDllHelper(sb, indent: "  ");
+        Line(sb);
         Line(sb, "  if getOpenedProcessID() == 0 then");
         Line(sb, "    showMessage('[UE5CEDumper] No game process is attached.\\n\\n' ..");
         Line(sb, "      'Attach Cheat Engine to the running game first (File > Open Process).')");
         Line(sb, "    return false");
         Line(sb, "  end");
         Line(sb);
-        // Re-injecting would double-map us and fight over the pipe.
+        // Re-injecting would double-map us and fight over the pipe. But "already
+        // loaded" splits two ways, and initState is what separates them — see the
+        // pushed-record twin in CeInjectScriptGenerator for the full reasoning.
         Line(sb, "  local okGet, probe = pcall(getAddress, 'UE5_Init')");
-        Line(sb, "  if okGet and probe and probe ~= 0 then");
-        Line(sb, "    showMessage('[UE5CEDumper] Already loaded in this process.\\n\\n' ..");
-        Line(sb, "      'No injection needed -- just launch UE5DumpUI.exe and click Connect.')");
-        Line(sb, "    return true");
+        Line(sb, "  local alreadyLoaded = okGet and probe and probe ~= 0");
+        Line(sb, "  if alreadyLoaded then");
+        Line(sb, $"    local READY, SKIPPED = {CeMailboxLayout.InitReady}, {CeMailboxLayout.InitSkipped}");
+        Line(sb, "    local okSym, mbNow = pcall(getAddress, 'g_invokeMailbox')");
+        Line(sb, "    local pre = nil");
+        Line(sb, "    if okSym and mbNow and mbNow ~= 0 then");
+        Line(sb, $"      local okRead, v = pcall(readInteger, mbNow + {CeMailboxLayout.OffInitState})");
+        Line(sb, "      pre = okRead and v or nil");
+        Line(sb, "    end");
+        Line(sb, "    if pre == READY or pre == SKIPPED then");
+        Line(sb, "      showMessage('[UE5CEDumper] Already loaded and serving in this process.\\n\\n' ..");
+        Line(sb, "        'No injection needed -- just launch UE5DumpUI.exe and click Connect.')");
+        Line(sb, "      return true");
+        Line(sb, "    end");
+        // Parked by a previous ue5_shutdown(): revive in place rather than re-injecting.
+        Line(sb, "    dbg('[UE5CEDumper] loaded but parked -- restarting via UE5_AutoStart')");
+        Line(sb, "    if not callDLL('UE5_AutoStart') then");
+        Line(sb, "      showMessage('[UE5CEDumper] The DLL is loaded but could not be restarted.\\n\\n' ..");
+        Line(sb, "        'UE5_AutoStart did not run -- the game may be blocking remote threads.\\n' ..");
+        Line(sb, "        'Restart the game to get a clean state.')");
+        Line(sb, "      return false");
+        Line(sb, "    end");
         Line(sb, "  end");
         Line(sb);
-        Line(sb, "  dbg('[UE5CEDumper] injecting ' .. DLL_PATH)");
-        Line(sb, "  if not injectDLL(DLL_PATH) then");
-        Line(sb, "    showMessage('[UE5CEDumper] injectDLL failed.\\n\\n' ..");
-        Line(sb, "      'Possible causes:\\n' ..");
-        Line(sb, "      '  1. The DLL was moved -- expected at:\\n     ' .. DLL_PATH .. '\\n' ..");
-        Line(sb, "      '  2. Anti-cheat is blocking injection\\n' ..");
-        Line(sb, "      '  3. Cheat Engine needs to run as administrator')");
-        Line(sb, "    return false");
+        Line(sb, "  if not alreadyLoaded then");
+        Line(sb, "    dbg('[UE5CEDumper] injecting ' .. DLL_PATH)");
+        Line(sb, "    if not injectDLL(DLL_PATH) then");
+        Line(sb, "      showMessage('[UE5CEDumper] injectDLL failed.\\n\\n' ..");
+        Line(sb, "        'Possible causes:\\n' ..");
+        Line(sb, "        '  1. The DLL was moved -- expected at:\\n     ' .. DLL_PATH .. '\\n' ..");
+        Line(sb, "        '  2. Anti-cheat is blocking injection\\n' ..");
+        Line(sb, "        '  3. Cheat Engine needs to run as administrator')");
+        Line(sb, "      return false");
+        Line(sb, "    end");
         Line(sb, "  end");
         Line(sb);
         CeReadinessLua.AppendPollLoop(sb, indent: "  ");
@@ -143,14 +176,7 @@ public static class CeAutorunScriptGenerator
         Line(sb, "-- (unlike during injection): by now the game is running normally, so");
         Line(sb, "-- CreateRemoteThread works.");
         Line(sb, "function ue5_shutdown()");
-        Line(sb, "  local function callDLL(name)");
-        Line(sb, "    local okGet, fn = pcall(getAddress, name)");
-        Line(sb, "    if not (okGet and fn and fn ~= 0) then");
-        Line(sb, "      dbg('[UE5CEDumper] export not found: ' .. name)");
-        Line(sb, "      return false");
-        Line(sb, "    end");
-        Line(sb, "    return (pcall(executeCodeEx, 0, fn))");
-        Line(sb, "  end");
+        CeLuaHygiene.AppendCallDllHelper(sb, indent: "  ");
         Line(sb);
         Line(sb, "  local okProbe, probe = pcall(getAddress, 'UE5_StopPipeServer')");
         Line(sb, "  if not (okProbe and probe and probe ~= 0) then");
@@ -158,10 +184,11 @@ public static class CeAutorunScriptGenerator
         Line(sb, "    return true");
         Line(sb, "  end");
         Line(sb);
-        Line(sb, "  local a = callDLL('UE5_StopPipeServer')");
+        // UE5_Shutdown alone — see the twin in CeInjectScriptGenerator for why
+        // calling UE5_StopPipeServer first was both redundant and harmful.
         Line(sb, "  local b = callDLL('UE5_Shutdown')");
-        Line(sb, "  dbg('[UE5CEDumper] shutdown: stopPipe=' .. tostring(a) .. ' shutdown=' .. tostring(b))");
-        Line(sb, "  if not (a and b) then");
+        Line(sb, "  dbg('[UE5CEDumper] shutdown: ' .. tostring(b))");
+        Line(sb, "  if not b then");
         Line(sb, "    print('[UE5CEDumper] shutdown did not complete cleanly -- check the DLL log.')");
         Line(sb, "    return false");
         Line(sb, "  end");

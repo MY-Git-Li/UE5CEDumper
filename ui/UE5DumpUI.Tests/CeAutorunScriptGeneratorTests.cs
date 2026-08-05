@@ -124,17 +124,30 @@ public class CeAutorunScriptGeneratorTests
     }
 
     [Fact]
-    public void Inject_polls_readiness_and_never_uses_executeCodeEx()
+    public void Inject_polls_readiness_and_never_uses_executeCodeEx_on_the_startup_path()
     {
+        // Twin of CeInjectScriptGeneratorTests' rule, narrowed for the same reason
+        // (audit #4 B1(b)): ue5_inject now also revives an already-mapped DLL that a
+        // previous ue5_shutdown parked, and that needs a remote call because the
+        // mailbox poller has been joined. Injection-time — from injectDLL through the
+        // readiness poll — is the part that runs while a game may still be blocking
+        // CreateRemoteThread, and it stays clean.
         var s = CeAutorunScriptGenerator.Generate(Dll);
         var inject = s.Substring(s.IndexOf("function ue5_inject()", StringComparison.Ordinal),
             s.IndexOf("function ue5_shutdown()", StringComparison.Ordinal)
                 - s.IndexOf("function ue5_inject()", StringComparison.Ordinal));
         Assert.Contains("readInteger, mb + 0x0C", inject, StringComparison.Ordinal);
         Assert.Contains($"sleep({CeReadinessLua.PollIntervalMs})", inject, StringComparison.Ordinal);
-        // Injection-time = exactly when games block CreateRemoteThread.
-        var code = string.Join('\n', CodeLines(inject));
-        Assert.DoesNotContain("executeCodeEx", code, StringComparison.Ordinal);
+
+        var startupPath = string.Join('\n', CodeLines(
+            inject.Substring(inject.IndexOf("injectDLL(DLL_PATH)", StringComparison.Ordinal))));
+        Assert.DoesNotContain("executeCodeEx", startupPath, StringComparison.Ordinal);
+
+        // The revive path goes through the shared emitter, never a hand-rolled call:
+        // that emitter is the one place that knows executeCodeEx's real signature.
+        Assert.Contains("callDLL('UE5_AutoStart')", inject, StringComparison.Ordinal);
+        Assert.Contains($"pcall(executeCodeEx, 0, {CeLuaHygiene.DllCallTimeoutMs},", inject,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -158,10 +171,29 @@ public class CeAutorunScriptGeneratorTests
     public void Is_quiet_by_default_but_never_auto_closes()
     {
         var s = CeAutorunScriptGenerator.Generate(Dll);
-        Assert.Contains("local DEBUG = UE5_DEBUG or 0", s, StringComparison.Ordinal);
+        Assert.Contains("local function dbg(", s, StringComparison.Ordinal);
         // No window of its own — closing the Lua Engine on someone who opened it
         // deliberately would be hostile.
         Assert.DoesNotContain(CeLuaHygiene.CloseCall, s, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// B23 — this file is loaded by CE's AUTORUN at start-up, so <c>DEBUG</c> must be
+    /// read at CALL time. The eager preamble captured <c>UE5_DEBUG</c> into a local when
+    /// the chunk ran — before the Lua console existed — which made the script's own
+    /// instruction ("Set UE5_DEBUG = 1 in the Lua console") impossible to follow: the
+    /// local was already 0 and nothing re-read it.
+    /// </summary>
+    [Fact]
+    public void Debug_flag_is_read_at_call_time_not_at_load_time()
+    {
+        var s = CeAutorunScriptGenerator.Generate(Dll);
+
+        // The instruction is still there, so it had better be true.
+        Assert.Contains("Set UE5_DEBUG = 1 in the Lua console", s, StringComparison.Ordinal);
+        Assert.Contains("return (UE5_DEBUG or 0) ~= 0", s, StringComparison.Ordinal);
+        // ...and the load-time capture must be gone: a stale local IS the bug.
+        Assert.DoesNotContain("local DEBUG = UE5_DEBUG or 0", s, StringComparison.Ordinal);
     }
 
     [Fact]

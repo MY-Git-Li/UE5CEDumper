@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UE5DumpUI.Models;
 
@@ -274,8 +274,20 @@ public static class GroupMatch
     /// is filled even on a false return (the convergence lists the caller persists), but a
     /// false return means the object is NOT a group candidate. Returns false for &lt; 2 slots
     /// (a group needs ≥ 2 values; the caller enforces the 2..4 bound).</summary>
+    /// <remarks>
+    /// THE DEFAULT WAS 8 AND THAT WAS A BUG — the same one the DLL's Orden had (fixed
+    /// 2026-08-05). The cap truncates in leaf order, which is field-declaration order with
+    /// the BASE class first, so on any Actor the first eight satisfying leaves are
+    /// PrimaryActorTick/CustomTimeDilation and a derived class's OWN fields never make the
+    /// list. Because this list is also what a later temporal pass compares against, a
+    /// Changed/Unchanged match could only ever see never-changing engine fields.
+    ///
+    /// Shared with the live Group Scan via <see cref="Constants.GroupPerSlotCap"/> on
+    /// purpose: the snapshot corpus and the live scan answer the same question, and two
+    /// different caps would make the same object match on one page and not the other.
+    /// </remarks>
     public static bool Run(IReadOnlyList<Leaf> leaves, IReadOnlyList<Slot> slots,
-                           out List<int>[] perSlot, int perSlotCap = 8)
+                           out List<int>[] perSlot, int perSlotCap = Constants.GroupPerSlotCap)
     {
         perSlot = new List<int>[slots.Count];
         for (int s = 0; s < slots.Count; s++) perSlot[s] = new List<int>();

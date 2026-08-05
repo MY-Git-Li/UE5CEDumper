@@ -295,7 +295,8 @@ internal static class ProxyOrphanScanner
         IReadOnlySet<string> liveBinariesDirs,
         DirProbe probe,
         OwnedFileProbe isOurs,
-        LivenessProbe liveness)
+        LivenessProbe liveness,
+        RecyclerProbe? hasRecycler = null)
     {
         var noFiles = Array.Empty<string>();
         var noDirs = Array.Empty<string>();
@@ -310,6 +311,21 @@ internal static class ProxyOrphanScanner
         if (liveBinariesDirs.Contains(leaf))
             return new PrunePlan(OrphanVerdict.LiveGameFolder, noFiles, noDirs, null,
                 new List<string> { "This is the binaries folder of a game that is currently installed." }, "");
+
+        // Ask about the RECYCLE BIN here, at scan time, so the confirm dialog never offers a
+        // recycle this volume cannot perform. The question used to be asked first inside
+        // MoveToRecycleBin — after the user had already been told what would happen — and it was
+        // asked as a drive-LETTER test, which a fixed volume with NukeOnDelete=1 passes while
+        // FOF_ALLOWUNDO silently hard-deletes and returns success. NotOnFixedDrive kept its name
+        // (it is in the shipped enum) but now means "no usable Recycle Bin here". (B13/B41)
+        if (hasRecycler != null && !hasRecycler(leaf))
+            return new PrunePlan(OrphanVerdict.NotOnFixedDrive, noFiles, noDirs, null,
+                new List<string>
+                {
+                    "This volume has no working Recycle Bin (removable/network, or the bin is " +
+                    "disabled for it), so a delete here would be PERMANENT. Refused — remove the " +
+                    "file by hand if that is what you want.",
+                }, "");
 
         DirSnapshot? leafSnap = probe(leaf);
         OrphanVerdict content = ClassifyLeaf(leafSnap, isOurs, out var ourNames, out var blockers,
@@ -441,8 +457,14 @@ internal static class ProxyOrphanScanner
                            "Remove it by hand if you meant to protect it.");
         if (failed.Count > 0)
             return (false, $"Could not remove: {string.Join(", ", Take(failed, 3))}.");
+        // "Already gone" is only the whole truth when nothing else happened. ProxyDeployService
+        // counts a vanished file into allFilesGone and then still prunes the chain, so up to four
+        // directories could be removed while this line said "nothing left to remove" in success
+        // green. Report the directories the plan actually executed. (B12)
         if (filesRecycled == 0 && filesAlreadyGone > 0)
-            return (true, "Already gone — nothing left to remove.");
+            return dirsRemoved > 0
+                ? (true, $"File was already gone; {dirsRemoved} empty folder(s) removed.")
+                : (true, "Already gone — nothing left to remove.");
         if (filesRecycled == 0)
             return (false, "Nothing was removed.");
 
@@ -477,8 +499,13 @@ internal static class ProxyOrphanScanner
     /// <para><paramref name="generatedAt"/> is passed in rather than read from the clock so the output
     /// is deterministic under test.</para>
     /// </summary>
+    /// <param name="foldersExamined">How many folders the scan looked at. Reported so an EMPTY
+    /// report is evidence rather than an assertion — "0 found" and "never looked" have to be
+    /// distinguishable, and a week later the file is the only thing left to tell them apart.
+    /// Pass -1 when the count is unknown (older callers / tests) and the line is omitted.</param>
     internal static string BuildReport(
-        IReadOnlyList<OrphanProxy> rows, string generatedAt, string appVersion)
+        IReadOnlyList<OrphanProxy> rows, string generatedAt, string appVersion,
+        int foldersExamined = -1)
     {
         var sb = new StringBuilder();
         void Line(string s = "") => sb.Append(s).Append("\r\n");
@@ -506,6 +533,13 @@ internal static class ProxyOrphanScanner
         if (rows.Count == 0)
         {
             Line("No leftover proxy DLLs were found.");
+            if (foldersExamined >= 0)
+            {
+                Line();
+                Line($"{foldersExamined} folder(s) were examined. This file is the record that the");
+                Line("scan ran and covered them — a clean result and a scan that never happened look");
+                Line("identical without it.");
+            }
             return sb.ToString();
         }
 

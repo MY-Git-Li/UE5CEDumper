@@ -59,6 +59,109 @@ public static class CeLuaHygiene
     }
 
     /// <summary>
+    /// LATE-BOUND variant of <see cref="AppendDebugPreamble"/>, for a file that is
+    /// loaded ONCE and whose functions run much later — CE's autorun folder being the
+    /// case that motivated it.
+    ///
+    /// <para>The eager preamble captures <c>UE5_DEBUG</c> into a local at the point the
+    /// chunk runs. In an autorun script that point is CE start-up, so the file's own
+    /// instruction — "set UE5_DEBUG = 1 in the Lua console" — could never work: by the
+    /// time the console exists, <c>DEBUG</c> has already been fixed at 0 and nothing
+    /// re-reads it. Here <c>dbg</c> reads the global on every call instead. (B23)</para>
+    ///
+    /// <para>Emits no <c>DEBUG</c> local, deliberately: a stale local is exactly the
+    /// bug. Anything needing the value at call time uses <c>ue5_debugOn()</c>.</para>
+    /// </summary>
+    public static void AppendLateBoundDebugPreamble(StringBuilder sb, string indent = "")
+    {
+        Line(sb, indent, "-- DEBUG is read at CALL time, not at load time: this file is loaded by CE's");
+        Line(sb, indent, "-- autorun at start-up, long before the Lua console exists to set UE5_DEBUG.");
+        Line(sb, indent, "local function ue5_debugOn() return (UE5_DEBUG or 0) ~= 0 end");
+        Line(sb, indent, "local function dbg(...) if ue5_debugOn() then print(...) end end");
+    }
+
+    /// <summary>
+    /// Emit the bounded "wait for the mailbox to go IDLE" preamble of a round-trip.
+    ///
+    /// <para>A SINGLE sample of <c>cmd</c> is wrong, and not for a rare-race reason:
+    /// <c>SetDone</c>/<c>SetError</c> publish <c>status = DONE</c> <b>before</b> clearing
+    /// <c>cmd</c> (deliberately — see Mimic.cpp), so a script that issues two round-trips
+    /// back to back exits its status poll and can still observe the PREVIOUS command in
+    /// <c>cmd</c>. One read then reports "busy" and abandons a query that would have
+    /// worked 1 ms later. <see cref="CeMailboxLayout.MailboxIdleWaitMs"/> is far more
+    /// than that window and still fails fast when CE really is mid-command.</para>
+    ///
+    /// <para><paramref name="onBusy"/> is the Lua statement to run on timeout — the
+    /// callers differ (a <c>return nil, msg</c> inside a helper vs. setting
+    /// <c>hadError</c> in a flat block), so the emitter does not assume one. (R3)</para>
+    /// </summary>
+    public static void AppendIdleWait(StringBuilder sb, string mbExpr, string onBusy,
+                                      string indent = "")
+    {
+        Line(sb, indent, "-- Bounded wait for IDLE, not a single sample: the DLL publishes status=DONE");
+        Line(sb, indent, "-- BEFORE clearing cmd, so a second back-to-back command can still see the");
+        Line(sb, indent, "-- previous one for an instant and would spuriously report 'busy'.");
+        Line(sb, indent, "local idleWaited = 0");
+        Line(sb, indent, $"while readInteger({mbExpr} + {CeMailboxLayout.OffCmd}) ~= 0 do");
+        Line(sb, indent, "  sleep(1); idleWaited = idleWaited + 1");
+        Line(sb, indent, $"  if idleWaited >= {CeMailboxLayout.MailboxIdleWaitMs} then {onBusy} end");
+        Line(sb, indent, "end");
+    }
+
+    /// <summary>
+    /// Timeout in ms for a synchronous <c>executeCodeEx</c> DLL call. Finite on
+    /// purpose: <c>nil</c>/<c>-1</c> means wait forever, which hangs CE's whole UI
+    /// if the game thread is stalled, and <c>0</c> means "don't wait" AND leaks the
+    /// call memory (CE's own <c>celua.txt</c> flags it).
+    /// </summary>
+    public const int DllCallTimeoutMs = 5000;
+
+    /// <summary>
+    /// Emit the shared <c>callDLL(name)</c> helper: resolve an exported symbol and
+    /// call it, returning <c>true</c> only when the call actually ran. Requires
+    /// <see cref="AppendDebugPreamble"/> earlier in the same <c>{$lua}</c> block.
+    ///
+    /// <para>Emitted from here because getting <c>executeCodeEx</c> wrong is
+    /// <b>silent</b>, and this repo got it wrong everywhere for a long time. The real
+    /// signature is <c>executeCodeEx(callmethod, timeout, address, params...)</c> —
+    /// <c>callmethod</c> 0=stdcall / 1=cdecl, and <b>the address is argument 3</b>.
+    /// Passing the address in slot 2 makes CE execute with <c>address = nil</c> and
+    /// return <c>nil</c> <i>without raising</i>, so a <c>pcall</c> around it reports
+    /// success for a call that never happened (audit #4 B1 — a CE Disable therefore
+    /// tore nothing down while telling the user it had).</para>
+    ///
+    /// <para>Hence also the result check: <c>pcall</c>'s status answers "did Lua
+    /// raise", never "did the function run". <c>executeCodeEx</c> returns the callee's
+    /// RAX on success and <c>nil</c> on failure/timeout, so <c>nil</c> is the only
+    /// honest failure signal.</para>
+    /// </summary>
+    public static void AppendCallDllHelper(StringBuilder sb, string indent = "")
+    {
+        Line(sb, indent, "-- executeCodeEx(callmethod, timeout, address): callmethod 0=stdcall, timeout ms.");
+        Line(sb, indent, "-- The address is argument THREE. Put it in the timeout slot and CE runs with");
+        Line(sb, indent, "-- address=nil and returns nil WITHOUT raising -- so pcall's status would say");
+        Line(sb, indent, "-- 'success' for a call that never happened. Check the RESULT, not the status.");
+        Line(sb, indent, "local function callDLL(name)");
+        Line(sb, indent, "  local okGet, fn = pcall(getAddress, name)");
+        Line(sb, indent, "  if not (okGet and fn and fn ~= 0) then");
+        Line(sb, indent, "    dbg('[UE5CEDumper] export not found: ' .. name)");
+        Line(sb, indent, "    return false");
+        Line(sb, indent, "  end");
+        Line(sb, indent, $"  local okCall, ret = pcall(executeCodeEx, 0, {DllCallTimeoutMs}, fn)");
+        Line(sb, indent, "  if not okCall or ret == nil then");
+        Line(sb, indent, "    dbg('[UE5CEDumper] call did not run: ' .. name)");
+        Line(sb, indent, "    return false");
+        Line(sb, indent, "  end");
+        Line(sb, indent, "  return true");
+        Line(sb, indent, "end");
+    }
+
+    private static void Line(StringBuilder sb, string indent, string text)
+    {
+        sb.Append(indent).Append(text).Append('\n');
+    }
+
+    /// <summary>
     /// Escape arbitrary text for a Lua SINGLE-quoted literal. The one escaper new
     /// code should call — there are four divergent private copies in this repo
     /// (BakedScriptGenerator, FreezeScriptGenerator, InvokeScriptGenerator, plus

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
@@ -27,6 +28,46 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
         }
         return true;
     }
+
+    /// <summary>Raise the first instance's main window. Matched by PROCESS, not by
+    /// window title — the title carries the connected game's module name, so a
+    /// title-based search would miss whenever the first instance is connected, which is
+    /// exactly when the user is most likely to double-click the exe again. (B42)</summary>
+    public bool ActivateExistingInstance()
+    {
+        try
+        {
+            var me = Process.GetCurrentProcess();
+            foreach (var p in Process.GetProcessesByName(me.ProcessName))
+            {
+                using (p)
+                {
+                    if (p.Id == me.Id) continue;
+                    var h = p.MainWindowHandle;
+                    if (h == IntPtr.Zero) continue;
+                    // Restore first: a minimized window ignores SetForegroundWindow.
+                    if (IsIconic(h)) ShowWindow(h, SW_RESTORE);
+                    return SetForegroundWindow(h);
+                }
+            }
+        }
+        catch { /* best-effort: we are exiting either way */ }
+        return false;
+    }
+
+    private const int SW_RESTORE = 9;
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     public void ReleaseSingleInstance()
     {
@@ -723,18 +764,71 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "SHFileOperationW", ExactSpelling = true)]
     private static extern int SHFileOperationW(ref SHFILEOPSTRUCTW lpFileOp);
 
+    /// <summary>
+    /// Does the volume holding <paramref name="fullPath"/> actually have a working Recycle
+    /// Bin? Asked of the shell, not inferred from the drive letter (B13/B41).
+    ///
+    /// <para><c>SHQueryRecycleBin</c> succeeds on a volume with a bin — including an EMPTY one,
+    /// which is why the returned counts are ignored — and fails when the bin is disabled for
+    /// that volume. <c>GetVolumePathName</c> comes first because a path can live on a
+    /// mount-point volume with no drive letter of its own, where <c>Path.GetPathRoot</c> would
+    /// hand back the HOST volume's root and answer the question about the wrong disk.</para>
+    ///
+    /// <para>Fixed-drive is still required as a cheap pre-filter: a removable or network volume
+    /// is out of scope for this cleanup regardless of what the shell says.</para>
+    /// </summary>
+    public bool VolumeHasRecycleBin(string fullPath)
+    {
+        try
+        {
+            var volume = new StringBuilder(260);
+            if (!GetVolumePathNameW(fullPath, volume, volume.Capacity)) return false;
+            string root = volume.ToString();
+            if (root.Length == 0) return false;
+
+            if (new DriveInfo(root).DriveType != DriveType.Fixed) return false;
+
+            var info = new SHQUERYRBINFO { cbSize = Marshal.SizeOf<SHQUERYRBINFO>() };
+            return SHQueryRecycleBinW(root, ref info) == 0;   // S_OK
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // 24-byte blittable struct (int + two long) => classic [DllImport] is fine.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SHQUERYRBINFO
+    {
+        public int  cbSize;
+        public long i64Size;
+        public long i64NumItems;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "SHQueryRecycleBinW", ExactSpelling = true)]
+    private static extern int SHQueryRecycleBinW(string pszRootPath, ref SHQUERYRBINFO pSHQueryRBInfo);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetVolumePathNameW", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetVolumePathNameW(string lpszFileName, StringBuilder lpszVolumePathName, int cchBufferLength);
+
     public bool MoveToRecycleBin(string path)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return false;
 
-            // FOF_ALLOWUNDO on a volume with no recycler silently HARD-deletes, which would turn
-            // the caller's "moved to the Recycle Bin" promise into a lie. Refuse instead.
-            // The caller logs the refusal; this layer stays free of a logging dependency.
-            string? root = Path.GetPathRoot(Path.GetFullPath(path));
-            if (string.IsNullOrEmpty(root) || new DriveInfo(root).DriveType != DriveType.Fixed)
-                return false;
+            // FOF_ALLOWUNDO on a volume with no recycler silently HARD-deletes and returns 0,
+            // which would turn the caller's "moved to the Recycle Bin" promise into a lie.
+            // Refuse instead. The caller logs the refusal; this layer stays free of a logging
+            // dependency.
+            //
+            // A DriveType test is NOT a recycler test — that was the whole defect (B13/B41). A
+            // fixed drive can have the recycler disabled per-volume (`NukeOnDelete=1`, or Group
+            // Policy), and then FOF_ALLOWUNDO is best-effort with no way to tell after the fact.
+            // Ask the shell directly instead, via the volume the path actually lives on.
+            if (!VolumeHasRecycleBin(Path.GetFullPath(path))) return false;
 
             var op = new SHFILEOPSTRUCTW
             {

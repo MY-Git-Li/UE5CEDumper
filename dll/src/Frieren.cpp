@@ -78,7 +78,17 @@ const char* g_cachedGEngineAob       = nullptr;
 int         g_cachedGEngineAobPos    = 0;
 int         g_cachedGEngineAobLen    = 0;
 
-static bool        s_initialized = false;
+// The init latch is set only at the very END of UE5_Init, after a multi-second scan,
+// so it can never serialize two callers on its own — and there IS a designed-in second
+// caller: proxy mode (Heiter) starts the pipe WITHOUT scanning, so a UI "Scan"
+// (Fern::RunScan -> UE5_Init) and a CE hotkey (Mimic::EnsureInitialized -> UE5_Init)
+// can both find the latch clear and both run a full init. Both write DynOff::*, Aura's
+// array descriptor, Serie's pool state, and FindGEngineSlot's report wholesale, and the
+// probes read back what earlier probes latched — so an interleave latches a MIX and
+// still prints validated=yes. Atomic for the unlocked fast path; s_initMutex guards the
+// body so a second caller waits and returns the first caller's result. (B4/B5 audit #4)
+static std::atomic<bool> s_initialized{false};
+static std::mutex  s_initMutex;
 static Fern  s_pipeServer;
 static std::mutex  s_walkMutex;
 static ClassInfo   s_walkCache;
@@ -112,7 +122,29 @@ static bool CopyToBuffer(const std::string& src, char* buf, int32_t bufLen) {
 extern "C" {
 
 bool UE5_Init() {
-    if (s_initialized) {
+    if (s_initialized.load(std::memory_order_acquire)) {
+        LOG_WARN("UE5_Init: Already initialized");
+        return true;
+    }
+
+    // Serialize the body. try_lock first so the WAIT is visible in the log: a queued
+    // caller is this guard doing its job, and it is the only externally observable
+    // proof that the interleave was possible at all (see the log-derivable check in
+    // todo.md). Then re-test the latch under the lock — the first caller may have
+    // completed while we blocked, and re-scanning would be the very corruption
+    // this guard exists to prevent.
+    std::unique_lock<std::mutex> initLock(s_initMutex, std::try_to_lock);
+    if (!initLock.owns_lock()) {
+        LOG_WARN("UE5_Init: init already in progress on another thread — tid=%lu is waiting "
+                 "(guard working, not an error)", GetCurrentThreadId());
+        initLock.lock();
+        LOG_INFO("UE5_Init: tid=%lu resumed after waiting (first caller %s)",
+                 GetCurrentThreadId(),
+                 s_initialized.load(std::memory_order_acquire)
+                     ? "succeeded — returning its result, no second scan"
+                     : "did NOT complete — this thread will scan");
+    }
+    if (s_initialized.load(std::memory_order_acquire)) {
         LOG_WARN("UE5_Init: Already initialized");
         return true;
     }
@@ -487,7 +519,20 @@ bool UE5_Init() {
         }
     }
 
-    s_initialized = true;
+    // A CE Disable that landed while this scan was running has already cleared the
+    // latch (UE5_Shutdown) and torn the server down, and every cancellable loop above
+    // bailed early on Tot::Requested() — so these results are partial by construction.
+    // Latching true now would make the next enable's UE5_Init short-circuit and run the
+    // whole session on them. Refuse the latch instead; the next enable re-scans. Safe
+    // against a false positive: UE5_AutoStart calls Tot::ResetShutdown() before this.
+    if (Tot::ShutdownRequested()) {
+        LOG_WARN("UE5_Init: shutdown was requested during the scan — results are partial, "
+                 "NOT latching initialized so the next enable re-scans");
+        Sein::SetChannel(LogChannel::Pipe);
+        return false;
+    }
+
+    s_initialized.store(true, std::memory_order_release);
     LOG_INFO("UE5_Init: Complete (UE%u, GObjects=0x%llX, GNames=0x%llX, Objects=%d)",
              ptrs.UEVersion,
              static_cast<unsigned long long>(ptrs.GObjects),
@@ -560,7 +605,11 @@ void UE5_Shutdown() {
     // blocked on EnqueueInvoke receives its -7 result and unwinds cleanly.
     Stark::Shutdown();
     s_pipeServer.Stop();
-    s_initialized = false;
+    // Deliberately NOT under s_initMutex: taking it here would make a Disable block for
+    // the full remaining scan, re-creating the wedged-teardown shape B49 just fixed.
+    // Tot::RequestShutdown() above is the interlock — a scan still running past this
+    // point sees it and refuses to latch (see UE5_Init).
+    s_initialized.store(false, std::memory_order_release);
     // The pipe is gone, so stop advertising READY — a CE Lua re-enable after a
     // Disable must wait for the fresh auto-start rather than read a stale flag.
     g_invokeMailbox.initState = Mimic::INIT_IDLE;
@@ -698,6 +747,20 @@ bool UE5_AutoStart() {
     // Called by CEPlugin's InjectDLL after the DLL is loaded into the game.
     // Idempotent: UE5_Init checks s_initialized and skips if already done.
     LOG_INFO("UE5_AutoStart: entry");
+
+    // Re-arm after a CE Disable. UE5_Shutdown latches Tot::RequestShutdown() and
+    // joins the mailbox poller, and Mimic::StartThread's only other caller is
+    // DllMain — which never runs twice — so without these two lines a re-enable
+    // came back with no mailbox at all and the session was unrecoverable without
+    // restarting the game (audit #4 B1(b)).
+    //
+    // Both must happen HERE, not later. Tot::ResetShutdown is otherwise only
+    // reached from Fern::Start, which runs *after* UE5_Init below: a re-enable
+    // would rescan with g_shutdown still latched (cancellable loops bail early)
+    // and every module's StartWorker* would refuse to spawn, since that gate reads
+    // the same flag. Both calls are no-ops on a first start.
+    Tot::ResetShutdown();
+    Mimic::StartThread();   // early-returns when the poller is already running
     // Publish progress into the mailbox so a CE Lua poller can stop sleeping a
     // fixed budget and react the moment we are actually ready (Mimic::InitState).
     g_invokeMailbox.initState = Mimic::INIT_RUNNING;
@@ -1420,9 +1483,17 @@ static void TryInstallGameThreadHook(bool force = false) {
         uint64_t last = s_lastHookAttemptMs.load(std::memory_order_relaxed);
         if (now - last < kHookRetryCooldownMs) return;   // too soon — stay quiet
     }
-    s_hookAttempts.fetch_add(1, std::memory_order_relaxed);
+    // Only the AUTOMATIC path spends the budget. A forced attempt already skips the
+    // cap and the cooldown, so counting it there just burned the automatic retries on
+    // the user's behalf: two clicks of a feature that forces a hook (Live Funcs,
+    // See-through) exhausted kMaxHookAttempts and the lazy retry went silent for the
+    // rest of the session. The timestamp IS still stamped for both — a forced attempt
+    // is a real attempt, and the cooldown should measure from it. (B24)
+    if (!force) {
+        s_hookAttempts.fetch_add(1, std::memory_order_relaxed);
+        attempts += 1;
+    }
     s_lastHookAttemptMs.store(GetTickCount64(), std::memory_order_relaxed);
-    attempts += 1;
 
     uintptr_t peAddr = ResolveProcessEventAddr();
     if (!peAddr) {

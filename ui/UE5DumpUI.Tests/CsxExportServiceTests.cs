@@ -1,4 +1,4 @@
-using UE5DumpUI.Core;
+﻿using UE5DumpUI.Core;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using Xunit;
@@ -114,9 +114,10 @@ public class StubDumpService : IDumpService
     public virtual Task<ValueScanRefineResult> RefineValueScanAsync(ulong sessionId, ValueScanType scanType, string? value = null, string? value2 = null, FloatRoundMode roundMode = FloatRoundMode.Round, bool caseSensitive = false, int pageSize = 1000, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<ValueScanWindowResult> QueryCandidatesAsync(ulong sessionId, int offset, int limit, string? filter = null, string? sortKey = null, bool sortDesc = false, IReadOnlyList<string>? excludeClasses = null, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task EndValueScanAsync(ulong sessionId, CancellationToken ct = default) => throw new NotImplementedException();
-    public virtual Task<GroupScanBeginResult> BeginGroupScanAsync(IReadOnlyList<GroupSlotInput> slots, bool gameOnly = true, int maxResults = 50000, bool deep = false, bool crossObject = false, bool nativeC = false, bool newestFirst = false, int pageSize = 1000, int deadlineMs = 15000, bool autoSkipNoise = false, FloatRoundMode roundMode = FloatRoundMode.Round, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<GroupScanBeginResult> BeginGroupScanAsync(IReadOnlyList<GroupSlotInput> slots, bool gameOnly = true, int maxResults = 50000, bool deep = false, bool crossObject = false, bool nativeC = false, bool newestFirst = false, int pageSize = 1000, int deadlineMs = 15000, bool autoSkipNoise = false, FloatRoundMode roundMode = FloatRoundMode.Round, int perSlotCap = 256, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<GroupScanRefineResult> RefineGroupScanAsync(ulong sessionId, IReadOnlyList<GroupSlotInput> slots, int pageSize = 1000, FloatRoundMode roundMode = FloatRoundMode.Round, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<GroupScanWindowResult> QueryGroupCandidatesAsync(ulong sessionId, int offset, int limit, string? filter = null, string? sortKey = null, bool sortDesc = false, IReadOnlyList<string>? excludeClasses = null, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<IReadOnlyList<GroupSlotMatch>> QueryGroupSlotLeavesAsync(ulong sessionId, GroupSlotMatch slot, string instanceAddr, string className, int offset = 0, int limit = 0, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task EndGroupScanAsync(ulong sessionId, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<SnapshotChunkResult> SnapshotChunkAsync(string dataType, bool gameOnly, int offset, int limit, bool nativeC = false, bool autoSkipNoise = true, string numericFamily = "Any", CancellationToken ct = default) => throw new NotImplementedException();

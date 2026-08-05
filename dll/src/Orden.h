@@ -150,19 +150,43 @@ inline bool HasDistinctAssignment(const std::vector<SlotMatches>& m, int nLeaves
 // the block is NOT a group candidate. Early-rejects the moment a slot has zero
 // matches. Returns false for an empty slot set (a group scan needs >= 2 slots;
 // the caller enforces the 2..4 bound).
+/// @param perSlotCap  How many satisfying leaves to KEEP per slot.
+/// @param outTruncated Set true if any slot had more matches than the cap.
+///
+/// THE CAP IS ORDER-BIASED, AND THAT BIAS WAS A BUG (2026-08-05). Leaves arrive in
+/// field-declaration order, base class first, so on any AActor the first 8 satisfying
+/// leaves are `PrimaryActorTick.*`, `CustomTimeDilation` and friends -- and a derived
+/// class's OWN fields, which are the ones a user actually searches for, never made the
+/// list. The kept set is then ALSO what a later refine re-reads, so a `Changed` pass
+/// compared only never-changing engine fields and pruned every candidate to zero. The
+/// symptom looked like "group scan cannot see my property"; the cause was a cap of 8.
+///
+/// One list was serving two purposes: the assignment check needs only a handful, the
+/// refine needs everything. The cap now sizes for the REFINE, and truncation is reported
+/// instead of being silent -- a cap that quietly drops the interesting half is exactly
+/// the kind of thing nothing else in this codebase can notice.
+/// Sized for the REFINE, not the assignment check: it must hold every leaf a later
+/// Changed/Decreased pass might need to re-read. 256 covers any realistic object's
+/// numeric fields, and the truncation flag catches the rest rather than hiding them.
+inline constexpr int kDefaultPerSlotCap = 256;
+
 inline bool MatchGroup(const std::vector<Leaf>& leaves,
                        const std::vector<SlotTarget>& slots,
                        std::vector<SlotMatches>& out,
-                       int perSlotCap = 8) {
+                       int perSlotCap = kDefaultPerSlotCap,
+                       bool* outTruncated = nullptr) {
     out.assign(slots.size(), SlotMatches{});
     if (slots.empty()) return false;
     for (size_t s = 0; s < slots.size(); ++s) {
+        int satisfying = 0;
         for (size_t li = 0; li < leaves.size(); ++li) {
             if (LeafSatisfiesSlot(leaves[li], slots[s])) {
+                ++satisfying;
                 if (static_cast<int>(out[s].leafIdx.size()) < perSlotCap)
                     out[s].leafIdx.push_back(static_cast<int>(li));
             }
         }
+        if (satisfying > perSlotCap && outTruncated) *outTruncated = true;
         if (out[s].leafIdx.empty()) return false;
     }
     return HasDistinctAssignment(out, static_cast<int>(leaves.size()));

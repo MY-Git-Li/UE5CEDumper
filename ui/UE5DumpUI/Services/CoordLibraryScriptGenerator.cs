@@ -244,7 +244,11 @@ public static class CoordLibraryScriptGenerator
             Line(sb, "local function call(op, writeParams)");
             Line(sb, "  local mb = mailbox()");
             Line(sb, "  if mb == nil then return nil, 'g_invokeMailbox not found -- is UE5Dumper.dll injected?' end");
-            Line(sb, "  if readInteger(mb + MB_CMD) ~= 0 then return nil, 'the DLL mailbox is busy' end");
+            // R3: was a single sample of cmd. Teleporting to two coordinates in quick
+            // succession is the ordinary use of this script, and that is exactly the
+            // pattern the single read gets wrong.
+            CeLuaHygiene.AppendIdleWait(sb, "mb",
+                "return nil, 'the DLL mailbox is busy -- try again in a moment'", "  ");
             Line(sb, "  if writeParams then writeParams(mb + MB_PARAMS) end");
             Line(sb, "  writeQword(mb + MB_UFUNC, 0)");
             Line(sb, "  writeQword(mb + MB_INST, op)");

@@ -1,4 +1,4 @@
-namespace UE5DumpUI;
+﻿namespace UE5DumpUI;
 
 /// <summary>
 /// Centralized constants for the UI application.
@@ -15,6 +15,15 @@ public static class Constants
 
     // Logging — category-routed to separate files
     public const string LogFolderName = "UE5CEDumper";
+
+    /// <summary>
+    /// Breadcrumb file naming the folder that holds UE5Dumper.dll, so
+    /// scripts/UE5CEDumper.CT can find the DLL when Cheat Engine gives it nothing
+    /// to infer from. Lives at the %LOCALAPPDATA%\UE5CEDumper ROOT, deliberately
+    /// NOT under Logs\ — the retention sweep walks only the Logs directory and
+    /// globs only *.log, so this is outside it on both counts.
+    /// </summary>
+    public const string DllPathBreadcrumbFile = "dll-path.txt";
     public const string LogSubFolder = "Logs";
     public const string LogSubfolderName = "UE5DumpUI";      // UI module subfolder under Logs/
     public const string MirrorLogPrefix = "ui";               // Prefix for mirror files in game folders
@@ -133,6 +142,16 @@ public static class Constants
     // Value/group scan begin deadline in ms (Value Search "Timeout" slider default).
     // Also the sentinel the wire-shape code compares against to omit the field when
     // the user hasn't overridden it. Mirrors the DLL's 15000 ms scan default.
+    /// <summary>Leaves kept PER SLOT per object in a group scan (DLL `per_slot_cap`).
+    /// NOT a performance knob: this list is what a later Changed/Decreased refine
+    /// re-reads, and leaves arrive base-class-first, so too small a value silently hides
+    /// a derived class's own fields — at the old fixed 8 every AActor stored only
+    /// PrimaryActorTick/CustomTimeDilation and a Changed refine pruned everything.
+    /// The DLL owns the clamp band; these mirror it so the UI can validate locally.</summary>
+    public const int GroupPerSlotCap    = 256;
+    public const int GroupPerSlotCapMin = 8;
+    public const int GroupPerSlotCapMax = 4096;
+
     public const int ScanSessionDeadlineMs = 15000;
 
     // Server-side paging window for scan begin / refine / query. Distinct from

@@ -28,6 +28,7 @@
 #include "Macht.h"
 #include "Aura.h"
 #include "Tot.h"     // Tot::MarkBackgroundWorker — re-assert worker ignores per-command cancel (M4)
+#include "Routine.h"   // Routine::ReassertLoop — shared sliced-sleep + guarded tick (R5/B14)
 #include "Ubel.h"
 
 #include <atomic>
@@ -56,7 +57,7 @@ std::mutex s_mutex;
 
 // Re-assert worker — separate control mutex so StopWorker()'s join() never runs
 // while s_mutex is held (the worker locks s_mutex per tick → would deadlock).
-std::thread       s_worker;
+Routine::SafeThread       s_worker;   // detaches at process exit, never terminates
 std::mutex        s_workerMutex;
 std::atomic<bool> s_workerStop{false};
 
@@ -226,7 +227,7 @@ void BuildTargets(uintptr_t pawnClass, bool verbose) {
     s_targets.clear();
     s_targetsClass = pawnClass;
     if (!pawnClass) return;
-    ClassInfo ci = Ubel::WalkClassEx(pawnClass);
+    const ClassInfo& ci = Ubel::WalkClassEx(pawnClass);
     for (const auto& f : ci.Fields) {
         if (f.TypeName != "BoolProperty" || !f.Address) continue;
         std::string lower = ToLower(f.Name);
@@ -310,19 +311,12 @@ int32_t ApplyGodNowLocked(bool verbose, bool* outDrifted = nullptr) {
 // ---- re-assert worker ----
 
 void WorkerLoop() {
-    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
-    LOG_INFO("GodMode: re-assert worker started (%d ms)", Grimoire::PROTECT_REASSERT_MS);
+    // Sliced sleep, cancel-immunity, per-tick exception guard and the shutdown break
+    // all live in Routine::ReassertLoop (R5 / B14). Only the tick is ours.
     int driftCount = 0;
-    while (!s_workerStop.load()) {
-        // Sleep in slices so StopWorker() is responsive (join latency bounded).
-        for (int slept = 0;
-             slept < Grimoire::PROTECT_REASSERT_MS && !s_workerStop.load();
-             slept += 25)
-            std::this_thread::sleep_for(std::chrono::milliseconds(25));
-        if (s_workerStop.load()) break;
-
+    Routine::ReassertLoop("GodMode", Grimoire::PROTECT_REASSERT_MS, s_workerStop, [&] {
         std::lock_guard<std::mutex> lk(s_mutex);
-        if (!s_wantGod.load()) continue;   // toggled off between ticks
+        if (!s_wantGod.load()) return;     // toggled off between ticks
         bool drifted = false;
         ApplyGodNowLocked(false, &drifted);   // write-on-drift handled inside
         if (drifted) {
@@ -336,8 +330,7 @@ void WorkerLoop() {
                          "health, not these flags (use Value Search + Freeze on HP).",
                          driftCount);
         }
-    }
-    LOG_INFO("GodMode: re-assert worker stopped");
+    });
 }
 
 // Start/stop the worker. The *Locked cores assume the caller already holds
@@ -368,7 +361,7 @@ int32_t ResolveProtectBits(std::vector<ProtectBit>& out) {
     PawnRef p;
     int32_t rc = ResolvePawnRef(p);
     if (rc != PR_OK) return rc;
-    ClassInfo ci = Ubel::WalkClassEx(p.pawnClass);
+    const ClassInfo& ci = Ubel::WalkClassEx(p.pawnClass);
     for (const auto& f : ci.Fields) {
         if (f.TypeName != "BoolProperty" || !f.Address) continue;
         std::string lower = ToLower(f.Name);

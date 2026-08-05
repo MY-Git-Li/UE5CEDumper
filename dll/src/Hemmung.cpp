@@ -17,6 +17,7 @@
 #include "Macht.h"
 #include "Aura.h"
 #include "Tot.h"     // Tot::MarkBackgroundWorker — re-assert worker ignores per-command cancel (M4)
+#include "Routine.h"   // Routine::ReassertLoop — shared sliced-sleep + guarded tick (R5/B14)
 #include "Ubel.h"
 
 #include <algorithm>
@@ -50,7 +51,7 @@ std::mutex s_mutex;
 
 // Re-assert worker — separate control mutex so StopWorker()'s join() never runs
 // while s_mutex is held (the worker locks s_mutex per tick → would deadlock).
-std::thread       s_worker;
+Routine::SafeThread       s_worker;   // detaches at process exit, never terminates
 std::mutex        s_workerMutex;
 std::atomic<bool> s_workerStop{false};
 
@@ -250,8 +251,11 @@ void ApplyDilLocked(int32_t target, bool* drifted) {
     if (!ReadFloatAt(f.addr, f.size, current)) return;
     // Re-capture the natural base when the owner changes (a new WorldSettings on
     // level load, or a respawned pawn): that owner's value is untouched by us.
+    // Unlike Laufen the base is not a multiplicand here — it is what Reset RESTORES,
+    // so capturing 0 means Reset leaves the game permanently frozen. Fall back to the
+    // engine default rather than store a value we know is unusable. (B22)
     if (f.owner != d.capturedOwner) {
-        d.base = current;
+        d.base = (current > 0.0 && std::isfinite(current)) ? current : 1.0;
         d.capturedOwner = f.owner;
     }
     double eps = (std::max)(1e-4, std::fabs(d.value) * 1e-5);
@@ -282,18 +286,12 @@ void FillDilLocked(int32_t target, DilationInfo& info) {
 // ---- re-assert worker (identical discipline to Laufen) ----
 
 void WorkerLoop() {
-    Tot::MarkBackgroundWorker();   // ignore per-command cancel; abort only on shutdown (M4)
-    LOG_INFO("Time: re-assert worker started (%d ms)", Grimoire::TIME_REASSERT_MS);
+    // Sliced sleep, cancel-immunity, per-tick exception guard and the shutdown break
+    // all live in Routine::ReassertLoop (R5 / B14). Only the tick is ours.
     int driftCount = 0;
-    while (!s_workerStop.load()) {
-        for (int slept = 0;
-             slept < Grimoire::TIME_REASSERT_MS && !s_workerStop.load();
-             slept += 25)
-            std::this_thread::sleep_for(std::chrono::milliseconds(25));
-        if (s_workerStop.load()) break;
-
+    Routine::ReassertLoop("Time", Grimoire::TIME_REASSERT_MS, s_workerStop, [&] {
         std::lock_guard<std::mutex> lk(s_mutex);
-        if (!AnyActiveLocked()) continue;   // all levers reset between ticks
+        if (!AnyActiveLocked()) return;   // all levers reset between ticks
         bool drifted = false;
         for (int i = 0; i < DIL_COUNT; ++i)
             ApplyDilLocked(i, &drifted);
@@ -304,8 +302,7 @@ void WorkerLoop() {
                          "recomputing it (slow-mo ability / Sequencer time track); the "
                          "override is being held against it.", driftCount);
         }
-    }
-    LOG_INFO("Time: re-assert worker stopped");
+    });
 }
 
 // Worker start/stop "Locked" cores (caller ALREADY holds s_workerMutex). Lock
@@ -386,7 +383,17 @@ int32_t SetDilation(int32_t target, double value) {
         // changed — NOT when merely changing the value on the same active owner, or
         // we would fold our own write into the restore base.
         if (!d.active || f.owner != d.capturedOwner) {
-            d.base = current;
+            // See the worker's note: base is the RESTORE value, so 0 / NaN would make
+            // Reset freeze the game forever. 1.0 is the engine default for both
+            // AWorldSettings::TimeDilation and AActor::CustomTimeDilation. (B22)
+            if (current > 0.0 && std::isfinite(current)) {
+                d.base = current;
+            } else {
+                LOG_WARN("Time: target %d ('%s') reads %.4f — not a usable base; "
+                         "Reset will restore the engine default 1.0 instead",
+                         target, f.name.c_str(), current);
+                d.base = 1.0;
+            }
             d.capturedOwner = f.owner;
         }
         d.value = value;

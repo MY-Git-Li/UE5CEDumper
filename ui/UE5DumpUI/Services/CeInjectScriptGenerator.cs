@@ -78,29 +78,65 @@ public static class CeInjectScriptGenerator
         Line(sb, "end");
         Line(sb);
 
-        // ── 0.5. Already loaded? Re-injecting would double-map and fight over the pipe ──
-        Line(sb, "-- Already present (proxy DLL deployed, or a previous inject)? Injecting");
-        Line(sb, "-- again would double-map us and fight over the pipe.");
+        CeLuaHygiene.AppendCallDllHelper(sb);
+        Line(sb);
+
+        // ── 0.5. Already loaded? Two opposite reasons, and they need opposite handling ──
+        Line(sb, "-- Already present? Injecting again would double-map us and fight over the");
+        Line(sb, "-- pipe -- but 'already present' covers two cases that must NOT be treated");
+        Line(sb, "-- alike, and the mailbox's initState is what tells them apart:");
+        // NB: never write the literal "[DISABLE]" in an ENABLE-block comment — the
+        // tests (and CE) slice the script on that marker, so it would truncate the
+        // block here.
+        Line(sb, "--   * SERVING (READY/SKIPPED): a proxy DLL deployed it, or another instance");
+        Line(sb, "--     owns the pipe. Not ours. Untick, so the disable block cannot tear down");
+        Line(sb, "--     a pipe this record never started.");
+        Line(sb, "--   * PARKED (anything else): this record was ticked, unticked -- which runs");
+        Line(sb, "--     UE5_Shutdown and leaves initState at IDLE -- and is now being re-ticked.");
+        Line(sb, "--     Revive it in place: the DLL is still mapped, so re-injecting is wrong.");
         Line(sb, "local okGet, probe = pcall(getAddress, 'UE5_Init')");
-        Line(sb, "if okGet and probe and probe ~= 0 then");
-        Line(sb, "  dbg('[UE5CEDumper] already loaded -- skipping inject')");
-        Line(sb, "  showMessage('[UE5CEDumper] Already loaded in this process.\\n\\n' ..");
-        Line(sb, "    'No injection needed -- just launch UE5DumpUI.exe and click Connect.')");
-        Line(sb, "  return");
+        Line(sb, "local alreadyLoaded = okGet and probe and probe ~= 0");
+        Line(sb, "if alreadyLoaded then");
+        Line(sb, $"  local INIT_READY, INIT_SKIPPED = {CeMailboxLayout.InitReady}, {CeMailboxLayout.InitSkipped}");
+        Line(sb, "  local okSym, mbNow = pcall(getAddress, 'g_invokeMailbox')");
+        Line(sb, "  local pre = nil");
+        Line(sb, "  if okSym and mbNow and mbNow ~= 0 then");
+        Line(sb, $"    local okRead, v = pcall(readInteger, mbNow + {CeMailboxLayout.OffInitState})");
+        Line(sb, "    pre = okRead and v or nil");
+        Line(sb, "  end");
+        Line(sb, "  if pre == INIT_READY or pre == INIT_SKIPPED then");
+        Line(sb, "    dbg('[UE5CEDumper] already loaded AND serving -- not ours to manage')");
+        Line(sb, "    showMessage('[UE5CEDumper] Already loaded and serving in this process.\\n\\n' ..");
+        Line(sb, "      'No injection needed -- just launch UE5DumpUI.exe and click Connect.')");
+        // Untick: this record did not start that pipe, so its [DISABLE] must never
+        // be allowed to run UE5_Shutdown against it (audit #4 B30).
+        Line(sb, "    if memrec then memrec.Active = false end");
+        Line(sb, "    return");
+        Line(sb, "  end");
+        Line(sb, "  dbg('[UE5CEDumper] loaded but parked -- restarting via UE5_AutoStart')");
+        Line(sb, "  if not callDLL('UE5_AutoStart') then");
+        Line(sb, "    showMessage('[UE5CEDumper] The DLL is loaded but could not be restarted.\\n\\n' ..");
+        Line(sb, "      'UE5_AutoStart did not run -- the game may be blocking remote threads.\\n' ..");
+        Line(sb, "      'Restart the game to get a clean state.')");
+        Line(sb, "    if memrec then memrec.Active = false end");
+        Line(sb, "    return");
+        Line(sb, "  end");
         Line(sb, "end");
         Line(sb);
 
-        // ── 1. Inject ──
+        // ── 1. Inject (only when it is not already mapped) ──
         Line(sb, $"local DLL_PATH = '{CeLuaHygiene.EscapeLuaString(dllPath)}'");
-        Line(sb, "dbg('[UE5CEDumper] injecting ' .. DLL_PATH)");
-        Line(sb, "if not injectDLL(DLL_PATH) then");
-        Line(sb, "  showMessage('[UE5CEDumper] injectDLL failed.\\n\\n' ..");
-        Line(sb, "    'Possible causes:\\n' ..");
-        Line(sb, "    '  1. The DLL was moved -- expected at:\\n     ' .. DLL_PATH .. '\\n' ..");
-        Line(sb, "    '  2. Anti-cheat is blocking injection\\n' ..");
-        Line(sb, "    '  3. Cheat Engine needs to run as administrator')");
-        Line(sb, "  if memrec then memrec.Active = false end");
-        Line(sb, "  return");
+        Line(sb, "if not alreadyLoaded then");
+        Line(sb, "  dbg('[UE5CEDumper] injecting ' .. DLL_PATH)");
+        Line(sb, "  if not injectDLL(DLL_PATH) then");
+        Line(sb, "    showMessage('[UE5CEDumper] injectDLL failed.\\n\\n' ..");
+        Line(sb, "      'Possible causes:\\n' ..");
+        Line(sb, "      '  1. The DLL was moved -- expected at:\\n     ' .. DLL_PATH .. '\\n' ..");
+        Line(sb, "      '  2. Anti-cheat is blocking injection\\n' ..");
+        Line(sb, "      '  3. Cheat Engine needs to run as administrator')");
+        Line(sb, "    if memrec then memrec.Active = false end");
+        Line(sb, "    return");
+        Line(sb, "  end");
         Line(sb, "end");
         Line(sb);
 
@@ -154,22 +190,23 @@ public static class CeInjectScriptGenerator
         Line(sb, "  return");
         Line(sb, "end");
         Line(sb);
-        Line(sb, "local function callDLL(name)");
-        Line(sb, "  local okGet, fn = pcall(getAddress, name)");
-        Line(sb, "  if not (okGet and fn and fn ~= 0) then");
-        Line(sb, "    dbg('[UE5CEDumper] export not found: ' .. name)");
-        Line(sb, "    return false");
-        Line(sb, "  end");
-        Line(sb, "  return (pcall(executeCodeEx, 0, fn))");
-        Line(sb, "end");
+        CeLuaHygiene.AppendCallDllHelper(sb);
         Line(sb);
-        Line(sb, "local a = callDLL('UE5_StopPipeServer')");
+        // UE5_Shutdown ALONE. It is `s_pipeServer.Stop()` plus everything else, and
+        // it runs that Stop deliberately AFTER Stark::Shutdown so a pipe thread
+        // blocked in EnqueueInvoke gets its -7 and unwinds. Calling
+        // UE5_StopPipeServer first inverted that ordering, and — because the CE
+        // call times out while the remote thread keeps running — put a second
+        // teardown into the process concurrently with the first.
         Line(sb, "local b = callDLL('UE5_Shutdown')");
-        Line(sb, "dbg('[UE5CEDumper] shutdown: stopPipe=' .. tostring(a) .. ' shutdown=' .. tostring(b))");
+        Line(sb, "dbg('[UE5CEDumper] shutdown: ' .. tostring(b))");
         // The DLL stays mapped: FreeLibrary on an injected DLL mid-game isn't worth
-        // the risk. Re-ticking hits [ENABLE]'s already-loaded guard, which is correct
-        // — UE5_AutoStart is idempotent and resets initState on the way through.
-        Line(sb, "if not (a and b) then");
+        // the risk. Re-ticking is a real restart now, not a shrug: UE5_Shutdown parks
+        // initState at IDLE, [ENABLE] reads that as "parked" and calls UE5_AutoStart,
+        // which re-arms Tot's shutdown latch and Mimic's poller (audit #4 B1(b) —
+        // before that fix the mailbox thread could only ever be started from DllMain,
+        // so a Disable was unrecoverable without restarting the game).
+        Line(sb, "if not b then");
         Line(sb, "  print('[UE5CEDumper] shutdown did not complete cleanly -- check the DLL log.')");
         Line(sb, "else");
         CeLuaHygiene.AppendCloseOnSuccess(sb, indent: "  ");

@@ -14,6 +14,7 @@
 #include "Sein.h"
 #include "Stark.h"
 #include "Linie.h"   // Live PE profiler — opt-in per-UFunction fire counting
+#include "Routine.h"   // Routine::RunThreadGuarded — a throw out of the PE hook fast-fails the GAME (B14)
 
 #include <MinHook.h>
 #include <Windows.h>
@@ -130,19 +131,17 @@ static int32_t CallProcessEventSEH(uintptr_t instance, uintptr_t ufunc, uintptr_
 
 /// Hooked ProcessEvent — called on the game thread for every UObject event.
 /// Drains the invoke queue first, then calls the original PE for the game's own call.
-static void __fastcall HookedProcessEvent(void* thisObj, void* ufunc, void* params) {
-    // Tick the fire counter first thing. Even if the queue is empty and we
-    // pass straight through to s_originalPE, this gives the post-install
-    // validator (Frieren) ground truth that "we are sitting on the right
-    // vtable slot." relaxed: a single non-zero observation by the validator
-    // is enough; we never read this back inside the hot path.
-    s_hookFireCount.fetch_add(1, std::memory_order_relaxed);
-    // Stamp the fire time so IsGameThreadResponsive / MsSinceLastHookFire can
-    // tell "ticking now" from "went quiet". One clock read on the hot path —
-    // cheap next to ProcessEvent's own work, and the atomic store is relaxed.
-    uint64_t nowMs = NowMs();
-    s_lastHookFireMs.store(nowMs, std::memory_order_relaxed);
-
+// Everything OUR hook does before handing control to the game's ProcessEvent. Split out
+// so the whole body sits inside one guard: this function is entered from GAME CODE on the
+// GAME'S OWN THREAD, so an exception escaping it unwinds into a frame that has no handler
+// for us and the process fast-fails (0xC0000409, FAST_FAIL_FATAL_APP_EXIT).
+//
+// That is not hypothetical — it is the DQ7R crash of 2026-08-04 (build 2622), captured in
+// a WER dump whose entire stack was inside our module. It allocates in two places, both
+// reachable while the game is tearing its object pool down: Linie's map insert, and the
+// `pending` vector below. Zero cost on x64 when nothing throws (table-driven EH). (B14,
+// scope corrected by in-game verification.)
+static void HookedProcessEventBody(void* ufunc, uint64_t nowMs) {
     // Live PE profiler (Linie): opt-in per-UFunction fire counting. The
     // not-recording path pays exactly one relaxed atomic load + a
     // predicted-not-taken branch; the mutex + map touch happen ONLY inside a
@@ -189,8 +188,31 @@ static void __fastcall HookedProcessEvent(void* thisObj, void* ufunc, void* para
             }
         }
     }
+}
 
-    // Now handle the game's own ProcessEvent call
+static void __fastcall HookedProcessEvent(void* thisObj, void* ufunc, void* params) {
+    // Tick the fire counter first thing. Even if the queue is empty and we
+    // pass straight through to s_originalPE, this gives the post-install
+    // validator (Frieren) ground truth that "we are sitting on the right
+    // vtable slot." relaxed: a single non-zero observation by the validator
+    // is enough; we never read this back inside the hot path.
+    s_hookFireCount.fetch_add(1, std::memory_order_relaxed);
+    // Stamp the fire time so IsGameThreadResponsive / MsSinceLastHookFire can
+    // tell "ticking now" from "went quiet". One clock read on the hot path —
+    // cheap next to ProcessEvent's own work, and the atomic store is relaxed.
+    uint64_t nowMs = NowMs();
+    s_lastHookFireMs.store(nowMs, std::memory_order_relaxed);
+
+    // Our work, contained. See HookedProcessEventBody — a throw escaping here fast-fails
+    // the game, because the caller is the game itself.
+    Routine::RunThreadGuarded("GameThreadDispatch", [&] {
+        HookedProcessEventBody(ufunc, nowMs);
+    });
+
+    // Now handle the game's own ProcessEvent call. OUTSIDE the guard on purpose: this is
+    // the game's own code and its exceptions are its own business — swallowing one here
+    // would silently change the game's behaviour, which is far worse than what the guard
+    // above prevents.
     if (s_originalPE) {
         s_originalPE(thisObj, ufunc, params);
     }

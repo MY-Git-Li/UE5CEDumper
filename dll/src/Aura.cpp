@@ -673,6 +673,10 @@ static int ComputeStrideScore(int named, int good, int bad) {
 }
 
 // Helper: run ProbeStride for all candidate strides on a given base address, updating best.
+// How many items each stride candidate is probed against. Named so the "only N validated"
+// warning can state the DENOMINATOR -- "27 items validated" means nothing without it.
+static constexpr int kStrideProbeBudget = 200;
+
 static void ProbeAllStrides(uintptr_t base, int maxItems, const char* phase,
                             int candidates[], int numCandidates,
                             int& bestStride, int& bestCount, int& bestNamed,
@@ -752,7 +756,7 @@ static void DetectStrideForCurrentObjOffset(uintptr_t chunkTable, uintptr_t chun
                                             int& bestStride, int& bestCount, int& bestNamed,
                                             int& bestBad, bool& bestHasNames) {
     bestStride = 0; bestCount = 0; bestNamed = 0; bestBad = INT_MAX; bestHasNames = false;
-    constexpr int MAX_ITEMS_PHASE1 = 200;
+    constexpr int MAX_ITEMS_PHASE1 = kStrideProbeBudget;
     bool detected = false;
 
     // --- Pre-check: detect flat (non-chunked) FFixedUObjectArray (UE4.11-4.20) ---
@@ -1024,8 +1028,20 @@ static void DetectItemSize() {
         s_itemObjOffset = 0;
     }
 
-    int candidates[] = { 16, 24, 20 };
-    constexpr int NUM_CANDIDATES = 3;
+    // 32 is here because a stock UE 5.4 **Development** package uses it, and its absence
+    // was not a near-miss -- it was undetectable. A stride that DIVIDES the real one still
+    // lands on a genuine object every k-th probe, so 16 against a real 32 validated half
+    // the pool and the sweep settled there "tentatively". Downstream, exactly every other
+    // object was garbage: UE5_Init resolved obj[0], obj[2], obj[4] and the Object Tree
+    // reported 12,588 of 25,175 named -- 50.0% to the decimal (2026-08-05, DumperTest).
+    //
+    // Ordering does not decide the winner (ProbeAllStrides scores every candidate and takes
+    // the best), so 32 sits after the two common sizes purely for log readability. With the
+    // real stride present it wins outright: named ~= all / bad ~= 0, against the alias's
+    // named ~= bad ~= half.
+    int candidates[] = { 16, 24, 32, 20 };
+    constexpr int NUM_CANDIDATES = 4;
+    static_assert(NUM_CANDIDATES <= 5, "ProbeAllStrides stores results in a fixed array of 5");
 
     // Object-ptr-offset candidates, classic first (see header comment).
     const int objOffPasses[] = { 0x00, 0x08 };
@@ -1090,8 +1106,22 @@ static void DetectItemSize() {
         s_itemSize = gStride;
         s_layoutMode = (gObjOff != 0) ? Lineal::ItemLayoutMode::Unpacked57
                                       : Lineal::ItemLayoutMode::Classic;
+        const int validated = gHasNames ? gNamed : gCount;
         LOG_WARN("ObjectArray: FUObjectItem size tentatively set to %d bytes, object-ptr offset +0x%02X (only %d items validated)",
-                 gStride, gObjOff, gHasNames ? gNamed : gCount);
+                 gStride, gObjOff, validated);
+        // Say what "tentative" COSTS, because the previous wording read as routine and the
+        // scan carried on as though it were an answer. A validated count this far below the
+        // probe budget is the signature of an ALIAS: the real item is a multiple of this
+        // stride, so every k-th probe hits a real object and the rest are garbage — which
+        // surfaces later as a suspiciously round "N% of objects named" and a scan that walks
+        // almost nothing. If that is what you are looking at, the missing stride is the bug.
+        if (validated * 4 < kStrideProbeBudget) {
+            LOG_ERROR("ObjectArray: that is only %d of %d probes — treat every object count and "
+                      "name below as UNTRUSTWORTHY. A real stride that is a MULTIPLE of %d "
+                      "(e.g. %d) would validate all of them; if the object tree shows a round "
+                      "fraction named, that multiple is missing from the candidate list.",
+                      validated, kStrideProbeBudget, gStride, gStride * 2);
+        }
         return;
     }
 
@@ -1932,7 +1962,7 @@ static void CollectContainersRecursive(
     constexpr int kMaxDepth = 3;
     if (depth > kMaxDepth) return;
 
-    auto ci = Ubel::WalkClassEx(structAddr);
+    const ClassInfo& ci = Ubel::WalkClassEx(structAddr);
     for (const auto& f : ci.Fields) {
         if (!f.Address) continue;
 
@@ -2080,7 +2110,7 @@ static void EmitStructDirectLeaves(uintptr_t structAddr, uintptr_t base,
                                    const ContainerLeafVisitor& visit) {
     constexpr int kMaxStructDepth = 4;
     if (structDepth > kMaxStructDepth || !structAddr) return;
-    ClassInfo ci = Ubel::WalkClassEx(structAddr);
+    const ClassInfo& ci = Ubel::WalkClassEx(structAddr);
     for (const auto& f : ci.Fields) {
         std::string leafName = namePrefix.empty() ? f.Name : (namePrefix + "." + f.Name);
         if (IsScalarLeafType(f.TypeName)) {
@@ -2788,7 +2818,7 @@ static void CollectRefMetaRecursive(uintptr_t structAddr,
     constexpr int kMaxDepth = 3;
     if (depth > kMaxDepth) return;
 
-    auto ci = Ubel::WalkClassEx(structAddr);
+    const ClassInfo& ci = Ubel::WalkClassEx(structAddr);
     for (const auto& f : ci.Fields) {
         if (!f.Address) continue;
 
@@ -3975,7 +4005,7 @@ static void CollectSchemaLeaves(
     // sibling fields of the same struct type are both visited.
     if (!pathStructs.insert(structAddr).second) return;
 
-    ClassInfo ci = Ubel::WalkClassEx(structAddr);
+    const ClassInfo& ci = Ubel::WalkClassEx(structAddr);
     for (const auto& f : ci.Fields) {
         if (out.size() >= kMaxSchemaLeavesPerClass) break;
         if (!f.Address) continue;
@@ -4150,7 +4180,7 @@ PropertySearchResult SearchProperties(
         result.scannedClasses++;
 
         // Walk class properties (including inherited)
-        ClassInfo ci = Ubel::WalkClassEx(obj);
+        const ClassInfo& ci = Ubel::WalkClassEx(obj);
         if (ci.Fields.empty()) continue;
 
         // Search properties
@@ -4518,7 +4548,7 @@ std::vector<PropertySearchResult> SearchPropertiesBatch(
 
         scannedClasses++;
 
-        ClassInfo ci = Ubel::WalkClassEx(obj);
+        const ClassInfo& ci = Ubel::WalkClassEx(obj);
         if (ci.Fields.empty()) continue;
 
         // Per-field: check every query in one pass over the field list.
@@ -4670,7 +4700,7 @@ std::vector<ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs)
         }
         // ClassInfo lives at global scope (see Ubel.h), but the
         // WalkClassEx function lives inside namespace Ubel.
-        ClassInfo ci = Ubel::WalkClassEx(addr);
+        const ClassInfo& ci = Ubel::WalkClassEx(addr);
         if (ci.Fields.empty()) ++emptyCount;
         out.push_back(std::move(ci));
     }
@@ -4799,7 +4829,7 @@ ClassListResult ListClasses(bool gameOnly, int maxResults) {
         result.totalClasses++;
 
         // Walk class to get property count and size
-        ClassInfo ci = Ubel::WalkClassEx(obj);
+        const ClassInfo& ci = Ubel::WalkClassEx(obj);
 
         ClassListEntry entry;
         entry.className      = ci.Name;
@@ -4970,7 +5000,7 @@ AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries) {
         // is wasted work here, but the alternative (a Functions-only walker)
         // would mean a parallel reader path -- not worth the maintenance burden
         // for the typical perf budget.
-        ClassInfo ci = Ubel::WalkClassEx(obj);
+        const ClassInfo& ci = Ubel::WalkClassEx(obj);
         std::vector<FunctionInfo> funcs = Ubel::WalkFunctions(obj);
 
         for (const auto& f : funcs) {
@@ -6060,7 +6090,7 @@ ValueScanResult ScanForValue(
                                        int depth) -> void {
         constexpr int kMaxStructDepth = 4;   // direct-struct nesting inside the element
         if (depth > kMaxStructDepth || !innerStructAddr) return;
-        ClassInfo ci = Ubel::WalkClassEx(innerStructAddr);
+        const ClassInfo& ci = Ubel::WalkClassEx(innerStructAddr);
         for (const auto& f : ci.Fields) {
             bool accepted = false;
             for (const auto& t : acceptedTypes) {
@@ -6115,7 +6145,7 @@ ValueScanResult ScanForValue(
         // on the UE4 UProperty path only; the UE5 FProperty path needs
         // the WalkClassEx pass). The extra metadata reads we don't use
         // are cheap relative to the GObjects walk itself.
-        ClassInfo ci = Ubel::WalkClassEx(structAddr);
+        const ClassInfo& ci = Ubel::WalkClassEx(structAddr);
         for (const auto& f : ci.Fields) {
             // Leaf-type match: emit a ScanField at the cumulative offset.
             bool accepted = false;
@@ -6367,7 +6397,7 @@ ValueScanResult ScanForValue(
         // WalkClassEx also populates structType / inner / enum metadata
         // we want available). Then expandFields walks the property chain
         // recursively for ScanField emission.
-        ClassInfo ci = Ubel::WalkClassEx(classAddr);
+        const ClassInfo& ci = Ubel::WalkClassEx(classAddr);
         sci.className = ci.Name;
         sci.classPath = ci.FullPath;
         sci.gameClass = !IsEnginePackage(ci.FullPath);
@@ -7142,7 +7172,7 @@ ValueScanResult ScanForValue(
                 // Holes = the element struct's bytes NOT covered by a reflected field
                 // (the native region). For a 0-UPROPERTY struct that's the whole
                 // element; for a partially-reflected struct only its gaps.
-                ClassInfo eci = Ubel::WalkClassEx(elemStruct);   // cached
+                const ClassInfo& eci = Ubel::WalkClassEx(elemStruct);   // memoized (B10) — by ref
                 const int32_t maxRegion = cfe.stride - regionOff;   // bytes available to this side
                 int32_t structSize = eci.PropertiesSize;
                 if (structSize <= 0)        structSize = maxRegion;
@@ -7561,7 +7591,7 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
                 ePos = out[aPos].elements.size();
                 Aura::SnapshotArrayElement el; el.index = lf.elemIndex;
                 if (lf.elemStructAddr) {
-                    ClassInfo eci = Ubel::WalkClassEx(lf.elemStructAddr);  // cached
+                    const ClassInfo& eci = Ubel::WalkClassEx(lf.elemStructAddr);  // memoized (B10) — by ref
                     std::vector<std::string> types, names;
                     types.reserve(eci.Fields.size()); names.reserve(eci.Fields.size());
                     for (const auto& ff : eci.Fields) { types.push_back(ff.TypeName); names.push_back(ff.Name); }
@@ -7695,7 +7725,7 @@ void CollectGroupLeaves(uintptr_t obj, const std::string& ownerClassName,
     for (uintptr_t v : visited) if (v == structAddr) return;  // cycle guard
     visited.push_back(structAddr);
 
-    ClassInfo ci = Ubel::WalkClassEx(structAddr);  // cached per struct
+    const ClassInfo& ci = Ubel::WalkClassEx(structAddr);  // memoized per struct (B10)
     for (const auto& f : ci.Fields) {
         if (leaves.size() >= leafCap) break;
         Radar::DataType dt;
@@ -8077,12 +8107,18 @@ void AppendRawHoleLeaves(uintptr_t obj, uintptr_t cls, const std::string& classN
 GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                                   bool gameOnly, int32_t maxResults, bool deep,
                                   bool crossObject, bool nativeC, bool newestFirst,
-                                  int32_t deadlineMs, bool preFilterNoise) {
+                                  int32_t deadlineMs, bool preFilterNoise,
+                                  int perSlotCap) {
     GroupScanResult result;
     auto t0 = std::chrono::steady_clock::now();
     const auto kDeadline = std::chrono::milliseconds(deadlineMs > 0 ? deadlineMs : 15000);
 
     const size_t nSlots = slots.size();
+    // Set if any object had more satisfying leaves than the per-slot cap. Reported once
+    // at the end: a truncated set is still a correct FIRST scan, but a later
+    // Changed/Decreased refine can only re-read what was kept -- which is how a cap of 8
+    // hid every derived-class field behind AActor's.
+    bool capHit = false;
     if (nSlots < 2) return result;                       // a group needs >= 2 values
     for (const auto& sp : slots)
         if (sp.targets.entries.empty()) return result;   // a slot that fits no width => no hits
@@ -8302,7 +8338,8 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         if (nativeC)
             AppendRawHoleLeaves(obj, cls, className, slots, nativeWidths, nativeWinBuf,
                                 leaves, metas, kLeafCap);
-        if (leaves.size() >= nSlots && Orden::MatchGroup(leaves, ordenSlots, matchOut))
+        if (leaves.size() >= nSlots && Orden::MatchGroup(leaves, ordenSlots, matchOut,
+                                                        perSlotCap, &capHit))
             emitGroupCandidate(obj, objIdx, name, className, leaves, metas, matchOut);
 
         // --- Deep blocks (opt-in): each numeric container / struct-array element
@@ -8315,7 +8352,8 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
             for (auto& kv : deepBlocks) {
                 GroupBlock& blk = kv.second;
                 if (blk.leaves.size() < nSlots) continue;
-                if (Orden::MatchGroup(blk.leaves, ordenSlots, matchOut))
+                if (Orden::MatchGroup(blk.leaves, ordenSlots, matchOut,
+                                      perSlotCap, &capHit))
                     emitGroupCandidate(obj, objIdx, name, className, blk.leaves, blk.metas, matchOut);
                 if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
             }
@@ -8327,6 +8365,12 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         }
     }
 
+    if (capHit) {
+        LOG_WARN("ScanForValueGroup: at least one object had more than %d leaves matching a slot "
+                 "- the extras were dropped, and a later Changed/Decreased refine can only "
+                 "re-read what was kept. Narrow the first scan's range if an expected field is "
+                 "missing.", perSlotCap);
+    }
     result.stats.scannedObjects = scanned;
     result.stats.scannedClasses = static_cast<int32_t>(eligible.size());
     result.stats.durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -8348,12 +8392,23 @@ ValueScanStats RefineGroupCandidates(
     // set into a fresh survivors vector. Each slot match re-reads its ABSOLUTE
     // leafAddr (direct: obj+offset; deep: container element — stale on container
     // realloc, where the SEH-safe read faults and the match is dropped).
+    // Diagnostic budget: enough to see a pattern, few enough to stay off the hot path.
+    constexpr int kDiagCandidates = 5;
+    int dbgCandidates = 0;
+
     std::vector<Radar::GroupCandidate> survivors;
     survivors.reserve(candidates.size());
     for (auto& gc : candidates) {
         if (gc.slotMatches.size() != nSlots) continue;
         if (gc.instanceIdx >= instances.size()) continue;   // defensive
         bool alive = true;
+        // Per-slot drop tally for the first few candidates. A refine that prunes to zero
+        // says only "0 surviving" today, which is the same output for six different causes:
+        // the leaf could not be read, its width has no target, the predicate rejected it, or
+        // the survivors could not form a distinct assignment. Three separate hypotheses were
+        // written and abandoned against that silence on 2026-08-05 -- so it now counts.
+        const bool diag = (dbgCandidates < kDiagCandidates);
+        int dRead = 0, dWidth = 0, dNoTarget = 0, dPredicate = 0, dKept = 0, dEntered = 0;
         for (size_t s = 0; s < nSlots && alive; ++s) {
             // P2: per-slot predicate. Prev-value types (Changed/Increased/...)
             // compare each leaf's re-read bytes against its own stored prevValue;
@@ -8365,29 +8420,44 @@ ValueScanStats RefineGroupCandidates(
             std::vector<Radar::GroupSlotMatch> keep;
             keep.reserve(gc.slotMatches[s].size());
             for (auto& sm : gc.slotMatches[s]) {
-                if (sm.descriptorIdx >= descriptors.size()) continue;
+                ++dEntered;
+                if (sm.descriptorIdx >= descriptors.size()) { ++dWidth; continue; }
                 Radar::DataType width;
                 if (!Radar::TryDataTypeFromPropertyTypeName(descriptors[sm.descriptorIdx].fieldType, width))
-                    continue;
+                    { ++dWidth; continue; }
                 const size_t sz = Radar::SizeOf(width);
-                if (sz == 0 || sz > 8) continue;
+                if (sz == 0 || sz > 8) { ++dWidth; continue; }
                 uint8_t buf[8] = {};
-                if (!Macht::ReadBytesSafe(sm.leafAddr, buf, sz)) continue;
+                if (!Macht::ReadBytesSafe(sm.leafAddr, buf, sz)) { ++dRead; continue; }
                 const uint8_t* cmp = usePrev ? sm.prevValue : slots[s].targets.Find(width);
-                if (!cmp) continue;                          // value can't fit this width
+                if (!cmp) { ++dNoTarget; continue; }          // value can't fit this width
                 const uint8_t* cmp2 = nullptr;
                 if (st == Radar::ScanType::Between) {
                     cmp2 = slots[s].targets2.Find(width);
-                    if (!cmp2) continue;                     // upper bound can't fit this width
+                    if (!cmp2) { ++dNoTarget; continue; }    // upper bound can't fit this width
                 }
-                if (!Radar::ComparePredicate(width, st, buf, cmp, cmp2, slots[s].roundMode)) continue;
+                if (!Radar::ComparePredicate(width, st, buf, cmp, cmp2, slots[s].roundMode))
+                    { ++dPredicate; continue; }
                 std::memcpy(sm.prevValue, buf, sz);
+                ++dKept;
                 keep.push_back(sm);
             }
             gc.slotMatches[s] = std::move(keep);
             if (gc.slotMatches[s].empty()) alive = false;
         }
-        if (alive && GroupCandidateFeasible(gc))
+        const bool feasible = alive && GroupCandidateFeasible(gc);
+        if (diag) {
+            ++dbgCandidates;
+            const char* verdict = !alive     ? "DROPPED (a slot has no surviving leaf)"
+                                : !feasible  ? "DROPPED (survivors cannot form a DISTINCT assignment "
+                                               "-- every slot matched the same leaf)"
+                                             : "kept";
+            Sein::Debug("SCAN:grp",
+                "RefineGroup cand[%u]: %s | leaves entered=%d kept=%d | dropped: unreadable=%d "
+                "bad-width=%d no-target-for-width=%d predicate-said-no=%d",
+                (unsigned)gc.instanceIdx, verdict, dEntered, dKept, dRead, dWidth, dNoTarget, dPredicate);
+        }
+        if (feasible)
             survivors.push_back(std::move(gc));
     }
     candidates = std::move(survivors);
@@ -8580,7 +8650,7 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
             // never dropped. Verdict is thread-local memoized per class.
             if (skipNoiseClasses && IsSnapshotNoiseClass(cls, classPath)) continue;
 
-            ClassInfo ci = Ubel::WalkClassEx(cls);  // cached per class (value copy)
+            const ClassInfo& ci = Ubel::WalkClassEx(cls);  // memoized per class (B10) — no copy
             if (ci.Fields.empty()) continue;
 
             typeNames.clear();

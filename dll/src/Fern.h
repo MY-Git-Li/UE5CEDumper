@@ -15,6 +15,7 @@
 // ============================================================
 
 #include <Windows.h>
+#include "Routine.h"   // Routine::SafeThread — ~std::thread on a joinable thread terminates (B14)
 #include <string>
 #include <thread>
 #include <atomic>
@@ -44,15 +45,65 @@ private:
         HANDLE             pipe{INVALID_HANDLE_VALUE};
         std::mutex         writeMutex;
         std::atomic<bool>  inFlight{false};   // true only while inside DispatchCommand
+        // What that in-flight command IS, and when it started. Written just before
+        // DispatchCommand and read ONLY by Stop's drain-timeout diagnostic, so the hot
+        // path pays one small copy per command and the teardown can finally name the
+        // connection that would not leave. "2 left" is not actionable; "2 left: lane
+        // busy 4980 ms in 'walk_instance'" is. (2026-08-04: the first Stop ever logged
+        // with connections attached timed out at the full 5 s and the log could not say
+        // why.)
+        std::mutex         diagMutex;         // guards cmdName only
+        std::string        cmdName;           // last/current command on this connection
+        std::atomic<long long> cmdStartMs{0}; // steady-clock ms when it began
         std::atomic<bool>  closed{false};     // CloseHandle done exactly once
+        // A duplicate of the SERVING thread's own handle, so Stop can call
+        // CancelSynchronousIo on it. CancelIoEx cancels ASYNCHRONOUS requests; these
+        // pipe instances are created without FILE_FLAG_OVERLAPPED, so a thread parked in
+        // ReadFile has no pending IRP for CancelIoEx to find and it returns
+        // ERROR_NOT_FOUND. Measured 2026-08-05 on the first Stop that ever caught two
+        // idle connections: "0 accepted, 2 had nothing pending", then 49 re-asserts over
+        // the full 5 s budget, all reporting the same. CancelSynchronousIo is the API for
+        // a synchronous operation blocking a known thread, and it needs the THREAD handle
+        // -- which only the serving thread itself can hand us.
+        std::atomic<HANDLE> servingThread{nullptr};
+
+        // WHERE the serving thread actually is. `inFlight` only says "inside
+        // DispatchCommand", so everything else -- parked in ReadFile, blocked in
+        // WriteFile on a client that stopped reading, waiting on writeMutex, or joining
+        // watch threads during cleanup -- collapsed into one bucket that the drain
+        // diagnostic then LABELLED "idle in ReadFile". That label is an inference, and
+        // three fixes were aimed at it: "stuck inside a command" (wrong), "CancelIoEx
+        // missed the window" (wrong -- 49 re-asserts, all nothing-pending), and
+        // "CancelSynchronousIo is the right API" (wrong -- still timed out). Each one
+        // treated the label as an observation. This makes it one.
+        enum class Phase : uint8_t {
+            Reading,          // inside ReadLine's blocking ReadFile
+            Dispatching,      // inside DispatchCommand
+            Writing,          // inside WriteLine (WriteFile, or waiting on writeMutex)
+            StoppingWatches,  // cleanup: joining this connection's watch threads
+            Unregistering,    // cleanup: erasing from m_conns / closing the handle
+            Done,
+        };
+        std::atomic<Phase>     phase{Phase::Reading};
+        std::atomic<long long> phaseStartMs{0};
     };
 
-    std::thread        m_acceptThread;
+    static const char* PhaseName(Connection::Phase p);
+    static void SetPhase(Connection& conn, Connection::Phase p);
+
+    Routine::SafeThread        m_acceptThread;
     std::atomic<bool>  m_running{false};
+    // True for the duration of Stop(). m_running goes false on Stop()'s first
+    // line, so it cannot tell Start() "a teardown is still unwinding" — and
+    // starting during that window move-assigns onto a joinable thread, which is
+    // std::terminate.
+    std::atomic<bool>  m_stopping{false};
     std::atomic<bool>  m_clientConnected{false};   // mirror of (!m_conns.empty())
 
     // Registry of live connections + the instance currently parked in
-    // ConnectNamedPipe (so Stop() can close it to unblock the accept).
+    // ConnectNamedPipe. Stop() reads it only to decide whether to send a
+    // wake-connect; it must NOT close that handle (a synchronous listen instance
+    // blocks the close until somebody connects — see Fern::Stop).
     std::vector<std::shared_ptr<Connection>> m_conns;
     HANDLE                  m_listenPipe{INVALID_HANDLE_VALUE};
     std::mutex              m_connMutex;     // guards m_conns + m_listenPipe + m_clientConnected
@@ -65,7 +116,7 @@ private:
     // bails. It peeks ONLY while a connection's inFlight flag is set (the thread
     // is then CPU-bound in DispatchCommand, not in ReadFile/WriteFile), so there
     // is no concurrent read/write on the handle.
-    std::thread          m_monitorThread;
+    Routine::SafeThread          m_monitorThread;
     void MonitorLoop();
 
     // Watch entries — per-connection. A watch's event is written to the
@@ -77,7 +128,7 @@ private:
         uint32_t            size;
         uint32_t            interval_ms;
         Connection*         owner{nullptr};
-        std::thread         watchThread;
+        Routine::SafeThread         watchThread;
         std::atomic<bool>   active{true};
     };
     std::unordered_map<uintptr_t, std::unique_ptr<WatchEntry>> m_watches;
@@ -89,7 +140,7 @@ private:
         std::atomic<int>  phase{0};       // 0=idle, 1..6=scanning, 7=complete
         std::string       statusText;
         std::mutex        statusMutex;
-        std::thread       scanThread;
+        Routine::SafeThread       scanThread;
         bool              completed = false;
     };
     ScanState m_scan;
@@ -105,10 +156,12 @@ private:
         uintptr_t         foundGWorld   = 0;
         const char*       gobjectsMethod = "not_found";
         const char*       gworldMethod   = "not_found";
-        std::thread       scanThread;
+        Routine::SafeThread       scanThread;
     };
     RescanState m_rescan;
     void RunRescan(bool scanGObjects, bool scanGWorld);
+    // The actual work; RunRescan is the guarded wrapper that always clears `running`.
+    void RunRescanBody(bool scanGObjects, bool scanGWorld);
 
     void AcceptLoop();
     void HandleConnection(std::shared_ptr<Connection> conn);

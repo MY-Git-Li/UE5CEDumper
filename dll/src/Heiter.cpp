@@ -10,6 +10,7 @@
 #include "BuildStamp.h"
 #include "Grimoire.h"
 #include "Utf8Helpers.h"
+#include "Routine.h"   // Routine::RunThreadGuarded — a throw out of a thread proc is std::terminate (B14)
 
 // Global DLL module handle — used by CEPlugin.cpp to resolve the DLL's
 // own file path when injecting into the game process.
@@ -51,6 +52,9 @@ static HANDLE g_hAutoStartThread = nullptr;
 // The mutex handle is intentionally never closed — its lifetime spans the
 // whole process. The OS reclaims it on process exit.
 static HANDLE g_primaryProxyMutex = nullptr;
+// False when CreateMutexW itself failed — the guard is then not armed at all and a
+// second proxy in this process would run alongside us. Logged once Sein exists. (B47)
+static bool   g_primaryProxyMutexArmed = false;
 #endif
 
 #ifdef UE5_PROXY_BUILD
@@ -58,7 +62,17 @@ static HANDLE g_primaryProxyMutex = nullptr;
 // In proxy mode, we start the pipe server immediately (no scan).
 // The user triggers scanning later from the UI when the game has loaded.
 // No CE delay needed — proxy DLL is always in the game process.
+static void AutoStartBody();
+
+// Guarded entry: AutoStartBody runs the whole AOB scan + pipe start, which allocates
+// heavily, and this is a raw CreateThread proc where a throw is std::terminate. (B14)
 static DWORD WINAPI AutoStartThreadProc(LPVOID)
+{
+    Routine::RunThreadGuarded("DllMain AutoStart", [] { AutoStartBody(); });
+    return 0;
+}
+
+static void AutoStartBody()
 {
     // Guard: if this DLL was accidentally loaded by UE5DumpUI.exe (e.g. both
     // files in the same directory), skip all initialization to avoid the UI
@@ -74,7 +88,7 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
         if (exe == L"ue5dumpui.exe") {
             LOG_WARN("DllMain ProxyStart: loaded by UE5DumpUI.exe — skipping proxy init");
             g_invokeMailbox.initState = Mimic::INIT_SKIPPED;
-            return 0;
+            return;
         }
     }
 
@@ -87,7 +101,6 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
     bool ok = UE5_StartPipeServer();
     g_invokeMailbox.initState = ok ? Mimic::INIT_READY : Mimic::INIT_FAILED;
     LOG_INFO("DllMain ProxyStart: pipe server %s", ok ? "started" : "FAILED to start");
-    return 0;
 }
 #else
 // ── CE / Manual inject auto-start ──────────────────────────────────────────
@@ -99,7 +112,17 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
 // This eliminates the need for CE Lua to call UE5_Init via executeCodeEx,
 // which was timing out due to the AOB scan taking longer than CE's remote-
 // thread timeout.
+static void AutoStartBody();
+
+// Guarded entry: AutoStartBody runs the whole AOB scan + pipe start, which allocates
+// heavily, and this is a raw CreateThread proc where a throw is std::terminate. (B14)
 static DWORD WINAPI AutoStartThreadProc(LPVOID)
+{
+    Routine::RunThreadGuarded("DllMain AutoStart", [] { AutoStartBody(); });
+    return 0;
+}
+
+static void AutoStartBody()
 {
     // Log immediately (before any sleep) to confirm thread is running.
     LOG_INFO("DllMain AutoStart: thread started (g_isCEPlugin=%d)", (int)g_isCEPlugin.load());
@@ -112,7 +135,34 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
     if (g_isCEPlugin.load()) {
         LOG_INFO("DllMain AutoStart: CE plugin host — skipping auto-start");
         g_invokeMailbox.initState = Mimic::INIT_SKIPPED;
-        return 0;
+        return;
+    }
+
+    // Belt and braces for the same race (B34). CEPlugin_GetVersion now claims plugin
+    // identity, which closes the ordinary window — but "did a human tick a checkbox in
+    // under a second" is not a condition worth betting a full AOB scan of the WRONG
+    // PROCESS on, and identity is never claimed at all when the DLL is injected into CE
+    // by hand rather than loaded as a plugin. Cheat Engine is never a scan target.
+    //
+    // PREFIX match, not an exact-name list. The first version of this guard listed
+    // "cheatengine-x86_64.exe" / "cheatengine-i386.exe" / "Cheat Engine.exe" and was
+    // verified against a live capture that named the real executable:
+    // **cheatengine-x86_64-SSE4-AVX2.exe** — a build variant none of those three
+    // matched, so the DLL scanned CE for 5.8 s and opened \\.\pipe\UE5DumpBfx inside it.
+    // CE ships several suffixed variants and can add more; the stable part is the stem.
+    {
+        wchar_t hostPath[MAX_PATH] = {};
+        if (GetModuleFileNameW(nullptr, hostPath, MAX_PATH)) {
+            const wchar_t* leaf = wcsrchr(hostPath, L'\\');
+            leaf = leaf ? leaf + 1 : hostPath;
+            if (IsCheatEngineExeName(leaf)) {
+                LOG_WARN("DllMain AutoStart: host process is '%ls' — Cheat Engine is never "
+                         "a scan target; skipping auto-start (CE plugin, not yet enabled, "
+                         "or the DLL was injected into CE by hand?)", leaf);
+                g_invokeMailbox.initState = Mimic::INIT_SKIPPED;
+                return;
+            }
+        }
     }
 
     // Check if another UE5Dumper instance is already running (e.g., proxy DLL)
@@ -127,13 +177,13 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
         // SKIPPED, not FAILED: a pipe server IS up (owned by the other instance),
         // so a CE Lua poller should proceed to connect rather than report an error.
         g_invokeMailbox.initState = Mimic::INIT_SKIPPED;
-        return 0;
+        return;
     }
 
     LOG_INFO("DllMain AutoStart: game process — calling UE5_AutoStart");
     UE5_AutoStart();
     LOG_INFO("DllMain AutoStart: UE5_AutoStart returned");
-    return 0;
+    return;
 }
 #endif
 
@@ -144,20 +194,40 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID /*reserved*/) {
         DisableThreadLibraryCalls(hModule);
 
 #ifdef UE5_PROXY_BUILD
-        // First-loaded-wins: if another UE5CEDumper proxy DLL has already
-        // claimed the global mutex, become a passive forwarder. We MUST do
-        // this before Sein::Init() so the second instance doesn't open log
-        // files in the same per-process subfolder as the first.
+        // First-loaded-wins: if another UE5CEDumper proxy DLL is already loaded into
+        // THIS process, become a passive forwarder. We MUST do this before Sein::Init()
+        // so the second instance doesn't open log files in the same per-process
+        // subfolder as the first.
         //
         // Returning TRUE here skips Sein::Init / Mimic::StartThread / the
         // auto-start thread; the only thing this DLL still does is service
         // its OS-API export forwarders (Lugner.cpp / Lugner_Dinput8.cpp).
-        g_primaryProxyMutex = CreateMutexW(nullptr, FALSE,
-            L"Global\\UE5CEDumper_PrimaryProxy");
-        if (g_primaryProxyMutex != nullptr &&
-            GetLastError() == ERROR_ALREADY_EXISTS) {
-            // No logging — Sein not initialized in passive mode.
-            return TRUE;
+        //
+        // The name is per-PROCESS, and that is the whole point — the comment above has
+        // always said so, but the name used to be `Global\…`, which is a different
+        // thing in two ways (B47). Creating a `Global\` object needs
+        // SeCreateGlobalPrivilege, which a non-elevated game does NOT have: CreateMutexW
+        // returned NULL, the guard was skipped entirely, and the same-process dedup it
+        // exists for silently never worked. When it DID work (elevated game) it was
+        // worse — machine-wide, so a second instrumented game anywhere on the system
+        // turned this proxy passive. Local\ + PID is the scope the design intends.
+        {
+            wchar_t mutexName[64];
+            swprintf_s(mutexName, L"Local\\UE5CEDumper_PrimaryProxy_%lu",
+                       GetCurrentProcessId());
+            g_primaryProxyMutex = CreateMutexW(nullptr, FALSE, mutexName);
+            if (g_primaryProxyMutex != nullptr &&
+                GetLastError() == ERROR_ALREADY_EXISTS) {
+                // Cannot log — Sein is deliberately not initialized in passive mode, and
+                // initializing it is exactly what this branch must avoid. The first
+                // instance records the pairing from its own side instead (below).
+                return TRUE;
+            }
+            // A NULL handle means the guard is not armed at all. Record it once we have
+            // a logger, because a silently-unarmed dedup is what made this defect
+            // invisible: two proxies in one process would BOTH run, and the only symptom
+            // is interleaved logs in one folder.
+            g_primaryProxyMutexArmed = (g_primaryProxyMutex != nullptr);
         }
 #endif
 
@@ -188,6 +258,16 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID /*reserved*/) {
 
             // Initialize per-process mirror log subfolder
             Sein::InitProcessMirror(fileName);
+
+#ifdef UE5_PROXY_BUILD
+            // The first moment this can be said out loud. A dedup that is not armed
+            // must not look like a dedup that found nothing. (B47)
+            if (!g_primaryProxyMutexArmed) {
+                LOG_WARN("Proxy: first-loaded-wins guard is NOT armed (CreateMutexW failed, "
+                         "err=%lu) — a second UE5CEDumper proxy in this process would run "
+                         "alongside this one", GetLastError());
+            }
+#endif
         }
         // Start mailbox polling thread (CE Lua shared memory interface).
         // Runs in both proxy and inject modes — handles auto-init on first command.

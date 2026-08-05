@@ -1,4 +1,4 @@
-using UE5DumpUI.Models;
+﻿using UE5DumpUI.Models;
 
 namespace UE5DumpUI.Core;
 
@@ -329,6 +329,7 @@ public interface IDumpService
         int deadlineMs = Constants.ScanSessionDeadlineMs,
         bool autoSkipNoise = false,
         Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
+        int perSlotCap = Constants.GroupPerSlotCap,
         CancellationToken ct = default);
 
     Task<GroupScanRefineResult> RefineGroupScanAsync(
@@ -346,6 +347,19 @@ public interface IDumpService
         string? sortKey = null,
         bool sortDesc = false,
         IReadOnlyList<string>? excludeClasses = null,
+        CancellationToken ct = default);
+
+    /// <summary>Every leaf ONE slot of ONE group candidate kept, BY NAME. A results
+    /// row can only display one assignment out of the many an object may satisfy;
+    /// this is how the rest become visible and actionable. Fetched on demand for an
+    /// expanded row — a page of candidates carries far too many leaves to inline.</summary>
+    Task<IReadOnlyList<GroupSlotMatch>> QueryGroupSlotLeavesAsync(
+        ulong sessionId,
+        GroupSlotMatch slot,
+        string instanceAddr,
+        string className,
+        int offset = 0,
+        int limit = 0,
         CancellationToken ct = default);
 
     Task EndGroupScanAsync(ulong sessionId, CancellationToken ct = default);

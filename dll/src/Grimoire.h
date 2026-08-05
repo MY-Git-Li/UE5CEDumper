@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <string>    // DynOff::LooksLikeFieldClassName / PickFFieldClassNameOffset
+#include <cwchar>    // _wcsnicmp / _wcsicmp — IsCheatEngineExeName
 
 namespace Grimoire {
 
@@ -28,6 +29,13 @@ constexpr const wchar_t* HINT_CACHE_PREFIX = L"UE5CEDumper";  // File: UE5CEDump
 constexpr const wchar_t* PIPE_NAME        = L"\\\\.\\pipe\\UE5DumpBfx";
 constexpr const char*    PIPE_NAME_NARROW  = "\\\\.\\pipe\\UE5DumpBfx";
 constexpr unsigned long  PIPE_BUF_SIZE    = 65536;
+// Slice of Fern::Stop's 5 s connection-drain wait. Each slice re-asserts
+// CancelIoEx on the surviving connections, because a single cancel fired before
+// the wait can miss a thread that is BETWEEN two reads and will then park in a
+// fresh, uncancelled ReadFile (Fern::ReadLine reads one byte per call, so every
+// command offers many such gaps). 100 ms: 50 chances inside the budget, and the
+// cost when nothing survives is zero — the loop exits on the first wait.
+constexpr int            PIPE_STOP_CANCEL_REASSERT_MS = 100;
 
 // --- Userspace pointer plausibility ---
 // A candidate x64 pointer is "plausible userspace" iff it sits in the canonical
@@ -336,12 +344,52 @@ constexpr double  SCHLACHT_TRACE_STEP    = 2.0;      // uu — advance the ray s
 constexpr int     SCHLACHT_PIERCE_DEFAULT = 1;       // hide this many nearest occluders by default
 constexpr int     SCHLACHT_PIERCE_MAX     = 10;      // UI/clamp ceiling for the pierce depth
 constexpr int     SCHLACHT_MAX_EXTRA_ITERS = 16;     // extra trace iterations beyond pierceN (skipped Pawns / dupes)
-// Deferred-restore poll: a disable while the game thread is paused cannot un-hide,
-// so a short-lived worker waits for the thread to come back and restores then. The
-// tick is slow (this is a "has the user clicked back into the game yet" poll, not a
-// trace loop); the bound stops a thread outliving everything if they never return —
-// realistically the game is closed by then, which makes the leftover moot anyway.
-constexpr int     SCHLACHT_PENDING_TICK_MS = 250;
-constexpr int     SCHLACHT_PENDING_MAX_MS  = 5 * 60 * 1000;   // 5 minutes
+} // namespace Grimoire
+
+// ============================================================
+// Host-process identification
+// ============================================================
+
+/// True when `exeLeafName` is a Cheat Engine executable. Cheat Engine is NEVER a scan
+/// target: if our DLL is loaded into it (as a not-yet-enabled plugin, or injected by
+/// hand) the auto-start path must refuse rather than AOB-scan CE and open the game pipe
+/// inside it.
+///
+/// **A PREFIX test on purpose.** The first version of this guard was an exact-name list
+/// — `cheatengine-x86_64.exe`, `cheatengine-i386.exe`, `Cheat Engine.exe` — and a live
+/// capture then named the real executable **`cheatengine-x86_64-SSE4-AVX2.exe`**, which
+/// matched none of them. CE ships several CPU-feature variants and can add more; what is
+/// stable is the stem. Matching the stem also covers `cheatengine-i386.exe`,
+/// `cheatengine-x86_64.exe` and any future `-AVX512`-style suffix without another edit.
+///
+/// Case-insensitive (Windows filenames are). Deliberately NOT a substring search: a game
+/// legitimately called e.g. `MyCheatEngineClone.exe` must not be refused, so the match is
+/// anchored at the start. (Audit #4 B34, corrected by in-game verification.)
+inline bool IsCheatEngineExeName(const wchar_t* exeLeafName) {
+    if (!exeLeafName || !*exeLeafName) return false;
+    // "cheatengine-*.exe" — every shipped variant of the main executable.
+    if (_wcsnicmp(exeLeafName, L"cheatengine", 11) == 0) return true;
+    // The installer's launcher shim, which has a space and no suffix.
+    if (_wcsicmp(exeLeafName, L"Cheat Engine.exe") == 0) return true;
+    return false;
+}
+
+namespace Grimoire {
+
+// Every re-assert worker sleeps its period in slices of this, so StopWorker()'s join
+// waits at most one slice rather than a whole period. Was 8 bare `25`s across four
+// modules (R5). Keep it well under the shortest period (PROTECT/MOVE/TIME/SOLIDE) —
+// a slice longer than a period would turn the sliced sleep into a single long one.
+constexpr int     WORKER_SLEEP_SLICE_MS = 25;
+
+// Deferred-restore poll: a disable while the game thread is paused cannot undo what
+// the feature did, so a short-lived worker waits for the thread to come back and
+// restores then. The tick is slow (this is a "has the user clicked back into the game
+// yet" poll, not a trace loop); the bound stops a thread outliving everything if they
+// never return — realistically the game is closed by then, which makes the leftover
+// moot anyway. Shared by Schlacht (un-hide occluders) and Dunste (re-enable the pawn's
+// collision) — same poll, same reason, so deliberately NOT per-module constants.
+constexpr int     PENDING_RESTORE_TICK_MS = 250;
+constexpr int     PENDING_RESTORE_MAX_MS  = 5 * 60 * 1000;   // 5 minutes
 
 } // namespace Grimoire

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -22,6 +22,13 @@ public partial class ProxyDeployViewModel : ViewModelBase
     private readonly IPlatformService? _platform;
 
     [ObservableProperty] private bool _isScanning;
+    // WHICH scan is running. IsScanning stays the mutual-exclusion guard, but it cannot
+    // also drive the Cancel buttons: three commands set it and only two have a Cancel, so
+    // every one of them showed BOTH buttons — each wired to a different command, whose
+    // CanExecute (the wrapped command's CanBeCanceled) was false, rendering a disabled
+    // ghost Cancel on the card that was not scanning. (B45)
+    [ObservableProperty] private bool _isScanningDrives;
+    [ObservableProperty] private bool _isScanningOrphans;
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private string _sourceDllPath = "";
     [ObservableProperty] private string? _sourceDllVersion;
@@ -412,6 +419,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         {
             ClearError();
             IsScanning = true;
+            IsScanningDrives = true;
             StatusColor = StatusNeutral;
             StatusText = "Scanning drives for UE games...";
             LastOperationResult = null;
@@ -451,6 +459,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         finally
         {
             IsScanning = false;
+            IsScanningDrives = false;
         }
     }
 
@@ -474,6 +483,9 @@ public partial class ProxyDeployViewModel : ViewModelBase
     public ObservableCollection<OrphanProxy> Orphans { get; } = new();
 
     [ObservableProperty] private bool _orphanScanRan;
+    /// <summary>Folders the last orphan scan examined. An empty report must be able to say
+    /// what it LOOKED AT, or it is indistinguishable from a scan that never ran.</summary>
+    private int _orphanFoldersExamined;
 
     /// <summary>Only say "none found" after a scan has actually run — before that, silence.</summary>
     public bool ShowNoOrphansFound => OrphanScanRan && Orphans.Count == 0;
@@ -537,13 +549,19 @@ public partial class ProxyDeployViewModel : ViewModelBase
         {
             ClearError();
             IsScanning = true;
+            IsScanningOrphans = true;
             StatusColor = StatusNeutral;
             StatusText = "Looking for leftover proxy DLLs...";
             LastOperationResult = null;
 
             // Constructed on the UI thread → the callback marshals back to it.
-            var progress = new Progress<OrphanScanProgress>(p =>
-                StatusText = $"Checking {p.Examined} folder(s) — {p.Found} leftover(s) found");
+            // Keep the last examined count: an empty report has to be able to say what it
+            // LOOKED AT, or it proves nothing.
+            int examined = 0;
+            var progress = new Progress<OrphanScanProgress>(p => {
+                examined = p.Examined;
+                StatusText = $"Checking {p.Examined} folder(s) — {p.Found} leftover(s) found";
+            });
 
             var found = await _deploy.FindOrphanProxiesAsync(
                 OrphanScanSources.SteamShapeScan | OrphanScanSources.DeployLog | OrphanScanSources.DllLoadLog,
@@ -560,12 +578,23 @@ public partial class ProxyDeployViewModel : ViewModelBase
                 Orphans.Add(o);
             }
             OrphanScanRan = true;
+            _orphanFoldersExamined = examined;
+            OnPropertyChanged(nameof(CanWriteOrphanReport));
+            WriteOrphanReportCommand.NotifyCanExecuteChanged();
             NotifyOrphanSelectionChanged();
 
+            // Name the NEXT action explicitly, and quote the button label verbatim ("Report…",
+            // ellipsis and all) so it can be matched on screen. The scan finishing was being read
+            // as "the report has been produced" — a fair assumption, since a scan that reports its
+            // findings on screen looks finished — and the file was then never written. Saying which
+            // button writes it costs one clause and removes the guess. The clean case also states
+            // the coverage, because "found nothing" is only reassuring next to "…out of how many".
             SetOperationResult(
                 Orphans.Count == 0
-                    ? "No leftover proxy DLLs found"
-                    : $"Found {Orphans.Count} leftover proxy DLL(s) — nothing removed yet",
+                    ? $"No leftover proxy DLLs found ({_orphanFoldersExamined} folder(s) examined) — "
+                      + "press “Report…” to save this result as a file."
+                    : $"Found {Orphans.Count} leftover proxy DLL(s) — nothing removed yet. "
+                      + "Press “Report…” for a dry run of exactly what would go.",
                 0);
         }
         catch (OperationCanceledException)
@@ -582,11 +611,19 @@ public partial class ProxyDeployViewModel : ViewModelBase
         finally
         {
             IsScanning = false;
+            IsScanningOrphans = false;
         }
     }
 
-    /// <summary>True once a scan has produced rows, so Report has something to write.</summary>
-    public bool CanWriteOrphanReport => Orphans.Count > 0;
+    /// <summary>True once a scan has RUN — not once it has found something.
+    ///
+    /// <para>A clean scan must still be able to write a report, and that is not a nicety: with no
+    /// artifact, "scanned everything and found nothing" and "the scan never ran / looked in the
+    /// wrong place / failed silently" are indistinguishable a week later. The report is the only
+    /// durable record that the sweep happened and what it covered. <c>BuildReport</c> has always
+    /// handled the empty case ("No leftover proxy DLLs were found."); it was this gate that made
+    /// that text unreachable.</para></summary>
+    public bool CanWriteOrphanReport => OrphanScanRan;
 
     /// <summary>
     /// Binaries folders of games we already know are installed. Passed to BOTH the scan and the
@@ -610,13 +647,28 @@ public partial class ProxyDeployViewModel : ViewModelBase
     [RelayCommand]
     private async Task WriteOrphanReportAsync()
     {
-        if (Orphans.Count == 0) { LastOperationResult = "Nothing to report — run the scan first"; return; }
+        // Gate on "a scan has run", not on "it found something" — see CanWriteOrphanReport.
+        // Log BOTH outcomes. Three rounds were spent on "I ran Report and no file appeared"
+        // with nothing in the log to say whether the command had even been entered — the
+        // success path logged nothing and the refusal logged nothing, so "it never ran" and
+        // "it ran and failed" were indistinguishable. Same defect this whole audit is about.
+        if (!OrphanScanRan)
+        {
+            _log.Info("ProxyDeploy", "Leftover report refused: no orphan scan has run in this session");
+            LastOperationResult = "Nothing to report — run the scan first";
+            return;
+        }
         if (_platform == null) { LastOperationResult = "Report unavailable on this platform"; return; }
 
         try
         {
             ClearError();
-            string dir = Path.Combine(_platform.GetAppDataPath(), "Reports");
+            // GetAppDataPath() is %LOCALAPPDATA% itself, so the app's own folder segment
+            // has to be added — every other consumer does. Without it the written record
+            // of a destructive cleanup landed in %LOCALAPPDATA%\Reports: outside the
+            // System-tab data wipe, and outside "send me your app data folder". Audit #4 B38.
+            string dir = Path.Combine(_platform.GetAppDataPath(),
+                                      Constants.LogFolderName, "Reports");
             Directory.CreateDirectory(dir);
             // Timestamped rather than overwritten so two scans can be compared, and so a report the
             // user is still reading is never replaced under them.
@@ -629,12 +681,16 @@ public partial class ProxyDeployViewModel : ViewModelBase
             string text = Services.ProxyOrphanScanner.BuildReport(
                 Orphans.ToList(),
                 DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                build > 0 ? build.ToString() : "unknown");
+                build > 0 ? build.ToString() : "unknown",
+                _orphanFoldersExamined);
 
             await File.WriteAllTextAsync(file, text);
             PruneAgedReports(dir);
             await _platform.OpenWithShellAsync(file);
 
+            _log.Info("ProxyDeploy",
+                      $"Leftover report written: {file} ({Orphans.Count} row(s), " +
+                      $"{_orphanFoldersExamined} folder(s) examined)");
             SetOperationResult($"Report written: {file}", 0);
         }
         catch (Exception ex)
@@ -748,6 +804,27 @@ public partial class ProxyDeployViewModel : ViewModelBase
     /// inject (best-effort auto-connect).</summary>
     public Func<Task>? RequestConnectAsync { get; set; }
 
+    /// <summary>True once the pipe is actually connected. Needed because
+    /// <see cref="RequestConnectAsync"/> is fire-and-forget — without a way to ASK, the
+    /// post-inject connect could only be attempted once and hoped for.</summary>
+    public Func<bool>? IsConnectedProbe { get; set; }
+
+    /// <summary>Silences the top-bar "Connection Error" while the retry owns the message.</summary>
+    public Action<bool>? SetConnectErrorSuppression { get; set; }
+
+    /// <summary>How long to keep retrying the post-inject connect.</summary>
+    /// <remarks>
+    /// The injected DLL scans BEFORE it opens its pipe (the proxy path is the opposite —
+    /// it opens the pipe first and scans on request), so the pipe simply does not exist
+    /// for the length of a full AOB scan. Measured on a stock UE 5.4 Development package:
+    /// 1 s auto-start delay + 7.8 s scan = the pipe appeared 8.8 s after injection, and
+    /// the single immediate attempt reported "The operation has timed out."
+    /// 45 s covers a slow scan with room to spare; each attempt is cheap and the status
+    /// line counts them, so a genuinely dead DLL is obvious rather than silent.
+    /// </remarks>
+    public static readonly TimeSpan PostInjectConnectWindow = TimeSpan.FromSeconds(45);
+    internal static readonly TimeSpan PostInjectRetryDelay = TimeSpan.FromSeconds(1);
+
     /// <summary>Load injection-candidate processes for the picker. showAll=false
     /// returns only UE games.</summary>
     public async Task<IReadOnlyList<GameProcessInfo>> ListGameProcessesAsync(bool showAll)
@@ -855,12 +932,72 @@ public partial class ProxyDeployViewModel : ViewModelBase
         // Suggested column flags an injection-only game (never had a proxy deployed).
         RememberInjection(target.Path);
 
-        // Auto-connect the pipe (best-effort — the DLL auto-starts its pipe server).
-        if (RequestConnectAsync is not null)
+        await ConnectWithRetryAsync(target.Name, target.Pid);
+    }
+
+    /// <summary>Connect to the freshly injected DLL, retrying until its pipe appears.</summary>
+    /// <remarks>
+    /// A single immediate attempt cannot work: the injected DLL runs its whole AOB scan
+    /// before opening the pipe, so for several seconds there is nothing to connect TO.
+    /// The failure looked like a broken injection ("Connection Error / The operation has
+    /// timed out") when the injection had in fact succeeded and the DLL was mid-scan —
+    /// the log showed the pipe opening 8.8 s later and then waiting for a client that
+    /// never came back.
+    /// </remarks>
+    private async Task ConnectWithRetryAsync(string targetName, int pid)
+    {
+        if (RequestConnectAsync is null) return;
+
+        var started  = DateTime.UtcNow;
+        var deadline = started + PostInjectConnectWindow;
+        int attempt  = 0;
+
+        // The retry owns the user-facing message from here: every failed attempt inside the
+        // window is expected, not an error, and letting the top bar flash red only to connect
+        // successfully moments later is worse than saying nothing.
+        SetConnectErrorSuppression?.Invoke(true);
+        try
         {
-            try { await RequestConnectAsync(); }
-            catch (Exception ex) { _log.Warn("ProxyDeploy", $"Auto-connect after inject failed: {ex.Message}"); }
+            while (DateTime.UtcNow < deadline)
+            {
+                attempt++;
+                try { await RequestConnectAsync(); }
+                catch (Exception ex)
+                {
+                    _log.Warn("ProxyDeploy", $"Auto-connect after inject attempt {attempt} failed: {ex.Message}");
+                }
+
+                // No probe wired (tests, or an older composition) — keep the old
+                // single-shot behaviour rather than spinning for 45 s on no information.
+                if (IsConnectedProbe is null) return;
+                if (IsConnectedProbe())
+                {
+                    SetOperationResult(
+                        $"Injected into {targetName} (PID {pid}) — connected after "
+                        + $"{(DateTime.UtcNow - started).TotalSeconds:F0}s ({attempt} attempts).", 0);
+                    return;
+                }
+
+                // Show BOTH numbers. Elapsed alone leaves "is it nearly out of patience?"
+                // unanswerable, and a bare attempt count says nothing about how long is left.
+                SetOperationResult(
+                    $"Injected into {targetName} (PID {pid}) — waiting for the DLL to finish its "
+                    + $"AOB scan and open its pipe: {(DateTime.UtcNow - started).TotalSeconds:F0}s elapsed, "
+                    + $"{Math.Max(0, (deadline - DateTime.UtcNow).TotalSeconds):F0}s left "
+                    + $"(attempt {attempt}).", 0);
+                await Task.Delay(PostInjectRetryDelay);
+            }
         }
+        finally
+        {
+            SetConnectErrorSuppression?.Invoke(false);
+        }
+
+        SetOperationResult(
+            $"Injected into {targetName} (PID {pid}), but its pipe never opened within "
+            + $"{PostInjectConnectWindow.TotalSeconds:F0}s ({attempt} attempts). The injection "
+            + "succeeded — check the DLL's init log.", 0);
+        _log.Warn("ProxyDeploy", $"Post-inject connect gave up after {attempt} attempts");
     }
 
     [RelayCommand]

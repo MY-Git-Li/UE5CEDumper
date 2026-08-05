@@ -17,6 +17,7 @@
 #include "Stark.h"
 #include "Radar.h"
 #include "Tot.h"
+#include "Routine.h"   // Routine::RunThreadGuarded — a throw out of a thread proc is std::terminate (B14)
 #include "Wirbel.h"
 #include "Laufen.h"
 #include "Hemmung.h"  // Hemmung::SetDilation/ResetDilation/GetSnapshot for time_* commands
@@ -254,6 +255,12 @@ bool ParseValueBytes(Radar::DataType dt, const std::string& raw, uint8_t out[8],
 // The UI's "counts partial" warning compares class_distinct against this.
 static constexpr int kClassHistogramMaxRows = 40;
 
+// Per-request cap for query_group_slot_leaves. A slot keeps at most `per_slot_cap`
+// leaves (clamped 8..4096 on begin_group_scan), and this is one expanded row's
+// detail — not a scan result — so the whole list fits in one response at the
+// default. Kept a hard server-side ceiling anyway: `limit` comes off the wire.
+static constexpr int kGroupSlotLeafMaxRows = 4096;
+
 // Serialize a class histogram (already sorted count-desc) to the wire, capped
 // at `maxRows` so the noise picker stays small. Shared by the value + group
 // begin/refine responses (class_histogram = [{class_name, count}, ...]).
@@ -319,6 +326,41 @@ json CandidateToJson(const Radar::Candidate& c,
     return item;
 }
 
+// Wire JSON for ONE leaf of a group slot: the resolved field name / offset /
+// type / current value / addresses.
+//
+// Shared by the row's REPRESENTATIVE leaf and by query_group_slot_leaves' full
+// list, so the two can never disagree about what a leaf is called or holds. The
+// value comes from Radar::GroupSlotValueString — the same call the server-side
+// filter matches against, which is the whole point: this area's entire bug
+// history is two code paths answering one question differently.
+json GroupLeafToJson(const Radar::GroupSlotMatch& m,
+                     const Radar::SlotSpec& spec,
+                     const std::vector<Radar::FieldDescriptor>& descriptors) {
+    json lj;
+    if (m.descriptorIdx >= descriptors.size()) return lj;
+    const Radar::FieldDescriptor& d = descriptors[m.descriptorIdx];
+    lj["field_name"]      = Radar::FieldDisplayName(d, m.elementIndex);
+    lj["field_offset"]    = m.offset;
+    lj["field_type"]      = d.fieldType;
+    lj["bool_field_mask"] = d.boolFieldMask;
+    // Native-C (P2): badge a raw-hole leaf + its interpreted width (omitted for
+    // reflected leaves — back-compat / lean wire).
+    if (d.isNativeC) {
+        lj["is_native_c"]  = true;
+        lj["guessed_type"] = d.guessedType;
+    }
+    // Absolute leaf address (direct: owner+offset; deep: container element).
+    lj["addr"]        = Renge::AddrToStr(m.leafAddr);
+    // Owning object of the leaf (P4): the candidate actor for an own-block leaf,
+    // or an owned sub-object for a cross-object leaf — drives handoffs.
+    lj["owner_addr"]  = Renge::AddrToStr(m.ownerAddr);
+    // Owning object's class (P4 inc 2) — drives the per-slot Pivot handoff.
+    lj["owner_class"] = m.ownerClass;
+    lj["leaf_value"]  = Radar::GroupSlotValueString(m, spec, descriptors);
+    return lj;
+}
+
 // Build the wire JSON for one group-scan candidate (build 1276). A group hit is
 // OBJECT-level: one owning UObject + a nested `slots` array. Each slot carries
 // the user's target value, its converging matched offsets, a `locked` flag (the
@@ -326,10 +368,20 @@ json CandidateToJson(const Radar::Candidate& c,
 // representative (first) match — the resolved field name / offset / type / leaf
 // value / leaf address so the UI's per-slot row can drive the same handoffs
 // (Open in Live Walker / Locate in GWorld / Copy) as a single-value candidate.
+/// @param highlight  The active server-side filter, or "". When set, each slot reports
+///                   the leaf that MATCHED it rather than the first one kept.
+///
+/// WHY THE PARAMETER EXISTS. The filter walks every leaf in every slot (className /
+/// definingClass / fieldName / value — Radar.cpp BuildGroupOrderedView), while this
+/// function reported `matches[0]`. So filtering for `424242` returned rows whose visible
+/// values contained no 424242 anywhere: the filter was right, the row was showing a
+/// different leaf of the same candidate. Two code paths answering the same question
+/// differently — and the user reasonably read it as a wrong result.
 json GroupCandidateToJson(const Radar::GroupCandidate& gc,
                           const std::vector<Radar::SlotSpec>&        slots,
                           const std::vector<Radar::FieldDescriptor>& descriptors,
-                          const std::vector<Radar::InstanceRecord>&  instances) {
+                          const std::vector<Radar::InstanceRecord>&  instances,
+                          const std::string& highlight = "") {
     const Radar::InstanceRecord& inst = instances[gc.instanceIdx];
 
     json item;
@@ -350,11 +402,22 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
     item["defining_class_name"] = definingClass;
 
     json slotsJson = json::array();
+    // ONE assignment for the whole row — no two slots may display the same leaf.
+    // The rule lives in Radar, beside the filter it has to agree with; see
+    // Radar::PickGroupWitnessAssignment for why it is not written here. The filter
+    // is split the same way the filter itself splits it (space = AND), so naming
+    // two fields puts one in each slot.
+    const std::vector<size_t> picks = Radar::PickGroupWitnessAssignment(
+        gc.slotMatches, slots, descriptors, Radar::SplitFilterTerms(highlight));
+
     for (size_t s = 0; s < gc.slotMatches.size(); ++s) {
         const Radar::SlotSpec& spec = slots[s];
         const auto& matches = gc.slotMatches[s];
 
-        json sj;
+        // Start from the displayed leaf so the row and query_group_slot_leaves
+        // emit a leaf through exactly one encoder.
+        json sj = matches.empty() ? json::object()
+                                  : GroupLeafToJson(matches[picks[s]], spec, descriptors);
         sj["slot_index"] = static_cast<int>(s);
         sj["value"]      = spec.value;
         sj["scan_type"]  = Radar::NameOf(spec.st);  // per-slot predicate (P2)
@@ -366,34 +429,14 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
         sj["matched_offsets"] = offsets;
         sj["locked"]          = (matches.size() == 1);
 
-        if (!matches.empty()) {
-            const Radar::GroupSlotMatch& m0 = matches[0];
-            const Radar::FieldDescriptor& d = descriptors[m0.descriptorIdx];
-            sj["field_name"]      = Radar::FieldDisplayName(d, m0.elementIndex);
-            sj["field_offset"]    = m0.offset;
-            sj["field_type"]      = d.fieldType;
-            sj["bool_field_mask"] = d.boolFieldMask;
-            // Native-C (P2): badge a raw-hole slot match + its interpreted width
-            // (omitted for reflected leaves — back-compat / lean wire).
-            if (d.isNativeC) {
-                sj["is_native_c"]  = true;
-                sj["guessed_type"] = d.guessedType;
-            }
-            // Absolute leaf address (direct: owner+offset; deep: container element).
-            sj["addr"]            = Renge::AddrToStr(m0.leafAddr);
-            // Owning object of the leaf (P4): the candidate actor for an own-block
-            // leaf, or an owned sub-object for a cross-object leaf — drives handoffs.
-            sj["owner_addr"]      = Renge::AddrToStr(m0.ownerAddr);
-            // Owning object's class (P4 inc 2): the candidate class for an own-block
-            // leaf, the owned sub-object's class for a cross-object leaf — drives the
-            // per-slot Pivot handoff to the right class.
-            sj["owner_class"]     = m0.ownerClass;
-            Radar::Candidate tmp;
-            std::memcpy(tmp.prevValue, m0.prevValue, sizeof(tmp.prevValue));
-            tmp.descriptorIdx = m0.descriptorIdx;
-            tmp.elementIndex  = m0.elementIndex;
-            sj["leaf_value"]  = Radar::FormatCandidateValue(tmp, spec.dt, d);
-        }
+        // How many leaves this slot actually holds. `locked` already says "exactly
+        // one"; this says how much the single displayed value is standing in for, so
+        // a row can no longer imply the candidate matched on one field when it
+        // matched on thirty. `query_group_slot_leaves` returns the other thirty BY
+        // NAME — before it existed, `matched_offsets` was the only trace of them and
+        // a raw integer cannot tell a user that 1308 is `FrozenInt`.
+        if (!matches.empty())
+            sj["match_count"] = static_cast<int>(matches.size());
         slotsJson.push_back(std::move(sj));
     }
     item["slots"] = slotsJson;
@@ -414,6 +457,14 @@ bool Fern::Start() {
     if (m_running.load()) {
         LOG_WARN("PipeServer: Already running");
         return true;
+    }
+    // Stop() clears m_running in its FIRST statement, so for the whole teardown
+    // window the server reads as "stopped" while its threads are still alive.
+    // Starting there would move-assign onto a joinable m_acceptThread, which the
+    // standard defines as std::terminate — the game dies with no log and no dump.
+    if (m_stopping.load(std::memory_order_acquire)) {
+        LOG_WARN("PipeServer: Start refused — a Stop() is still in progress");
+        return false;
     }
 
     // Clear the sticky shutdown latch left by a prior Stop()/UE5_Shutdown().
@@ -440,38 +491,141 @@ bool Fern::Start() {
 
 void Fern::Stop() {
     if (!m_running.exchange(false)) return; // Already stopped
+    // Closed only on the way out. m_running goes false in the line above, so
+    // without this the whole teardown window looks "stopped" to Start(), which
+    // would then move-assign over a still-joinable m_acceptThread — a
+    // standard-mandated std::terminate that kills the game with no log.
+    m_stopping.store(true, std::memory_order_release);
+    struct StoppingGuard {
+        std::atomic<bool>& f;
+        ~StoppingGuard() { f.store(false, std::memory_order_release); }
+    } stoppingGuard{ m_stopping };
+
+    // Phase timings: reconstructing this teardown from the outside cost a full
+    // investigation because "Stopped" was the only line Stop() ever logged, and a
+    // 5 s stall was indistinguishable from the 5 s connection-drain TIMEOUT.
+    const auto tStart = std::chrono::steady_clock::now();
+    auto elapsedMs = [&tStart] {
+        return static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - tStart).count());
+    };
+    size_t connsAtEntry;
+    {
+        std::lock_guard<std::mutex> lock(m_connMutex);
+        connsAtEntry = m_conns.size();
+    }
+    LOG_INFO("PipeServer: Stop entry (conns=%zu)", connsAtEntry);
+
     // Abort any in-flight long-running operation BEFORE joining threads, so a
     // scan blocking the accept thread bails promptly and the join below
     // completes fast (otherwise disabling the script / closing can hang while
     // a long scan finishes). Sticky — never auto-cleared.
     Tot::RequestShutdown();
-    StopAllWatches();
 
-    // Unblock everyone (Path A multi-connection teardown). Close the parked
-    // listen instance to break AcceptLoop's ConnectNamedPipe (proven unblock),
-    // and CancelIoEx every live connection so a thread blocked in ReadFile/
-    // WriteFile returns ERROR_OPERATION_ABORTED and runs its OWN cleanup (each
-    // connection handle is closed by its owning thread — no cross-thread close
-    // race). A thread inside DispatchCommand exits via the m_running loop check
-    // after it returns; Tot::RequestShutdown above makes a long scan bail first.
+    // Unblock everyone (Path A multi-connection teardown). CancelIoEx every live
+    // connection so a thread blocked in ReadFile/WriteFile returns
+    // ERROR_OPERATION_ABORTED and runs its OWN cleanup (each connection handle is
+    // closed by its owning thread — no cross-thread close race). A thread inside
+    // DispatchCommand exits via the m_running loop check after it returns;
+    // Tot::RequestShutdown above makes a long scan bail first.
+    //
+    // The listen instance is NOT closed here, and that is the whole point. This
+    // block used to call CloseHandle(m_listenPipe) under the comment "proven
+    // unblock". The logs disprove it: the listen instance is a SYNCHRONOUS handle
+    // (AcceptLoop's CreateNamedPipeW passes no FILE_FLAG_OVERLAPPED), so closing
+    // it does not abort the accept thread's parked ConnectNamedPipe — it BLOCKS
+    // until that call completes, i.e. until somebody connects. Under m_connMutex,
+    // which every connection thread needs to unregister itself.
+    //
+    // Measured on Elliot 2026-08-04: 9.4 s and 13.3 s for two disables where the
+    // user happened to reconnect the UI — and on the third, with the UI already
+    // disconnected, "PipeServer: Stopped" was NEVER logged at all. The teardown
+    // thread stayed wedged in the game process holding m_connMutex for the rest of
+    // the session. The delay was never a timeout; it was "until a client shows up".
+    // Cancel every live connection's I/O. MUST be called with m_connMutex held:
+    // a connection thread erases itself from m_conns (under this lock) BEFORE it
+    // calls CloseConnOnce, so anything still in the registry has an open handle.
+    //
+    // Returns how many cancels the kernel ACCEPTED. The rest came back
+    // ERROR_NOT_FOUND — "no I/O was pending on this handle right now" — which is
+    // the reading that matters: the thread was between two ReadFile calls (this
+    // server reads a byte at a time, so a 40-byte command is 40 chances to be in
+    // the gap) and will issue a FRESH read that this one-shot cancel can never
+    // reach. That is why the cancel is re-asserted in the drain loop below rather
+    // than fired once and trusted. Measured 2026-08-05: two connections idle in
+    // ReadFile survived the single cancel and burned the whole 5 s budget.
+    auto cancelLiveConns = [this](int& accepted, int& notFound) {
+        accepted = notFound = 0;
+        for (auto& c : m_conns) {
+            if (!c || c->pipe == INVALID_HANDLE_VALUE ||
+                c->closed.load(std::memory_order_relaxed))
+                continue;
+            if (CancelIoEx(c->pipe, nullptr)) ++accepted;
+            else                              ++notFound;
+            // AND the synchronous one, which is the case that actually occurs here.
+            // CancelIoEx is kept because it is correct for anything genuinely async and
+            // costs nothing when there is nothing to find; CancelSynchronousIo is what
+            // frees a thread sitting in a blocking ReadFile on a non-overlapped handle.
+            if (HANDLE th = c->servingThread.load(std::memory_order_acquire))
+                CancelSynchronousIo(th);
+        }
+    };
+
+    bool listenerParked;
+    int cancelAccepted = 0, cancelNotFound = 0;
     {
         std::lock_guard<std::mutex> lock(m_connMutex);
-        if (m_listenPipe != INVALID_HANDLE_VALUE) {
-            CloseHandle(m_listenPipe);
-            m_listenPipe = INVALID_HANDLE_VALUE;
-        }
-        for (auto& c : m_conns) {
-            if (c->pipe != INVALID_HANDLE_VALUE && !c->closed.load(std::memory_order_relaxed))
-                CancelIoEx(c->pipe, nullptr);
+        listenerParked = (m_listenPipe != INVALID_HANDLE_VALUE);
+        cancelLiveConns(cancelAccepted, cancelNotFound);
+    }
+    // One line per Stop — cold, and it is the line that was missing when the
+    // 2026-08-05 drain timeout could say the threads were "idle in ReadFile (the
+    // I/O cancel should have freed it)" but not whether the cancel had anything
+    // to free. Those are different bugs.
+    if (cancelAccepted || cancelNotFound) {
+        LOG_INFO("PipeServer: Stop cancel issued: %d accepted, %d had nothing pending",
+                 cancelAccepted, cancelNotFound);
+    }
+
+    // Wake the accept thread by COMPLETING its ConnectNamedPipe instead of closing
+    // its handle: connect to our own pipe and immediately drop it. m_running is
+    // already false, so AcceptLoop takes its !m_running branch, closes its OWN
+    // handle and breaks — which also repairs a leak this function used to cause,
+    // since nulling m_listenPipe made AcceptLoop's `if (m_listenPipe == pipe)`
+    // guard fail and the instance was never closed by anyone.
+    //
+    // Outside the lock on purpose: the connect can block briefly, and AcceptLoop
+    // needs m_connMutex to finish. Gated on listenerParked so we do not poke a
+    // DIFFERENT process's server — the pipe name is machine-global, so a second
+    // instrumented game would otherwise see a phantom connect.
+    if (listenerParked) {
+        HANDLE poke = CreateFileW(Grimoire::PIPE_NAME, GENERIC_READ, 0, nullptr,
+                                  OPEN_EXISTING, 0, nullptr);
+        if (poke != INVALID_HANDLE_VALUE) {
+            CloseHandle(poke);
+        } else {
+            // ERROR_FILE_NOT_FOUND: the instance is already gone. ERROR_PIPE_BUSY:
+            // every instance is taken, so nothing is parked in ConnectNamedPipe.
+            // Both mean there is nothing to wake — not a failure.
+            LOG_INFO("PipeServer: Stop wake-poke found no parked listener (err=%lu)", GetLastError());
         }
     }
 
+    LOG_INFO("PipeServer: Stop cancels+wake done (%lld ms)", elapsedMs());
+
     // Stop watches AFTER cancelling connection I/O so a watch-thread WriteFile
-    // can't deadlock its own join on a stuck pipe.
+    // can't deadlock its own join on a stuck pipe. This is the ONLY StopAllWatches
+    // call — the duplicate that used to sit before the cancel block was a leftover
+    // from before the Path A refactor, and it is exactly the ordering this comment
+    // says not to use.
     StopAllWatches();
 
-    // Join background scan threads (they exit naturally; RunScan/RunRescan are
-    // bounded AOB scans).
+    // Join background scan threads. These joins are UNBOUNDED — the comment here used
+    // to claim RunScan/RunRescan were "bounded AOB scans", but RunRescan runs Genau's
+    // Extra Scan, a full .data sweep. What actually bounds them is Tot::RequestShutdown()
+    // above plus the cancel polls Genau's loops now carry; without those, and since
+    // UE5_Shutdown runs on the CE Lua caller's thread, CE's UI froze for the remainder
+    // of the sweep. (B18)
     m_rescan.running.store(false);
     if (m_rescan.scanThread.joinable()) {
         m_rescan.scanThread.join();
@@ -480,21 +634,83 @@ void Fern::Stop() {
     if (m_scan.scanThread.joinable()) {
         m_scan.scanThread.join();
     }
+    LOG_INFO("PipeServer: Stop watches+scan joins done (%lld ms)", elapsedMs());
 
     // Wait for every connection thread to self-unregister (they are detached;
     // they erase themselves from m_conns + notify on exit). Bounded so a wedged
     // handler can't hang shutdown forever.
+    bool drained;
+    size_t connsLeft;
+    int reasserts = 0;
     {
         std::unique_lock<std::mutex> lock(m_connMutex);
-        m_connCv.wait_for(lock, std::chrono::seconds(5), [this] { return m_conns.empty(); });
+        // Slice the 5 s budget and RE-ASSERT the cancel each slice instead of
+        // waiting on one shot fired before the wait began. A thread parked in
+        // ReadFile that the first cancel missed (it was between reads) is
+        // otherwise unreachable for the whole budget — which is exactly what the
+        // 2026-08-05 capture showed: 2 stragglers, both "idle in ReadFile", 5002 ms.
+        // Same write-on-drift shape as the re-assert workers: assert the state you
+        // want repeatedly rather than assuming one assertion landed.
+        //
+        // Cheap: each slice is one CancelIoEx per surviving connection, and the
+        // loop only runs while connections survive — the common case exits on the
+        // first wait with zero re-asserts.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        for (;;) {
+            drained = m_connCv.wait_for(lock, std::chrono::milliseconds(Grimoire::PIPE_STOP_CANCEL_REASSERT_MS),
+                                        [this] { return m_conns.empty(); });
+            if (drained || std::chrono::steady_clock::now() >= deadline) break;
+            int acc = 0, nf = 0;
+            cancelLiveConns(acc, nf);   // safe: lock is held again after wait_for returns
+            ++reasserts;
+        }
+        connsLeft = m_conns.size();
+        // Name the stragglers while we still hold the registry lock. Without this the
+        // timeout says only "N left", which is not enough to act on — the 2026-08-04
+        // run burned the full 5 s budget and the log could not say whether the threads
+        // were parked in ReadFile (the cancel missed them) or stuck inside a command
+        // (the cancel cannot help until it returns). Those need opposite fixes.
+        if (!drained) {
+            long long nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            for (const auto& c : m_conns) {
+                if (!c) continue;
+                std::string what;
+                { std::lock_guard<std::mutex> dlk(c->diagMutex); what = c->cmdName; }
+                Connection::Phase ph = c->phase.load(std::memory_order_relaxed);
+                long long phStart = c->phaseStartMs.load(std::memory_order_relaxed);
+                long long started = c->cmdStartMs.load(std::memory_order_relaxed);
+                (void)started;
+                // Build the age into a NAMED local. The obvious one-liner passes
+                // .c_str() of a temporary through a ternary — legal (the temporary
+                // outlives the full-expression) but not worth making a reader verify.
+                std::string age;
+                if (phStart > 0) age = " for " + std::to_string(nowMs - phStart) + " ms";
+                LOG_WARN("PipeServer:   straggler: %s%s, last cmd '%s'",
+                         PhaseName(ph), age.c_str(),
+                         what.empty() ? "(none yet)" : what.c_str());
+            }
+        }
     }
+    // Distinguish "satisfied" from "timed out" explicitly: a 5 s stall elsewhere
+    // and a 5 s expiry of THIS wait produce identical wall-clock, and telling them
+    // apart from the outside is what made the 2026-08-04 investigation expensive.
+    // The re-assert count is the ONLY externally visible difference between "the
+    // first cancel worked" and "the first cancel missed and a later one caught it".
+    // Both print `satisfied`; without the count a fix for the missed-window case
+    // could not be told from it never having been needed.
+    LOG_INFO("PipeServer: Stop conn drain %s, %zu left (%lld ms, %d cancel re-assert%s)",
+             drained ? "satisfied" : "TIMEOUT", connsLeft, elapsedMs(),
+             reasserts, reasserts == 1 ? "" : "s");
 
     if (m_acceptThread.joinable()) {
         m_acceptThread.join();
     }
+    LOG_INFO("PipeServer: Stop accept join done (%lld ms)", elapsedMs());
     if (m_monitorThread.joinable()) {
         m_monitorThread.join();
     }
+    LOG_INFO("PipeServer: Stop monitor join done (%lld ms)", elapsedMs());
 
     // No handler thread is running now — free every remaining value-scan session.
     Radar::SessionManager::Instance().DropAll();
@@ -510,6 +726,8 @@ void Fern::Stop() {
 // scan bails. Peeks only while m_commandInFlight (handler is CPU-bound in
 // DispatchCommand, not touching the pipe) — no concurrent read/write.
 void Fern::MonitorLoop() {
+  // Allocates while peeking the pipe and formatting logs; a raw thread proc. (B14)
+  Routine::RunThreadGuarded("PipeServer: MonitorLoop", [&] {
     while (m_running.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         if (!m_running.load()) break;
@@ -555,9 +773,13 @@ void Fern::MonitorLoop() {
             }
         }
     }
+  });
 }
 
 void Fern::AcceptLoop() {
+  // The accept thread allocates (Connection, the registry, log formatting). A throw here
+  // is std::terminate — and it also silently ends the server, so the guard reports it. (B14)
+  Routine::RunThreadGuarded("PipeServer: AcceptLoop", [&] {
     while (m_running.load()) {
         // Create a new pipe instance (multi-instance: up to kMaxPipeInstances
         // concurrent clients, so the UI's interactive + bulk lanes can connect
@@ -623,9 +845,36 @@ void Fern::AcceptLoop() {
         if (firstConn) Tot::ResetPerCommand();
 
         LOG_INFO("PipeServer: Client connected (conns=%zu)", connCount);
-        std::thread([this, conn]() { HandleConnection(conn); }).detach();
+        // Guarded: only DispatchCommand inside HandleConnection had a handler, so a
+        // throw from ReadLine / the JSON pre-parse / WriteLine escaped a DETACHED
+        // thread — std::terminate, i.e. the game dies. (B14)
+        std::thread([this, conn]() {
+            Routine::RunThreadGuarded("PipeServer: connection",
+                                      [&] { HandleConnection(conn); });
+        }).detach();
     }
     LOG_INFO("PipeServer: AcceptLoop exiting");
+  });
+}
+
+const char* Fern::PhaseName(Connection::Phase p) {
+    switch (p) {
+        case Connection::Phase::Reading:         return "parked in ReadFile (waiting for the next command)";
+        case Connection::Phase::Dispatching:     return "INSIDE a command (cancel cannot reach it until it returns)";
+        case Connection::Phase::Writing:         return "in WriteLine — WriteFile to a client that may have stopped reading, or waiting on writeMutex";
+        case Connection::Phase::StoppingWatches: return "in cleanup, JOINING its watch threads (an I/O cancel on this thread does nothing)";
+        case Connection::Phase::Unregistering:   return "in cleanup, unregistering — should be about to leave";
+        default:                                 return "done";
+    }
+}
+
+/// Stamp the current phase + when it began, for Stop's drain diagnostic only.
+void Fern::SetPhase(Connection& conn, Connection::Phase p) {
+    conn.phase.store(p, std::memory_order_relaxed);
+    conn.phaseStartMs.store(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count(),
+        std::memory_order_relaxed);
 }
 
 std::string Fern::ReadLine(HANDLE pipe) {
@@ -686,6 +935,23 @@ void Fern::CloseConnOnce(Connection& conn) {
 void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
     HANDLE pipe = conn->pipe;
 
+    // Publish a real handle to THIS thread so Stop can cancel the synchronous ReadFile
+    // it will spend almost all its life parked in. GetCurrentThread() is a pseudo-handle
+    // that always means "the calling thread", so it is useless to anyone else -- it has
+    // to be duplicated into a genuine one. Closed in the cleanup below.
+    {
+        HANDLE dup = nullptr;
+        if (DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
+                            GetCurrentProcess(), &dup,
+                            THREAD_TERMINATE, FALSE, DUPLICATE_SAME_ACCESS)) {
+            conn->servingThread.store(dup, std::memory_order_release);
+        } else {
+            Sein::Warn("PIPE:cmd", "PipeServer: could not duplicate serving-thread handle "
+                       "(err=%lu) — this connection cannot be woken out of ReadFile on Stop",
+                       GetLastError());
+        }
+    }
+
     // Batch-suppress repetitive command logging (e.g. 244 x get_object_list)
     std::string lastCmd;
     int repeatCount = 0;
@@ -699,6 +965,7 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
     };
 
     while (m_running.load()) {
+        SetPhase(*conn, Connection::Phase::Reading);
         std::string line = ReadLine(pipe);
         if (line.empty()) { flushRepeat(); break; } // Disconnected / I/O cancelled
 
@@ -730,6 +997,18 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         // blocking docs/multipipe-eval.md blames for UI lag, which until now
         // nothing measured. See Sense.h.
         conn->inFlight.store(true, std::memory_order_relaxed);
+        SetPhase(*conn, Connection::Phase::Dispatching);
+        // Record WHICH command, for Stop's drain-timeout diagnostic only. `cmd` is
+        // already parsed above for the repeat-suppression, so this costs one small
+        // string copy per command and nothing on any read path.
+        {
+            std::lock_guard<std::mutex> dlk(conn->diagMutex);
+            conn->cmdName = cmd;
+        }
+        conn->cmdStartMs.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
         // QPC, not GetTickCount64: its ~15.6 ms granularity floored every sub-tick
         // dispatch to 0, so a live run of 1397 walk_instance calls reported
         // "0 ms total, max 15 ms" — an artefact of which calls straddled a tick,
@@ -741,6 +1020,7 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         Sense::RecordDispatch(cmd.empty() ? std::string("(unparsed)") : cmd, dispatchUs);
 
         if (!response.empty()) {
+            SetPhase(*conn, Connection::Phase::Writing);
             if (!WriteLine(*conn, response)) {
                 flushRepeat();
                 Sein::Error("PIPE:cmd", "PipeServer: Failed to write response");
@@ -755,8 +1035,10 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
     // unregister and close our own handle. Drop value-scan sessions only when
     // this was the LAST connection (sessions are bulk-lane-only; the UI's two
     // lanes disconnect together on close).
+    SetPhase(*conn, Connection::Phase::StoppingWatches);
     StopWatchesForConnection(conn.get());
 
+    SetPhase(*conn, Connection::Phase::Unregistering);
     bool last;
     {
         std::lock_guard<std::mutex> lock(m_connMutex);
@@ -767,6 +1049,12 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
     }
 
     CloseConnOnce(*conn);
+
+    // Release the duplicated thread handle. Exchange first so Stop, which reads it
+    // under m_connMutex, can never see a handle this thread has already closed --
+    // and by here we are past the erase from m_conns, so Stop cannot be iterating us.
+    if (HANDLE th = conn->servingThread.exchange(nullptr, std::memory_order_acq_rel))
+        CloseHandle(th);
 
     if (last) {
         Radar::SessionManager::Instance().DropAll();
@@ -1674,7 +1962,7 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
 
             uintptr_t addr = Renge::StrToAddr(addrStr);
-            ClassInfo ci = Ubel::WalkClassEx(addr);
+            const ClassInfo& ci = Ubel::WalkClassEx(addr);
 
             json data;
             data["class"] = EncodeClassInfoToJson(ci);
@@ -1842,7 +2130,15 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             }
 
             uintptr_t addr = Renge::StrToAddr(addrStr);
-            auto bytes = Renge::HexToBytes(hexBytes);
+            // Reject a malformed pattern instead of writing a silently-mangled one.
+            // strtoul mapped every non-hex character to 0x00, so "DE AD BE EF" used to
+            // be written as {DE,0A,0D,BE,0E} and answered ok:true. (B46)
+            std::vector<uint8_t> bytes;
+            if (!Renge::TryHexToBytes(hexBytes, bytes)) {
+                return Renge::MakeError(id,
+                    "Invalid bytes (need an even-length hex string, no separators): "
+                    + hexBytes).dump();
+            }
             if (bytes.empty() || bytes.size() > 65536) {
                 return Renge::MakeError(id, "Invalid write size (max 65536)").dump();
             }
@@ -2921,7 +3217,13 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             }
             const int slotCount = static_cast<int>(slots.size());
 
-            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC, newestFirst, deadlineMs, autoSkipNoise);
+            // Opt-in leaf budget per slot. Clamped, not trusted: too small silently hides
+            // a derived class's own fields (the old fixed 8 did exactly that), too large
+            // is a memory footgun on a 500-field object x 4 slots x every candidate.
+            int perSlotCap = request.value("per_slot_cap", Orden::kDefaultPerSlotCap);
+            if (perSlotCap < 8)    perSlotCap = 8;
+            if (perSlotCap > 4096) perSlotCap = 4096;
+            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC, newestFirst, deadlineMs, autoSkipNoise, perSlotCap);
 
             uint64_t sessionId = Radar::GroupSessionManager::Instance().Begin(
                 std::move(slots), std::move(scanResult.candidates),
@@ -2941,7 +3243,8 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                     const int n = (std::min)(pageSize, static_cast<int>(order.size()));
                     for (int i = 0; i < n; ++i)
                         candidates.push_back(GroupCandidateToJson(
-                            sess.candidates[order[i]], sess.slots, sess.descriptors, sess.instances));
+                            sess.candidates[order[i]], sess.slots, sess.descriptors,
+                            sess.instances));
                     // Class-noise histogram over the FULL set (object-level class).
                     auto hist = Radar::BuildGroupClassHistogram(sess.candidates, sess.descriptors);
                     classDistinct = static_cast<int>(hist.size());
@@ -3112,7 +3415,8 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                     const int end   = (std::min)(offset + limit, filteredCount);
                     for (int i = begin; i < end; ++i)
                         candidates.push_back(GroupCandidateToJson(
-                            sess.candidates[order[i]], sess.slots, sess.descriptors, sess.instances));
+                            sess.candidates[order[i]], sess.slots, sess.descriptors,
+                            sess.instances, filter));
                 });
             if (!found) {
                 return Renge::MakeError(id, "session_not_found").dump();
@@ -3125,6 +3429,125 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             data["offset"]         = offset;
             data["count"]          = static_cast<int>(candidates.size());
             data["candidates"]     = candidates;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === query_group_slot_leaves: every leaf ONE slot of ONE candidate kept,
+        // BY NAME (build 2719).
+        //
+        // A group row can only display a single assignment, however many the
+        // candidate satisfies. On the DumperTest sample a `Changed` + `Unchanged`
+        // refine kept {Health.CurrentValue, TickCount} for slot 0 and 36 leaves
+        // including FrozenInt for slot 1 — two equally valid pairs, one row. The
+        // others existed on the wire only as raw integers in `matched_offsets`,
+        // and an integer cannot tell a user that 1308 is `FrozenInt`, so a correct
+        // match was reported as a miss four separate times.
+        //
+        // On demand, per expanded row — never inlined into the paged list, which
+        // carries up to 1000 candidates x N slots x per_slot_cap (<= 4096) leaves. ===
+        if (cmd == Renge::CMD_QUERY_GROUP_SLOT_LEAVES) {
+            uint64_t sessionId = request.value("session_id", 0ULL);
+            if (sessionId == 0) {
+                return Renge::MakeError(id, "Missing or zero session_id").dump();
+            }
+            uintptr_t instanceAddr = 0;
+            if (!Renge::TryStrToAddr(request.value("instance_addr", ""), instanceAddr)
+                || instanceAddr == 0) {
+                return Renge::MakeError(id, "Missing or malformed instance_addr").dump();
+            }
+            const int slotIndex = request.value("slot_index", -1);
+            if (slotIndex < 0) {
+                return Renge::MakeError(id, "Missing or negative slot_index").dump();
+            }
+            int offset = request.value("offset", 0);
+            int limit  = request.value("limit", kGroupSlotLeafMaxRows);
+            if (offset < 0) offset = 0;
+            if (limit  < 0) limit  = 0;
+            if (limit > kGroupSlotLeafMaxRows) limit = kGroupSlotLeafMaxRows;
+
+            // Optional tie-breaker. One UObject can own MANY candidates: with
+            // `deep`, Aura emits one GroupCandidate per container BLOCK and they all
+            // intern to the same InstanceRecord ("blocks share", Aura.cpp:8163), so
+            // instance_addr alone is ambiguous and first-match-wins would answer an
+            // expanded deep row with a DIFFERENT block's fields — a silent wrong
+            // answer, in precisely the feature meant to end silent wrong answers.
+            // The row already knows its displayed leaf's absolute address; a leaf
+            // address belongs to exactly one block, so it identifies the candidate.
+            // NOT a candidate index: RefineGroupCandidates rebuilds the vector, so
+            // any index is stale after the next refine.
+            uintptr_t leafHint = 0;
+            Renge::TryStrToAddr(request.value("leaf_addr", ""), leafHint);
+
+            json leaves = json::array();
+            int  total = 0;
+            bool candidateFound = false, slotFound = false, staleHint = false;
+            const bool sessionFound = Radar::GroupSessionManager::Instance().WithSession(
+                sessionId, [&](const Radar::GroupSession& sess) {
+                    const Radar::GroupCandidate* chosen = nullptr;
+                    const Radar::GroupCandidate* firstByAddr = nullptr;
+                    int sharingAddr = 0;   // how many candidates this UObject owns
+                    for (const Radar::GroupCandidate& gc : sess.candidates) {
+                        if (gc.instanceIdx >= sess.instances.size()) continue;
+                        if (sess.instances[gc.instanceIdx].instanceAddr != instanceAddr) continue;
+                        ++sharingAddr;
+                        if (!firstByAddr) firstByAddr = &gc;
+                        if (leafHint == 0) break;                 // no hint: first wins
+                        if (chosen) break;                        // found it, and not alone
+                        if (static_cast<size_t>(slotIndex) >= gc.slotMatches.size()) continue;
+                        for (const Radar::GroupSlotMatch& m : gc.slotMatches[slotIndex])
+                            if (m.leafAddr == leafHint) { chosen = &gc; break; }
+                    }
+                    if (!chosen) {
+                        // The hint matched nothing: the caller's row is stale (a refine
+                        // dropped that leaf). With ONE candidate per address the
+                        // fallback is exact — there is nothing to be wrong about. With
+                        // several (deep: one per container block) it would be a GUESS,
+                        // and answering a stale row with another block's fields is
+                        // precisely the silent wrong answer this command exists to end.
+                        // Refuse, and let the caller re-query the row.
+                        if (leafHint != 0 && sharingAddr > 1) { staleHint = true; return; }
+                        chosen = firstByAddr;
+                    }
+                    if (!chosen) return;
+                    candidateFound = true;
+                    if (static_cast<size_t>(slotIndex) >= chosen->slotMatches.size()
+                        || static_cast<size_t>(slotIndex) >= sess.slots.size()) return;
+                    slotFound = true;
+                    const auto& matches = chosen->slotMatches[slotIndex];
+                    // The object's OWN fields first. Leaves are collected
+                    // base-class-first, so without this an actor's list opens with
+                    // thirty engine fields and `FrozenInt` is off the bottom of a
+                    // scrolling box — the list existed to make it findable.
+                    const std::vector<size_t> order =
+                        Radar::OrderGroupSlotLeaves(matches, sess.descriptors);
+                    total = static_cast<int>(matches.size());
+                    const int begin = (std::min)(offset, total);
+                    // begin (not offset) + limit: both are already clamped to small
+                    // values, so the sum cannot overflow. `offset` comes straight off
+                    // the wire and `offset + limit` is signed-overflow UB for a large
+                    // one. (query_group_candidates has the same latent pattern.)
+                    const int end   = (std::min)(begin + limit, total);
+                    for (int i = begin; i < end; ++i) {
+                        // A leaf whose descriptorIdx is out of range encodes to {};
+                        // emitting it would put a nameless blank row in the list.
+                        json lj = GroupLeafToJson(matches[order[i]], sess.slots[slotIndex],
+                                                  sess.descriptors);
+                        if (!lj.empty()) leaves.push_back(std::move(lj));
+                    }
+                });
+            if (!sessionFound) return Renge::MakeError(id, "session_not_found").dump();
+            if (staleHint)     return Renge::MakeError(id, "stale_leaf_addr").dump();
+            if (!candidateFound) return Renge::MakeError(id, "candidate_not_found").dump();
+            if (!slotFound)      return Renge::MakeError(id, "slot_index out of range").dump();
+
+            json data;
+            data["session_id"]    = sessionId;
+            data["instance_addr"] = Renge::AddrToStr(instanceAddr);
+            data["slot_index"]    = slotIndex;
+            data["total"]         = total;
+            data["offset"]        = offset;
+            data["count"]         = static_cast<int>(leaves.size());
+            data["leaves"]        = leaves;
             return Renge::MakeResponse(id, data).dump();
         }
 
@@ -4473,7 +4896,12 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             std::vector<uint8_t> paramBuf(bufSize, 0);
 
             if (!paramsHex.empty()) {
-                auto hexBytes = Renge::HexToBytes(paramsHex);
+                std::vector<uint8_t> hexBytes;
+                if (!Renge::TryHexToBytes(paramsHex, hexBytes)) {
+                    return Renge::MakeError(id,
+                        "Invalid params hex (need an even-length hex string): "
+                        + paramsHex).dump();
+                }
                 size_t copyLen = (std::min)(hexBytes.size(), paramBuf.size());
                 if (copyLen > 0) {
                     memcpy(paramBuf.data(), hexBytes.data(), copyLen);
@@ -5405,7 +5833,9 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
 // ============================================================
 void Fern::RunScan() {
     Sein::Info("PIPE:scan", "RunScan: started");
-    UE5_Init();  // Updates ScanProgress phases 1-7
+    // UE5_Init allocates heavily against a live game. The flags below MUST still be
+    // cleared if it throws, or the UI waits on a scan that is never coming. (B14)
+    Routine::RunThreadGuarded("RunScan", [] { UE5_Init(); });
     m_scan.completed = true;
     m_scan.running.store(false);
     Sein::Info("PIPE:scan", "RunScan: finished");
@@ -5415,6 +5845,15 @@ void Fern::RunScan() {
 // RunRescan — Background thread for aggressive pointer recovery
 // ============================================================
 void Fern::RunRescan(bool scanGObjects, bool scanGWorld) {
+    // Guarded, and the `running` flag is cleared in BOTH outcomes: Genau's Extra Scan
+    // allocates against a live process, and a throw here used to terminate the game AND
+    // (had it not) would have left the UI waiting on a rescan that never finishes. (B14)
+    Routine::RunThreadGuarded("RunRescan", [&] { RunRescanBody(scanGObjects, scanGWorld); });
+    m_rescan.phase.store(3);
+    m_rescan.running.store(false);
+}
+
+void Fern::RunRescanBody(bool scanGObjects, bool scanGWorld) {
     Sein::Info("PIPE:rescan", "RunRescan: started (GObjects=%d, GWorld=%d)",
                  scanGObjects, scanGWorld);
 
@@ -5481,6 +5920,10 @@ void Fern::StartWatch(const std::shared_ptr<Connection>& conn, uintptr_t addr, u
 
     WatchEntry* ptr = entry.get();
     entry->watchThread = std::thread([this, ptr]() {
+      // Fully unguarded before B14's scope correction, and it allocates on every tick:
+      // the buffer, BytesToHex's string, the json object, and dump(). A bad_alloc here
+      // terminated the game.
+      Routine::RunThreadGuarded("PipeServer: watch", [&] {
         std::vector<uint8_t> buf(ptr->size);
         while (ptr->active.load() && m_running.load()) {
             if (Macht::ReadBytesSafe(ptr->addr, buf.data(), ptr->size)) {
@@ -5498,6 +5941,7 @@ void Fern::StartWatch(const std::shared_ptr<Connection>& conn, uintptr_t addr, u
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(ptr->interval_ms));
         }
+      });
     });
 
     m_watches[addr] = std::move(entry);

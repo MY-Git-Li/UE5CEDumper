@@ -492,8 +492,17 @@ public static class BakedScriptGenerator
         // Float / double: prefer InvariantCulture decimal
         if (ueTypeName is "FloatProperty" or "DoubleProperty")
         {
-            if (double.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
+            // IsFinite is not belt-and-braces here. double.TryParse ACCEPTS "NaN",
+            // "Infinity" and "-Infinity" (and overflowing literals round to ±Infinity),
+            // so the parse "succeeds" and MarkUnparsed never fires — then ToString("R")
+            // emits those bare words, which are not Lua number literals. Lua reads them
+            // as an undefined global, i.e. `nil`, and the baked param silently becomes
+            // nothing at all. Input is unvalidated upstream (InvokeParamDialog). (B23)
+            if (double.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)
+                && double.IsFinite(d))
+            {
                 return d.ToString("R", CultureInfo.InvariantCulture);
+            }
             return MarkUnparsed(t);
         }
 
@@ -579,36 +588,12 @@ public static class BakedScriptGenerator
     /// here (that would change the string's value), so the leading <c>]</c> is
     /// emitted as a decimal escape instead -- same value, different source bytes.
     /// Reached with user text via the string-param path in <see cref="FormatValue"/>.</summary>
-    public static string EscapeLua(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return s ?? "";
-        var sb = new StringBuilder(s.Length + 8);
-        for (int i = 0; i < s.Length; i++)
-        {
-            char c = s[i];
-            switch (c)
-            {
-                case '\\': sb.Append("\\\\"); break;
-                case '\'': sb.Append("\\'");  break;
-                case '\n': sb.Append("\\n");  break;
-                case '\r': sb.Append("\\r");  break;
-                case ']':
-                {
-                    int j = i + 1;
-                    while (j < s.Length && s[j] == '=') j++;
-                    // 3 digits, not "\93": Lua's \ddd escape greedily takes up to
-                    // three digits, so a following digit would fuse into it (\931
-                    // > 255 -> error). By construction the next emitted char here
-                    // is always '=' or ']', never a digit -- the padded form is
-                    // belt-and-braces against a future change to this rule.
-                    sb.Append(j < s.Length && s[j] == ']' ? "\\093" : "]");
-                    break;
-                }
-                default: sb.Append(c); break;
-            }
-        }
-        return sb.ToString();
-    }
+    public static string EscapeLua(string s) => CeLuaHygiene.EscapeLuaString(s);
+
+    // R2: the body used to live here, hand-copied. Its own comment said "keep them
+    // mirrors" — which is a divergence being maintained by hand, and there is no
+    // reason for two implementations of one escape table. The name stays so callers
+    // and tests do not churn; the behaviour is now defined in exactly one place.
 
     /// <summary>Escape for embedding in a Lua block comment <c>--[[...]]</c>.
     /// Breaks EVERY closing long bracket -- <c>]]</c>, <c>]=]</c>, <c>]==]</c>, any

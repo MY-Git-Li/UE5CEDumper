@@ -1291,7 +1291,7 @@ public static class CeXmlExportService
         sb.AppendLine("  <CheatEntries>");
         sb.AppendLine($"    <CheatEntry>");
         sb.AppendLine($"      <ID>0</ID>");
-        sb.AppendLine($"      <Description>\"{symbolName}\"</Description>");
+        sb.AppendLine($"      <Description>\"{EscapeXmlContent(symbolName)}\"</Description>");
         sb.AppendLine($"      <VariableType>Auto Assembler Script</VariableType>");
         sb.AppendLine($"      <AssemblerScript>");
 
@@ -1413,7 +1413,7 @@ public static class CeXmlExportService
         var indent = "    ";
         sb.AppendLine($"{indent}<CheatEntry>");
         sb.AppendLine($"{indent}  <ID>{_nextId++}</ID>");
-        sb.AppendLine($"{indent}  <Description>\"GWorld \u2192 {symbolName}\"</Description>");
+        sb.AppendLine($"{indent}  <Description>\"GWorld \u2192 {EscapeXmlContent(symbolName)}\"</Description>");
         sb.AppendLine($"{indent}  <Options moHideChildren=\"1\" moDeactivateChildrenAsWell=\"1\"/>");
         sb.AppendLine($"{indent}  <LastState/>");
         sb.AppendLine($"{indent}  <VariableType>Auto Assembler Script</VariableType>");
@@ -1665,7 +1665,7 @@ public static class CeXmlExportService
         sb.AppendLine("  <CheatEntries>");
         sb.AppendLine("    <CheatEntry>");
         sb.AppendLine("      <ID>0</ID>");
-        sb.AppendLine($"      <Description>\"{leafSymbol}\"</Description>");
+        sb.AppendLine($"      <Description>\"{EscapeXmlContent(leafSymbol)}\"</Description>");
         sb.AppendLine("      <VariableType>Auto Assembler Script</VariableType>");
         sb.AppendLine("      <AssemblerScript>");
 
@@ -3524,7 +3524,7 @@ public static class CeXmlExportService
         _emitEntryCount++;
         sb.AppendLine($"{indent}<CheatEntry>");
         sb.AppendLine($"{indent}  <ID>{_nextId++}</ID>");
-        sb.AppendLine($"{indent}  <Description>\"{description}\"</Description>");
+        sb.AppendLine($"{indent}  <Description>\"{EscapeXmlContent(description)}\"</Description>");
         // CE DropDownList: inline list on this group, or link to another group's list
         if (dropDownContent != null)
             sb.AppendLine($"{indent}  <DropDownList DisplayValueAsItem=\"1\">{dropDownContent}</DropDownList>");
@@ -3564,7 +3564,7 @@ public static class CeXmlExportService
         _emitEntryCount++;
         sb.AppendLine($"{indent}<CheatEntry>");
         sb.AppendLine($"{indent}  <ID>{_nextId++}</ID>");
-        sb.AppendLine($"{indent}  <Description>\"{description}\"</Description>");
+        sb.AppendLine($"{indent}  <Description>\"{EscapeXmlContent(description)}\"</Description>");
         if (showAsHex)
             sb.AppendLine($"{indent}  <ShowAsHex>1</ShowAsHex>");
         sb.AppendLine($"{indent}  <ShowAsSigned>0</ShowAsSigned>");
@@ -3588,7 +3588,7 @@ public static class CeXmlExportService
         _emitEntryCount++;
         sb.AppendLine($"{indent}<CheatEntry>");
         sb.AppendLine($"{indent}  <ID>{_nextId++}</ID>");
-        sb.AppendLine($"{indent}  <Description>\"{description}\"</Description>");
+        sb.AppendLine($"{indent}  <Description>\"{EscapeXmlContent(description)}\"</Description>");
         // CE DropDownList: inline list content (first occurrence of this enum)
         if (dropDownContent != null)
             sb.AppendLine($"{indent}  <DropDownList DisplayValueAsItem=\"1\">{dropDownContent}</DropDownList>");
@@ -3638,7 +3638,7 @@ public static class CeXmlExportService
         int length = _ceStringLength > 0 ? _ceStringLength : 256;
         sb.AppendLine($"{indent}<CheatEntry>");
         sb.AppendLine($"{indent}  <ID>{_nextId++}</ID>");
-        sb.AppendLine($"{indent}  <Description>\"{description}\"</Description>");
+        sb.AppendLine($"{indent}  <Description>\"{EscapeXmlContent(description)}\"</Description>");
         sb.AppendLine($"{indent}  <ShowAsSigned>0</ShowAsSigned>");
         EmitRowColor(sb, indent);
         sb.AppendLine($"{indent}  <VariableType>String</VariableType>");
@@ -3725,7 +3725,17 @@ public static class CeXmlExportService
         return sb.ToString().TrimEnd();
     }
 
-    /// <summary>Escape special characters for XML element text content.</summary>
+    /// <summary>
+    /// Escape special characters for XML element text content.
+    ///
+    /// <para><b>Every</b> <c>&lt;Description&gt;</c> goes through this, not just the ones
+    /// that looked risky. Description text is arbitrary GAME memory — TMap keys, TSet
+    /// elements, soft-object paths, DataTable row names — and a single <c>&amp;</c> in any
+    /// of them produces an invalid entity reference that makes Cheat Engine reject the
+    /// <b>whole document</b>. A multi-thousand-entry export then imports as nothing, with
+    /// no indication which record was at fault (audit #4 B3). Escaping a string that was
+    /// already safe is a no-op, so there is no reason to be selective.</para>
+    /// </summary>
     private static string EscapeXmlContent(string s)
         => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 

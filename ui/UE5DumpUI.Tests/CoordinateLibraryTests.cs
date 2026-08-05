@@ -304,6 +304,54 @@ public class CoordinateLibraryStoreTests : IDisposable
     }
 
     [Fact]
+    public void SavePreClearBackup_SurvivesTheDeleteItGuards()
+    {
+        _store.Save("game", FileWith(new CoordEntry { Uid = "a", Label = "Hand-curated" }));
+
+        var bak = _store.SavePreClearBackup("game");
+        _store.Delete("game");
+
+        Assert.False(File.Exists(_store.FilePathFor("game")));
+        Assert.True(File.Exists(bak));
+        Assert.Contains("Hand-curated", File.ReadAllText(bak));
+    }
+
+    [Fact]
+    public void SavePreClearBackup_IsDistinctFromThePreImportBackup()
+    {
+        // Audit #4 B6: the rolling .bak cannot stand in for either one-shot backup, and
+        // a clear must not eat an import's rollback copy (or vice versa).
+        _store.Save("game", FileWith(new CoordEntry { Uid = "a", Label = "Before import" }));
+        var preImport = _store.SavePreImportBackup("game");
+
+        _store.Save("game", FileWith(new CoordEntry { Uid = "b", Label = "Before clear" }));
+        var preClear = _store.SavePreClearBackup("game");
+
+        Assert.NotEqual(preImport, preClear);
+        Assert.Contains("Before import", File.ReadAllText(preImport));
+        Assert.Contains("Before clear", File.ReadAllText(preClear));
+    }
+
+    [Fact]
+    public void SavePreClearBackup_OutlivesTheSavesThatEatTheRollingBackup()
+    {
+        // OnCoordZToleranceChanged persists on every spinner nudge, so two clicks of a
+        // NumericUpDown used to destroy the last copy of a cleared library.
+        _store.Save("game", FileWith(new CoordEntry { Uid = "a", Label = "Only copy" }));
+        var bak = _store.SavePreClearBackup("game");
+        _store.Delete("game");
+
+        _store.Save("game", FileWith(new CoordEntry { Uid = "b", Label = "After 1" }));
+        _store.Save("game", FileWith(new CoordEntry { Uid = "c", Label = "After 2" }));
+
+        Assert.Contains("Only copy", File.ReadAllText(bak));
+    }
+
+    [Fact]
+    public void SavePreClearBackup_NoFileYet_ReturnsEmpty()
+        => Assert.Equal("", _store.SavePreClearBackup("game"));
+
+    [Fact]
     public void Save_IsAtomic_NoTempFileLeftBehind()
     {
         _store.Save("game", FileWith(new CoordEntry { Uid = "a", Label = "x" }));

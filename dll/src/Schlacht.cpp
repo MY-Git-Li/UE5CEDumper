@@ -16,6 +16,7 @@
 #include "Macht.h"
 #include "Aura.h"
 #include "Tot.h"     // Tot::MarkBackgroundWorker — see-through worker ignores per-command cancel (M4)
+#include "Routine.h"   // Routine::RunTickGuarded — a throw out of a thread proc is std::terminate (B14)
 #include "Ubel.h"
 #include "Stark.h"      // IsGameThreadResponsive — gate the game-thread invokes
 
@@ -398,7 +399,7 @@ struct State {
 State s_state;
 std::mutex s_mutex;
 
-std::thread       s_worker;
+Routine::SafeThread       s_worker;   // detaches at process exit, never terminates
 std::mutex        s_workerMutex;
 std::atomic<bool> s_workerStop{false};
 
@@ -500,7 +501,7 @@ void StopWorkerLocked() {
 // So instead of leaving the record for a hypothetical later enable, poll for the
 // game thread to come back and restore the moment it does — which is the instant
 // the user clicks back into the game, i.e. exactly when they would notice.
-std::thread       s_pendingWorker;
+Routine::SafeThread       s_pendingWorker;   // detaches at process exit, never terminates
 std::atomic<bool> s_pendingStop{false};
 std::atomic<bool> s_pendingRunning{false};
 
@@ -509,38 +510,47 @@ void PendingRestoreLoop() {
     LOG_INFO("SeeThrough: waiting for the game thread to resume so the leftover "
              "hidden actor(s) can be restored");
     int waited = 0;
-    for (;;) {
+    bool warnedThrow = false;
+    bool done = false;
+    while (!done) {
         std::this_thread::sleep_for(
-            std::chrono::milliseconds(Grimoire::SCHLACHT_PENDING_TICK_MS));
-        waited += Grimoire::SCHLACHT_PENDING_TICK_MS;
+            std::chrono::milliseconds(Grimoire::PENDING_RESTORE_TICK_MS));
+        waited += Grimoire::PENDING_RESTORE_TICK_MS;
         if (s_pendingStop.load() || Tot::ShutdownRequested()) break;
 
-        // Re-enabled, or someone else already restored: nothing left to do.
-        bool nothingToDo;
-        { std::lock_guard<std::mutex> lk(s_mutex);
-          nothingToDo = s_state.active || s_state.hiddenActors.empty(); }
-        if (nothingToDo) break;
+        // This loop can run for up to 5 minutes and it walks reflection + dispatches
+        // game-thread invokes the whole time, so it outlives a game the user simply
+        // closes — Tot::ShutdownRequested() is NOT set on a plain game exit. A throw
+        // escaping a thread entry is std::terminate (0xC0000409), the crash shape build
+        // 2389 reproduced live in the sibling loop. (B14)
+        Routine::RunTickGuarded("SeeThrough", warnedThrow, [&] {
+            // Re-enabled, or someone else already restored: nothing left to do.
+            bool nothingToDo;
+            { std::lock_guard<std::mutex> lk(s_mutex);
+              nothingToDo = s_state.active || s_state.hiddenActors.empty(); }
+            if (nothingToDo) { done = true; return; }
 
-        if (!Stark::IsGameThreadResponsive()) {
-            if (waited >= Grimoire::SCHLACHT_PENDING_MAX_MS) {
-                LOG_WARN("SeeThrough: gave up waiting for the game thread (%d s) — any "
-                         "leftover hidden actor(s) stay hidden until See-through is "
-                         "enabled and disabled again with the game running",
-                         Grimoire::SCHLACHT_PENDING_MAX_MS / 1000);
-                break;
+            if (!Stark::IsGameThreadResponsive()) {
+                if (waited >= Grimoire::PENDING_RESTORE_MAX_MS) {
+                    LOG_WARN("SeeThrough: gave up waiting for the game thread (%d s) — any "
+                             "leftover hidden actor(s) stay hidden until See-through is "
+                             "enabled and disabled again with the game running",
+                             Grimoire::PENDING_RESTORE_MAX_MS / 1000);
+                    done = true;
+                }
+                return;
             }
-            continue;
-        }
 
-        std::unordered_set<uintptr_t> restore;
-        { std::lock_guard<std::mutex> lk(s_mutex);
-          restore = std::move(s_state.hiddenActors);
-          s_state.hiddenActors.clear();
-          s_state.hiddenCount = 0; }
-        for (uintptr_t a : restore) InvokeSetHidden(a, false);
-        LOG_INFO("SeeThrough: game thread resumed after %d ms — restored %zu "
-                 "leftover hidden actor(s)", waited, restore.size());
-        break;
+            std::unordered_set<uintptr_t> restore;
+            { std::lock_guard<std::mutex> lk(s_mutex);
+              restore = std::move(s_state.hiddenActors);
+              s_state.hiddenActors.clear();
+              s_state.hiddenCount = 0; }
+            for (uintptr_t a : restore) InvokeSetHidden(a, false);
+            LOG_INFO("SeeThrough: game thread resumed after %d ms — restored %zu "
+                     "leftover hidden actor(s)", waited, restore.size());
+            done = true;
+        });
     }
     s_pendingRunning.store(false);
 }
