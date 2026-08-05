@@ -455,7 +455,7 @@
     <sys:String x:Key="str.System.OpenLogFolderTip">Open the application log folder (%LOCALAPPDATA%\UE5CEDumper\Logs) in the file browser.</sys:String>
     <sys:String x:Key="str.System.OpenLogFolder.Error">Could not open log folder: {0}</sys:String>
     <sys:String x:Key="str.System.CompressLogs">Compress Logs</sys:String>
-    <sys:String x:Key="str.System.CompressLogsTip">Compress archived log files in place with NTFS LZX compression (measured 12.8:1 on a real 102 MB log folder). The files keep their name and extension and still open in any text editor or grep — nothing needs to be unpacked. Live logs, files under 4 KB, files written in the last hour, and files already compressed are skipped. Safe to run while a game is playing: it runs at idle priority.</sys:String>
+    <sys:String x:Key="str.System.CompressLogsTip">Compress archived log files in place with NTFS LZX compression (measured 12.8:1 on a real 102 MB log folder). The files keep their name and extension and still open in any text editor or grep — nothing needs to be unpacked. Skipped: this session's own logs, files under 4 KB, files written in the last hour, files already compressed, and a game's newest log until it has been idle for 7 days. Safe to run while a game is playing: it runs at idle priority.</sys:String>
     <sys:String x:Key="str.System.CompressLogs.Running">Compressing logs…</sys:String>
     <sys:String x:Key="str.System.CompressLogs.Result">Compressed {0} log file(s): {1} MB → {2} MB on disk ({3} MB saved), {4} failed.</sys:String>
     <sys:String x:Key="str.System.CompressLogs.NothingToDo">Nothing to compress — {0} already compressed, {1} skipped (too small, too recent, or in use).</sys:String>

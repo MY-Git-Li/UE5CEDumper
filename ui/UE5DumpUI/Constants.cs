@@ -53,7 +53,24 @@ public static class Constants
     // DLL-written per-game categories whose names the UI does not know.
     public const int LogCompressMinIdleHours = 1;
 
-    // Age floor for the AUTOMATIC startup sweep (opt-in, default ON). Deliberately longer
+    // Extra idle time a `<cat>-0.log` must have before it counts as finished — applied on
+    // BOTH triggers, on top of the ordinary idle window.
+    //
+    // `-0.log` is a SLOT NAME, not a liveness fact: a game last played 13 days ago still
+    // owns a walk-0.log that nothing will ever append to again. Excluding those outright
+    // was stricter than LoggingService.PurgeOrphanedLogs, which passes a live-name set only
+    // for the UI's own folder and sweeps every GAME folder on age alone — i.e. we were
+    // refusing to COMPRESS files the same subsystem is willing to DELETE. Measured cost of
+    // the old rule on a real folder: 36 files / 5 MB permanently uncompressed, and the set
+    // only grows, one final log per game ever tested.
+    //
+    // Compressing them is durable: Sein archives a `-0.log` by RENAME on the next
+    // injection, and a rename preserves LZX (verified 335,872 bytes on disk before and
+    // after). A game that really is running keeps its log's mtime fresh, and the file lock
+    // is the backstop if it somehow does not.
+    public const int LogCompressLiveFileMinAgeDays = 7;
+
+    // Age floor for the AUTOMATIC startup sweep (opt-in, default OFF). Deliberately longer
     // than the manual window: an unattended pass should only ever touch logs that are
     // plainly historical, and a log you might still be reading about yesterday's session
     // is not.

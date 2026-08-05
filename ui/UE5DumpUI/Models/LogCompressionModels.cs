@@ -10,7 +10,8 @@ public enum LogCompressionDecision
 {
     /// <summary>Eligible — hand this path to the compressor.</summary>
     Compress,
-    /// <summary>A <c>-0.log</c>: this session's live file, held open by a logger.</summary>
+    /// <summary>A <c>-0.log</c> that is still plausibly being written: either one of THIS
+    /// process's own files, or a game's newest log that has not yet gone quiet.</summary>
     SkipLive,
     /// <summary>Already smaller on disk than its length — compressed on an earlier pass.</summary>
     SkipAlreadyCompressed,
@@ -25,8 +26,12 @@ public enum LogCompressionDecision
 /// <c>GetCompressedFileSizeW</c>, which is the ONLY reliable "is it already compressed"
 /// signal for LZX — see <see cref="Services.LogCompressionPolicy"/>.
 /// </summary>
+/// <param name="OwnedByThisProcess">The file lives in the UI's own log folder, so a
+/// Serilog sink holds it open for the whole session. Known for a fact, unlike a game
+/// folder's files, where liveness can only be inferred from age.</param>
 public readonly record struct LogFileEntry(
-    string Path, string Name, long Length, long OnDiskBytes, DateTime LastWriteUtc);
+    string Path, string Name, long Length, long OnDiskBytes, DateTime LastWriteUtc,
+    bool OwnedByThisProcess = false);
 
 /// <summary>The compressor's work list plus the reason every other file was left out.</summary>
 public sealed class LogCompressionPlan

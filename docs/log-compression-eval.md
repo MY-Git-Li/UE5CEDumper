@@ -5,9 +5,9 @@
 > the scratchpad — the live log folder was not modified. Re-measure before trusting these on a
 > different machine; the method is at the bottom. §5 describes what shipped.
 >
-> **Not yet exercised in the real app**: 3300 unit tests cover the policy and a full
-> compress-a-real-folder pass, but the System-tab button and the startup sweep have not been
-> clicked/launched outside the test suite.
+> **In-app VERIFIED (2026-08-05)**: both triggers exercised on the maintainer's machine —
+> **180 log files, 85.1 MB → 6.5 MB on disk (78.6 MB saved), 0 failed**, the whole folder now
+> 111.9 MB logical / 17.8 MB on disk. That run is also what exposed §5a.
 
 The 21-day retention window (`Constants.LogMaxAgeDays` / `Grimoire::LOG_RETENTION_DAYS`) is
 doing its job, and the folder still reached **111.9 MB**. Retention bounds the *age* of the
@@ -115,7 +115,7 @@ LZX costs the extra 1.7 MB and keeps every one of those intact. That is the whol
 
 -----
 
-## 5. What shipped (build 2730)
+## 5. What shipped (builds 2730 / 2732)
 
 **Two triggers, one engine, different age floors.**
 
@@ -128,6 +128,35 @@ The floors differ on purpose. The button is an explicit instruction, so "compres
 nobody is writing to right now" is what was asked for. The automatic pass runs unasked, so it
 only ever touches logs that are plainly historical — a log you might still be reading about
 yesterday's session is not.
+
+### 5a. `-0.log` is a slot name, not a liveness fact (build 2732)
+
+The first cut excluded every `*-0.log` outright. Wrong, and the first real run showed why: a game
+you last played 13 days ago still owns `SEED BATTLE DESTINY REMASTERED\walk-0.log` at 3.64 MB,
+and nothing will ever append to it again until that game is injected once more. Measured cost on
+the real folder: **36 files / 5.03 MB permanently uncompressed** — and the set only grows, one
+final log per game ever tested.
+
+Two facts settled it:
+
+- **`LoggingService.PurgeOrphanedLogs` already sweeps game folders on age alone.** It passes a
+  live-name set only for the UI's own folder; every game folder goes through
+  `PruneOrphanedLogs(dir, maxAgeDays)` with none, taking the file lock as the real guard
+  (*"Locked — a running game's DLL still owns it. Retry next startup."*). We were refusing to
+  **compress** files the same subsystem is willing to **delete**.
+- **Compressing them is durable.** `Sein` archives a `-0.log` by RENAME on the next injection,
+  and a rename preserves LZX — verified: 335,872 bytes on disk before the rename and after.
+
+The rule now:
+
+| file | treatment |
+|---|---|
+| `-0.log` in `Logs\UE5DumpUI\` | **always skipped** — a Serilog sink holds it for the whole session. Identity, not age. |
+| `-0.log` anywhere else | eligible once idle ≥ `LogCompressLiveFileMinAgeDays` (**7 days**), on BOTH triggers |
+| everything else | the ordinary idle window (1 h manual / 7 d auto) |
+
+A game that really is running keeps its log's mtime fresh, so the age floor covers it; the file
+lock is the backstop if it somehow does not (and a locked file is safely skipped — trap 4).
 
 **The automatic pass is opt-in and defaults OFF.** It is cheap and reversible (`compact /u`),
 but a launch that rewrites the user's files without being asked is not a default to choose for

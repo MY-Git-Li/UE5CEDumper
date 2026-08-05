@@ -88,6 +88,13 @@ public sealed class WindowsLogCompressionService : ILogCompressionService
             return new LogCompressionResult(Supported: false, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
+        // The UI's own module folder. Its -0.log files are held open by Serilog for the
+        // whole session, so they are excluded on identity rather than on age — the one
+        // place liveness is a fact instead of an inference.
+        string ownDir;
+        try { ownDir = Path.GetFullPath(Path.Combine(logRoot, Constants.LogSubfolderName)); }
+        catch { ownDir = ""; }
+
         var entries = new List<LogFileEntry>();
         try
         {
@@ -97,7 +104,11 @@ public sealed class WindowsLogCompressionService : ILogCompressionService
                 try
                 {
                     var fi = new FileInfo(p);
-                    entries.Add(new LogFileEntry(p, fi.Name, fi.Length, OnDiskBytes(p), fi.LastWriteTimeUtc));
+                    bool ours = ownDir.Length > 0 && fi.DirectoryName != null &&
+                                string.Equals(Path.GetFullPath(fi.DirectoryName), ownDir,
+                                              StringComparison.OrdinalIgnoreCase);
+                    entries.Add(new LogFileEntry(
+                        p, fi.Name, fi.Length, OnDiskBytes(p), fi.LastWriteTimeUtc, ours));
                 }
                 catch { /* vanished mid-enumeration (rotation) — nothing to compress */ }
             }
@@ -109,7 +120,9 @@ public sealed class WindowsLogCompressionService : ILogCompressionService
             return new LogCompressionResult(Supported: true, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
-        var plan = LogCompressionPolicy.Plan(entries, DateTime.UtcNow, minIdle, minSizeBytes);
+        var plan = LogCompressionPolicy.Plan(
+            entries, DateTime.UtcNow, minIdle, minSizeBytes,
+            TimeSpan.FromDays(Constants.LogCompressLiveFileMinAgeDays));
         if (plan.ToCompress.Count == 0)
         {
             return new LogCompressionResult(true, 0, 0,

@@ -85,8 +85,37 @@ behind `Core/ILogCompressionService`. 29 new tests; the load-bearing one compres
 whose per-game subfolder name contains spaces and asserts `LastWriteTimeUtc` is unchanged. 3300
 C# green, AOT-trimmed publish clean. Full numbers + method: `docs/log-compression-eval.md`.
 
-**Not yet exercised outside the tests** - the button and the startup sweep have not been
-clicked/launched in the real app.
+**IN-APP VERIFIED same day**: both triggers run on the maintainer's machine - **180 files,
+85.1 MB -> 6.5 MB on disk, 78.6 MB saved, 0 failed**. The folder is now 111.9 MB logical against
+17.8 MB on disk.
+
+### Follow-up, build 2732: `-0.log` is a slot name, not a liveness fact
+
+That first real run is what exposed it. Excluding every `*-0.log` outright looked obviously
+right and was wrong: a game last played 13 days ago still owns
+`SEED BATTLE DESTINY REMASTERED\walk-0.log` at 3.64 MB, and nothing will append to it again
+until that game is injected once more. **36 files / 5.03 MB** were being held uncompressed
+permanently, and the set grows by one final log per game ever tested.
+
+Two facts decided it, and the first is the interesting one:
+
+- **The sibling sweep already trusts age over the name — for DELETION.**
+  `LoggingService.PurgeOrphanedLogs` passes a live-name set only for the UI's own folder; every
+  game folder goes through `PruneOrphanedLogs(dir, maxAgeDays)` with none at all, taking the file
+  lock as the real guard (*"Locked - a running game's DLL still owns it. Retry next startup."*).
+  So the policy was refusing to **compress** files the same subsystem is willing to **delete**.
+  The inconsistency was the argument.
+- **Compressing them is durable.** `Sein` archives a `-0.log` by RENAME on the next injection,
+  and a rename preserves LZX - verified 335,872 bytes on disk before the rename and after. The
+  compression rides into the dated archive instead of being undone.
+
+The rule now: a `-0.log` in `Logs\UE5DumpUI\` is skipped on IDENTITY (a Serilog sink holds it all
+session - the one place liveness is a fact rather than an inference), and a `-0.log` anywhere
+else becomes eligible once idle for `LogCompressLiveFileMinAgeDays` = 7 days, on BOTH triggers
+including the manual button. A running game keeps its log's mtime fresh, so age covers it; the
+lock is the backstop, and a locked file is safely skipped.
+
+3304 C# green.
 
 -----
 

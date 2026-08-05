@@ -28,35 +28,59 @@ namespace UE5DumpUI.Services;
 /// </summary>
 public static class LogCompressionPolicy
 {
-    /// <summary>The live file of a session — a logger holds it open and will keep
-    /// appending. Compressing it is both futile (an append fully decompresses an LZX file:
-    /// measured 335,872 → 8,441,799 bytes) and pointless (the handle blocks it anyway).</summary>
+    /// <summary>
+    /// The <c>-0.log</c> slot: whichever run wrote this category most recently. NOT the
+    /// same thing as "currently being written" — that is the distinction this whole rule
+    /// turns on.
+    ///
+    /// <para><b>It is a slot name, not a liveness fact.</b> A game you last played 13 days
+    /// ago still owns a <c>walk-0.log</c>, and nothing will ever append to it again until
+    /// that game is injected once more — at which point <c>Sein</c> RENAMES it to a dated
+    /// archive (and a rename preserves LZX, verified: 335,872 bytes on disk before and
+    /// after). So compressing an idle one is neither futile nor undone later.</para>
+    ///
+    /// <para>Treating the name as a hard exclusion was stricter than the sibling sweep that
+    /// DELETES: <c>LoggingService.PurgeOrphanedLogs</c> passes a live-name set only for the
+    /// UI's own folder and sweeps every GAME folder on age alone, taking the file lock as
+    /// the real guard. Refusing to compress a file the same subsystem is willing to delete
+    /// made no sense.</para>
+    /// </summary>
     public static bool IsLiveLog(string? name) =>
         name != null && name.EndsWith("-0.log", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Decide one file. Order of the checks is the order of the reasons the UI
-    /// reports, cheapest and most-specific first.</summary>
+    /// <summary>
+    /// Decide one file. Order of the checks is the order of the reasons the UI reports.
+    /// </summary>
+    /// <param name="liveMinAge">Extra idle time a <c>-0.log</c> must have on top of
+    /// <paramref name="minIdle"/> before it counts as finished. Deliberately much longer
+    /// (7 days) and applied on BOTH triggers, including the manual button: the cost of
+    /// being wrong is attempting a locked file, and the gain from being hasty is nil.</param>
     public static LogCompressionDecision Decide(
-        in LogFileEntry f, DateTime nowUtc, TimeSpan minIdle, long minSizeBytes)
+        in LogFileEntry f, DateTime nowUtc, TimeSpan minIdle, long minSizeBytes, TimeSpan liveMinAge)
     {
-        if (IsLiveLog(f.Name))                return LogCompressionDecision.SkipLive;
+        // Our own sinks hold these open for the entire session — known, not inferred.
+        if (f.OwnedByThisProcess && IsLiveLog(f.Name))
+            return LogCompressionDecision.SkipLive;
         if (f.OnDiskBytes > 0 &&
             f.OnDiskBytes < f.Length)         return LogCompressionDecision.SkipAlreadyCompressed;
         if (f.Length <= minSizeBytes)         return LogCompressionDecision.SkipTooSmall;
+        if (IsLiveLog(f.Name) &&
+            nowUtc - f.LastWriteUtc < liveMinAge) return LogCompressionDecision.SkipLive;
         if (nowUtc - f.LastWriteUtc < minIdle) return LogCompressionDecision.SkipTooFresh;
         return LogCompressionDecision.Compress;
     }
 
     /// <summary>Build the work list plus the per-reason skip counts.</summary>
     public static LogCompressionPlan Plan(
-        IEnumerable<LogFileEntry> files, DateTime nowUtc, TimeSpan minIdle, long minSizeBytes)
+        IEnumerable<LogFileEntry> files, DateTime nowUtc, TimeSpan minIdle, long minSizeBytes,
+        TimeSpan liveMinAge)
     {
         var plan = new LogCompressionPlan();
         if (files == null) return plan;
 
         foreach (var f in files)
         {
-            switch (Decide(f, nowUtc, minIdle, minSizeBytes))
+            switch (Decide(f, nowUtc, minIdle, minSizeBytes, liveMinAge))
             {
                 case LogCompressionDecision.SkipLive:               plan.SkippedLive++; break;
                 case LogCompressionDecision.SkipAlreadyCompressed:  plan.SkippedAlreadyCompressed++; break;

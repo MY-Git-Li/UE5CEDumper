@@ -19,10 +19,14 @@ public class LogCompressionPolicyTests
 {
     private static readonly DateTime Now = new(2026, 8, 5, 12, 0, 0, DateTimeKind.Utc);
     private static readonly TimeSpan Hour = TimeSpan.FromHours(1);
+    private static readonly TimeSpan LiveAge = TimeSpan.FromDays(Constants.LogCompressLiveFileMinAgeDays);
     private const long Min = Constants.LogCompressMinSizeBytes;   // 4096
 
-    private static LogFileEntry F(string name, long len, long onDisk, int hoursAgo) =>
-        new($@"C:\Logs\{name}", name, len, onDisk, Now.AddHours(-hoursAgo));
+    private static LogFileEntry F(string name, long len, long onDisk, int hoursAgo, bool ours = false) =>
+        new($@"C:\Logs\{name}", name, len, onDisk, Now.AddHours(-hoursAgo), ours);
+
+    private static LogCompressionDecision D(in LogFileEntry f, TimeSpan? idle = null) =>
+        LogCompressionPolicy.Decide(f, Now, idle ?? Hour, Min, LiveAge);
 
     // ---------- IsLiveLog ----------
 
@@ -41,12 +45,7 @@ public class LogCompressionPolicyTests
     [Fact]
     public void Decide_EligibleArchive_IsCompressed()
         => Assert.Equal(LogCompressionDecision.Compress,
-                        LogCompressionPolicy.Decide(F("walk-20260701-101010.log", 8_000_000, 8_000_000, 48), Now, Hour, Min));
-
-    [Fact]
-    public void Decide_LiveFile_IsSkipped_EvenWhenHugeAndOld()
-        => Assert.Equal(LogCompressionDecision.SkipLive,
-                        LogCompressionPolicy.Decide(F("walk-0.log", 8_000_000, 8_000_000, 900), Now, Hour, Min));
+                        D(F("walk-20260701-101010.log", 8_000_000, 8_000_000, 48)));
 
     [Fact]
     public void Decide_AlreadyCompressed_IsSkipped()
@@ -54,7 +53,7 @@ public class LogCompressionPolicyTests
         // The signal that matters: LZX does NOT set FileAttributes.Compressed, so
         // on-disk < length is the only cheap way to know. Real measured pair.
         Assert.Equal(LogCompressionDecision.SkipAlreadyCompressed,
-                     LogCompressionPolicy.Decide(F("walk-a.log", 8_441_784, 335_872, 48), Now, Hour, Min));
+                     D(F("walk-a.log", 8_441_784, 335_872, 48)));
     }
 
     [Fact]
@@ -62,8 +61,7 @@ public class LogCompressionPolicyTests
     {
         // OnDiskBytes == 0 means "could not read it", not "it is empty". Treating that as
         // already-compressed would permanently skip the file.
-        Assert.Equal(LogCompressionDecision.Compress,
-                     LogCompressionPolicy.Decide(F("walk-b.log", 8_000_000, 0, 48), Now, Hour, Min));
+        Assert.Equal(LogCompressionDecision.Compress, D(F("walk-b.log", 8_000_000, 0, 48)));
     }
 
     [Theory]
@@ -71,31 +69,65 @@ public class LogCompressionPolicyTests
     [InlineData(1)]
     [InlineData(4096)]     // the floor is inclusive: "> min", not ">= min"
     public void Decide_AtOrBelowTheFloor_IsTooSmall(long len)
-        => Assert.Equal(LogCompressionDecision.SkipTooSmall,
-                        LogCompressionPolicy.Decide(F("walk-c.log", len, len, 48), Now, Hour, Min));
+        => Assert.Equal(LogCompressionDecision.SkipTooSmall, D(F("walk-c.log", len, len, 48)));
 
     [Fact]
     public void Decide_JustOverTheFloor_IsEligible()
-        => Assert.Equal(LogCompressionDecision.Compress,
-                        LogCompressionPolicy.Decide(F("walk-d.log", 4097, 4097, 48), Now, Hour, Min));
+        => Assert.Equal(LogCompressionDecision.Compress, D(F("walk-d.log", 4097, 4097, 48)));
 
     [Fact]
     public void Decide_WrittenWithinTheIdleWindow_IsTooFresh()
-        => Assert.Equal(LogCompressionDecision.SkipTooFresh,
-                        LogCompressionPolicy.Decide(F("walk-e.log", 8_000_000, 8_000_000, 0), Now, Hour, Min));
+        => Assert.Equal(LogCompressionDecision.SkipTooFresh, D(F("walk-e.log", 8_000_000, 8_000_000, 0)));
 
     [Fact]
     public void Decide_ExactlyAtTheIdleWindow_IsEligible()
-        => Assert.Equal(LogCompressionDecision.Compress,
-                        LogCompressionPolicy.Decide(F("walk-f.log", 8_000_000, 8_000_000, 1), Now, Hour, Min));
+        => Assert.Equal(LogCompressionDecision.Compress, D(F("walk-f.log", 8_000_000, 8_000_000, 1)));
+
+    // ---------- the -0.log rule ----------
 
     [Fact]
-    public void Decide_LiveWins_OverEveryOtherReason()
+    public void Decide_OurOwnLiveFile_IsSkippedAtAnyAge()
     {
-        // A live file that is also tiny and fresh must report as live: it is the one
-        // skip whose reason is a hard rule rather than a threshold.
+        // A Serilog sink holds these for the whole session. Even a 900-hour-old init-0.log
+        // (a very long-running session) is still open, so this one is identity, not age.
         Assert.Equal(LogCompressionDecision.SkipLive,
-                     LogCompressionPolicy.Decide(F("pipe-0.log", 10, 10, 0), Now, Hour, Min));
+                     D(F("init-0.log", 8_000_000, 8_000_000, 900, ours: true)));
+    }
+
+    [Fact]
+    public void Decide_AGamesNewestLog_IsSkippedWhileItCouldStillBeWritten()
+    {
+        // 48 h clears the 1 h idle window but not the 7-day live floor.
+        Assert.Equal(LogCompressionDecision.SkipLive, D(F("walk-0.log", 8_000_000, 8_000_000, 48)));
+    }
+
+    [Fact]
+    public void Decide_AGamesNewestLog_IsCompressedOnceItHasGoneQuiet()
+    {
+        // The case that prompted the rule: SEED BATTLE DESTINY REMASTERED\walk-0.log,
+        // 3.64 MB, untouched for 13 days. Nothing will append to it until that game is
+        // injected again — and that path RENAMES it, which preserves LZX.
+        Assert.Equal(LogCompressionDecision.Compress,
+                     D(F("walk-0.log", 3_800_000, 3_800_000, 13 * 24)));
+    }
+
+    [Fact]
+    public void Decide_TheLiveFloorAppliesToTheAutomaticTriggerToo()
+    {
+        // The auto sweep's own idle window is 7 days, so the floor is not what binds
+        // there — but a -0.log one hour short of it must still be refused.
+        var almost = F("walk-0.log", 8_000_000, 8_000_000, Constants.LogCompressLiveFileMinAgeDays * 24 - 1);
+        Assert.Equal(LogCompressionDecision.SkipLive,
+                     D(almost, idle: TimeSpan.FromDays(Constants.LogAutoCompressMinAgeDays)));
+    }
+
+    [Fact]
+    public void Decide_AnAlreadyCompressedLiveSlotReportsDone_NotLive()
+    {
+        // Ordering check: a -0.log compressed on a previous pass must not be re-reported
+        // as "in use", or the counts stop adding up across runs.
+        Assert.Equal(LogCompressionDecision.SkipAlreadyCompressed,
+                     D(F("walk-0.log", 8_441_784, 335_872, 13 * 24)));
     }
 
     // ---------- Plan ----------
@@ -105,17 +137,19 @@ public class LogCompressionPolicyTests
     {
         var plan = LogCompressionPolicy.Plan(new[]
         {
-            F("walk-20260701-1.log", 5_000_000, 5_000_000, 48),   // compress
-            F("walk-20260701-2.log", 3_000_000, 3_000_000, 48),   // compress
-            F("walk-0.log",          9_000_000, 9_000_000, 48),   // live
-            F("pipe-20260701-1.log", 8_441_784,   335_872, 48),   // already done
-            F("init-20260701-1.log",       100,       100, 48),   // too small
-            F("view-20260805-1.log", 6_000_000, 6_000_000,  0),   // too fresh
-        }, Now, Hour, Min);
+            F("walk-20260701-1.log", 5_000_000, 5_000_000, 48),        // compress
+            F("walk-20260701-2.log", 3_000_000, 3_000_000, 48),        // compress
+            F("walk-0.log",          9_000_000, 9_000_000, 13 * 24),   // compress (gone quiet)
+            F("scan-0.log",          9_000_000, 9_000_000, 48),        // live (still recent)
+            F("init-0.log",          9_000_000, 9_000_000, 900, true), // live (ours)
+            F("pipe-20260701-1.log", 8_441_784,   335_872, 48),        // already done
+            F("init-20260701-1.log",       100,       100, 48),        // too small
+            F("view-20260805-1.log", 6_000_000, 6_000_000,  0),        // too fresh
+        }, Now, Hour, Min, LiveAge);
 
-        Assert.Equal(2, plan.ToCompress.Count);
-        Assert.Equal(8_000_000, plan.CandidateBytes);
-        Assert.Equal(1, plan.SkippedLive);
+        Assert.Equal(3, plan.ToCompress.Count);
+        Assert.Equal(17_000_000, plan.CandidateBytes);
+        Assert.Equal(2, plan.SkippedLive);
         Assert.Equal(1, plan.SkippedAlreadyCompressed);
         Assert.Equal(1, plan.SkippedTooSmall);
         Assert.Equal(1, plan.SkippedTooFresh);
@@ -124,7 +158,7 @@ public class LogCompressionPolicyTests
     [Fact]
     public void Plan_EmptyInputIsEmpty()
     {
-        var plan = LogCompressionPolicy.Plan(Array.Empty<LogFileEntry>(), Now, Hour, Min);
+        var plan = LogCompressionPolicy.Plan(Array.Empty<LogFileEntry>(), Now, Hour, Min, LiveAge);
         Assert.Empty(plan.ToCompress);
         Assert.Equal(0, plan.CandidateBytes);
     }
@@ -252,6 +286,29 @@ public class LogCompressionServiceTests : IDisposable
 
         // THE assertion: retention keys on LastWriteTime, so compression must not move it.
         Assert.Equal(before, File.GetLastWriteTimeUtc(archive));
+    }
+
+    [Fact]
+    public async Task Compress_AQuietGamesNewestLogIsCompressed_ButOurOwnSessionFileIsNot()
+    {
+        // The real case: SEED BATTLE DESTINY REMASTERED\walk-0.log, 3.64 MB, 13 days idle.
+        // It is the game's newest log, nothing will append to it until that game is
+        // injected again, and that path renames it (which preserves LZX).
+        var quiet = WriteLog(Path.Combine("SEED BATTLE DESTINY REMASTERED", "walk-0.log"), 13 * 24);
+        // Ours: Serilog holds this for the whole session, so it is excluded on identity —
+        // being 13 days old (a very long-running session) must not make it eligible.
+        var ours  = WriteLog(Path.Combine(Constants.LogSubfolderName, "init-0.log"), 13 * 24);
+
+        var oursBefore = new FileInfo(ours).Length;
+        var r = await _svc.CompressAsync(_dir, TimeSpan.FromHours(1), Constants.LogCompressMinSizeBytes,
+                                         TestContext.Current.CancellationToken);
+        if (!r.Supported) return;
+
+        Assert.Equal(1, r.Compressed);
+        Assert.Equal(1, r.SkippedLive);
+        Assert.True(WindowsLogCompressionService.OnDiskBytes(quiet) < new FileInfo(quiet).Length,
+                    "the quiet game log should have shrunk on disk");
+        Assert.Equal(oursBefore, WindowsLogCompressionService.OnDiskBytes(ours));
     }
 
     [Fact]
