@@ -208,14 +208,30 @@ public:
 	UPROPERTY() int32 TickCount;
 	UPROPERTY() int32 FrozenInt;
 
+	/// Frames since BeginPlay, for the on-screen readout (ADumperTestHUD).
+	/// An accessor, NOT a UPROPERTY -- see the member below.
+	int32 GetFrameCount() const { return FrameCount; }
+
 private:
 	void OnSecondTick();
 
-	/// Draw TickCount / Health on screen once a second. The actor is invisible by
-	/// design, so without this "is the timer running?" needs the dumper attached and
-	/// the object walked -- and a scan that finds nothing changed is indistinguishable
-	/// from a game that is not ticking. -DumperTestNoHud suppresses it.
-	void DrawHeartbeat() const;
+	/// Install ADumperTestHUD on the local PlayerController if it is not already there.
+	///
+	/// Called from **Tick**, not BeginPlay and NEVER from the 1 Hz timer, and written as a
+	/// re-assert rather than a one-shot. BeginPlay is too early -- this actor is spawned by
+	/// a UWorldSubsystem and routinely beats the PlayerController into existence -- and a
+	/// travel replaces the controller underneath us later.
+	///
+	/// The timer is ruled out for a stronger reason: it is the thing the readout EXISTS TO
+	/// MEASURE. Install from there and a dead timer shows as a blank screen, which is
+	/// indistinguishable from "the sample never spawned" -- the exact confusion the
+	/// split-clock design was built to end. From Tick, a dead timer shows as a frozen
+	/// TickCount beside a climbing `frames`, which is the diagnosis.
+	///
+	/// NOTE: APlayerController::ClientSetHUD DESTROYS the current HUD (PlayerController.cpp:1332).
+	/// The Third Person template ships no custom HUD so nothing is lost, but a project
+	/// that has one would lose it -- hence -DumperTestNoHud to opt out entirely.
+	void EnsureHeartbeatHud();
 
 	/// Frames since BeginPlay. Driven by Tick, so it advances even if the 1 Hz timer
 	/// never fires -- which is the entire point: a blank screen and a dead timer used

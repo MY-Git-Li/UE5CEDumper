@@ -1822,11 +1822,22 @@ and `Health.CurrentValue` falling, so the values genuinely change.
 > The field column was also widened (`All fields` truncated
 > `MinNetUpdateFrequency = unchanged -> 0x174 (FloatProper…`).
 >
-> **Still open, and not this feature's problem:** the sample's on-screen heartbeat is silent in
-> a Shipping package. `UEngine::AddOnScreenDebugMessage` is `#if !(UE_BUILD_SHIPPING ||
-> UE_BUILD_TEST)` in full (5.4 `UnrealEngine.cpp:11397`), so no flag can restore it — see the
-> dev-log entry and `tools/ue-sample/README.md`. A blank Shipping screen therefore proves
-> nothing about the sample.
+> **Separately, and not this feature's problem — the sample's Shipping heartbeat, now REWRITTEN:**
+> `UEngine::AddOnScreenDebugMessage` is `#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)` in full
+> (5.4 `UnrealEngine.cpp:11397`), so no flag could restore it. Replaced with `ADumperTestHUD`
+> (`AHUD::DrawHUD` → `DrawText`, installed via `ClientSetHUD` from **Tick**, not the 1 Hz timer
+> and not a GameMode asset). Whole chain read in the 5.4 source first — see the dev-log entry.
+>
+> ⬜ **Needs a re-cook + re-package to verify** — this environment cannot compile UE, so nothing
+> about it is claimed to work until that run. **PASS** = the three lines appear in the *Shipping*
+> package and `TickCount` climbs; **FAIL** = still blank, which now means the HUD install failed
+> (check `-DumperTestNoHud` is not on the command line) rather than "expected".
+>
+> While verifying it, a **third** wrong Shipping assertion in the same file surfaced, pre-existing:
+> `UE_LOG(..., Warning, ...)` does NOT survive Shipping (`Build.h:328` sets
+> `NO_LOGGING = !USE_LOGGING_IN_SHIPPING`; `LogMacros.h:146-158` keeps only Fatal), so
+> `[DumperTest] ADumperTestActor ready at 0x…` prints in Development only. All three misreads
+> came from inferring a gate from a sibling instead of opening it.
 
 
 > 🇹🇼 **繁體中文版：[pending-verification_zh-TW.md](pending-verification_zh-TW.md)** — a standalone

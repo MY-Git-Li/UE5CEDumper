@@ -139,9 +139,38 @@ blank screen in a Shipping package proves nothing about the sample** — use the
 for "is the timer running?", or read `TickCount` at `0x518` in Live Walker, which is authoritative
 in both.
 
-A Shipping-capable heartbeat needs a real draw path (an `AHUD` subclass overriding `DrawHUD()` +
-`DrawText()`, set as the GameMode's `HUDClass`). **Not built** — it needs a re-cook to verify, and
-nothing may claim to work here without one.
+**BUILT the same day, after the maintainer re-cooked and reported it still missing** (correctly —
+the first pass had changed only the comment). `ADumperTestHUD : AHUD` overriding `DrawHUD()` now
+draws the three lines, installed at runtime by `ADumperTestActor::EnsureHeartbeatHud()` via
+`APlayerController::ClientSetHUD` — **not** the GameMode's `HUDClass` as first sketched, because
+that is a binary asset and the sample's whole design avoids those (same reason the actor is spawned
+by a subsystem rather than placed in a level).
+
+The entire chain was read in the 5.4 source before a line was written, since this environment
+cannot compile UE and a wrong guess costs a cook-and-package cycle: `ClientSetHUD` executes locally
+in a standalone game (`Actor.cpp:4923-4935`, `NM_Standalone` → `FunctionCallspace::Local`) →
+`ClientSetHUD_Implementation` spawns and assigns `MyHUD` (`PlayerController.cpp:1332`) → the
+viewport calls `MyHUD->PostRender()` (`GameViewportClient.cpp:1936`, no `UE_BUILD_*` gate anywhere
+in 1700-1940) → `AHUD::PostRender` (`HUD.cpp:149`) → `DrawHUD` (`:638`) → `DrawText` (`:929`), with
+`bShowHUD = true` from the ctor (`:75`).
+
+**Installed from `Tick`, never from the 1 Hz timer** — the first draft used the timer and that
+recreates the exact ambiguity the split-clock design exists to end: a dead timer would show as a
+blank screen, indistinguishable from "the sample never spawned". Caught before the maintainer saw
+it; the adversarial review caught six more, all documentation-vs-code splits, including the old
+already-refuted paragraph that had survived the README rewrite and still named the deleted
+`DrawHeartbeat`.
+
+**A third wrong Shipping assertion fell out of the review, this one pre-existing:**
+`UE_LOG(..., Warning, ...)` does *not* survive a Shipping build. `Build.h:328` sets
+`NO_LOGGING = !USE_LOGGING_IN_SHIPPING` (0 by default) and `LogMacros.h:146-158` reduces `UE_LOG`
+to Fatal-only under it — so `[DumperTest] ADumperTestActor ready at 0x…`, documented as the
+without-the-dumper existence check, prints in Development only. Corrected in the source and the
+README. All three misreads in this one file share a cause: **inferring a gate from a sibling
+instead of opening it.**
+
+⬜ **Needs the maintainer's re-cook to verify** — it cannot be compiled or run here, and nothing
+about it is claimed to work until that run.
 
 -----
 
