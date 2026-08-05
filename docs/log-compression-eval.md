@@ -7,7 +7,8 @@
 >
 > **In-app VERIFIED (2026-08-05)**: both triggers exercised on the maintainer's machine —
 > **180 log files, 85.1 MB → 6.5 MB on disk (78.6 MB saved), 0 failed**, the whole folder now
-> 111.9 MB logical / 17.8 MB on disk. That run is also what exposed §5a.
+> 111.9 MB logical / 17.8 MB on disk. That run is also what exposed §5a, whose fix
+> (build 2732, the quiet-`-0.log` case) was then verified in-app the same day.
 
 The 21-day retention window (`Constants.LogMaxAgeDays` / `Grimoire::LOG_RETENTION_DAYS`) is
 doing its job, and the folder still reached **111.9 MB**. Retention bounds the *age* of the

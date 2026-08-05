@@ -115,7 +115,7 @@ else becomes eligible once idle for `LogCompressLiveFileMinAgeDays` = 7 days, on
 including the manual button. A running game keeps its log's mtime fresh, so age covers it; the
 lock is the backstop, and a locked file is safely skipped.
 
-3304 C# green.
+3304 C# green. **In-app verified** the same day.
 
 -----
 
