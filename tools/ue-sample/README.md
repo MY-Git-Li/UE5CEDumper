@@ -33,8 +33,41 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
    `Source/DumperTest/`.
 3. Merge `DumperTest/Config/DefaultEngine.ini.add` into the generated `Config/DefaultEngine.ini`.
    **Merge, do not replace** — the template's own file holds the default map and the project ID.
-4. Right-click `DumperTest.uproject` → **Generate Visual Studio project files**, then build
-   (or just reopen the `.uproject` and accept the rebuild prompt).
+4. **Build from the command line. Do not build the solution in Visual Studio** — see the trap below.
+
+   ```bash
+   "C:\Program Files\Epic Games\UE_5.4\Engine\Build\BatchFiles\Build.bat" DumperTestEditor Win64 Development -Project="D:\Unreal Projects\DumperTest\DumperTest.uproject" -WaitMutex
+   ```
+
+   *Verified 2026-08-05: 27 actions, **30 s**, zero errors.* Then double-click the `.uproject`.
+   (Double-clicking it first also works — the editor offers to rebuild out-of-date modules and takes
+   the same path.)
+
+   > ### ⚠ `Build.bat … exit 6` and a wall of "找不到 …csproj 的專案資訊"
+   >
+   > **Symptom:** building the UE-generated `.sln` fails on `DotNetPerforceLib` /
+   > `EventLoopUnitTests` with *"目標 Framework 'net6.0' 已不受支援"* and project-info-not-found for
+   > every `EpicGames.*` shared library.
+   >
+   > **Cause:** those are the **engine's own C# Programs**, which the generated solution includes and
+   > which target **net6.0**. A machine whose only SDK is .NET 8/9/10 has no net6.0 targeting pack, so
+   > NuGet cannot restore them. Visual Studio **2026** makes it worse by running a one-way upgrade on
+   > the solution first (`UpgradeLog.htm` + `Backup\` appear next to the `.uproject`).
+   >
+   > **None of it is needed to build a game module.** UBT ships **precompiled**
+   > (`Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll`) and UE bundles its own .NET at
+   > `Engine/Binaries/ThirdParty/DotNet/6.0.302/`. The command above touches neither the solution nor
+   > the system SDK.
+   >
+   > **Do NOT install the .NET 6 SDK for this.** It is end-of-life, and it would only satisfy engine
+   > programs you will never run.
+   >
+   > **The C++ toolchain was never the problem.** UBT reported *"Using Visual Studio 2022 14.38.33145
+   > toolchain (…\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.38.33130)"* — it found a
+   > VS2022-era MSVC inside the VS 2026 install and was happy. UE 5.4's UBT knows compilers only up to
+   > `VisualStudio2022` (`UEBuildWindows.cs:138`), so if you ever *do* need the IDE, open the solution
+   > with **VS 2022** and build **only the `DumperTest` project** (right-click → Build), never
+   > *Build Solution*. The `.sln` is disposable — regenerate it from the `.uproject` context menu.
 5. Press Play. The output log must show
    `[DumperTest] ADumperTestActor ready at 0x…` — if it does not, nothing below will work and the
    problem is the subsystem, not the dumper.
@@ -55,6 +88,63 @@ DumperTest.exe -windowed -ResX=1280 -ResY=720
 [todo.md's self-built-samples section](../../docs/todo.md) calls the highest-value first cell: it
 *measures* which reflected UFunctions the cooker hollows out (`UCheatManager::Fly/God/Slomo` invoke
 successfully and do nothing in Shipping) instead of rediscovering it per game.
+
+-----
+
+## Where the packaged binary lives — NOT in git, and not in CI
+
+**Decided 2026-08-05. Only the source is committed; the package is not.** Both halves have a number
+behind them.
+
+**Not in git.** A packaged 5.4 ThirdPerson set measures **583 MB** (the three configs of the existing
+5.4 corpus row); one Shipping package alone is 100–200 MB. This repo's entire `.git` is **180 MB**, so
+committing even one config would roughly double it — permanently, because history cannot be pruned
+without a rewrite. And it would be committing a **build artifact whose source is already here**.
+
+The repo already has the right pattern and it is worth copying exactly: the AOB corpus binaries live
+**outside** the repo, and what is committed is the small thing that *verifies* them —
+`tools/ghidra/identity/` + `memory-maps/`, **668 KB** total. See
+[corpus-preservation.md](../../docs/corpus-preservation.md). So:
+
+* **binary** → outside, e.g. `D:\UE_Analyze_Data\DumperTest\5.4\{Shipping,Development}\`
+  (**not** in `Varies Version builds\` — `inventory_builds.py`/`preflight.py` treat that tree as the
+  AOB corpus and CI asserts its row counts).
+* **repo** → this source, plus a note of the engine version, the exact build command and the packaged
+  exe's hash, so *"is the package I am testing built from this source?"* has an answer. Without that,
+  a stale package silently tests yesterday's property zoo and looks like a dumper regression.
+
+**Not in CI, and size is the lesser reason.** CI has no UE 5.4 install (tens of GB), no GPU and no
+display — but the real blocker is that **what this sample tests is a live process being injected into
+and walked**: a running game, a ticking game thread, the UI or CE attached. That is the same class of
+thing [todo.md § Pending live-game verification](../../docs/todo.md) exists for, and the existing
+`check_live_verification.py` gate only checks that the register is *well-formed* — it does not run,
+and cannot run, the verification itself. Nothing about packaging this sample changes that.
+
+> **What CI could cheaply do, if it is ever wanted (not built):** a source-level drift gate asserting
+> the expected-value table in this README still matches the literals in `DumperTestActor.cpp`. That is
+> audit #4's 4a root cause — *the report and the reality are computed by different code paths* —
+> applied here: change `I32 = 1234567` in the .cpp without changing the table and the next tester
+> scans for a number that is not there. ~40 lines of Python, and it would be the seventh gate.
+
+-----
+
+## Reflection is confirmed complete (2026-08-05, build verified)
+
+Read out of the generated `DumperTestActor.gen.cpp` — this is the evidence that the zoo actually
+reaches UE reflection rather than merely compiling:
+
+| emitted param type | count | covers |
+|---|---|---|
+| `FTextPropertyParams` | **9** | the 8 actor FTexts + `UDumperTestPayload::PayloadText` |
+| `FStrPropertyParams` | 6 | 4 `Str_*` + `PayloadString` + `Opt_Str_Set`'s inner |
+| **`FGenericPropertyParams`** | **4** | **the four `TOptional`s** — `FOptionalProperty` has no dedicated params type; each also emits an `_Inner` (`Opt_Int_Set_Inner` = `EPropertyGenFlags::Int`) |
+| `FSet` / `FMap` / `FArray` | 1 / 2 / 2 | `Set_Int`, both maps, `Arr_Int` + `Arr_Struct` |
+| `FInt8` / `FInt16` / `FUInt16` / `FInt64` | 1 each | the byte/width families |
+| `FBoolPropertyParams` | 4 | 3 bitfields + `bPlainBool` |
+| `FByte` / `FEnum` / `FFloat` / `FDouble` / `FStruct` / `FObject` / `FName` | 3 / 1 / 3 / 1 / 2 / 1 / 2 | |
+
+> A grep for these must include digits — `F[A-Za-z]*PropertyParams` silently misses
+> `FInt8`/`FInt16`/`FInt64` and makes the byte families look absent.
 
 -----
 
