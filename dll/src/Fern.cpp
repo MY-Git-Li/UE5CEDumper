@@ -255,6 +255,12 @@ bool ParseValueBytes(Radar::DataType dt, const std::string& raw, uint8_t out[8],
 // The UI's "counts partial" warning compares class_distinct against this.
 static constexpr int kClassHistogramMaxRows = 40;
 
+// Per-request cap for query_group_slot_leaves. A slot keeps at most `per_slot_cap`
+// leaves (clamped 8..4096 on begin_group_scan), and this is one expanded row's
+// detail — not a scan result — so the whole list fits in one response at the
+// default. Kept a hard server-side ceiling anyway: `limit` comes off the wire.
+static constexpr int kGroupSlotLeafMaxRows = 4096;
+
 // Serialize a class histogram (already sorted count-desc) to the wire, capped
 // at `maxRows` so the noise picker stays small. Shared by the value + group
 // begin/refine responses (class_histogram = [{class_name, count}, ...]).
@@ -320,6 +326,41 @@ json CandidateToJson(const Radar::Candidate& c,
     return item;
 }
 
+// Wire JSON for ONE leaf of a group slot: the resolved field name / offset /
+// type / current value / addresses.
+//
+// Shared by the row's REPRESENTATIVE leaf and by query_group_slot_leaves' full
+// list, so the two can never disagree about what a leaf is called or holds. The
+// value comes from Radar::GroupSlotValueString — the same call the server-side
+// filter matches against, which is the whole point: this area's entire bug
+// history is two code paths answering one question differently.
+json GroupLeafToJson(const Radar::GroupSlotMatch& m,
+                     const Radar::SlotSpec& spec,
+                     const std::vector<Radar::FieldDescriptor>& descriptors) {
+    json lj;
+    if (m.descriptorIdx >= descriptors.size()) return lj;
+    const Radar::FieldDescriptor& d = descriptors[m.descriptorIdx];
+    lj["field_name"]      = Radar::FieldDisplayName(d, m.elementIndex);
+    lj["field_offset"]    = m.offset;
+    lj["field_type"]      = d.fieldType;
+    lj["bool_field_mask"] = d.boolFieldMask;
+    // Native-C (P2): badge a raw-hole leaf + its interpreted width (omitted for
+    // reflected leaves — back-compat / lean wire).
+    if (d.isNativeC) {
+        lj["is_native_c"]  = true;
+        lj["guessed_type"] = d.guessedType;
+    }
+    // Absolute leaf address (direct: owner+offset; deep: container element).
+    lj["addr"]        = Renge::AddrToStr(m.leafAddr);
+    // Owning object of the leaf (P4): the candidate actor for an own-block leaf,
+    // or an owned sub-object for a cross-object leaf — drives handoffs.
+    lj["owner_addr"]  = Renge::AddrToStr(m.ownerAddr);
+    // Owning object's class (P4 inc 2) — drives the per-slot Pivot handoff.
+    lj["owner_class"] = m.ownerClass;
+    lj["leaf_value"]  = Radar::GroupSlotValueString(m, spec, descriptors);
+    return lj;
+}
+
 // Build the wire JSON for one group-scan candidate (build 1276). A group hit is
 // OBJECT-level: one owning UObject + a nested `slots` array. Each slot carries
 // the user's target value, its converging matched offsets, a `locked` flag (the
@@ -361,18 +402,22 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
     item["defining_class_name"] = definingClass;
 
     json slotsJson = json::array();
-    // Leaf addresses already claimed by an earlier slot's displayed value, so the row
-    // shows a genuine ASSIGNMENT rather than each slot's independent first choice.
-    std::vector<uintptr_t> shownLeaves;
-    shownLeaves.reserve(gc.slotMatches.size());
-    // Defining class/struct of each shown leaf, so later slots can prefer a SIBLING.
-    std::vector<std::string> shownDefiningClasses;
-    shownDefiningClasses.reserve(gc.slotMatches.size());
+    // ONE assignment for the whole row — no two slots may display the same leaf.
+    // The rule lives in Radar, beside the filter it has to agree with; see
+    // Radar::PickGroupWitnessAssignment for why it is not written here. The filter
+    // is split the same way the filter itself splits it (space = AND), so naming
+    // two fields puts one in each slot.
+    const std::vector<size_t> picks = Radar::PickGroupWitnessAssignment(
+        gc.slotMatches, slots, descriptors, Radar::SplitFilterTerms(highlight));
+
     for (size_t s = 0; s < gc.slotMatches.size(); ++s) {
         const Radar::SlotSpec& spec = slots[s];
         const auto& matches = gc.slotMatches[s];
 
-        json sj;
+        // Start from the displayed leaf so the row and query_group_slot_leaves
+        // emit a leaf through exactly one encoder.
+        json sj = matches.empty() ? json::object()
+                                  : GroupLeafToJson(matches[picks[s]], spec, descriptors);
         sj["slot_index"] = static_cast<int>(s);
         sj["value"]      = spec.value;
         sj["scan_type"]  = Radar::NameOf(spec.st);  // per-slot predicate (P2)
@@ -384,99 +429,14 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
         sj["matched_offsets"] = offsets;
         sj["locked"]          = (matches.size() == 1);
 
-        if (!matches.empty()) {
-            // Prefer the leaf the filter actually matched; fall back to the first kept.
-            // Pick a representative that is NOT already shown for an earlier slot.
-            //
-            // Each slot used to report its own matches[0], which is not an assignment:
-            // when two slots kept the same leaf first, the row read
-            // "PrimaryActorTick.TickInterval=0, PrimaryActorTick.TickInterval=0" — a value
-            // apparently paired with ITSELF, which is precisely what MatchGroup forbids.
-            // HasDistinctAssignment had already proven a distinct assignment exists; the
-            // row simply was not showing one, so a correct match looked like a bug.
-            //
-            // Greedy first-unused. It can theoretically fail where a proper matching
-            // exists, but the existence check has already passed, so at worst the row
-            // falls back to a duplicate rather than claiming no match.
-            size_t pick = 0;
-            bool picked = false;
-            const std::string needle = highlight.empty() ? std::string()
-                                                         : Radar::ToLowerAscii(highlight);
-            auto isFree = [&](size_t k) {
-                for (uintptr_t used : shownLeaves)
-                    if (used == matches[k].leafAddr) return false;
-                return true;
-            };
-            // Pass 1: a free leaf that also satisfies the active filter.
-            if (!needle.empty()) {
-                for (size_t k = 0; k < matches.size() && !picked; ++k) {
-                    if (!isFree(k)) continue;
-                    const Radar::FieldDescriptor& dk = descriptors[matches[k].descriptorIdx];
-                    if (Radar::GroupTextContainsCI(dk.fieldName, needle) ||
-                        Radar::GroupTextContainsCI(dk.className, needle) ||
-                        Radar::GroupTextContainsCI(dk.definingClassName, needle) ||
-                        Radar::GroupTextContainsCI(
-                            Radar::GroupSlotValueString(matches[k], spec, descriptors), needle)) {
-                        pick = k; picked = true;
-                    }
-                }
-            }
-            // Pass 2: a free leaf DEFINED BY THE SAME CLASS/STRUCT as the one already
-            // shown for an earlier slot.
-            //
-            // A group scan is looking for values that belong TOGETHER, so the useful
-            // witness is one from the same struct — `Health.CurrentValue` beside
-            // `Health.BaseValue`, `TickCount` beside `FrozenInt`. Taking the first free
-            // leaf instead produced pairings like `Health.CurrentValue=98,
-            // PrimaryActorTick.TickInterval=0`, which is a VALID assignment and a useless
-            // one: it reads as though the actor's health matched against an engine tick
-            // field, and it hid the pairing the user was actually looking for. Reported
-            // as "Health那一組有找到，424242 找不到" when both had matched all along.
-            if (!picked && !shownDefiningClasses.empty()) {
-                for (size_t k = 0; k < matches.size() && !picked; ++k) {
-                    if (!isFree(k)) continue;
-                    const std::string& dc = descriptors[matches[k].descriptorIdx].definingClassName;
-                    for (const auto& shown : shownDefiningClasses)
-                        if (!dc.empty() && dc == shown) { pick = k; picked = true; break; }
-                }
-            }
-            // Pass 3: any free leaf.
-            for (size_t k = 0; k < matches.size() && !picked; ++k)
-                if (isFree(k)) { pick = k; picked = true; }
-            shownLeaves.push_back(matches[pick].leafAddr);
-            shownDefiningClasses.push_back(descriptors[matches[pick].descriptorIdx].definingClassName);
-            // How many leaves this slot actually holds. `locked` already says "exactly
-            // one"; this says how much the single displayed value is standing in for, so
-            // a row can no longer imply the candidate matched on one field when it
-            // matched on thirty.
+        // How many leaves this slot actually holds. `locked` already says "exactly
+        // one"; this says how much the single displayed value is standing in for, so
+        // a row can no longer imply the candidate matched on one field when it
+        // matched on thirty. `query_group_slot_leaves` returns the other thirty BY
+        // NAME — before it existed, `matched_offsets` was the only trace of them and
+        // a raw integer cannot tell a user that 1308 is `FrozenInt`.
+        if (!matches.empty())
             sj["match_count"] = static_cast<int>(matches.size());
-            const Radar::GroupSlotMatch& m0 = matches[pick];
-            const Radar::FieldDescriptor& d = descriptors[m0.descriptorIdx];
-            sj["field_name"]      = Radar::FieldDisplayName(d, m0.elementIndex);
-            sj["field_offset"]    = m0.offset;
-            sj["field_type"]      = d.fieldType;
-            sj["bool_field_mask"] = d.boolFieldMask;
-            // Native-C (P2): badge a raw-hole slot match + its interpreted width
-            // (omitted for reflected leaves — back-compat / lean wire).
-            if (d.isNativeC) {
-                sj["is_native_c"]  = true;
-                sj["guessed_type"] = d.guessedType;
-            }
-            // Absolute leaf address (direct: owner+offset; deep: container element).
-            sj["addr"]            = Renge::AddrToStr(m0.leafAddr);
-            // Owning object of the leaf (P4): the candidate actor for an own-block
-            // leaf, or an owned sub-object for a cross-object leaf — drives handoffs.
-            sj["owner_addr"]      = Renge::AddrToStr(m0.ownerAddr);
-            // Owning object's class (P4 inc 2): the candidate class for an own-block
-            // leaf, the owned sub-object's class for a cross-object leaf — drives the
-            // per-slot Pivot handoff to the right class.
-            sj["owner_class"]     = m0.ownerClass;
-            Radar::Candidate tmp;
-            std::memcpy(tmp.prevValue, m0.prevValue, sizeof(tmp.prevValue));
-            tmp.descriptorIdx = m0.descriptorIdx;
-            tmp.elementIndex  = m0.elementIndex;
-            sj["leaf_value"]  = Radar::FormatCandidateValue(tmp, spec.dt, d);
-        }
         slotsJson.push_back(std::move(sj));
     }
     item["slots"] = slotsJson;
@@ -3469,6 +3429,125 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             data["offset"]         = offset;
             data["count"]          = static_cast<int>(candidates.size());
             data["candidates"]     = candidates;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === query_group_slot_leaves: every leaf ONE slot of ONE candidate kept,
+        // BY NAME (build 2719).
+        //
+        // A group row can only display a single assignment, however many the
+        // candidate satisfies. On the DumperTest sample a `Changed` + `Unchanged`
+        // refine kept {Health.CurrentValue, TickCount} for slot 0 and 36 leaves
+        // including FrozenInt for slot 1 — two equally valid pairs, one row. The
+        // others existed on the wire only as raw integers in `matched_offsets`,
+        // and an integer cannot tell a user that 1308 is `FrozenInt`, so a correct
+        // match was reported as a miss four separate times.
+        //
+        // On demand, per expanded row — never inlined into the paged list, which
+        // carries up to 1000 candidates x N slots x per_slot_cap (<= 4096) leaves. ===
+        if (cmd == Renge::CMD_QUERY_GROUP_SLOT_LEAVES) {
+            uint64_t sessionId = request.value("session_id", 0ULL);
+            if (sessionId == 0) {
+                return Renge::MakeError(id, "Missing or zero session_id").dump();
+            }
+            uintptr_t instanceAddr = 0;
+            if (!Renge::TryStrToAddr(request.value("instance_addr", ""), instanceAddr)
+                || instanceAddr == 0) {
+                return Renge::MakeError(id, "Missing or malformed instance_addr").dump();
+            }
+            const int slotIndex = request.value("slot_index", -1);
+            if (slotIndex < 0) {
+                return Renge::MakeError(id, "Missing or negative slot_index").dump();
+            }
+            int offset = request.value("offset", 0);
+            int limit  = request.value("limit", kGroupSlotLeafMaxRows);
+            if (offset < 0) offset = 0;
+            if (limit  < 0) limit  = 0;
+            if (limit > kGroupSlotLeafMaxRows) limit = kGroupSlotLeafMaxRows;
+
+            // Optional tie-breaker. One UObject can own MANY candidates: with
+            // `deep`, Aura emits one GroupCandidate per container BLOCK and they all
+            // intern to the same InstanceRecord ("blocks share", Aura.cpp:8163), so
+            // instance_addr alone is ambiguous and first-match-wins would answer an
+            // expanded deep row with a DIFFERENT block's fields — a silent wrong
+            // answer, in precisely the feature meant to end silent wrong answers.
+            // The row already knows its displayed leaf's absolute address; a leaf
+            // address belongs to exactly one block, so it identifies the candidate.
+            // NOT a candidate index: RefineGroupCandidates rebuilds the vector, so
+            // any index is stale after the next refine.
+            uintptr_t leafHint = 0;
+            Renge::TryStrToAddr(request.value("leaf_addr", ""), leafHint);
+
+            json leaves = json::array();
+            int  total = 0;
+            bool candidateFound = false, slotFound = false, staleHint = false;
+            const bool sessionFound = Radar::GroupSessionManager::Instance().WithSession(
+                sessionId, [&](const Radar::GroupSession& sess) {
+                    const Radar::GroupCandidate* chosen = nullptr;
+                    const Radar::GroupCandidate* firstByAddr = nullptr;
+                    int sharingAddr = 0;   // how many candidates this UObject owns
+                    for (const Radar::GroupCandidate& gc : sess.candidates) {
+                        if (gc.instanceIdx >= sess.instances.size()) continue;
+                        if (sess.instances[gc.instanceIdx].instanceAddr != instanceAddr) continue;
+                        ++sharingAddr;
+                        if (!firstByAddr) firstByAddr = &gc;
+                        if (leafHint == 0) break;                 // no hint: first wins
+                        if (chosen) break;                        // found it, and not alone
+                        if (static_cast<size_t>(slotIndex) >= gc.slotMatches.size()) continue;
+                        for (const Radar::GroupSlotMatch& m : gc.slotMatches[slotIndex])
+                            if (m.leafAddr == leafHint) { chosen = &gc; break; }
+                    }
+                    if (!chosen) {
+                        // The hint matched nothing: the caller's row is stale (a refine
+                        // dropped that leaf). With ONE candidate per address the
+                        // fallback is exact — there is nothing to be wrong about. With
+                        // several (deep: one per container block) it would be a GUESS,
+                        // and answering a stale row with another block's fields is
+                        // precisely the silent wrong answer this command exists to end.
+                        // Refuse, and let the caller re-query the row.
+                        if (leafHint != 0 && sharingAddr > 1) { staleHint = true; return; }
+                        chosen = firstByAddr;
+                    }
+                    if (!chosen) return;
+                    candidateFound = true;
+                    if (static_cast<size_t>(slotIndex) >= chosen->slotMatches.size()
+                        || static_cast<size_t>(slotIndex) >= sess.slots.size()) return;
+                    slotFound = true;
+                    const auto& matches = chosen->slotMatches[slotIndex];
+                    // The object's OWN fields first. Leaves are collected
+                    // base-class-first, so without this an actor's list opens with
+                    // thirty engine fields and `FrozenInt` is off the bottom of a
+                    // scrolling box — the list existed to make it findable.
+                    const std::vector<size_t> order =
+                        Radar::OrderGroupSlotLeaves(matches, sess.descriptors);
+                    total = static_cast<int>(matches.size());
+                    const int begin = (std::min)(offset, total);
+                    // begin (not offset) + limit: both are already clamped to small
+                    // values, so the sum cannot overflow. `offset` comes straight off
+                    // the wire and `offset + limit` is signed-overflow UB for a large
+                    // one. (query_group_candidates has the same latent pattern.)
+                    const int end   = (std::min)(begin + limit, total);
+                    for (int i = begin; i < end; ++i) {
+                        // A leaf whose descriptorIdx is out of range encodes to {};
+                        // emitting it would put a nameless blank row in the list.
+                        json lj = GroupLeafToJson(matches[order[i]], sess.slots[slotIndex],
+                                                  sess.descriptors);
+                        if (!lj.empty()) leaves.push_back(std::move(lj));
+                    }
+                });
+            if (!sessionFound) return Renge::MakeError(id, "session_not_found").dump();
+            if (staleHint)     return Renge::MakeError(id, "stale_leaf_addr").dump();
+            if (!candidateFound) return Renge::MakeError(id, "candidate_not_found").dump();
+            if (!slotFound)      return Renge::MakeError(id, "slot_index out of range").dump();
+
+            json data;
+            data["session_id"]    = sessionId;
+            data["instance_addr"] = Renge::AddrToStr(instanceAddr);
+            data["slot_index"]    = slotIndex;
+            data["total"]         = total;
+            data["offset"]        = offset;
+            data["count"]         = static_cast<int>(leaves.size());
+            data["leaves"]        = leaves;
             return Renge::MakeResponse(id, data).dump();
         }
 

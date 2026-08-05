@@ -1651,6 +1651,195 @@ static void Test_NumericFamily_Filter() {
     EXPECT("parse empty->Any",   ParseNumericFamily("")             == NumericFamily::Any);
 }
 
+// Which leaf each slot DISPLAYS. Reproduces the DumperTest sample exactly: a
+// Changed + Unchanged refine where slot 0 kept {Health.CurrentValue, TickCount}
+// and slot 1 kept {PrimaryActorTick.TickInterval, Health.BaseValue, FrozenInt}.
+// Two valid assignments, one row — and for four separate reports the pair the
+// row did not pick was read as a missed match.
+//
+// The rule used to live inside Fern.cpp's JSON builder where no test could reach
+// it, which is how it kept drifting away from the filter it must agree with.
+static void Test_Radar_PickGroupWitnessAssignment() {
+    using namespace Radar;
+
+    auto desc = [](const char* defining, const char* field) {
+        FieldDescriptor d;
+        d.className = "DumperTestActor";
+        d.definingClassName = defining;
+        d.fieldName = field;
+        d.fieldType = "IntProperty";
+        return d;
+    };
+    std::vector<FieldDescriptor> descs = {
+        desc("Actor",                "PrimaryActorTick.TickInterval"),  // 0
+        desc("DumperTestAttribute",  "Health.BaseValue"),               // 1
+        desc("DumperTestAttribute",  "Health.CurrentValue"),            // 2
+        desc("DumperTestActor",      "TickCount"),                      // 3
+        desc("DumperTestActor",      "FrozenInt"),                      // 4
+    };
+
+    auto leaf = [](uint32_t descIdx, uintptr_t addr, int32_t value) {
+        GroupSlotMatch m;
+        m.descriptorIdx = descIdx;
+        m.leafAddr      = addr;
+        m.offset        = static_cast<int32_t>(addr);
+        std::memcpy(m.prevValue, &value, sizeof(value));
+        return m;
+    };
+
+    std::vector<SlotSpec> slots(2);
+    slots[0].dt = DataType::Int32; slots[0].st = ScanType::Changed;
+    slots[1].dt = DataType::Int32; slots[1].st = ScanType::Unchanged;
+
+    // The real offsets from the 2026-08-05 session: FrozenInt @0x51C == 1308.
+    std::vector<std::vector<GroupSlotMatch>> sm = {
+        { leaf(2, 1288, 19),  leaf(3, 1304, 101) },
+        { leaf(0,   52,  0),  leaf(1, 1284, 100), leaf(4, 1308, 424242) },
+    };
+
+    // A zero is almost never the value being hunted (engine bookkeeping sits at 0
+    // by default), so `TickInterval=0, InitialLifeSpan=0` is the least useful pair
+    // a candidate can show. Non-zero wins INSIDE each rule.
+    EXPECT("zero: plain / decimal / signed / vector forms",
+           IsZeroValueText("0") && IsZeroValueText("0.0") && IsZeroValueText("-0.00") &&
+           IsZeroValueText("0, 0, 0") && IsZeroValueText(" 0 "));
+    EXPECT("zero: any non-zero digit disqualifies",
+           !IsZeroValueText("1") && !IsZeroValueText("0.5") && !IsZeroValueText("100") &&
+           !IsZeroValueText("0, 0, 1"));
+    EXPECT("zero: non-numeric text is not a zero",
+           !IsZeroValueText("") && !IsZeroValueText("-") && !IsZeroValueText("Elite"));
+
+    // No filter: slot 0 takes its first free leaf, and slot 1 then prefers a
+    // SIBLING from the same struct — Health.BaseValue, not the engine tick field
+    // that happens to come first.
+    auto plain = PickGroupWitnessAssignment(sm, slots, descs, {});
+    EXPECT("witness: slot0 -> Health.CurrentValue", plain.size() == 2 && plain[0] == 0);
+    EXPECT("witness: slot1 prefers the same struct over the first free leaf", plain[1] == 1);
+
+    // Pass 3 skips a leading zero. Reproduces the default first-scan row that read
+    // `PrimaryActorTick.TickInterval=0, InitialLifeSpan=0` — a valid pairing and a
+    // useless one, while the same object's real fields had matched too.
+    std::vector<std::vector<GroupSlotMatch>> zeroFirst = {
+        { leaf(0,   52,      0), leaf(3, 1304,    183) },   // TickInterval=0, TickCount=183
+        { leaf(0, 1216,      0), leaf(4, 1308, 424242) },   // (zero), FrozenInt=424242
+    };
+    auto nonZero = PickGroupWitnessAssignment(zeroFirst, slots, descs, {});
+    EXPECT("zero: slot0 skips the 0 and shows TickCount", nonZero[0] == 1);
+    EXPECT("zero: slot1 skips the 0 too", nonZero[1] == 1);
+
+    // But a slot with NOTHING but zeros must still show one — the fallback is a
+    // tie-break, not a filter, and an empty cell would be a worse lie.
+    std::vector<std::vector<GroupSlotMatch>> allZero = {
+        { leaf(3, 1304, 0) },
+        { leaf(4, 1308, 0) },
+    };
+    auto zeros = PickGroupWitnessAssignment(allZero, slots, descs, {});
+    EXPECT("zero: an all-zero slot still reports its leaf",
+           zeros.size() == 2 && zeros[0] == 0 && zeros[1] == 0);
+
+    // And an explicitly filtered-for zero still wins: the tie-break lives INSIDE
+    // each rule, so it can never outrank what the user actually asked for.
+    std::vector<std::vector<GroupSlotMatch>> askedForZero = {
+        { leaf(3, 1304, 183), leaf(0, 52, 0) },   // TickCount first, the 0 second
+        { leaf(4, 1308, 424242) },
+    };
+    auto asked = PickGroupWitnessAssignment(
+        askedForZero, slots, descs, SplitFilterTerms("tickinterval"));
+    EXPECT("zero: a filtered-for zero still wins its slot", asked[0] == 1);
+
+    // Filtering by NAME must bring that field to the front of its own slot...
+    auto byName = PickGroupWitnessAssignment(sm, slots, descs, SplitFilterTerms("tickcount"));
+    EXPECT("witness: filter 'tickcount' -> slot0 shows TickCount", byName[0] == 1);
+    // ...and the sibling rule then pairs it with the other field of the SAME
+    // class, which is exactly the TickCount/FrozenInt pairing that was reported
+    // missing while both had matched all along.
+    EXPECT("witness: and slot1 pairs it with FrozenInt (same defining class)", byName[1] == 2);
+
+    // Filtering by VALUE goes through GroupSlotValueString — the same call the
+    // server-side filter matches on, so a row can never show a leaf the filter
+    // did not match.
+    auto byValue = PickGroupWitnessAssignment(sm, slots, descs, SplitFilterTerms("424242"));
+    EXPECT("witness: filter '424242' -> slot1 shows FrozenInt", byValue[1] == 2);
+
+    // TWO TERMS = the only way to ask for a SPECIFIC pairing. With 2 x 3 kept
+    // leaves (2 x 36 in the real case) nothing in the data says which of the many
+    // valid pairings you meant, so naming both fields is the request. Each term
+    // must land in its OWN slot — one greedy slot taking both would put the second
+    // named field nowhere, which is the whole defect.
+    auto twoTerms = PickGroupWitnessAssignment(
+        sm, slots, descs, SplitFilterTerms("tickcount frozenint"));
+    EXPECT("witness: 'tickcount frozenint' -> slot0 = TickCount", twoTerms[0] == 1);
+    EXPECT("witness: 'tickcount frozenint' -> slot1 = FrozenInt", twoTerms[1] == 2);
+
+    // Order-independent: the user should not have to know which value is slot 0.
+    auto reversed = PickGroupWitnessAssignment(
+        sm, slots, descs, SplitFilterTerms("frozenint tickcount"));
+    EXPECT("witness: term order does not decide slot order",
+           reversed[0] == 1 && reversed[1] == 2);
+
+    // Extra whitespace must not create empty terms (an empty term matches every
+    // leaf and would silently disable the pairing).
+    EXPECT("terms: whitespace collapsed, lower-cased",
+           SplitFilterTerms("  TickCount\t frozenINT  ").size() == 2 &&
+           SplitFilterTerms("  TickCount\t frozenINT  ")[0] == "tickcount" &&
+           SplitFilterTerms("  TickCount\t frozenINT  ")[1] == "frozenint");
+    EXPECT("terms: empty filter yields no terms", SplitFilterTerms("   ").empty());
+
+    // Distinctness: when both slots keep the SAME leaf first, they must not both
+    // display it. "PrimaryActorTick.TickInterval=0, PrimaryActorTick.TickInterval=0"
+    // is a value apparently paired with itself, which MatchGroup forbids outright.
+    std::vector<std::vector<GroupSlotMatch>> shared = {
+        { leaf(0, 52, 0), leaf(1, 1284, 100) },
+        { leaf(0, 52, 0), leaf(1, 1284, 100) },
+    };
+    auto distinct = PickGroupWitnessAssignment(shared, slots, descs, {});
+    EXPECT("witness: no leaf is displayed by two slots",
+           shared[0][distinct[0]].leafAddr != shared[1][distinct[1]].leafAddr);
+
+    // An empty slot claims nothing and must not disturb the later slots. The
+    // filter picks the SECOND leaf, so an implementation that lost its place
+    // (or just returned zeros) fails here rather than passing by construction.
+    std::vector<std::vector<GroupSlotMatch>> withEmpty = {
+        {},
+        { leaf(1, 1284, 100), leaf(4, 1308, 424242) },
+    };
+    auto emptied = PickGroupWitnessAssignment(withEmpty, slots, descs, SplitFilterTerms("frozen"));
+    EXPECT("witness: an empty slot is skipped and later slots still filter",
+           emptied.size() == 2 && emptied[0] == 0 && emptied[1] == 1);
+
+    // A descriptorIdx past the pool must never index it. Slot 0 leads with a
+    // corrupt entry and the filter matches only the SECOND leaf, so the guard has
+    // to skip rather than match-or-crash — asserting index 1 is what makes this
+    // test fail on a missing bounds check instead of passing on a default 0.
+    std::vector<std::vector<GroupSlotMatch>> bad = {
+        { leaf(99, 4096, 7), leaf(1, 1284, 100) },
+        { leaf(4, 1308, 424242) },
+    };
+    auto guarded = PickGroupWitnessAssignment(bad, slots, descs, SplitFilterTerms("health"));
+    EXPECT("witness: an out-of-range descriptor is skipped, not indexed",
+           guarded.size() == 2 && guarded[0] == 1 && guarded[1] == 0);
+
+    // ---- leaf-list display order ----
+    // Leaves arrive base-class-first, so an actor's list opens with engine fields
+    // and the ones the user came for are thirty rows down a 220px scrolling box.
+    // The object's OWN declared fields come first. A leaf nested in a STRUCT
+    // reports the struct as its defining class, so it stays in the second tier —
+    // it is not a field of this class either.
+    auto ordered = OrderGroupSlotLeaves(sm[1], descs);
+    EXPECT("order: 3 leaves in, 3 out", ordered.size() == 3);
+    EXPECT("order: FrozenInt (declared by DumperTestActor) comes first",
+           descs[sm[1][ordered[0]].descriptorIdx].fieldName == "FrozenInt");
+    // ...and the two it jumped are still in their original relative order.
+    EXPECT("order: the inherited/nested tier keeps scan order",
+           descs[sm[1][ordered[1]].descriptorIdx].fieldName == "PrimaryActorTick.TickInterval" &&
+           descs[sm[1][ordered[2]].descriptorIdx].fieldName == "Health.BaseValue");
+    // Ordering must not drop or duplicate anything — it decides what is VISIBLE.
+    std::vector<size_t> seen = ordered;
+    std::sort(seen.begin(), seen.end());
+    EXPECT("order: a permutation, nothing lost or repeated",
+           seen.size() == 3 && seen[0] == 0 && seen[1] == 1 && seen[2] == 2);
+}
+
 // Group-scan server-side class filter: exclude skip + histogram bucket on the
 // candidate's OBJECT-level class (first non-empty slot's match), including the
 // defensive case where slot 0 is empty so the class comes from a later slot.
@@ -3493,6 +3682,7 @@ int main() {
     Test_SnapshotNoise_GuardrailAndSets();
     Test_NumericFamily_Filter();
     Test_GroupScan_ExcludeAndHistogram();
+    Test_Radar_PickGroupWitnessAssignment();
     Test_ValueScan_OrderedViewScale();
     Test_Macht_IsRipRelativeModRM();
     Test_ValueScan_SparseContainerGeometry();

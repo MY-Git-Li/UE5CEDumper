@@ -14,6 +14,10 @@
 
 **11 項 ✅ 已驗證 · 2 項 🟡 一半 · 13 項 ⬜ 尚未被觸發**
 
+> **2026-08-05 追加：** 本檔末尾新增 **③ D 系列**（DumperTest 自建樣本挖出來的，
+> 不計入上面這三個數字）。D1 / D3 已修復並驗證，**只剩 [D2](#-d2--群組掃描的那一列只顯示得下其中一種配對) 一步**
+> —— 跑一次 `Changed` + `Unchanged` 群組掃描，確認列上的 `(+35)` 和 **All fields** 有作用。
+
 | 狀態 | 項目 |
 |---|---|
 | ✅ 已驗證 | B49、B31、B5（被動半）、B47、B35、B42、B36、**B34**、**B14 + R5**、**B38**、乾淨掃描也產生 report |
@@ -747,6 +751,80 @@ registry 那一半**還沒被走過**：它只有在所有便宜的 slot 都落�
 - **FAIL** = 還是找不到，或每次都閃（自我修復的寫入沒有發生）。
 
 *為什麼本機測不了：這是 CE Lua，`CtDllDiscoveryTests` 只能釘住結構。*
+
+-----
+
+# ③ D 系列 —— DumperTest 自建樣本挖出來的
+
+> 這幾項不屬於 audit #4，來源是 2026-08-05 自建的 UE 5.4 `DumperTest` 樣本
+> （`tools/ue-sample/`，打包在 `D:\UE_Analyze_Data\For Testing\DumperTest\`）。
+> **D1**（GNames 解到 `EOSSDK-Win64-Shipping.dll`）和 **D3**（`FUObjectItem` stride
+> 被偵測成一半）都已 ✅ 修復並驗證；只剩 D2 的最後一步。
+
+## ⬜ D2 —— 群組掃描的那一列，只顯示得下「其中一種配對」
+**build 2719** · 需要實機操作（跑一次群組掃描）
+
+**這一項本身不是掃描錯誤。** 一個物件通常同時以好幾種方式滿足同一組值，而結果列
+只放得下一組。2026-08-05 回報的
+*「`TickCount=NNN, FrozenInt=424242` 沒出現」* 就是這樣：那一場的
+`ui-pipe-0.log` 顯示 slot 0（Changed）保留 `[1288, 1304]`、slot 1（Unchanged）保留
+36 個含 `1308`，而 `1304` = `0x518` = TickCount、`1308` = `0x51C` = FrozenInt
+（同一場的 `ui-view-*.log` 有 `ScrollToFieldByOffset: offset 0x51C -> field 'FrozenInt'`
+可獨立佐證）。兩組配對都成立，列上只顯示了 `Health` 那一組。
+
+**前三次修法都是換一組贏家 —— 那是零和的**：不管推哪一組上去，另一組看起來都像沒找到。
+
+而且**沒有任何自動規則能挑出「TickCount + FrozenInt」這一組**：slot 1 的 36 個
+unchanged 欄位裡，FrozenInt 和 `I16` / `FixedArr` / `I8_Neg` 在資料上毫無差別，
+2 × 36 = 72 種合法配對，掃描器無從得知你要的是哪一種。所以 build 2719 做的是三件
+讓它**可解**的事，而不是再換一次贏家：
+
+1. **`match_count`**（2690 就在線上、但從沒被解析）→ 列上的 `(+35)`，展開列的
+   `1 of 36 matching field(s)`。
+2. **All fields**（`query_group_slot_leaves`）逐一具名該 slot 保留的每個欄位，
+   **再按一下收合**；清單順序改成**物件自己宣告的欄位排前面**（leaf 是 base class 優先
+   收集的，不排序的話開頭就是 `PrimaryActorTick.*` / `InitialLifeSpan` /
+   `CustomTimeDilation`，`FrozenInt` 會在第三十幾列、捲動框外）。
+3. **Filter 改成 space = AND** —— 這才是「指定配對」的方法。以前 filter 是單一子字串，
+   根本沒辦法同時說「slot 0 要 TickCount、slot 1 要 FrozenInt」。現在打
+   **`tickcount frozenint`**，兩個 term 各自落在一個 slot，那一列就直接變成你要的配對。
+   （這也把 group filter 補回 CLAUDE.md 本來就有的 space=AND 規則 —— 它是最後一個例外。）
+4. **預設不拿 0 當 witness**。0 在遊戲裡幾乎沒有實質意義（引擎的記錄欄位預設就是 0），
+   而預設那一列以前常讀作 `PrimaryActorTick.TickInterval=0, InitialLifeSpan=0` ——
+   合法但最沒資訊量的一組，而該物件真正的欄位其實也命中了。非零值現在在**每一條選取規則
+   內部**優先，是規則內的 tie-break 而不是新規則：整個 slot 都是 0 時仍然會顯示一個
+   （空白格是更糟的謊），而使用者明確 filter 出來的 0 仍然贏。
+
+✅ **2026-08-05 已實測**：打 `tickcount frozenint` → 該列變成
+`TickCount=45 (+1), FrozenInt=424242 (+35)`，Development 與 Shipping 兩個包都有結果。
+
+**怎麼做**（DumperTest Shipping 包，注入後）：
+1. Value Search → 開 **Multiple values (group)** → 兩個 slot 都 `NumericNoByte` / `Between 0 .. 1000000`
+2. **Group First Scan**
+3. slot 0 改 `Changed`、slot 1 改 `Unchanged` → **Group Next Scan**
+4. 找到 `DumperTestActor_0` 那一列，**點選它**（往下展開，不是往右）
+5. 在 slot 1 那一行按 **All fields**，再按一次確認會收合
+6. **在 Filter 打 `tickcount frozenint`**
+
+- **PASS** =
+  - 主列讀作 `Health.CurrentValue=19 (+1), Health.BaseValue=100 (+35)`（數字會變，重點是有 `(+N)`）
+  - 展開後每個 slot 寫著 `… — 1 of N matching field(s)`，不再是舊的
+    `= unchanged: 36 candidate offset(s)`
+  - **All fields** 列出 36 個具名欄位，而且 **`FrozenInt` = 424242 出現在前段**
+    （不用捲到底 —— 物件自己的欄位排在繼承來的前面）；再按一次會收合
+  - slot 0 的 All fields 看得到 **`TickCount`**
+  - **第 6 步之後，那一列直接變成 `TickCount=… , FrozenInt=424242`** ← 這是本次最關鍵的一項
+- **FAIL** = `(+N)` 沒出現（`match_count` 沒被解析）／按鈕沒出現
+  （`HasHiddenLeaves` 的 gate 或 DLL 版本不對）／清單是空的或報錯
+  （`query_group_slot_leaves` 沒接上 —— 錯誤會顯示在 ErrorMessage）／
+  打兩個 term 之後**一列都不剩**（filter 還是把整串當單一子字串，AND 沒生效）
+
+> **順便可以確認的兩件事**（不必特地做）：
+> Snapshot / SPC Query 的群組結果列現在也會出現 `(+N)`，但**沒有** All fields 按鈕
+> （那兩個分頁沒有 live session），滑鼠移到表格上會有一段不提那顆按鈕的說明。
+> 另外，Deep 打開時展開列若出現某個欄位「位置」是空的（沒有 `→ 0x…`），那是**正確的**
+> —— 容器元素沒有物件相對 offset，而 Snapshot 路徑也拿不到它真正的位址，
+> 所以寧可不寫，也不寫一個看起來合理但錯的位址。
 
 -----
 

@@ -233,18 +233,31 @@ void ADumperTestActor::DrawHeartbeat() const
 		return;
 	}
 
-	// SHIPPING NEEDS THIS. On-screen debug messages are not compiled out of a Shipping
-	// build -- the display call site is gated `#if !(UE_BUILD_TEST)`, which excludes TEST
-	// only, and GAreScreenMessagesEnabled is a plain runtime bool in Core. What actually
-	// silences them is CONFIG: UEngine::bEnableOnScreenDebugMessages is read from
-	// [/Script/Engine.Engine] in GEngineIni (UnrealEngine.cpp), and AddOnScreenDebugMessage
-	// early-outs on it. So the readout appeared in Development and not in Shipping, and
-	// "Shipping strips it" -- which I asserted from the wrong gate -- was never true.
+	// ⚠ THIS READOUT DOES NOT WORK IN A SHIPPING BUILD, AND CANNOT BE MADE TO.
+	// Verified 2026-08-05 against the installed 5.4 source, after the packaged
+	// Shipping exe stayed silent while Development printed fine:
 	//
-	// Re-asserted every draw rather than once at BeginPlay: these are three bool stores,
-	// and a console command or a screenshot request (which sets GAreScreenMessagesEnabled
-	// false and restores it later) can flip them underneath us. The whole point of this
-	// readout is that it cannot go quiet for a reason unrelated to what it measures.
+	//     Engine/Source/Runtime/Engine/Private/UnrealEngine.cpp:11397
+	//     void UEngine::AddOnScreenDebugMessage(uint64 Key, ...)
+	//     {
+	//     #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	//
+	// The whole BODY is compiled out, so the message never enters the list and no
+	// amount of flag-setting can bring it back. The three stores below are kept
+	// because they are correct and free for Development/Test (a console command or
+	// a screenshot request can flip GAreScreenMessagesEnabled underneath us), but
+	// they are NOT what makes Shipping quiet.
+	//
+	// This comment previously claimed the opposite -- "not compiled out of Shipping,
+	// the display call site is gated `#if !(UE_BUILD_TEST)`". That read the DISPLAY
+	// gate and missed the ADD gate, and the flag-setting fix built on it could never
+	// have worked. Second wrong assertion about this same function; the rule the repo
+	// already has applies -- read the gate, do not infer it from a sibling.
+	//
+	// To get a Shipping heartbeat, draw it yourself: a tiny AHUD subclass overriding
+	// DrawHUD() + DrawText(), set as the GameMode's HUDClass. AHUD::DrawHUD runs in
+	// Shipping. NOT DONE -- it needs a re-cook to verify and nothing may claim to work
+	// here without one.
 	GEngine->bEnableOnScreenDebugMessages        = true;
 	GEngine->bEnableOnScreenDebugMessagesDisplay = true;
 	GAreScreenMessagesEnabled                    = true;

@@ -38,6 +38,10 @@ public sealed class LaneRoutingPipeClient : IPipeClient
     {
         "begin_value_scan", "refine_value_scan", "end_value_scan", "query_candidates",
         "begin_group_scan", "refine_group_scan", "end_group_scan", "query_group_candidates",
+        // Same lane as its session's other commands: it takes GroupSessionManager::mu_,
+        // which refine_group_scan holds for the WHOLE refine. On the interactive lane an
+        // expanded row would block Live Walker behind a running refine.
+        "query_group_slot_leaves",
         "begin_snapshot", "snapshot_chunk",
         "find_instances", "find_by_address", "find_refs_to_uobject", "find_path_from_gworld",
         "search_properties", "search_properties_batch",

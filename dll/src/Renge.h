@@ -75,6 +75,12 @@ constexpr const char* CMD_BEGIN_GROUP_SCAN         = "begin_group_scan";
 constexpr const char* CMD_REFINE_GROUP_SCAN        = "refine_group_scan";
 constexpr const char* CMD_END_GROUP_SCAN           = "end_group_scan";
 constexpr const char* CMD_QUERY_GROUP_CANDIDATES   = "query_group_candidates";
+// Every leaf one slot of one candidate kept, BY NAME (build 2719). A group row
+// can only display one assignment; the rest existed on the wire solely as raw
+// integers in `matched_offsets`, which cannot tell a user that offset 1308 is
+// `FrozenInt`. Fetched on demand for the expanded row, never inlined into the
+// paged list (a page is up to 1000 candidates x N slots x per_slot_cap leaves).
+constexpr const char* CMD_QUERY_GROUP_SLOT_LEAVES   = "query_group_slot_leaves";
 constexpr const char* CMD_GET_DEBUG_CAMERA_STATE   = "get_debug_camera_state";
 constexpr const char* CMD_SET_DEBUG_CAMERA         = "set_debug_camera";
 // UE5.7+ packed FUObjectItem calibration (runtime tune of the reconstruction constants +

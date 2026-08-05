@@ -2051,6 +2051,32 @@ public sealed class DumpService : IDumpService
 
     // --- Multiple values group scan (CE-style "group scan", build 1276) ---
 
+    // Decode ONE leaf of a group slot. Shared by the row's representative (inside
+    // `slots`) and by query_group_slot_leaves' full list — the DLL emits both
+    // through one encoder (Fern.cpp GroupLeafToJson), so they are decoded through
+    // one decoder too. Slot-level fields (slot_index / value / scan_type / value2 /
+    // matched_offsets / locked / match_count) are NOT read here; the caller adds
+    // whichever of them apply.
+    private static GroupSlotMatch ParseGroupSlotLeaf(JsonObject so) => new()
+    {
+        FieldName     = so["field_name"]?.GetValue<string>() ?? "",
+        FieldOffset   = so["field_offset"]?.GetValue<int>() ?? 0,
+        FieldType     = so["field_type"]?.GetValue<string>() ?? "",
+        BoolFieldMask = (byte)(so["bool_field_mask"]?.GetValue<int>() ?? 0xFF),
+        LeafValue     = so["leaf_value"]?.GetValue<string>() ?? "",
+        Addr          = so["addr"]?.GetValue<string>() ?? "",
+        // The DLL's `addr` IS the leaf's own address (GroupSlotMatch::leafAddr —
+        // owner+offset for a direct field, the element's address for a deep one), so
+        // the detail row may show it when there is no meaningful offset. The
+        // Snapshot / SPC builders cannot say that and leave this false.
+        HasLeafAddress = so["addr"] != null,
+        OwnerAddr     = so["owner_addr"]?.GetValue<string>() ?? "",
+        OwnerClass    = so["owner_class"]?.GetValue<string>() ?? "",
+        // Native-C (P2): present only for raw-hole leaves.
+        IsNativeField = so["is_native_c"]?.GetValue<bool>() ?? false,
+        GuessedType   = so["guessed_type"]?.GetValue<string>() ?? "",
+    };
+
     private static GroupCandidate ParseGroupCandidate(JsonObject obj)
     {
         var gc = new GroupCandidate
@@ -2066,25 +2092,18 @@ public sealed class DumpService : IDumpService
             foreach (var s in slots)
             {
                 if (s is not JsonObject so) continue;
-                var sm = new GroupSlotMatch
-                {
-                    SlotIndex     = so["slot_index"]?.GetValue<int>() ?? 0,
-                    Value         = so["value"]?.GetValue<string>() ?? "",
-                    ScanType      = so["scan_type"]?.GetValue<string>() ?? "Exact",
-                    Value2        = so["value2"]?.GetValue<string>() ?? "",
-                    FieldName     = so["field_name"]?.GetValue<string>() ?? "",
-                    FieldOffset   = so["field_offset"]?.GetValue<int>() ?? 0,
-                    FieldType     = so["field_type"]?.GetValue<string>() ?? "",
-                    BoolFieldMask = (byte)(so["bool_field_mask"]?.GetValue<int>() ?? 0xFF),
-                    LeafValue     = so["leaf_value"]?.GetValue<string>() ?? "",
-                    Addr          = so["addr"]?.GetValue<string>() ?? "",
-                    OwnerAddr     = so["owner_addr"]?.GetValue<string>() ?? "",
-                    OwnerClass    = so["owner_class"]?.GetValue<string>() ?? "",
-                    Locked        = so["locked"]?.GetValue<bool>() ?? false,
-                    // Native-C (P2): present only for raw-hole slot matches.
-                    IsNativeField = so["is_native_c"]?.GetValue<bool>() ?? false,
-                    GuessedType   = so["guessed_type"]?.GetValue<string>() ?? "",
-                };
+                var sm = ParseGroupSlotLeaf(so);
+                sm.SlotIndex = so["slot_index"]?.GetValue<int>() ?? 0;
+                sm.Value     = so["value"]?.GetValue<string>() ?? "";
+                sm.ScanType  = so["scan_type"]?.GetValue<string>() ?? "Exact";
+                sm.Value2    = so["value2"]?.GetValue<string>() ?? "";
+                sm.Locked    = so["locked"]?.GetValue<bool>() ?? false;
+                // How many leaves the slot really kept. Absent on pre-2690 DLLs => 0,
+                // which is what gates the "All fields" button off (GroupSlotMatch.
+                // HasHiddenLeaves) — that DLL has no query_group_slot_leaves to serve
+                // it. The "(+N)" annotation still appears there, computed from
+                // matched_offsets, because it is display-only and cannot fail.
+                sm.MatchCount = so["match_count"]?.GetValue<int>() ?? 0;
                 if (so["matched_offsets"] is JsonArray mo)
                     foreach (var off in mo)
                         if (off != null) sm.MatchedOffsets.Add(off.GetValue<int>());
@@ -2269,6 +2288,64 @@ public sealed class DumpService : IDumpService
             foreach (var item in arr)
                 if (item is JsonObject o) result.Candidates.Add(ParseGroupCandidate(o));
         return result;
+    }
+
+    /// <summary>Every leaf ONE slot of ONE group candidate kept, BY NAME.
+    ///
+    /// The results row can only display one assignment out of the many a candidate
+    /// may satisfy; this is how the rest become visible and actionable. Fetched on
+    /// demand for the expanded row — a page of candidates carries far too many
+    /// leaves to inline. Each returned leaf is a <see cref="GroupSlotMatch"/>
+    /// carrying the slot's own predicate and owner, so the per-slot handoffs work
+    /// on it unchanged; <c>Locked</c> is set because a leaf IS an identified field.
+    /// </summary>
+    public async Task<IReadOnlyList<GroupSlotMatch>> QueryGroupSlotLeavesAsync(
+        ulong sessionId,
+        GroupSlotMatch slot,
+        string instanceAddr,
+        string className,
+        int offset = 0,
+        int limit = 0,
+        CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"]           = "query_group_slot_leaves",
+            ["session_id"]    = sessionId,
+            ["instance_addr"] = instanceAddr,
+            ["slot_index"]    = slot.SlotIndex,
+        };
+        // Tie-breaker: with `deep`, one object owns one candidate per container BLOCK
+        // and they share an instance address, so instance_addr alone can resolve to
+        // the wrong block. The displayed leaf's address identifies the right one.
+        if (!string.IsNullOrEmpty(slot.Addr)) req["leaf_addr"] = slot.Addr;
+        if (offset > 0) req["offset"] = offset;
+        if (limit  > 0) req["limit"]  = limit;
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var leaves = new List<GroupSlotMatch>();
+        if (res["leaves"] is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                if (item is not JsonObject o) continue;
+                var leaf = ParseGroupSlotLeaf(o);
+                // Carry the slot's identity so a leaf renders and hands off exactly
+                // like the representative does.
+                leaf.SlotIndex    = slot.SlotIndex;
+                leaf.Value        = slot.Value;
+                leaf.ScanType     = slot.ScanType;
+                leaf.Value2       = slot.Value2;
+                leaf.InstanceAddr = instanceAddr;
+                leaf.ClassName    = className;
+                // A leaf is one identified field, not a converging set.
+                leaf.Locked       = true;
+                leaves.Add(leaf);
+            }
+        }
+        return leaves;
     }
 
     public async Task EndGroupScanAsync(ulong sessionId, CancellationToken ct = default)

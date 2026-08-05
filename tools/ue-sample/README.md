@@ -86,7 +86,30 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
    |---|---|
    | `frames` climbing, `TickCount` climbing | sample is fully alive — a `0 results` belongs to the scan |
    | `frames` climbing, `TickCount` **frozen** | the 1 Hz timer is dead — the sample's bug |
-   | **nothing at all** | the readout never ran: wrong package, or the actor never spawned |
+   | **nothing at all** | Development/Test: the readout never ran (wrong package, or the actor never spawned). **Shipping: expected — see below** |
+
+   > ### ⚠ The heartbeat is invisible in a SHIPPING package, and cannot be fixed by config
+   >
+   > Verified 2026-08-05 against the installed 5.4 source after a packaged Shipping exe stayed
+   > silent while Development printed normally:
+   >
+   > ```
+   > Engine/Source/Runtime/Engine/Private/UnrealEngine.cpp:11397
+   > void UEngine::AddOnScreenDebugMessage(uint64 Key, ...)
+   > {
+   > #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+   > ```
+   >
+   > The whole function body is compiled out, so the message never enters the list —
+   > `bEnableOnScreenDebugMessages` / `GAreScreenMessagesEnabled` are irrelevant there.
+   > **A blank screen in Shipping proves nothing about the sample**; use the Development
+   > package for the "is the timer running?" question, or read `TickCount` in Live Walker
+   > (`ADumperTestActor` @ `0x518`), which is authoritative in both.
+   >
+   > A Shipping-capable heartbeat needs a real draw path — a small `AHUD` subclass overriding
+   > `DrawHUD()` + `DrawText()`, set as the GameMode's `HUDClass` (`AHUD::DrawHUD` runs in
+   > Shipping). **Not built**: it needs a re-cook to verify, and nothing here may claim to work
+   > without one.
 
    **That readout IS the health check.** `ADumperTestActor` is invisible by design — no mesh, no
    HUD, no gameplay — so without it *"is the timer actually running?"* cannot be answered without

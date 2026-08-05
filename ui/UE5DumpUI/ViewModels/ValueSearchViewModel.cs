@@ -1412,6 +1412,64 @@ public partial class ValueSearchViewModel : ViewModelBase
         NavigateToPivot?.Invoke(slot.PivotClassName, slot.FieldName);
     }
 
+    /// <summary>Fill a slot's <see cref="GroupSlotMatch.Leaves"/> with EVERY field it
+    /// matched, by name.
+    ///
+    /// A row can only display one assignment. On the DumperTest sample a
+    /// <c>Changed</c> + <c>Unchanged</c> refine kept {Health.CurrentValue, TickCount}
+    /// for slot 0 and 36 leaves including FrozenInt for slot 1 — two equally valid
+    /// pairs, one row — and the row's Health pair was read as "TickCount/FrozenInt
+    /// were missed". Everything else existed only as raw integers in
+    /// <c>matched_offsets</c>, and an integer cannot say that 1308 is FrozenInt.
+    ///
+    /// Each returned leaf is a full <see cref="GroupSlotMatch"/>, so the per-slot
+    /// handoffs (Live Walker / Copy / Pivot / Locate) act on it unchanged.
+    ///
+    /// <b>Toggles.</b> A second press collapses the list rather than re-fetching it —
+    /// with two slots open the details can run to dozens of rows, and the button that
+    /// opened them is the obvious thing to press to close them. Collapsing is purely
+    /// local (clear the collection); re-expanding re-queries, so the values are always
+    /// current rather than a stale snapshot from the first press.</summary>
+    [RelayCommand]
+    private async Task LoadGroupSlotLeavesAsync(GroupSlotMatch? slot)
+    {
+        if (slot == null || !HasGroupSession || string.IsNullOrEmpty(slot.InstanceAddr)) return;
+        if (slot.Leaves.Count > 0)
+        {
+            // Collapse. Bump the token too: an in-flight fetch for THIS slot must not
+            // land after the user has closed the list and re-open it.
+            _groupLeafLoadId++;
+            slot.Leaves.Clear();
+            StatusText = $"Slot {slot.SlotIndex + 1}: field list collapsed.";
+            return;
+        }
+        // Two quick clicks (or two slots at once) race: without a generation token
+        // the loser's Clear()+Add() can land after the winner's and leave one slot
+        // showing another's fields.
+        var gen = ++_groupLeafLoadId;
+        try
+        {
+            var leaves = await _dump.QueryGroupSlotLeavesAsync(
+                GroupSessionId, slot, slot.InstanceAddr, slot.ClassName);
+            if (gen != _groupLeafLoadId) return;
+            slot.Leaves.Clear();
+            foreach (var leaf in leaves) slot.Leaves.Add(leaf);
+            StatusText = $"Slot {slot.SlotIndex + 1}: {slot.Leaves.Count} matching field(s) in " +
+                         $"{slot.ClassName} — the row displays one of them. " +
+                         $"Press \"All fields\" again to collapse.";
+        }
+        catch (Exception ex)
+        {
+            if (gen != _groupLeafLoadId) return;
+            ErrorMessage = $"Listing slot fields failed: {ex.Message}";
+            _log.Error("ValueSearch load group slot leaves failed", ex);
+        }
+    }
+
+    /// <summary>Generation token for <see cref="LoadGroupSlotLeavesAsync"/> — only the
+    /// newest request may write its results.</summary>
+    private int _groupLeafLoadId;
+
     [RelayCommand]
     private void OpenGroupInInstanceFinder(GroupCandidate? candidate)
     {

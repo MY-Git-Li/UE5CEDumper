@@ -719,6 +719,82 @@ std::string GroupSlotValueString(const GroupSlotMatch& sm, const SlotSpec& spec,
                                  const std::vector<FieldDescriptor>& descriptors);
 std::string ToLowerAscii(const std::string& s);
 
+// True when a rendered leaf value is numerically zero ("0", "0.0", "-0.00", and
+// the vector form "0, 0, 0"). Text that is not a number at all returns false.
+//
+// A zero carries almost no information in a game: engine bookkeeping fields sit at
+// 0 by default, so a row reading `PrimaryActorTick.TickInterval=0,
+// InitialLifeSpan=0` is the least useful pair a candidate can show while its real
+// fields matched too. Used as a tie-break INSIDE each witness-selection rule, never
+// as a rule of its own — an explicitly filtered-for zero must still win.
+bool IsZeroValueText(const std::string& s);
+
+// Split a group filter into whitespace-separated, lower-cased terms.
+//
+// **space = AND** — the repo-wide keyword-box rule (CLAUDE.md): terms are ANDed,
+// fields are ORed. The group filter was the last box treating its input as one
+// substring, which made a two-field request impossible to express: a scan can hold
+// 2 x 36 = 72 valid pairings and nothing distinguishes `FrozenInt` from the other
+// 35 unchanged fields, so naming BOTH fields is the only way to ask for a specific
+// pairing. `tickcount frozenint` now means "keep candidates where some field
+// matches each", and the witness picker gives each slot one of the named fields.
+std::vector<std::string> SplitFilterTerms(const std::string& filter);
+
+// Choose ONE leaf per slot so a displayed row is a genuine ASSIGNMENT: no two
+// slots may show the same leaf. Returns one index into `slotMatches[s]` per slot
+// (0 for an empty slot, which cannot happen while a candidate lives).
+//
+// Three passes per slot, in order:
+//   1. a free leaf matching one of the filter `terms` (already lower-cased; empty
+//      = no filter). A term an EARLIER slot already used is tried last, so
+//      `tickcount frozenint` puts TickCount in one slot and FrozenInt in the
+//      other instead of both slots fighting over the first term. This is the only
+//      way to ask for a SPECIFIC pairing: with 2 x 36 kept leaves there are 72
+//      valid ones and nothing in the data distinguishes the one you meant,
+//   2. a free leaf DEFINED BY THE SAME class/struct as a leaf already chosen for
+//      an earlier slot — a group scan looks for values that belong TOGETHER, so
+//      `Health.CurrentValue` beside `Health.BaseValue` beats the same value
+//      beside `PrimaryActorTick.TickInterval`,
+//   3. any free leaf.
+//
+// Greedy: it can theoretically fail where a proper matching exists. The caller
+// has already established via HasDistinctAssignment that one does, so at worst a
+// row falls back to a duplicate rather than claiming no match.
+//
+// WHY THIS LIVES HERE and not in the wire encoder. Every earlier version of this
+// rule was written inside Fern.cpp's JSON builder, where no test could reach it
+// and where it could silently disagree with BuildGroupOrderedView — which walks
+// EVERY leaf of every slot. Four separate "the scan missed my field" reports were
+// all that one disagreement. Same file as the filter, same helpers, one answer.
+//
+// It still shows only ONE of the possible assignments; `query_group_slot_leaves`
+// is what surfaces the rest.
+std::vector<size_t> PickGroupWitnessAssignment(
+    const std::vector<std::vector<GroupSlotMatch>>& slotMatches,
+    const std::vector<SlotSpec>&                   slots,
+    const std::vector<FieldDescriptor>&            descriptors,
+    const std::vector<std::string>&                terms);
+
+// Display order for ONE slot's kept leaves: the fields the object's OWN class
+// declares first, everything inherited or nested in a struct after. Stable within
+// each tier, so scan order (which is offset order) survives.
+//
+// Leaves are collected base-class-first, so an actor's list opens with
+// `PrimaryActorTick.TickInterval`, `InitialLifeSpan`, `CustomTimeDilation`,
+// `AttachmentReplication.*` … and the fields a user was actually looking for —
+// `FrozenInt`, `TickCount`, `I32` — sit thirty rows down a scrolling box. Same
+// observation that made `perSlotCap = 8` hide every derived-class field (D2); this
+// is its display half. NOT a re-ranking of the witness: ordering a list cannot take
+// a pairing away from anyone.
+//
+// Tier is decided by the descriptor's own `definingClassName == className`, not by
+// guessing from the offset — a high offset correlates with "declared late" but is
+// not that predicate, and substituting a cheap proxy for a predicate the data
+// already carries is how this area's last regression happened.
+std::vector<size_t> OrderGroupSlotLeaves(
+    const std::vector<GroupSlotMatch>&  matches,
+    const std::vector<FieldDescriptor>& descriptors);
+
 std::vector<uint32_t> BuildGroupOrderedView(
     const std::vector<GroupCandidate>&  candidates,
     const std::vector<SlotSpec>&        slots,
@@ -785,6 +861,22 @@ public:
             s.viewValid    = true;
         }
         fn(static_cast<const GroupSession&>(s), s.viewOrder);
+        return true;
+    }
+
+    // Read-only access to a whole session WITHOUT building or invalidating the
+    // cached ordered view. Neither sibling is usable for a per-row detail fetch
+    // that does not care about display order: QueryWith rebuilds the view
+    // whenever the caller's (filter, sort, exclude) differ from the UI's current
+    // ones, and RefineWith drops it outright — so either would throw away the
+    // cached order every time a user expands a row.
+    template <typename Fn>
+    bool WithSession(uint64_t sessionId, Fn&& fn) {
+        std::lock_guard<std::mutex> lk(mu_);
+        auto it = sessions_.find(sessionId);
+        if (it == sessions_.end()) return false;
+        it->second->lastUse = std::chrono::steady_clock::now();
+        fn(static_cast<const GroupSession&>(*it->second));
         return true;
     }
 

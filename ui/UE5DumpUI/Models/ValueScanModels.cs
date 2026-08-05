@@ -298,6 +298,55 @@ public class GroupSlotMatch
     public List<int> MatchedOffsets { get; set; } = new();
     public bool      Locked         { get; set; }
 
+    /// <summary>True when <see cref="Addr"/> is genuinely THIS LEAF's address.
+    /// Set only by the live decoder (<c>DumpService.ParseGroupSlotLeaf</c>), whose
+    /// <c>addr</c> comes from <c>GroupSlotMatch::leafAddr</c>. The Snapshot / SPC
+    /// builders cannot capture an array element's heap address and put the owning
+    /// object's base in <see cref="Addr"/> instead, so for them this stays false and
+    /// the detail row shows no location rather than a wrong one.</summary>
+    public bool      HasLeafAddress { get; set; }
+
+    /// <summary>How many leaves this slot ACTUALLY kept (DLL <c>match_count</c>, build
+    /// 2690+). <see cref="FieldName"/> is ONE witness out of this many, chosen so the
+    /// row reads as a real assignment — it is not the only field that matched. Left 0
+    /// by the Snapshot / SPC paths, which build these models client-side; they populate
+    /// <see cref="MatchedOffsets"/> instead, which is why <c>MatchingFieldCount</c>
+    /// falls back to it.</summary>
+    public int MatchCount { get; set; }
+
+    /// <summary>Every leaf this slot kept, BY NAME — empty until fetched on demand
+    /// via <c>query_group_slot_leaves</c> (live pipe sessions only).
+    ///
+    /// Exists because a row can only display one assignment. On the DumperTest
+    /// sample, slot 0 kept {Health.CurrentValue, TickCount} and slot 1 kept 36
+    /// leaves including FrozenInt; the row showed the Health pair, and the only
+    /// trace of the rest was <see cref="MatchedOffsets"/> — raw integers that
+    /// cannot tell anyone that 1308 is <c>FrozenInt</c>. Reported as a missed
+    /// match four separate times.
+    ///
+    /// Each entry is itself a <see cref="GroupSlotMatch"/> carrying this slot's
+    /// predicate and owner, so every per-slot handoff (Live Walker / Copy / Pivot
+    /// / Locate) works on a leaf with no extra plumbing. Observable so the lazy
+    /// fill reaches the view without the model needing change notification.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<GroupSlotMatch> Leaves { get; } = new();
+
+    /// <summary>Gate for the "All fields" button — deliberately STRICTER than
+    /// <see cref="HiddenLeavesSuffix"/>. The button fires a pipe command, so it must
+    /// require the one signal that proves the server can answer it: <c>match_count</c>,
+    /// which only a build-2690+ DLL sends. Falling back to <see cref="MatchedOffsets"/>
+    /// here (as the display annotation does) would offer the button against an older
+    /// DLL that has no <c>query_group_slot_leaves</c>, and against the Snapshot / SPC
+    /// models, which have no pipe session at all.</summary>
+    public bool HasHiddenLeaves => MatchCount > 1;
+
+    /// <summary>Master-row annotation: "(+35)" when 35 other fields also matched,
+    /// empty when the displayed value is the whole story. Counted through
+    /// <c>MatchingFieldCount</c>, so Snapshot Group / SPC Group / Class Pivot get the
+    /// same warning from their own offset lists — the ValueSearch-only fix is how
+    /// this defect came back as a separate report last time.</summary>
+    public string HiddenLeavesSuffix =>
+        MatchingFieldCount > 1 ? $" (+{MatchingFieldCount - 1})" : "";
+
     /// <summary>Native-C (P2): true when this slot matched an UNMANAGED hole (a raw,
     /// non-UPROPERTY offset) rather than a reflected field. Drives the Origin badge.</summary>
     public bool      IsNativeField  { get; set; }
@@ -323,14 +372,43 @@ public class GroupSlotMatch
         _           => Value,
     };
 
+    // Where the value lives — or "" when nothing TRUE can be said.
+    //
+    // A DEEP / container leaf has no object-relative offset (it is reached through a
+    // container, so offset is stored as 0), and printing "→ 0x0" for it is false. The
+    // absolute address is the honest answer — but ONLY where Addr really is the leaf's
+    // address, which is the live pipe path alone (Fern.cpp GroupLeafToJson emits
+    // GroupSlotMatch::leafAddr). The Snapshot / SPC builders cannot capture an array
+    // element's heap address at all and set Addr = AddrPlusOffset(objAddr, 0) — the
+    // OWNING OBJECT's base. Inferring "deep leaf" from `FieldOffset == 0` there would
+    // print the UObject header as the place the value lives: a plausible, copyable,
+    // WRONG address, which is worse than the obviously-unknown 0x0 it replaced. So the
+    // producer states it explicitly instead of the consumer guessing.
+    private string Locator =>
+        FieldOffset != 0                                     ? OffsetHex
+        : HasLeafAddress && !string.IsNullOrEmpty(Addr)      ? Addr
+                                                             : "";
+
+    // Omit the arrow entirely rather than point it at something untrue.
+    private string LocatorSuffix => Locator.Length > 0 ? $" → {Locator}" : "";
+
+    // How many fields this slot matched. MatchCount is the DLL's own count (2690+);
+    // MatchedOffsets is the fallback, which is what the Snapshot / SPC builders fill
+    // (SnapshotStore.BuildGroupCandidate / BuildSpcGroupCandidate — one entry per
+    // DISTINCT matching field, deliberately not deduped by offset). One number, one
+    // preferred source. Display only — the pipe-backed button gates on MatchCount.
+    private int MatchingFieldCount => MatchCount > 0 ? MatchCount : MatchedOffsets.Count;
+
     // Detail-row caption: "Str  24 → 0x20  (IntProperty)" once locked (or
-    // "Str  ↑ increased → 0x20 ..." for a prev-value slot), else the criterion +
-    // how many candidate offsets still match.
+    // "Str  ↑ increased → 0x20 ..." for a prev-value slot); unlocked it names the
+    // DISPLAYED field and says how many others matched the same value, because a bare
+    // "36 candidate offset(s)" told a user nothing about which fields those were.
     public string DisplayLabel =>
         Locked
-            ? $"{(string.IsNullOrEmpty(FieldName) ? "?" : FieldName)}  {Criterion} → {OffsetHex}  ({FieldType})"
-            : $"{Criterion}: {MatchedOffsets.Count} candidate offset(s)";
-    public string LockLabel => Locked ? "🔒" : $"×{MatchedOffsets.Count}";
+            ? $"{(string.IsNullOrEmpty(FieldName) ? "?" : FieldName)}  {Criterion}{LocatorSuffix}  ({FieldType})"
+            : $"{(string.IsNullOrEmpty(FieldName) ? "?" : FieldName)}  {Criterion}{LocatorSuffix}"
+              + $"  — 1 of {MatchingFieldCount} matching field(s)";
+    public string LockLabel => Locked ? "🔒" : $"×{MatchingFieldCount}";
 }
 
 /// <summary>
@@ -357,9 +435,16 @@ public class GroupCandidate
     // Between 510..514 shows the bound 510). Matches the SPC group display, and the
     // rendered LeafValue keeps the int/float distinction (513 vs 513.36). Falls back to
     // the target only if a path left LeafValue empty.
+    // The "(+35)" suffix says the displayed field is ONE witness of 36, not the
+    // only match. Without it a valid row reads as an exhaustive answer, and the
+    // fields it happened not to show read as misses — the report this whole
+    // area kept producing. Absent only when the slot matched exactly one field.
+    // It DOES appear on the Snapshot / SPC paths: they leave MatchCount at 0 but
+    // fill MatchedOffsets, and MatchingFieldCount falls back to that on purpose —
+    // fixing this in ValueSearch alone is how the defect came back as its own report.
     public string SlotSummary =>
         string.Join(", ", Slots.Select(s =>
-            $"{(string.IsNullOrEmpty(s.FieldName) ? "?" : s.FieldName)}={(string.IsNullOrEmpty(s.LeafValue) ? s.Value : s.LeafValue)}"));
+            $"{(string.IsNullOrEmpty(s.FieldName) ? "?" : s.FieldName)}={(string.IsNullOrEmpty(s.LeafValue) ? s.Value : s.LeafValue)}{s.HiddenLeavesSuffix}"));
     public bool AllLocked => Slots.Count > 0 && Slots.All(s => s.Locked);
 
     // ---- Locked-offset table (P2) ----

@@ -1210,6 +1210,158 @@ std::string GroupSlotValueString(const GroupSlotMatch& sm, const SlotSpec& spec,
 
 std::string ToLowerAscii(const std::string& in) { return ToLower(in); }
 
+std::vector<std::string> SplitFilterTerms(const std::string& filter) {
+    std::vector<std::string> terms;
+    std::string cur;
+    for (char c : filter) {
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            if (!cur.empty()) { terms.push_back(ToLower(cur)); cur.clear(); }
+        } else {
+            cur.push_back(c);
+        }
+    }
+    if (!cur.empty()) terms.push_back(ToLower(cur));
+    return terms;
+}
+
+bool IsZeroValueText(const std::string& s) {
+    bool sawDigit = false;
+    for (char c : s) {
+        if (c == ' ' || c == '\t') continue;
+        if (c == '0') { sawDigit = true; continue; }
+        // Punctuation a zero can legitimately carry: sign, decimal point, and the
+        // separators a vector value uses ("0, 0, 0").
+        if (c == '.' || c == ',' || c == '+' || c == '-') continue;
+        return false;   // any other character (incl. any non-zero digit) => not zero
+    }
+    return sawDigit;    // "" / "-" / "," are not a zero, they are not a number
+}
+
+std::vector<size_t> OrderGroupSlotLeaves(
+    const std::vector<GroupSlotMatch>&  matches,
+    const std::vector<FieldDescriptor>& descriptors) {
+
+    std::vector<size_t> order(matches.size());
+    for (size_t i = 0; i < matches.size(); ++i) order[i] = i;
+
+    auto ownTier = [&](size_t i) -> int {
+        if (matches[i].descriptorIdx >= descriptors.size()) return 1;
+        const FieldDescriptor& d = descriptors[matches[i].descriptorIdx];
+        // Declared by the object's own class => tier 0. A leaf nested in a struct
+        // reports the STRUCT as its defining class, so it lands in tier 1 beside
+        // the inherited fields — correct: it is not a field of this class either.
+        return (!d.definingClassName.empty() && d.definingClassName == d.className) ? 0 : 1;
+    };
+    std::stable_sort(order.begin(), order.end(),
+                     [&](size_t a, size_t b) { return ownTier(a) < ownTier(b); });
+    return order;
+}
+
+std::vector<size_t> PickGroupWitnessAssignment(
+    const std::vector<std::vector<GroupSlotMatch>>& slotMatches,
+    const std::vector<SlotSpec>&                   slots,
+    const std::vector<FieldDescriptor>&            descriptors,
+    const std::vector<std::string>&                terms) {
+
+    std::vector<size_t> picks(slotMatches.size(), 0);
+    // A term consumed by an earlier slot. Without this, `tickcount frozenint`
+    // would let both slots claim whichever leaf matches the first term they see,
+    // and the second named field would never reach the row — which is the entire
+    // reason the filter had to learn AND.
+    std::vector<bool> termUsed(terms.size(), false);
+    // Leaf addresses already claimed by an earlier slot, and the defining
+    // class/struct of each — so a later slot can prefer a SIBLING.
+    std::vector<uintptr_t>   shownLeaves;
+    std::vector<std::string> shownDefiningClasses;
+    shownLeaves.reserve(slotMatches.size());
+    shownDefiningClasses.reserve(slotMatches.size());
+
+    for (size_t s = 0; s < slotMatches.size(); ++s) {
+        const std::vector<GroupSlotMatch>& matches = slotMatches[s];
+        if (matches.empty()) continue;   // claims nothing; picks[s] stays 0
+
+        auto isFree = [&](size_t k) {
+            for (uintptr_t used : shownLeaves)
+                if (used == matches[k].leafAddr) return false;
+            return true;
+        };
+        // A leaf whose descriptorIdx is out of range can still be CLAIMED (pass
+        // 3) but must never be text-matched — indexing `descriptors` with it is
+        // the one way this pure function could read out of bounds.
+        auto descOf = [&](size_t k) -> const FieldDescriptor* {
+            return matches[k].descriptorIdx < descriptors.size()
+                       ? &descriptors[matches[k].descriptorIdx] : nullptr;
+        };
+
+        // A zero is almost never the value someone is hunting: engine bookkeeping
+        // fields sit at 0 by default, so a row reading `TickInterval=0,
+        // InitialLifeSpan=0` is the least informative pair a candidate can offer
+        // while its real fields matched too. Every pass therefore tries non-zero
+        // leaves first and only then falls back — a tie-break INSIDE each rule, not
+        // a new rule that could outrank the filter.
+        auto isZeroLeaf = [&](size_t k) {
+            return s < slots.size() &&
+                   IsZeroValueText(GroupSlotValueString(matches[k], slots[s], descriptors));
+        };
+
+        size_t pick = 0;
+        bool   picked = false;
+
+        // Pass 1: a free leaf matching one of the filter terms. Two sub-passes —
+        // an UNUSED term first, so each named field lands in its own slot.
+        size_t claimedTerm = terms.size();
+        if (!terms.empty() && s < slots.size()) {
+            auto leafMatchesTerm = [&](size_t k, const std::string& term) {
+                const FieldDescriptor* d = descOf(k);
+                if (!d) return false;
+                return GroupTextContainsCI(d->fieldName, term) ||
+                       GroupTextContainsCI(d->className, term) ||
+                       GroupTextContainsCI(d->definingClassName, term) ||
+                       GroupTextContainsCI(
+                           GroupSlotValueString(matches[k], slots[s], descriptors), term);
+            };
+            for (int wantUnused = 1; wantUnused >= 0 && !picked; --wantUnused) {
+                for (int skipZero = 1; skipZero >= 0 && !picked; --skipZero) {
+                    for (size_t k = 0; k < matches.size() && !picked; ++k) {
+                        if (!isFree(k)) continue;
+                        if (skipZero && isZeroLeaf(k)) continue;
+                        for (size_t t = 0; t < terms.size(); ++t) {
+                            if (wantUnused && termUsed[t]) continue;
+                            if (!leafMatchesTerm(k, terms[t])) continue;
+                            pick = k; picked = true; claimedTerm = t;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (claimedTerm < terms.size()) termUsed[claimedTerm] = true;
+        // Pass 2: a free leaf defined by the same class/struct as one already shown.
+        if (!picked && !shownDefiningClasses.empty()) {
+            for (int skipZero = 1; skipZero >= 0 && !picked; --skipZero) {
+                for (size_t k = 0; k < matches.size() && !picked; ++k) {
+                    if (!isFree(k)) continue;
+                    if (skipZero && isZeroLeaf(k)) continue;
+                    const FieldDescriptor* d = descOf(k);
+                    if (!d || d->definingClassName.empty()) continue;
+                    for (const std::string& shown : shownDefiningClasses)
+                        if (d->definingClassName == shown) { pick = k; picked = true; break; }
+                }
+            }
+        }
+        // Pass 3: any free leaf. (None free => pick stays 0, a duplicate.)
+        for (int skipZero = 1; skipZero >= 0 && !picked; --skipZero)
+            for (size_t k = 0; k < matches.size() && !picked; ++k)
+                if (isFree(k) && !(skipZero && isZeroLeaf(k))) { pick = k; picked = true; }
+
+        picks[s] = pick;
+        shownLeaves.push_back(matches[pick].leafAddr);
+        if (const FieldDescriptor* d = descOf(pick))
+            shownDefiningClasses.push_back(d->definingClassName);
+    }
+    return picks;
+}
+
 std::vector<uint32_t> BuildGroupOrderedView(
     const std::vector<GroupCandidate>&  candidates,
     const std::vector<SlotSpec>&        slots,
@@ -1218,7 +1370,12 @@ std::vector<uint32_t> BuildGroupOrderedView(
     const std::string& filter, SortKey sortKey, bool sortDesc,
     const std::unordered_set<std::string>& excludeClasses) {
 
-    const std::string needle = ToLower(filter);
+    // space = AND (CLAUDE.md's keyword-box rule): every term must match SOMETHING
+    // on the candidate, but each may match a DIFFERENT field. Naming two fields is
+    // the only way to request one specific pairing out of the many a candidate
+    // satisfies — a `Changed`+`Unchanged` scan can hold 2 x 36 = 72 of them and
+    // nothing in the data says which one you meant.
+    const std::vector<std::string> terms = SplitFilterTerms(filter);
     const bool hasExclude = !excludeClasses.empty();
 
     // Render a slot match's value exactly as the wire does (resolves the field's
@@ -1232,20 +1389,24 @@ std::vector<uint32_t> BuildGroupOrderedView(
         return FormatCandidateValue(tmp, spec.dt, d);
     };
 
-    auto matchesFilter = [&](const GroupCandidate& gc) -> bool {
-        if (needle.empty()) return true;
-        if (ContainsCI(instances[gc.instanceIdx].instanceName, needle)) return true;
+    auto matchesTerm = [&](const GroupCandidate& gc, const std::string& term) -> bool {
+        if (ContainsCI(instances[gc.instanceIdx].instanceName, term)) return true;
         for (size_t s = 0; s < gc.slotMatches.size(); ++s) {
             const SlotSpec& spec = slots[s];  // slotMatches.size() == slots.size() invariant
             for (const auto& sm : gc.slotMatches[s]) {
                 const FieldDescriptor& d = descriptors[sm.descriptorIdx];
-                if (ContainsCI(d.className, needle)) return true;
-                if (ContainsCI(d.definingClassName, needle)) return true;
-                if (ContainsCI(d.fieldName, needle)) return true;
-                if (ContainsCI(slotValue(sm, spec), needle)) return true;
+                if (ContainsCI(d.className, term)) return true;
+                if (ContainsCI(d.definingClassName, term)) return true;
+                if (ContainsCI(d.fieldName, term)) return true;
+                if (ContainsCI(slotValue(sm, spec), term)) return true;
             }
         }
         return false;
+    };
+    auto matchesFilter = [&](const GroupCandidate& gc) -> bool {
+        for (const std::string& t : terms)
+            if (!matchesTerm(gc, t)) return false;   // term-level AND
+        return true;                                  // no terms => keep all
     };
 
     std::vector<uint32_t> idx;
