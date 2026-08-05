@@ -1828,7 +1828,37 @@ Pick up when the active plan finishes or when blocked.
 > **Same grep, same repro:** UI connected, untick the CE record → `grep "Stop conn drain"`.
 > **PASS** = `satisfied, 0 left (… ms, N cancel re-asserts)`. **FAIL** = `TIMEOUT` again, which
 > would mean the thread is not in `ReadFile` at all and the straggler line is wrong about it.
-> ⬜ unverified — 2651 shipped after this capture.
+> ### ❌ 2651 FAILED TOO — stop guessing; build 2657 instruments instead
+>
+> Re-run 2026-08-05 13:25 on DLL build **2652** (which contains the CancelSynchronousIo fix, and
+> no `could not duplicate serving-thread handle` warning, so the handles were published and the
+> call was made):
+>
+> ```
+> Stop cancel issued: 0 accepted, 2 had nothing pending
+> straggler: idle in ReadFile x2   (last cmd 'teleport_get_markers' / 'refine_group_scan')
+> Stop conn drain TIMEOUT, 2 left (5030 ms, 49 cancel re-asserts)
+> ```
+>
+> **Three hypotheses, three refutations:** "stuck inside a command" (they are idle), "CancelIoEx
+> missed the window" (49 re-asserts, all nothing-pending), "CancelSynchronousIo is the right API"
+> (called, still timed out). Every one of them aimed at the same phrase — and that phrase is an
+> **inference**. `inFlight` is set only around `DispatchCommand`, so a thread blocked in
+> `WriteFile`, waiting on `writeMutex`, or **joining its watch threads in
+> `StopWatchesForConnection`** is equally reported as "idle in ReadFile". A cancel does nothing for
+> any of the latter.
+>
+> This is `feedback-fix-not-taking-reread-evidence` playing out verbatim: *when a fix does not take,
+> re-read the evidence before adding more of the same fix.* Two were added.
+>
+> **Build 2657 replaces the label with an observation** — a per-connection `Phase`
+> (Reading / Dispatching / Writing / StoppingWatches / Unregistering) stamped at every transition,
+> reported with how long it has been there. `CancelIoEx` + `CancelSynchronousIo` are both kept:
+> harmless, and correct for the case the phase may yet confirm.
+>
+> **Next run, same repro, one grep:** `grep "straggler" pipe-0.log`. It now names the real phase.
+> `StoppingWatches` would mean the fix belongs in the watch-thread join, not in I/O cancellation at
+> all — a different subsystem from the three already tried. ⬜
 >
 > *The re-assert loop is kept. It cost nothing (49 iterations of a failing syscall over 5 s) and it
 > is what proved the diagnosis wrong quickly; a single shot would have looked like bad luck.*

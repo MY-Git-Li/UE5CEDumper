@@ -635,18 +635,18 @@ void Fern::Stop() {
                 if (!c) continue;
                 std::string what;
                 { std::lock_guard<std::mutex> dlk(c->diagMutex); what = c->cmdName; }
-                bool busy = c->inFlight.load(std::memory_order_relaxed);
+                Connection::Phase ph = c->phase.load(std::memory_order_relaxed);
+                long long phStart = c->phaseStartMs.load(std::memory_order_relaxed);
                 long long started = c->cmdStartMs.load(std::memory_order_relaxed);
+                (void)started;
                 // Build the age into a NAMED local. The obvious one-liner passes
                 // .c_str() of a temporary through a ternary — legal (the temporary
                 // outlives the full-expression) but not worth making a reader verify.
                 std::string age;
-                if (busy && started > 0) age = " for " + std::to_string(nowMs - started) + " ms";
-                LOG_WARN("PipeServer:   straggler: %s, last cmd '%s'%s",
-                         busy ? "INSIDE a command (cancel cannot reach it until it returns)"
-                              : "idle in ReadFile (the I/O cancel should have freed it)",
-                         what.empty() ? "(none yet)" : what.c_str(),
-                         age.c_str());
+                if (phStart > 0) age = " for " + std::to_string(nowMs - phStart) + " ms";
+                LOG_WARN("PipeServer:   straggler: %s%s, last cmd '%s'",
+                         PhaseName(ph), age.c_str(),
+                         what.empty() ? "(none yet)" : what.c_str());
             }
         }
     }
@@ -815,6 +815,26 @@ void Fern::AcceptLoop() {
   });
 }
 
+const char* Fern::PhaseName(Connection::Phase p) {
+    switch (p) {
+        case Connection::Phase::Reading:         return "parked in ReadFile (waiting for the next command)";
+        case Connection::Phase::Dispatching:     return "INSIDE a command (cancel cannot reach it until it returns)";
+        case Connection::Phase::Writing:         return "in WriteLine — WriteFile to a client that may have stopped reading, or waiting on writeMutex";
+        case Connection::Phase::StoppingWatches: return "in cleanup, JOINING its watch threads (an I/O cancel on this thread does nothing)";
+        case Connection::Phase::Unregistering:   return "in cleanup, unregistering — should be about to leave";
+        default:                                 return "done";
+    }
+}
+
+/// Stamp the current phase + when it began, for Stop's drain diagnostic only.
+void Fern::SetPhase(Connection& conn, Connection::Phase p) {
+    conn.phase.store(p, std::memory_order_relaxed);
+    conn.phaseStartMs.store(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count(),
+        std::memory_order_relaxed);
+}
+
 std::string Fern::ReadLine(HANDLE pipe) {
     std::string line;
     char ch;
@@ -903,6 +923,7 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
     };
 
     while (m_running.load()) {
+        SetPhase(*conn, Connection::Phase::Reading);
         std::string line = ReadLine(pipe);
         if (line.empty()) { flushRepeat(); break; } // Disconnected / I/O cancelled
 
@@ -934,6 +955,7 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         // blocking docs/multipipe-eval.md blames for UI lag, which until now
         // nothing measured. See Sense.h.
         conn->inFlight.store(true, std::memory_order_relaxed);
+        SetPhase(*conn, Connection::Phase::Dispatching);
         // Record WHICH command, for Stop's drain-timeout diagnostic only. `cmd` is
         // already parsed above for the repeat-suppression, so this costs one small
         // string copy per command and nothing on any read path.
@@ -956,6 +978,7 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
         Sense::RecordDispatch(cmd.empty() ? std::string("(unparsed)") : cmd, dispatchUs);
 
         if (!response.empty()) {
+            SetPhase(*conn, Connection::Phase::Writing);
             if (!WriteLine(*conn, response)) {
                 flushRepeat();
                 Sein::Error("PIPE:cmd", "PipeServer: Failed to write response");
@@ -970,8 +993,10 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
     // unregister and close our own handle. Drop value-scan sessions only when
     // this was the LAST connection (sessions are bulk-lane-only; the UI's two
     // lanes disconnect together on close).
+    SetPhase(*conn, Connection::Phase::StoppingWatches);
     StopWatchesForConnection(conn.get());
 
+    SetPhase(*conn, Connection::Phase::Unregistering);
     bool last;
     {
         std::lock_guard<std::mutex> lock(m_connMutex);

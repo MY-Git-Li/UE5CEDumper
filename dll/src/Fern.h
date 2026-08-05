@@ -66,7 +66,30 @@ private:
         // a synchronous operation blocking a known thread, and it needs the THREAD handle
         // -- which only the serving thread itself can hand us.
         std::atomic<HANDLE> servingThread{nullptr};
+
+        // WHERE the serving thread actually is. `inFlight` only says "inside
+        // DispatchCommand", so everything else -- parked in ReadFile, blocked in
+        // WriteFile on a client that stopped reading, waiting on writeMutex, or joining
+        // watch threads during cleanup -- collapsed into one bucket that the drain
+        // diagnostic then LABELLED "idle in ReadFile". That label is an inference, and
+        // three fixes were aimed at it: "stuck inside a command" (wrong), "CancelIoEx
+        // missed the window" (wrong -- 49 re-asserts, all nothing-pending), and
+        // "CancelSynchronousIo is the right API" (wrong -- still timed out). Each one
+        // treated the label as an observation. This makes it one.
+        enum class Phase : uint8_t {
+            Reading,          // inside ReadLine's blocking ReadFile
+            Dispatching,      // inside DispatchCommand
+            Writing,          // inside WriteLine (WriteFile, or waiting on writeMutex)
+            StoppingWatches,  // cleanup: joining this connection's watch threads
+            Unregistering,    // cleanup: erasing from m_conns / closing the handle
+            Done,
+        };
+        std::atomic<Phase>     phase{Phase::Reading};
+        std::atomic<long long> phaseStartMs{0};
     };
+
+    static const char* PhaseName(Connection::Phase p);
+    static void SetPhase(Connection& conn, Connection::Phase p);
 
     Routine::SafeThread        m_acceptThread;
     std::atomic<bool>  m_running{false};
