@@ -1,4 +1,4 @@
-using UE5DumpUI.Models;
+﻿using UE5DumpUI.Models;
 
 namespace UE5DumpUI.Core;
 
@@ -329,6 +329,7 @@ public interface IDumpService
         int deadlineMs = Constants.ScanSessionDeadlineMs,
         bool autoSkipNoise = false,
         Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
+        int perSlotCap = Constants.GroupPerSlotCap,
         CancellationToken ct = default);
 
     Task<GroupScanRefineResult> RefineGroupScanAsync(

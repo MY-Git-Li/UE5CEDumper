@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json.Nodes;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
@@ -1281,7 +1281,8 @@ public class ValueSearchTests
             int maxResults = 50000, bool deep = false, bool crossObject = false,
             bool nativeC = false, bool newestFirst = false, int pageSize = 1000,
             int deadlineMs = 15000, bool autoSkipNoise = false,
-            FloatRoundMode roundMode = FloatRoundMode.Round, CancellationToken ct = default)
+            FloatRoundMode roundMode = FloatRoundMode.Round, int perSlotCap = 256,
+        CancellationToken ct = default)
         {
             GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject, nativeC, newestFirst));
             LastGroupDeadlineMs = deadlineMs;

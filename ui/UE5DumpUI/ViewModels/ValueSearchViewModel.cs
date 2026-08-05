@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -62,6 +62,20 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// snappier scans on small ones. Threaded to the DLL as <c>deadline_ms</c> on
     /// begin_value_scan / begin_group_scan.</summary>
     [ObservableProperty] private int    _scanTimeoutSeconds = 25;
+
+    /// <summary>Leaves kept PER SLOT per object in a group scan. NOT a speed knob — this
+    /// list is what a later Changed/Decreased/Unchanged refine re-reads, and leaves are
+    /// collected base-class-first, so too small a value silently hides a derived class's
+    /// OWN fields behind its inherited ones. At the old fixed 8 every AActor stored only
+    /// PrimaryActorTick/CustomTimeDilation and a Changed refine pruned every candidate.
+    /// The DLL clamps to [8, 4096] regardless of what is sent.</summary>
+    [ObservableProperty] private int    _groupPerSlotCap = Constants.GroupPerSlotCap;
+
+    partial void OnGroupPerSlotCapChanged(int value)
+    {
+        if (value < Constants.GroupPerSlotCapMin)      GroupPerSlotCap = Constants.GroupPerSlotCapMin;
+        else if (value > Constants.GroupPerSlotCapMax) GroupPerSlotCap = Constants.GroupPerSlotCapMax;
+    }
 
     // Defensive clamp (the slider already bounds 10–90) so a programmatic / restored
     // value can't push an out-of-band deadline onto the wire.
@@ -1163,7 +1177,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             var result = await _dump.BeginGroupScanAsync(
                 GroupInputs.ToList(), GameOnly, MaxResults, DeepScan, CrossObjectScan,
                 NativeCScan, NewestFirst, PageSize, ScanTimeoutSeconds * 1000,
-                PreFilterNoise, SelectedRoundingMode, cts.Token);
+                PreFilterNoise, SelectedRoundingMode, GroupPerSlotCap, cts.Token);
 
             GroupSessionId = result.SessionId;
             GroupClassFilter.RebuildFromCounts(

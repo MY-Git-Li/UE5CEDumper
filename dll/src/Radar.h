@@ -710,6 +710,15 @@ struct GroupSession {
 // Object-level keys (ClassName / InstanceName / InstanceIndex) plus slot-0's
 // Offset / Value are supported; unsupported keys fall back to scan order. Pure /
 // std-only. Returns candidate indices in display order.
+// Exposed so the row RENDERER can agree with the FILTER. BuildGroupOrderedView walks
+// every leaf of every slot; the JSON row used to show slotMatches[0]. Filtering for a
+// value therefore returned rows that did not visibly contain it. Same helpers, one
+// answer. `needleLower` must already be lower-cased (ToLowerAscii).
+bool GroupTextContainsCI(const std::string& hay, const std::string& needleLower);
+std::string GroupSlotValueString(const GroupSlotMatch& sm, const SlotSpec& spec,
+                                 const std::vector<FieldDescriptor>& descriptors);
+std::string ToLowerAscii(const std::string& s);
+
 std::vector<uint32_t> BuildGroupOrderedView(
     const std::vector<GroupCandidate>&  candidates,
     const std::vector<SlotSpec>&        slots,

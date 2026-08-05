@@ -1193,6 +1193,23 @@ static const std::string& GroupCandidateClass(const GroupCandidate& gc,
     return kEmpty;
 }
 
+bool GroupTextContainsCI(const std::string& hay, const std::string& needleLower) {
+    return ContainsCI(hay, needleLower);
+}
+
+std::string GroupSlotValueString(const GroupSlotMatch& sm, const SlotSpec& spec,
+                                 const std::vector<FieldDescriptor>& descriptors) {
+    if (sm.descriptorIdx >= descriptors.size()) return {};
+    const FieldDescriptor& d = descriptors[sm.descriptorIdx];
+    Candidate tmp;
+    std::memcpy(tmp.prevValue, sm.prevValue, sizeof(tmp.prevValue));
+    tmp.descriptorIdx = sm.descriptorIdx;
+    tmp.elementIndex  = sm.elementIndex;
+    return FormatCandidateValue(tmp, spec.dt, d);
+}
+
+std::string ToLowerAscii(const std::string& in) { return ToLower(in); }
+
 std::vector<uint32_t> BuildGroupOrderedView(
     const std::vector<GroupCandidate>&  candidates,
     const std::vector<SlotSpec>&        slots,

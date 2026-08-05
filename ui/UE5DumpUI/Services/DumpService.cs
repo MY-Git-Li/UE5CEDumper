@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
 
@@ -2109,6 +2109,7 @@ public sealed class DumpService : IDumpService
         int deadlineMs = Constants.ScanSessionDeadlineMs,
         bool autoSkipNoise = false,
         Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
+        int perSlotCap = Constants.GroupPerSlotCap,
         CancellationToken ct = default)
     {
         var values = new JsonArray();
@@ -2155,6 +2156,10 @@ public sealed class DumpService : IDumpService
         // "Auto detect Engine/System noise" pre-filter (opt-in, default off).
         if (autoSkipNoise)
             req["auto_skip_noise"] = (JsonNode)true;
+        // Per-slot leaf budget. Attached only when moved off the default so the common
+        // case stays wire-identical; the DLL clamps to 8-4096 regardless of what is sent.
+        if (perSlotCap != Constants.GroupPerSlotCap)
+            req["per_slot_cap"] = (JsonNode)perSlotCap;
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 

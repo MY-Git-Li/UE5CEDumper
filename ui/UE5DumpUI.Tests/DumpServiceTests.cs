@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using System.Text.Json.Nodes;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
@@ -2026,6 +2026,30 @@ public class DumpServiceTests
             autoSkipNoise: true, ct: TestContext.Current.CancellationToken);
         Assert.NotNull(captured);
         Assert.True(captured!["auto_skip_noise"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task BeginGroupScanAsync_PerSlotCap_AttachedOnlyWhenMovedOffTheDefault()
+    {
+        // The cap decides what a later Changed/Decreased refine can re-read, so it is a
+        // real setting rather than a tuning knob -- but the common case must stay
+        // wire-identical, or every existing capture would show a spurious new field.
+        JsonObject? captured = null;
+        _pipe.SetHandler(req => { captured = req; return new JsonObject { ["ok"] = true }; });
+        var svc = CreateService();
+        var slots = new List<GroupSlotInput>
+        {
+            new() { DataType = ValueScanDataType.NumericNoByte, ScanType = ValueScanType.Exact, Value = "100" },
+            new() { DataType = ValueScanDataType.NumericNoByte, ScanType = ValueScanType.Exact, Value = "50" },
+        };
+
+        await svc.BeginGroupScanAsync(slots, ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(captured);
+        Assert.False(captured!.ContainsKey("per_slot_cap"));   // default → omitted
+
+        await svc.BeginGroupScanAsync(slots, perSlotCap: 512, ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(captured);
+        Assert.Equal(512, captured!["per_slot_cap"]?.GetValue<int>());
     }
 
     [Fact]

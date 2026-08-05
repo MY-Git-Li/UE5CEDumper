@@ -1877,8 +1877,36 @@ and `Health.CurrentValue` falling, so the values genuinely change.
 > Regression test `Test_Orden_PerSlotCap`: 40 satisfying leaves must all be kept, and an explicit
 > small cap must both bound the list **and** set the truncation flag. 972 dll tests green.
 >
-> **Remaining half:** the UI has no control for `per_slot_cap` yet — the pipe accepts it, nothing
-> sends it. Add a numeric box beside the Group Scan's Timeout slider. Effort **S**.
+> **UI control shipped (build 2690):** a `Leaves/slot:` NumericUpDown beside the Timeout slider,
+> group-mode only, 8–4096 step 8, clamped in the VM and again in the DLL, attached to the wire only
+> when moved off the default so existing captures stay byte-identical
+> (`BeginGroupScanAsync_PerSlotCap_AttachedOnlyWhenMovedOffTheDefault`).
+>
+> ### ✅ VERIFIED 2026-08-05 — Mode B works
+>
+> `Changed` + `Unchanged` → **2 surviving objects**, and the row is the case the whole feature
+> exists for: `DumperTestActor_0 — Health.CurrentValue=23, PrimaryActorTick.TickInterval=0`. One
+> value moving, one holding still, in the same object.
+>
+> ### 🟡 Related, and NOT a scan bug: the row showed a leaf the filter had not matched
+>
+> Reported the same session: `FrozenInt=424242` never appeared in the list, and filtering for
+> `424242` returned two rows that visibly contained no such value. Both are the same cause, and
+> neither is a wrong result.
+>
+> The **filter** (`Radar.cpp` `BuildGroupOrderedView`) walks **every** leaf of every slot — class,
+> defining class, field name and value. The **row renderer** (`Fern.cpp GroupCandidateToJson`)
+> emitted `matches[0]`. So the filter was right, and the row was showing a *different leaf of the
+> same candidate*. `FrozenInt` was in the kept set all along; `matches[0]` is base-class-first, so
+> an `AActor` field always won the display slot.
+>
+> Audit #4's 4a root cause again — *the report and the reality computed by different code paths* —
+> and this time the user was told to distrust a correct answer.
+>
+> **Fixed build 2690:** when a server-side filter is active the row reports the leaf that **matched
+> it**, using the same helpers the filter uses (`GroupTextContainsCI` / `GroupSlotValueString`, now
+> exported from `Radar` rather than duplicated). Each slot also carries `match_count`, so a row can
+> no longer imply a candidate matched on one field when it matched on thirty.
 
 
 > 🇹🇼 **繁體中文版：[pending-verification_zh-TW.md](pending-verification_zh-TW.md)** — a standalone

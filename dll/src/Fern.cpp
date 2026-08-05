@@ -327,10 +327,20 @@ json CandidateToJson(const Radar::Candidate& c,
 // representative (first) match — the resolved field name / offset / type / leaf
 // value / leaf address so the UI's per-slot row can drive the same handoffs
 // (Open in Live Walker / Locate in GWorld / Copy) as a single-value candidate.
+/// @param highlight  The active server-side filter, or "". When set, each slot reports
+///                   the leaf that MATCHED it rather than the first one kept.
+///
+/// WHY THE PARAMETER EXISTS. The filter walks every leaf in every slot (className /
+/// definingClass / fieldName / value — Radar.cpp BuildGroupOrderedView), while this
+/// function reported `matches[0]`. So filtering for `424242` returned rows whose visible
+/// values contained no 424242 anywhere: the filter was right, the row was showing a
+/// different leaf of the same candidate. Two code paths answering the same question
+/// differently — and the user reasonably read it as a wrong result.
 json GroupCandidateToJson(const Radar::GroupCandidate& gc,
                           const std::vector<Radar::SlotSpec>&        slots,
                           const std::vector<Radar::FieldDescriptor>& descriptors,
-                          const std::vector<Radar::InstanceRecord>&  instances) {
+                          const std::vector<Radar::InstanceRecord>&  instances,
+                          const std::string& highlight = "") {
     const Radar::InstanceRecord& inst = instances[gc.instanceIdx];
 
     json item;
@@ -368,7 +378,28 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
         sj["locked"]          = (matches.size() == 1);
 
         if (!matches.empty()) {
-            const Radar::GroupSlotMatch& m0 = matches[0];
+            // Prefer the leaf the filter actually matched; fall back to the first kept.
+            size_t pick = 0;
+            if (!highlight.empty()) {
+                const std::string needle = Radar::ToLowerAscii(highlight);
+                for (size_t k = 0; k < matches.size(); ++k) {
+                    const Radar::FieldDescriptor& dk = descriptors[matches[k].descriptorIdx];
+                    if (Radar::GroupTextContainsCI(dk.fieldName, needle) ||
+                        Radar::GroupTextContainsCI(dk.className, needle) ||
+                        Radar::GroupTextContainsCI(dk.definingClassName, needle) ||
+                        Radar::GroupTextContainsCI(
+                            Radar::GroupSlotValueString(matches[k], spec, descriptors), needle)) {
+                        pick = k;
+                        break;
+                    }
+                }
+            }
+            // How many leaves this slot actually holds. `locked` already says "exactly
+            // one"; this says how much the single displayed value is standing in for, so
+            // a row can no longer imply the candidate matched on one field when it
+            // matched on thirty.
+            sj["match_count"] = static_cast<int>(matches.size());
+            const Radar::GroupSlotMatch& m0 = matches[pick];
             const Radar::FieldDescriptor& d = descriptors[m0.descriptorIdx];
             sj["field_name"]      = Radar::FieldDisplayName(d, m0.elementIndex);
             sj["field_offset"]    = m0.offset;
@@ -3201,7 +3232,8 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                     const int n = (std::min)(pageSize, static_cast<int>(order.size()));
                     for (int i = 0; i < n; ++i)
                         candidates.push_back(GroupCandidateToJson(
-                            sess.candidates[order[i]], sess.slots, sess.descriptors, sess.instances));
+                            sess.candidates[order[i]], sess.slots, sess.descriptors,
+                            sess.instances));
                     // Class-noise histogram over the FULL set (object-level class).
                     auto hist = Radar::BuildGroupClassHistogram(sess.candidates, sess.descriptors);
                     classDistinct = static_cast<int>(hist.size());
@@ -3372,7 +3404,8 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                     const int end   = (std::min)(offset + limit, filteredCount);
                     for (int i = begin; i < end; ++i)
                         candidates.push_back(GroupCandidateToJson(
-                            sess.candidates[order[i]], sess.slots, sess.descriptors, sess.instances));
+                            sess.candidates[order[i]], sess.slots, sess.descriptors,
+                            sess.instances, filter));
                 });
             if (!found) {
                 return Renge::MakeError(id, "session_not_found").dump();

@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:UE5DumpUI.ViewModels"
              xmlns:m="using:UE5DumpUI.Models"
@@ -222,6 +222,16 @@
                     TickFrequency="5" IsSnapToTickEnabled="True"
                     Width="110" VerticalAlignment="Center"
                     ToolTip.Tip="{StaticResource str.Tip.VS.Timeout}"/>
+            <TextBlock Text="{StaticResource str.VS.PerSlotCap}"
+                       VerticalAlignment="Center" Margin="16,0,4,0"
+                       IsVisible="{Binding IsGroupMode}"
+                       ToolTip.Tip="{StaticResource str.Tip.VS.PerSlotCap}"/>
+            <NumericUpDown Value="{Binding GroupPerSlotCap}"
+                           Minimum="8" Maximum="4096" Increment="8"
+                           FormatString="0" Width="110"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding IsGroupMode}"
+                           ToolTip.Tip="{StaticResource str.Tip.VS.PerSlotCap}"/>
             <TextBlock Text="{Binding ScanTimeoutSeconds, StringFormat='{}{0}s'}"
                        Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
                        VerticalAlignment="Center" MinWidth="28"/>
