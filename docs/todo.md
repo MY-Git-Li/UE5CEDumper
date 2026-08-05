@@ -1672,6 +1672,60 @@ Pick up when the active plan finishes or when blocked.
 
 ## Pending live-game verification (verify only — no code)
 
+### 🔴 NEW 2026-08-05 — two defects the DumperTest sample found on its first real use
+
+Both came out of the config-only A/B (**same source, Shipping vs Development**) that this file has
+called the highest-value first cell since 2026-07-29. It produced them on day one.
+
+**D1 — GNames resolves into `EOSSDK-Win64-Shipping.dll` on a Development package.** Effort **M** ·
+Risk med. On the Shipping build of the *same source* everything resolves cleanly
+(`validated=yes`, GWorld fine). On Development:
+
+```
+[GNames] GNAM_SF_2: 1 match(es), none validated
+AOBScanAllModules: 2 matches in '...\Engine\Binaries\Win64\EOSSDK-Win64-Shipping.dll'
+[GNames] GNAM_SAT425_3: 2 matches (multi-module), validated -> 0x7FFCEF5F8FC0
+```
+
+GObjects is at `0x7FF67517D5A0` (inside the game exe); GNames lands at `0x7FFCEF5F8FC0`, **a
+different module entirely**. On a monolithic build that cannot be right. Every in-exe GNames
+pattern missed — the tables are Shipping-tuned — and the multi-module fallback then matched a
+data pattern inside a **third-party SDK DLL** whose pointer happens to reach a plausible name pool,
+so `ValidateGNames` accepted it.
+
+**The whole failure chain is downstream of this one address:**
+`Cannot find Guid or Vector struct` → `validated=NO (DEFAULTS)` → the FField/FProperty offsets stay
+at defaults that are wrong for this build (`Next=+0x18/Name=+0x20` vs Shipping's `+0x20/+0x28`) →
+`GWorld does not deref to a UWorld — recovery failed` → **Start-from-GWorld and Value Search both
+fail.** One misresolution, four visible symptoms.
+
+*Multi-module is deliberate and must stay* — modular builds put GNames in `CoreUObject`, which is
+why the winning pattern is named `GNAM_SAT425` (Satisfactory 4.25). The fix is not to remove it but
+to **rank same-module-as-GObjects first, and refuse an unrelated third-party DLL** (`EOSSDK`,
+redistributables) when GObjects resolved inside the main executable.
+
+**D2 — Group Scan cannot see the object's own scalar UPROPERTYs.** Effort **M** · Risk med.
+On the Shipping package (where the pointers ARE correct), a Group First Scan over
+`DumperTestActor_0` matched only **container elements and base-class fields**:
+
+```
+PrimaryActorTick.TickInterval=0, CustomTimeDilation=1     <- AActor's own
+Set_Int[0][0]=1337   Map_NameToInt.Value[0][0]=111   Arr_Int[0][0]=10
+```
+
+Not one of `I32`(1234567), `FrozenInt`(424242), `TickCount`, `Health.*`, `Opt_*` — all plain
+scalars declared on the derived class, all of which the **single-value** scan finds without trouble
+(`Opt_Int_Set` @0x468, `Set_Int` @0x358). Because the only leaves recorded are ones that never
+change, a follow-up `Changed`/`Decreased` refine returns **0**, which is what made this look like a
+Mode-B problem for three rounds.
+
+**Not a leaf cap:** `Aura.cpp` `kLeafCap = 4096`; the actor has 121 fields.
+**The sample is not at fault** — its on-screen heartbeat shows `frames=5971 TickCount=101` climbing
+and `Health.CurrentValue` falling, so the values genuinely change.
+**Sharpest repro, no timing involved:** Group First Scan, both slots `Exact` — `1234567` and
+`424242`. Both are static UPROPERTYs on the same object.
+
+
 > 🇹🇼 **繁體中文版：[pending-verification_zh-TW.md](pending-verification_zh-TW.md)** — a standalone
 > translation of THIS section, reorganised by how much effort each check costs (seven of the ①
 > items are free from any ordinary session). **This English section is canonical**: if the two
