@@ -37,6 +37,34 @@ public static class Constants
     public const int MaxProcessFolders = 20;           // Clean up oldest beyond this
     public const int LogMaxAgeDays = 21;               // Keep this in sync with Grimoire::LOG_RETENTION_DAYS
 
+    // ---- Log compression (compact /C /EXE:LZX, in place) -------------------------
+    //
+    // Retention bounds the AGE of the log corpus, not its SIZE: 21 days of multi-game
+    // sessions measured 111.9 MB. LZX took the eligible 102.05 MB of that to 7.98 MB
+    // (12.8:1) in 2.8 s, and left LastWriteTime untouched on all 289 files — which is why
+    // PruneAgedLogs needs no change. Numbers + traps: docs/log-compression-eval.md.
+    //
+    // Size floor: 347 of 698 files were <= 4 KB and held 0.4 MB between them — half the
+    // work for 0.4% of the bytes.
+    public const long LogCompressMinSizeBytes = 4096;
+
+    // Idle window for the MANUAL button: don't touch a file something may still be
+    // appending to. The -0.log name guard is the real protection; this covers the
+    // DLL-written per-game categories whose names the UI does not know.
+    public const int LogCompressMinIdleHours = 1;
+
+    // Age floor for the AUTOMATIC startup sweep (opt-in, default ON). Deliberately longer
+    // than the manual window: an unattended pass should only ever touch logs that are
+    // plainly historical, and a log you might still be reading about yesterday's session
+    // is not.
+    public const int LogAutoCompressMinAgeDays = 7;
+
+    // compact.exe batching. The CHARACTER budget is the binding one — Windows caps a
+    // command line at 32,767 and these paths are long (a per-game folder is named after
+    // the game EXE). Set well under the cap; overflowing fails a whole batch.
+    public const int LogCompressBatchSize = 40;
+    public const int LogCompressMaxArgChars = 24000;
+
     // Leftover-proxy cleanup reports (Reports/leftover-proxies-<stamp>.txt).
     //
     // AGE, not a generation count, for the same reason the logs above use age — and the flaw is the

@@ -22,6 +22,74 @@ builds ≤696 in
 
 -----
 
+## 2026-08-05 - Logs compress in place; the 21-day purge does not notice (build 2730)
+
+Retention bounds the AGE of the log corpus, not its SIZE. Three weeks of multi-game sessions
+measured **111.9 MB**, and the fix is not a shorter window - it is that 102 MB of that is
+archived text nobody will open again, sitting uncompressed.
+
+**`compact /C /EXE:LZX`, in place: 102.05 MB -> 7.98 MB (12.8:1) in 2.8 s.** LZX is Windows'
+"Compact OS" WOF algorithm, designed for write-once/read-many files, which is exactly what an
+archived log is. `compact /c` (LZNT1) manages 4.4:1 against LZX's 25.1:1 on the same 8 MB file
+and is not competitive.
+
+**The purge rule needed no change, and that was measured rather than assumed.** `compact`
+preserves `LastWriteTime` and `CreationTime` and moves only `LastAccessTime` - **0 of 289 files
+had their write time change**. `PruneAgedLogs` keys on `GetLastWriteTime` and globs
+`{prefix}-*.log`, so it deletes exactly what it would have. (Same shape as build 2726's snapshot
+sweep: last-access is noise on Windows, last-write is the signal - and compression touches only
+the noise.)
+
+**gz/zip was measured, not dismissed.** `GZipStream` reaches 6.57 MB at `Optimal` and 6.26 MB at
+`SmallestSize` - **1.6 % of the original corpus better than LZX** - and costs both purge globs,
+every grep workflow `log-verification-checklist.md` is built on, "Open Log Folder", and owning
+decompression for the DLL-written per-game mirror logs forever. An LZX file keeps its name and
+extension and decompresses on read: `rg`, `Select-String` and Notepad are unaffected. 1.7 MB is
+not worth that.
+
+**Two triggers, different age floors, both honest about it.** The System-tab **button** uses a
+1-hour idle floor - the user pressed it, so "compress anything nobody is writing to" is the
+instruction. The **startup sweep** uses 7 days and is **opt-in, default OFF**: it is cheap and
+reversible, but a launch that rewrites the user's files unasked is not a default to pick for
+them.
+
+**Six traps, each of which silently produces a wrong result.** They are why this took
+measurement rather than reading:
+
+- **Per-game log folders are game EXE names, and those contain spaces.** The first benchmark run
+  built its own command line, printed `...\REMASTERED\: The system cannot find the file
+  specified.`, **reported success, and had skipped 23 files.** Shipped code uses
+  `ProcessStartInfo.ArgumentList` (which quotes for you) and decides success by re-measuring
+  `GetCompressedFileSizeW` per file - `compact` exits 1 on partial failure while still printing
+  "compressed".
+- **LZX does not set `FileAttributes.Compressed`** (only `/c` does). An 8,441,784-byte file
+  sitting at 335,872 on disk still reported `Archive` alone. Detecting "already done" by
+  attribute would re-compress everything, forever. `GetCompressedFileSizeW < Length` is the
+  signal - and 0 from it means "unreadable", not "compressed", which the policy distinguishes.
+- **Appending to an LZX file fully decompresses it** (335,872 -> 8,441,799 measured). Harmless,
+  but `-0.log` must never be compressed.
+- A file **held open by a logger is safely skipped** (exit 1, nothing touched). The eligibility
+  rules are a courtesy; the filesystem is the real guard.
+- **Compress files, never the directory** - `compact /c <dir>` would route every future log
+  write through the compressor.
+- **NTFS only.** The button and checkbox hide on other volumes rather than offering something
+  that can only answer "unsupported".
+
+**No I/O-priority throttling, deliberately.** `PriorityClass = Idle` is CPU-only and that is
+enough at 2.8 s for the whole backlog. This repo already shipped the opposite reflex once:
+multipipe Phase 0 dropped the scan thread's priority, starved scans ~20x, and was reverted
+(build 1840).
+
+Policy is pure (`LogCompressionPolicy`, zero `System.IO`) and the process spawn plus P/Invoke sit
+behind `Core/ILogCompressionService`. 29 new tests; the load-bearing one compresses a real folder
+whose per-game subfolder name contains spaces and asserts `LastWriteTimeUtc` is unchanged. 3300
+C# green, AOT-trimmed publish clean. Full numbers + method: `docs/log-compression-eval.md`.
+
+**Not yet exercised outside the tests** - the button and the startup sweep have not been
+clicked/launched in the real app.
+
+-----
+
 ## 2026-08-05 - Snapshots and bookmarks move out of the app-data root; only one of them expires (build 2726)
 
 `%LOCALAPPDATA%\UE5CEDumper` had become unreadable, and for a structural reason rather than

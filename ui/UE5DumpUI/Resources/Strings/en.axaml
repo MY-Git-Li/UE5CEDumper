@@ -454,6 +454,15 @@
     <sys:String x:Key="str.System.OpenLogFolder">Open Log Folder</sys:String>
     <sys:String x:Key="str.System.OpenLogFolderTip">Open the application log folder (%LOCALAPPDATA%\UE5CEDumper\Logs) in the file browser.</sys:String>
     <sys:String x:Key="str.System.OpenLogFolder.Error">Could not open log folder: {0}</sys:String>
+    <sys:String x:Key="str.System.CompressLogs">Compress Logs</sys:String>
+    <sys:String x:Key="str.System.CompressLogsTip">Compress archived log files in place with NTFS LZX compression (measured 12.8:1 on a real 102 MB log folder). The files keep their name and extension and still open in any text editor or grep — nothing needs to be unpacked. Live logs, files under 4 KB, files written in the last hour, and files already compressed are skipped. Safe to run while a game is playing: it runs at idle priority.</sys:String>
+    <sys:String x:Key="str.System.CompressLogs.Running">Compressing logs…</sys:String>
+    <sys:String x:Key="str.System.CompressLogs.Result">Compressed {0} log file(s): {1} MB → {2} MB on disk ({3} MB saved), {4} failed.</sys:String>
+    <sys:String x:Key="str.System.CompressLogs.NothingToDo">Nothing to compress — {0} already compressed, {1} skipped (too small, too recent, or in use).</sys:String>
+    <sys:String x:Key="str.System.CompressLogs.Unsupported">Log compression needs an NTFS volume; this one is not.</sys:String>
+    <sys:String x:Key="str.System.CompressLogs.Error">Log compression failed: {0}</sys:String>
+    <sys:String x:Key="str.System.AutoCompressLogs">Compress logs older than 7 days at startup</sys:String>
+    <sys:String x:Key="str.System.AutoCompressLogsTip">Off by default. When on, every launch runs the same compression in the background at idle priority over logs untouched for 7+ days. Retention is unaffected: compression does not change a file's timestamp, so the 21-day cleanup still deletes exactly what it would have.</sys:String>
     <sys:String x:Key="str.System.RemoveAllSnapshots">Remove All Snapshot Data</sys:String>
     <sys:String x:Key="str.System.RemoveAllSnapshotsTip">Permanently delete the snapshot database FILES for EVERY game (snapshots.*.db and their sidecars, in %LOCALAPPDATA%\UE5CEDumper\Snapshots) from disk — not a row purge. Files currently in use by an active capture are skipped. Bookmarks are not touched. Experimental feature; irreversible.</sys:String>
     <sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmTitle">Remove all snapshot data</sys:String>

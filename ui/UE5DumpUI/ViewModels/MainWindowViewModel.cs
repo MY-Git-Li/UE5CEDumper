@@ -437,7 +437,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ISnapshotStore? snapshotStore = null,
         IGlobalHotkeyService? globalHotkeys = null,
         BookmarkStore? bookmarks = null,
-        CoordinateLibraryStore? coordLibrary = null)
+        CoordinateLibraryStore? coordLibrary = null,
+        ILogCompressionService? logCompression = null)
     {
         _pipeClient = pipeClient;
         _dump = dump;
@@ -459,7 +460,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         ObjectTree = new ObjectTreeViewModel(dump, log, platform);
         ClassStruct = new ClassStructViewModel(dump, log, platform);
-        Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate, snapshotStore, pipeClient);
+        Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate, snapshotStore, pipeClient, logCompression);
         LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker, bookmarks);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log, aobMaker, platform, experimentalGate);
@@ -2250,6 +2251,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (Spc != null) Track(Spc, SpcPersist);
         if (Pivot != null) Track(Pivot, PivotPersist);
         if (ProxyDeploy != null) Track(ProxyDeploy, ProxyDeployPersist);
+        Track(Pointers, SystemPersist);
     }
 
     // Persistable property-name sets — used both to filter PropertyChanged and as
@@ -2341,6 +2343,12 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         nameof(ProxyDeployViewModel.SelectedProxyType), nameof(ProxyDeployViewModel.ForceOverwrite),
         nameof(ProxyDeployViewModel.ScanDrivesMode), nameof(ProxyDeployViewModel.LkgSuggestEnabled),
+    };
+    // System tab. LogCompressionSupported is NOT here on purpose: it is a fact about the
+    // volume, re-derived every launch, not a preference.
+    private static readonly HashSet<string> SystemPersist = new()
+    {
+        nameof(PointerPanelViewModel.AutoCompressLogs),
     };
 
     /// <summary>Apply saved options to every VM. Runs under _suppressOptionSave.
@@ -2442,6 +2450,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             Pivot.SelectedSource = o.Pivot.SelectedSource;
             Pivot.SelectedKeyMode = o.Pivot.SelectedKeyMode;
         }
+        Pointers.AutoCompressLogs = o.System.AutoCompressLogs;
         if (ProxyDeploy != null)
         {
             ProxyDeploy.SelectedProxyType = o.ProxyDeploy.SelectedProxyType;
@@ -2598,6 +2607,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             o.ProxyDeploy.ConfirmedProxyByExe =
                 new Dictionary<string, ProxyType>(ProxyDeploy.ConfirmedProxyByExe, StringComparer.OrdinalIgnoreCase);
         }
+        o.System.AutoCompressLogs = Pointers.AutoCompressLogs;
 
         return o;
     }

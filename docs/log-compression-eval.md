@@ -1,9 +1,13 @@
-# Log compression — EVALUATED (2026-08-05). Verdict: **`compact /c /exe:LZX`, not zip/gz.**
+# Log compression — SHIPPED build 2730. Verdict: **`compact /c /exe:LZX`, not zip/gz.**
 
-> **Status: evaluated + measured, NOT built.** Every number below is from a real run on the
-> maintainer's own `%LOCALAPPDATA%\UE5CEDumper\Logs` (698 files / 111.9 MB), on a copy in the
-> scratchpad — the live log folder was not modified. Re-measure before trusting these on a
-> different machine; the method is at the bottom.
+> **Status: evaluated, measured, and BUILT (build 2730).** Every number below is from a real run
+> on the maintainer's own `%LOCALAPPDATA%\UE5CEDumper\Logs` (698 files / 111.9 MB), on a copy in
+> the scratchpad — the live log folder was not modified. Re-measure before trusting these on a
+> different machine; the method is at the bottom. §5 describes what shipped.
+>
+> **Not yet exercised in the real app**: 3300 unit tests cover the policy and a full
+> compress-a-real-folder pass, but the System-tab button and the startup sweep have not been
+> clicked/launched outside the test suite.
 
 The 21-day retention window (`Constants.LogMaxAgeDays` / `Grimoire::LOG_RETENTION_DAYS`) is
 doing its job, and the folder still reached **111.9 MB**. Retention bounds the *age* of the
@@ -111,27 +115,46 @@ LZX costs the extra 1.7 MB and keeps every one of those intact. That is the whol
 
 -----
 
-## 5. Recommended design (if built)
+## 5. What shipped (build 2730)
 
-**Manual only, System tab, next to "Open Log Folder".** The point of the feature is to not
-touch the disk while a game runs — so the user picks the moment. No startup hook.
+**Two triggers, one engine, different age floors.**
 
-- **Eligibility (pure, testable, zero `System.IO`)** — same split as `AppDataRetentionPolicy` /
-  `ProxyOrphanScanner`: given `(name, length, lastWriteUtc, onDiskBytes)` decide compress /
-  skip-too-small / skip-too-fresh / skip-already-done / skip-live. Rules: `Length > 4096`,
-  `now - LastWriteUtc >= 1h`, name is not `*-0.log`, `onDiskBytes >= Length`.
-- **Execution** — batch ~40 **quoted** paths per `compact.exe /C /EXE:LZX /Q` invocation, on a
-  background thread, `Process.PriorityClass = Idle`, cancellable between batches. Report
-  `files, before → after, saved` from `GetCompressedFileSizeW`, not from compact's stdout.
-- **Do NOT add I/O-priority throttling.** CPU-idle is enough at 2.8 s for a full 102 MB
-  backlog, and this repo has already been burned by exactly that reflex: multipipe "Phase 0"
-  dropped the scan thread's priority, starved scans ~20×, and was reverted (build 1840,
+| | trigger | age floor | default |
+|---|---|---|---|
+| **"Compress Logs"** button | System tab, next to "Open Log Folder" | idle ≥ **1 h** (`LogCompressMinIdleHours`) | — |
+| **"Compress logs older than 7 days at startup"** | checkbox beside it, persisted in `ui-options.json` → `System.AutoCompressLogs` | **7 days** (`LogAutoCompressMinAgeDays`) | **OFF** |
+
+The floors differ on purpose. The button is an explicit instruction, so "compress everything
+nobody is writing to right now" is what was asked for. The automatic pass runs unasked, so it
+only ever touches logs that are plainly historical — a log you might still be reading about
+yesterday's session is not.
+
+**The automatic pass is opt-in and defaults OFF.** It is cheap and reversible (`compact /u`),
+but a launch that rewrites the user's files without being asked is not a default to choose for
+them; the button next to it does the same work on demand.
+
+Code map:
+
+- `Services/LogCompressionPolicy` — **pure**, zero `System.IO`: `IsLiveLog`, `Decide`, `Plan`,
+  `Batch`. Same split as `AppDataRetentionPolicy` / `ProxyOrphanScanner`, so the rules that
+  decide what gets REWRITTEN are testable without a disk.
+- `Core/ILogCompressionService` + `Services/WindowsLogCompressionService` — the platform
+  boundary (repo rule). Spawns `compact.exe /C /EXE:LZX /Q` at `ProcessPriorityClass.Idle`,
+  batched by `LogCompressBatchSize` (40) **and** `LogCompressMaxArgChars` (24,000).
+- `ProcessStartInfo.ArgumentList`, never a joined string — it applies Windows quoting itself,
+  which removes trap 1 below by construction rather than by remembering to quote.
+- Success is decided by **re-measuring `GetCompressedFileSizeW` per file**, never by parsing
+  compact's stdout (trap 1).
+- **No I/O-priority throttling**, deliberately. CPU-idle is enough at 2.8 s for a full 102 MB
+  backlog, and this repo has already been burned by that reflex: multipipe "Phase 0" dropped the
+  scan thread's priority, starved scans ~20×, and was reverted (build 1840,
   [multipipe-eval.md](multipipe-eval.md) §8).
-- **Platform boundary** — the `compact.exe` spawn and the `GetCompressedFileSizeW` P/Invoke go
-  behind an interface in `Core` (repo rule); the eligibility policy stays pure.
-- **No retention change at all.** §1.
+- **No retention change at all** (§1), and the button/checkbox hide entirely when the log volume
+  is not NTFS rather than offering something that can only report "unsupported".
 
-Effort: **S–M** · Risk: **low** (worst case is a file that fails to compress).
+Test coverage: 29 tests. The load-bearing one asserts `LastWriteTimeUtc` is unchanged after a
+real compression pass over a real folder whose per-game subfolder name contains spaces — if that
+ever fails, compression has started deleting logs early.
 
 -----
 

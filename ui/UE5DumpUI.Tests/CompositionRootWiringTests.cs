@@ -76,7 +76,8 @@ public class CompositionRootWiringTests : IDisposable
             snapshotStore: null,
             globalHotkeys: null,
             bookmarks: null,
-            coordLibrary: new CoordinateLibraryStore(platform));
+            coordLibrary: new CoordinateLibraryStore(platform),
+            logCompression: null);
     }
 
     [Fact]

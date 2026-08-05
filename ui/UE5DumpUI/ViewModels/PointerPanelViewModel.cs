@@ -24,6 +24,22 @@ public partial class PointerPanelViewModel : ViewModelBase
     private readonly IExperimentalGate? _experimentalGate;
     private readonly ISnapshotStore? _snapshotStore;
     private readonly IPipeClient? _pipe;
+    private readonly ILogCompressionService? _logCompression;
+
+    /// <summary>
+    /// Compress archived logs older than <see cref="Constants.LogAutoCompressMinAgeDays"/>
+    /// days at every startup. Persisted (System section of ui-options.json), <b>default
+    /// OFF</b> — opt-in, because a launch should not rewrite the user's files unasked.
+    /// The startup pass itself runs from <c>App</c>; this property only records the
+    /// intent, because the sweep begins before this ViewModel exists.
+    /// </summary>
+    [ObservableProperty] private bool _autoCompressLogs;
+
+    /// <summary>False on a non-NTFS log volume — the button and checkbox hide rather than
+    /// offering something that can only ever report "not supported".</summary>
+    [ObservableProperty] private bool _logCompressionSupported;
+
+    [ObservableProperty] private bool _isCompressingLogs;
 
     [ObservableProperty] private string _gObjectsAddress = "";
     [ObservableProperty] private string _gNamesAddress = "";
@@ -398,7 +414,8 @@ public partial class PointerPanelViewModel : ViewModelBase
                                 AobUsageService? aobUsage = null,
                                 IExperimentalGate? experimentalGate = null,
                                 ISnapshotStore? snapshotStore = null,
-                                IPipeClient? pipeClient = null)
+                                IPipeClient? pipeClient = null,
+                                ILogCompressionService? logCompression = null)
     {
         _platform = platform;
         _dump = dump;
@@ -408,6 +425,8 @@ public partial class PointerPanelViewModel : ViewModelBase
         _experimentalGate = experimentalGate;
         _snapshotStore = snapshotStore;
         _pipe = pipeClient;
+        _logCompression = logCompression;
+        LogCompressionSupported = logCompression?.IsSupported(platform.GetLogDirectoryPath()) ?? false;
 
         // Subscribe to the live pipe activity tail (System-tab Pipe Activity card).
         if (pipeClient != null)
@@ -1045,6 +1064,52 @@ public partial class PointerPanelViewModel : ViewModelBase
             _log?.Error(Constants.LogCatInit, "OpenLogFolder failed", ex);
         }
     }
+
+    /// <summary>
+    /// Manual log-compression sweep. Uses the SHORT idle window
+    /// (<see cref="Constants.LogCompressMinIdleHours"/>) rather than the automatic pass's
+    /// 7-day floor: the user pressed the button, so "compress everything that isn't being
+    /// written right now" is what they asked for.
+    /// </summary>
+    [RelayCommand]
+    private async Task CompressLogsAsync()
+    {
+        if (_logCompression == null || IsCompressingLogs) return;
+
+        IsCompressingLogs = true;
+        MaintenanceStatusText = Res.Get("str.System.CompressLogs.Running");
+        try
+        {
+            var r = await _logCompression.CompressAsync(
+                _platform.GetLogDirectoryPath(),
+                TimeSpan.FromHours(Constants.LogCompressMinIdleHours),
+                Constants.LogCompressMinSizeBytes);
+
+            MaintenanceStatusText = !r.Supported
+                ? Res.Get("str.System.CompressLogs.Unsupported")
+                : r.NothingToDo
+                    ? Res.Format("str.System.CompressLogs.NothingToDo",
+                                 r.SkippedAlreadyCompressed, r.SkippedTooSmall + r.SkippedTooFresh + r.SkippedLive)
+                    : Res.Format("str.System.CompressLogs.Result",
+                                 r.Compressed, Mb(r.BytesBefore), Mb(r.BytesAfter), Mb(r.BytesSaved), r.Failed);
+
+            _log?.Info(Constants.LogCatInit,
+                $"CompressLogs: compressed={r.Compressed} failed={r.Failed} " +
+                $"saved={r.BytesSaved} supported={r.Supported}");
+        }
+        catch (Exception ex)
+        {
+            MaintenanceStatusText = Res.Format("str.System.CompressLogs.Error", ex.Message);
+            _log?.Error(Constants.LogCatInit, "CompressLogs failed", ex);
+        }
+        finally
+        {
+            IsCompressingLogs = false;
+        }
+    }
+
+    private static string Mb(long bytes) =>
+        (bytes / (1024.0 * 1024.0)).ToString("0.0", CultureInfo.InvariantCulture);
 
     [RelayCommand]
     private async Task RemoveAllSnapshotsAsync()
