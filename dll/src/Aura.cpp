@@ -673,6 +673,10 @@ static int ComputeStrideScore(int named, int good, int bad) {
 }
 
 // Helper: run ProbeStride for all candidate strides on a given base address, updating best.
+// How many items each stride candidate is probed against. Named so the "only N validated"
+// warning can state the DENOMINATOR -- "27 items validated" means nothing without it.
+static constexpr int kStrideProbeBudget = 200;
+
 static void ProbeAllStrides(uintptr_t base, int maxItems, const char* phase,
                             int candidates[], int numCandidates,
                             int& bestStride, int& bestCount, int& bestNamed,
@@ -752,7 +756,7 @@ static void DetectStrideForCurrentObjOffset(uintptr_t chunkTable, uintptr_t chun
                                             int& bestStride, int& bestCount, int& bestNamed,
                                             int& bestBad, bool& bestHasNames) {
     bestStride = 0; bestCount = 0; bestNamed = 0; bestBad = INT_MAX; bestHasNames = false;
-    constexpr int MAX_ITEMS_PHASE1 = 200;
+    constexpr int MAX_ITEMS_PHASE1 = kStrideProbeBudget;
     bool detected = false;
 
     // --- Pre-check: detect flat (non-chunked) FFixedUObjectArray (UE4.11-4.20) ---
@@ -1024,8 +1028,20 @@ static void DetectItemSize() {
         s_itemObjOffset = 0;
     }
 
-    int candidates[] = { 16, 24, 20 };
-    constexpr int NUM_CANDIDATES = 3;
+    // 32 is here because a stock UE 5.4 **Development** package uses it, and its absence
+    // was not a near-miss -- it was undetectable. A stride that DIVIDES the real one still
+    // lands on a genuine object every k-th probe, so 16 against a real 32 validated half
+    // the pool and the sweep settled there "tentatively". Downstream, exactly every other
+    // object was garbage: UE5_Init resolved obj[0], obj[2], obj[4] and the Object Tree
+    // reported 12,588 of 25,175 named -- 50.0% to the decimal (2026-08-05, DumperTest).
+    //
+    // Ordering does not decide the winner (ProbeAllStrides scores every candidate and takes
+    // the best), so 32 sits after the two common sizes purely for log readability. With the
+    // real stride present it wins outright: named ~= all / bad ~= 0, against the alias's
+    // named ~= bad ~= half.
+    int candidates[] = { 16, 24, 32, 20 };
+    constexpr int NUM_CANDIDATES = 4;
+    static_assert(NUM_CANDIDATES <= 5, "ProbeAllStrides stores results in a fixed array of 5");
 
     // Object-ptr-offset candidates, classic first (see header comment).
     const int objOffPasses[] = { 0x00, 0x08 };
@@ -1090,8 +1106,22 @@ static void DetectItemSize() {
         s_itemSize = gStride;
         s_layoutMode = (gObjOff != 0) ? Lineal::ItemLayoutMode::Unpacked57
                                       : Lineal::ItemLayoutMode::Classic;
+        const int validated = gHasNames ? gNamed : gCount;
         LOG_WARN("ObjectArray: FUObjectItem size tentatively set to %d bytes, object-ptr offset +0x%02X (only %d items validated)",
-                 gStride, gObjOff, gHasNames ? gNamed : gCount);
+                 gStride, gObjOff, validated);
+        // Say what "tentative" COSTS, because the previous wording read as routine and the
+        // scan carried on as though it were an answer. A validated count this far below the
+        // probe budget is the signature of an ALIAS: the real item is a multiple of this
+        // stride, so every k-th probe hits a real object and the rest are garbage — which
+        // surfaces later as a suspiciously round "N% of objects named" and a scan that walks
+        // almost nothing. If that is what you are looking at, the missing stride is the bug.
+        if (validated * 4 < kStrideProbeBudget) {
+            LOG_ERROR("ObjectArray: that is only %d of %d probes — treat every object count and "
+                      "name below as UNTRUSTWORTHY. A real stride that is a MULTIPLE of %d "
+                      "(e.g. %d) would validate all of them; if the object tree shows a round "
+                      "fraction named, that multiple is missing from the candidate list.",
+                      validated, kStrideProbeBudget, gStride, gStride * 2);
+        }
         return;
     }
 

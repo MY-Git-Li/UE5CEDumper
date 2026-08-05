@@ -96,6 +96,15 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
    `0 results` belongs to the scan; if they are frozen, the sample is the problem.
    `-DumperTestNoHud` suppresses it for a clean screenshot.
 
+   > **It works in Shipping too, and the reason it did not is worth knowing.** On-screen debug
+   > messages are *not* compiled out of a Shipping build — the display call site is gated
+   > `#if !(UE_BUILD_TEST)`, which excludes TEST only, and `GAreScreenMessagesEnabled` is a plain
+   > runtime bool in Core. What silences them is **config**: `UEngine::bEnableOnScreenDebugMessages`
+   > is read from `[/Script/Engine.Engine]` in `GEngineIni`, and `AddOnScreenDebugMessage` early-outs
+   > on it. `DrawHeartbeat` now sets all three flags every draw — three bool stores, re-asserted
+   > because a console command or a screenshot request can flip them underneath a readout whose
+   > whole point is that it cannot go quiet for reasons unrelated to what it measures.
+
    The output log also carries `[DumperTest] ADumperTestActor ready at 0x…`.
 6. **Package twice**: Platforms → Windows → Build Configuration → **Shipping**, Package Project;
    then again with **Development**.

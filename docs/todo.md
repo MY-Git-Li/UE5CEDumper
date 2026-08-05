@@ -1699,10 +1699,25 @@ items validated**)`. On a healthy game that validation count is in the thousands
 walked 1731. So the group-scan investigation must **re-run on Shipping, or after D3 is fixed**;
 measurements taken on this config are measuring the stride, not the matcher.
 
-**Fix shape:** when the stride probe's validated-item count is this low, do not accept the first
-candidate — try the larger strides (24 / 32) and keep whichever validates the most items. The
-machinery exists (see the FUObjectItem layout axis work in the corpus notes); what is missing is
-refusing to settle for "tentative". ⬜
+> ### ✅ Fixed build 2673 — **32 was not in the candidate list**
+>
+> `Aura.cpp`'s sweep tried `{ 16, 24, 20 }`. A real 32-byte item was therefore not a near-miss, it
+> was **undetectable** — and worse, undetectable in a way that looks like partial success: a stride
+> that DIVIDES the real one still lands on a genuine object every k-th probe, so 16 validated half
+> the pool and the sweep settled there "tentatively".
+>
+> Ordering does not decide the winner (`ProbeAllStrides` scores every candidate and takes the best),
+> so adding 32 is enough: against the real stride it scores `named ≈ all / bad ≈ 0`, while the alias
+> scores `named ≈ bad ≈ half`.
+>
+> **The "tentative" warning now states its cost.** Its old wording read as routine and the scan
+> carried on as though it were an answer. When the validated count is under a quarter of the probe
+> budget it now says so as an ERROR, names the denominator (200 — *"27 items validated"* means
+> nothing without it), and points at the actual cause: *a multiple of this stride would validate all
+> of them, and a round "N% named" in the object tree is that alias.*
+>
+> **Verify:** re-run the Development package. **PASS** = `FUObjectItem size detected as 32 bytes`,
+> `Name sanity: 10/10`, and an Object Tree that reads 100% named rather than 50.0%. ⬜
 
 
 Both came out of the config-only A/B (**same source, Shipping vs Development**) that this file has

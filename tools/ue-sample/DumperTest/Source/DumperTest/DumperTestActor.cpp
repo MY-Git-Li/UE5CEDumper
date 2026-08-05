@@ -233,6 +233,22 @@ void ADumperTestActor::DrawHeartbeat() const
 		return;
 	}
 
+	// SHIPPING NEEDS THIS. On-screen debug messages are not compiled out of a Shipping
+	// build -- the display call site is gated `#if !(UE_BUILD_TEST)`, which excludes TEST
+	// only, and GAreScreenMessagesEnabled is a plain runtime bool in Core. What actually
+	// silences them is CONFIG: UEngine::bEnableOnScreenDebugMessages is read from
+	// [/Script/Engine.Engine] in GEngineIni (UnrealEngine.cpp), and AddOnScreenDebugMessage
+	// early-outs on it. So the readout appeared in Development and not in Shipping, and
+	// "Shipping strips it" -- which I asserted from the wrong gate -- was never true.
+	//
+	// Re-asserted every draw rather than once at BeginPlay: these are three bool stores,
+	// and a console command or a screenshot request (which sets GAreScreenMessagesEnabled
+	// false and restores it later) can flip them underneath us. The whole point of this
+	// readout is that it cannot go quiet for a reason unrelated to what it measures.
+	GEngine->bEnableOnScreenDebugMessages        = true;
+	GEngine->bEnableOnScreenDebugMessagesDisplay = true;
+	GAreScreenMessagesEnabled                    = true;
+
 	// A fixed key so each line REPLACES its previous self instead of scrolling a wall of
 	// text off the screen -- these fire once a second for the life of the process.
 	GEngine->AddOnScreenDebugMessage(/*Key*/ 1001, /*Time*/ 1.5f, FColor::Green,
