@@ -1778,6 +1778,35 @@ and `Health.CurrentValue` falling, so the values genuinely change.
 **Sharpest repro, no timing involved:** Group First Scan, both slots `Exact` — `1234567` and
 `424242`. Both are static UPROPERTYs on the same object.
 
+> ### 🔬 NOT fixed — instrumented instead (build 2669), and the reason matters
+>
+> **Reading the code did not find it, and three hypotheses had already been written and abandoned
+> against this bug's silence.** What the code says, all of it verified line by line:
+> `CollectGroupLeaves` (`Aura.cpp:7686`) collects **every** direct and struct-nested numeric scalar —
+> so `I32`/`TickCount`/`Health.*` *are* in the object block, and `CustomTimeDilation` appearing in
+> the results proves that path runs. `emitGroupCandidate` (`:8175`) stores **all** leaves that
+> satisfied each slot, not one representative, and seeds `prevValue` from the leaf bytes (`:8185`).
+> `RefineGroupCandidates` (`:8367`) re-reads each stored leaf and compares prev-value predicates
+> against its own `prevValue`. Every step is right on its own.
+>
+> So the refine now **counts why leaves die** instead of only saying "0 surviving", which is the
+> same output for six different causes:
+>
+> ```
+> RefineGroup cand[N]: DROPPED (a slot has no surviving leaf) | leaves entered=42 kept=0 |
+>   dropped: unreadable=0 bad-width=0 no-target-for-width=0 predicate-said-no=42
+> ```
+>
+> It also names the one cause that is invisible today — `GroupCandidateFeasible` rejecting a
+> candidate because every slot matched **the same leaf**, so no *distinct* assignment exists. First
+> 5 candidates only, `[SCAN:grp]` debug, off the hot path.
+>
+> **Next run answers it:** a Group First Scan then a `Changed` refine, then
+> `grep "RefineGroup cand" pipe-0.log`. `predicate-said-no=<everything>` means the comparison is
+> wrong; `entered=` far below the object's field count means the leaves were never stored; the
+> DISTINCT-assignment verdict means the matcher, not the predicate. Those are three different fixes
+> and the log now separates them. ⬜
+
 
 > 🇹🇼 **繁體中文版：[pending-verification_zh-TW.md](pending-verification_zh-TW.md)** — a standalone
 > translation of THIS section, reorganised by how much effort each check costs (seven of the ①

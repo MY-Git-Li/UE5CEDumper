@@ -809,6 +809,9 @@ public partial class ProxyDeployViewModel : ViewModelBase
     /// post-inject connect could only be attempted once and hoped for.</summary>
     public Func<bool>? IsConnectedProbe { get; set; }
 
+    /// <summary>Silences the top-bar "Connection Error" while the retry owns the message.</summary>
+    public Action<bool>? SetConnectErrorSuppression { get; set; }
+
     /// <summary>How long to keep retrying the post-inject connect.</summary>
     /// <remarks>
     /// The injected DLL scans BEFORE it opens its pipe (the proxy path is the opposite —
@@ -945,30 +948,49 @@ public partial class ProxyDeployViewModel : ViewModelBase
     {
         if (RequestConnectAsync is null) return;
 
-        var deadline = DateTime.UtcNow + PostInjectConnectWindow;
-        int attempt = 0;
-        while (DateTime.UtcNow < deadline)
+        var started  = DateTime.UtcNow;
+        var deadline = started + PostInjectConnectWindow;
+        int attempt  = 0;
+
+        // The retry owns the user-facing message from here: every failed attempt inside the
+        // window is expected, not an error, and letting the top bar flash red only to connect
+        // successfully moments later is worse than saying nothing.
+        SetConnectErrorSuppression?.Invoke(true);
+        try
         {
-            attempt++;
-            try { await RequestConnectAsync(); }
-            catch (Exception ex)
+            while (DateTime.UtcNow < deadline)
             {
-                _log.Warn("ProxyDeploy", $"Auto-connect after inject attempt {attempt} failed: {ex.Message}");
-            }
+                attempt++;
+                try { await RequestConnectAsync(); }
+                catch (Exception ex)
+                {
+                    _log.Warn("ProxyDeploy", $"Auto-connect after inject attempt {attempt} failed: {ex.Message}");
+                }
 
-            // No probe wired (tests, or an older composition) — keep the old
-            // single-shot behaviour rather than spinning for 45 s on no information.
-            if (IsConnectedProbe is null) return;
-            if (IsConnectedProbe()) 
-            {
-                SetOperationResult($"Injected into {targetName} (PID {pid}) — connected.", 0);
-                return;
-            }
+                // No probe wired (tests, or an older composition) — keep the old
+                // single-shot behaviour rather than spinning for 45 s on no information.
+                if (IsConnectedProbe is null) return;
+                if (IsConnectedProbe())
+                {
+                    SetOperationResult(
+                        $"Injected into {targetName} (PID {pid}) — connected after "
+                        + $"{(DateTime.UtcNow - started).TotalSeconds:F0}s ({attempt} attempts).", 0);
+                    return;
+                }
 
-            SetOperationResult(
-                $"Injected into {targetName} (PID {pid}) — waiting for the DLL to finish its "
-                + $"scan before its pipe opens (attempt {attempt})...", 0);
-            await Task.Delay(PostInjectRetryDelay);
+                // Show BOTH numbers. Elapsed alone leaves "is it nearly out of patience?"
+                // unanswerable, and a bare attempt count says nothing about how long is left.
+                SetOperationResult(
+                    $"Injected into {targetName} (PID {pid}) — waiting for the DLL to finish its "
+                    + $"AOB scan and open its pipe: {(DateTime.UtcNow - started).TotalSeconds:F0}s elapsed, "
+                    + $"{Math.Max(0, (deadline - DateTime.UtcNow).TotalSeconds):F0}s left "
+                    + $"(attempt {attempt}).", 0);
+                await Task.Delay(PostInjectRetryDelay);
+            }
+        }
+        finally
+        {
+            SetConnectErrorSuppression?.Invoke(false);
         }
 
         SetOperationResult(

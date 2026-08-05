@@ -8348,12 +8348,23 @@ ValueScanStats RefineGroupCandidates(
     // set into a fresh survivors vector. Each slot match re-reads its ABSOLUTE
     // leafAddr (direct: obj+offset; deep: container element — stale on container
     // realloc, where the SEH-safe read faults and the match is dropped).
+    // Diagnostic budget: enough to see a pattern, few enough to stay off the hot path.
+    constexpr int kDiagCandidates = 5;
+    int dbgCandidates = 0;
+
     std::vector<Radar::GroupCandidate> survivors;
     survivors.reserve(candidates.size());
     for (auto& gc : candidates) {
         if (gc.slotMatches.size() != nSlots) continue;
         if (gc.instanceIdx >= instances.size()) continue;   // defensive
         bool alive = true;
+        // Per-slot drop tally for the first few candidates. A refine that prunes to zero
+        // says only "0 surviving" today, which is the same output for six different causes:
+        // the leaf could not be read, its width has no target, the predicate rejected it, or
+        // the survivors could not form a distinct assignment. Three separate hypotheses were
+        // written and abandoned against that silence on 2026-08-05 -- so it now counts.
+        const bool diag = (dbgCandidates < kDiagCandidates);
+        int dRead = 0, dWidth = 0, dNoTarget = 0, dPredicate = 0, dKept = 0, dEntered = 0;
         for (size_t s = 0; s < nSlots && alive; ++s) {
             // P2: per-slot predicate. Prev-value types (Changed/Increased/...)
             // compare each leaf's re-read bytes against its own stored prevValue;
@@ -8365,29 +8376,44 @@ ValueScanStats RefineGroupCandidates(
             std::vector<Radar::GroupSlotMatch> keep;
             keep.reserve(gc.slotMatches[s].size());
             for (auto& sm : gc.slotMatches[s]) {
-                if (sm.descriptorIdx >= descriptors.size()) continue;
+                ++dEntered;
+                if (sm.descriptorIdx >= descriptors.size()) { ++dWidth; continue; }
                 Radar::DataType width;
                 if (!Radar::TryDataTypeFromPropertyTypeName(descriptors[sm.descriptorIdx].fieldType, width))
-                    continue;
+                    { ++dWidth; continue; }
                 const size_t sz = Radar::SizeOf(width);
-                if (sz == 0 || sz > 8) continue;
+                if (sz == 0 || sz > 8) { ++dWidth; continue; }
                 uint8_t buf[8] = {};
-                if (!Macht::ReadBytesSafe(sm.leafAddr, buf, sz)) continue;
+                if (!Macht::ReadBytesSafe(sm.leafAddr, buf, sz)) { ++dRead; continue; }
                 const uint8_t* cmp = usePrev ? sm.prevValue : slots[s].targets.Find(width);
-                if (!cmp) continue;                          // value can't fit this width
+                if (!cmp) { ++dNoTarget; continue; }          // value can't fit this width
                 const uint8_t* cmp2 = nullptr;
                 if (st == Radar::ScanType::Between) {
                     cmp2 = slots[s].targets2.Find(width);
-                    if (!cmp2) continue;                     // upper bound can't fit this width
+                    if (!cmp2) { ++dNoTarget; continue; }    // upper bound can't fit this width
                 }
-                if (!Radar::ComparePredicate(width, st, buf, cmp, cmp2, slots[s].roundMode)) continue;
+                if (!Radar::ComparePredicate(width, st, buf, cmp, cmp2, slots[s].roundMode))
+                    { ++dPredicate; continue; }
                 std::memcpy(sm.prevValue, buf, sz);
+                ++dKept;
                 keep.push_back(sm);
             }
             gc.slotMatches[s] = std::move(keep);
             if (gc.slotMatches[s].empty()) alive = false;
         }
-        if (alive && GroupCandidateFeasible(gc))
+        const bool feasible = alive && GroupCandidateFeasible(gc);
+        if (diag) {
+            ++dbgCandidates;
+            const char* verdict = !alive     ? "DROPPED (a slot has no surviving leaf)"
+                                : !feasible  ? "DROPPED (survivors cannot form a DISTINCT assignment "
+                                               "-- every slot matched the same leaf)"
+                                             : "kept";
+            Sein::Debug("SCAN:grp",
+                "RefineGroup cand[%u]: %s | leaves entered=%d kept=%d | dropped: unreadable=%d "
+                "bad-width=%d no-target-for-width=%d predicate-said-no=%d",
+                (unsigned)gc.instanceIdx, verdict, dEntered, dKept, dRead, dWidth, dNoTarget, dPredicate);
+        }
+        if (feasible)
             survivors.push_back(std::move(gc));
     }
     candidates = std::move(survivors);

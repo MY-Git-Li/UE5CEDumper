@@ -629,6 +629,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             ProxyDeploy.RequestConnectAsync = () => ConnectCommand.ExecuteAsync(null);
             // Lets the post-inject retry ASK whether it worked instead of assuming.
             ProxyDeploy.IsConnectedProbe = () => IsConnected;
+            ProxyDeploy.SetConnectErrorSuppression = v => SuppressConnectErrors = v;
             // Persist the remembered-proxy map (a Dictionary mutation isn't caught
             // by the [ObservableProperty] change-tracking save).
             ProxyDeploy.RequestOptionSave = ScheduleOptionSave;
@@ -2102,11 +2103,24 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            // During the post-inject retry window a failed attempt is EXPECTED -- the DLL
+            // has not opened its pipe yet -- so shouting "Connection Error" in red is a lie
+            // that then resolves itself a few seconds later. The retry owns the message
+            // while it is running; a real failure still lands here once it gives up.
+            if (SuppressConnectErrors)
+            {
+                _log.Info(Constants.LogCatInit, $"Connect attempt failed while waiting for the DLL: {ex.Message}");
+                return;
+            }
             StatusText = "Connection Error";
             SetError(ex);
             _log.Error(Constants.LogCatInit, "Connection failed", ex);
         }
     }
+
+    /// <summary>Set while something is deliberately retrying <c>ConnectCommand</c> and owns
+    /// the user-facing message itself (see ProxyDeployViewModel's post-inject retry).</summary>
+    public bool SuppressConnectErrors { get; set; }
 
     [RelayCommand]
     private async Task DisconnectAsync()
