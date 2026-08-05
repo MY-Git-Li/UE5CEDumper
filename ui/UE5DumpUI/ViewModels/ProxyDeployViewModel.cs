@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -804,6 +804,24 @@ public partial class ProxyDeployViewModel : ViewModelBase
     /// inject (best-effort auto-connect).</summary>
     public Func<Task>? RequestConnectAsync { get; set; }
 
+    /// <summary>True once the pipe is actually connected. Needed because
+    /// <see cref="RequestConnectAsync"/> is fire-and-forget — without a way to ASK, the
+    /// post-inject connect could only be attempted once and hoped for.</summary>
+    public Func<bool>? IsConnectedProbe { get; set; }
+
+    /// <summary>How long to keep retrying the post-inject connect.</summary>
+    /// <remarks>
+    /// The injected DLL scans BEFORE it opens its pipe (the proxy path is the opposite —
+    /// it opens the pipe first and scans on request), so the pipe simply does not exist
+    /// for the length of a full AOB scan. Measured on a stock UE 5.4 Development package:
+    /// 1 s auto-start delay + 7.8 s scan = the pipe appeared 8.8 s after injection, and
+    /// the single immediate attempt reported "The operation has timed out."
+    /// 45 s covers a slow scan with room to spare; each attempt is cheap and the status
+    /// line counts them, so a genuinely dead DLL is obvious rather than silent.
+    /// </remarks>
+    public static readonly TimeSpan PostInjectConnectWindow = TimeSpan.FromSeconds(45);
+    internal static readonly TimeSpan PostInjectRetryDelay = TimeSpan.FromSeconds(1);
+
     /// <summary>Load injection-candidate processes for the picker. showAll=false
     /// returns only UE games.</summary>
     public async Task<IReadOnlyList<GameProcessInfo>> ListGameProcessesAsync(bool showAll)
@@ -911,12 +929,53 @@ public partial class ProxyDeployViewModel : ViewModelBase
         // Suggested column flags an injection-only game (never had a proxy deployed).
         RememberInjection(target.Path);
 
-        // Auto-connect the pipe (best-effort — the DLL auto-starts its pipe server).
-        if (RequestConnectAsync is not null)
+        await ConnectWithRetryAsync(target.Name, target.Pid);
+    }
+
+    /// <summary>Connect to the freshly injected DLL, retrying until its pipe appears.</summary>
+    /// <remarks>
+    /// A single immediate attempt cannot work: the injected DLL runs its whole AOB scan
+    /// before opening the pipe, so for several seconds there is nothing to connect TO.
+    /// The failure looked like a broken injection ("Connection Error / The operation has
+    /// timed out") when the injection had in fact succeeded and the DLL was mid-scan —
+    /// the log showed the pipe opening 8.8 s later and then waiting for a client that
+    /// never came back.
+    /// </remarks>
+    private async Task ConnectWithRetryAsync(string targetName, int pid)
+    {
+        if (RequestConnectAsync is null) return;
+
+        var deadline = DateTime.UtcNow + PostInjectConnectWindow;
+        int attempt = 0;
+        while (DateTime.UtcNow < deadline)
         {
+            attempt++;
             try { await RequestConnectAsync(); }
-            catch (Exception ex) { _log.Warn("ProxyDeploy", $"Auto-connect after inject failed: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                _log.Warn("ProxyDeploy", $"Auto-connect after inject attempt {attempt} failed: {ex.Message}");
+            }
+
+            // No probe wired (tests, or an older composition) — keep the old
+            // single-shot behaviour rather than spinning for 45 s on no information.
+            if (IsConnectedProbe is null) return;
+            if (IsConnectedProbe()) 
+            {
+                SetOperationResult($"Injected into {targetName} (PID {pid}) — connected.", 0);
+                return;
+            }
+
+            SetOperationResult(
+                $"Injected into {targetName} (PID {pid}) — waiting for the DLL to finish its "
+                + $"scan before its pipe opens (attempt {attempt})...", 0);
+            await Task.Delay(PostInjectRetryDelay);
         }
+
+        SetOperationResult(
+            $"Injected into {targetName} (PID {pid}), but its pipe never opened within "
+            + $"{PostInjectConnectWindow.TotalSeconds:F0}s ({attempt} attempts). The injection "
+            + "succeeded — check the DLL's init log.", 0);
+        _log.Warn("ProxyDeploy", $"Post-inject connect gave up after {attempt} attempts");
     }
 
     [RelayCommand]

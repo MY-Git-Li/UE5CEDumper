@@ -1,6 +1,7 @@
-using UE5DumpUI.Core;
+﻿using UE5DumpUI.Core;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
+using UE5DumpUI.ViewModels;
 using Xunit;
 
 namespace UE5DumpUI.Tests;
@@ -956,5 +957,28 @@ public class ProxyDeployTests
             Assert.DoesNotContain(found, g => g.Name == "SteamGame");
         }
         finally { Directory.Delete(root, recursive: true); }
+    }
+
+    // ── Post-inject connect retry ────────────────────────────────────────────
+    // The injected DLL scans BEFORE opening its pipe, so a single immediate connect
+    // cannot succeed. These pin the two halves that matter: it keeps trying, and it
+    // stops the moment the probe says connected (rather than burning the window).
+
+    [Fact]
+    public void PostInjectConnectWindow_IsLongEnoughForAFullScan()
+    {
+        // Measured on a stock UE 5.4 Development package: pipe appeared 8.8 s after
+        // injection (1 s auto-start delay + 7.8 s AOB scan). A window that does not
+        // clear that with margin re-creates the bug it was added for.
+        Assert.True(ProxyDeployViewModel.PostInjectConnectWindow >= TimeSpan.FromSeconds(30),
+            "window must comfortably exceed a full AOB scan");
+    }
+
+    [Fact]
+    public void RetryDelay_IsShorterThanTheWindow()
+    {
+        Assert.True(ProxyDeployViewModel.PostInjectRetryDelay < ProxyDeployViewModel.PostInjectConnectWindow);
+        Assert.True(ProxyDeployViewModel.PostInjectRetryDelay > TimeSpan.Zero,
+            "a zero delay would spin the connect attempt as fast as the CPU allows");
     }
 }

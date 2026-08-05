@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -627,6 +627,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log, platform);
             // Auto-connect the pipe after a successful in-UI DLL injection.
             ProxyDeploy.RequestConnectAsync = () => ConnectCommand.ExecuteAsync(null);
+            // Lets the post-inject retry ASK whether it worked instead of assuming.
+            ProxyDeploy.IsConnectedProbe = () => IsConnected;
             // Persist the remembered-proxy map (a Dictionary mutation isn't caught
             // by the [ObservableProperty] change-tracking save).
             ProxyDeploy.RequestOptionSave = ScheduleOptionSave;

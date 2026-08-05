@@ -1727,7 +1727,35 @@ redistributables) when GObjects resolved inside the main executable.
 > same `0x7FF6…` range as GObjects, `validated=yes` in the DynOff summary, and Start-from-GWorld +
 > Value Search working. **FAIL, but informatively** = `REFUSED 0x… — it is in 'EOSSDK-Win64-Shipping.dll'`
 > followed by no GNames at all, which would mean the in-executable patterns genuinely have no
-> coverage for a UE 5.4 Development build and the answer is a new AOB, not a ranking rule. ⬜
+> coverage for a UE 5.4 Development build and the answer is a new AOB, not a ranking rule.
+>
+> ### ✅ VERIFIED 2026-08-05 14:24 — first re-run, and it corrected itself in one pass
+>
+> ```
+> Module anchor set to 'DumperTest.exe' — later targets must resolve there unless this build is modular
+> [GNames] GNAM_SF_1: REFUSED 0x7FFCEF5F8FC0 — it is in 'EOSSDK-Win64-Shipping.dll' ...
+> [GNames] GNAM_V1: 166 matches, validated -> 0x7FF675090840
+> ```
+>
+> | | before | after |
+> |---|---|---|
+> | GNames | `0x7FFCEF5F8FC0` (EOSSDK) | **`0x7FF675090840`** — same module as GObjects |
+> | DynOff | `validated=NO (DEFAULTS)` | **`validated=yes`** |
+> | GWorld | `does not deref to a UWorld`, recovery failed | resolves, no warning |
+>
+> `FField Next=+0x18 / FProp Offset=+0x44` are now **validated**, which settles a second question:
+> those are the genuine offsets for a Development build and differ from Shipping's `+0x20/+0x4C`
+> legitimately. Five refused patterns later, `GNAM_V1` won in batch 4 with the correct address.
+>
+> **Two follow-ups the same run exposed, both fixed in build 2666:**
+> - the refusal logged **once per match** — 8–11 identical lines per pattern, five patterns deep.
+>   Now one line per pattern carrying the count.
+> - **the UI reported "Connection Error / The operation has timed out" on a successful injection.**
+>   The injected DLL scans BEFORE opening its pipe (the proxy path is the opposite), so the pipe
+>   appeared **8.8 s** after injection — 1 s auto-start delay plus a 7.8 s scan that got *longer*
+>   because refusing EOSSDK made it run all 31 patterns. The UI attempted the connect exactly once,
+>   immediately. It now retries for 45 s, asking an `IsConnectedProbe` whether it worked instead of
+>   assuming, and says which attempt it is on.
 
 **D2 — Group Scan cannot see the object's own scalar UPROPERTYs.** Effort **M** · Risk med.
 On the Shipping package (where the pointers ARE correct), a Group First Scan over

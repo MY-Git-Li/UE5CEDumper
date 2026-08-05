@@ -980,7 +980,11 @@ static std::string ModuleNameOf(HMODULE h) {
 
 /// Should a multi-module candidate at `resolved` be refused?
 /// Only when the anchor says the build is monolithic and the candidate is elsewhere.
-static bool RefuseForeignModule(uintptr_t resolved, const char* targetName, const char* sigId) {
+///
+/// Does NOT log: a pattern with N matches all resolving to the same foreign pointer would
+/// print N identical lines, and the first live run did exactly that -- 8 to 11 copies per
+/// pattern, five patterns deep. The caller accumulates and prints one line per pattern.
+static bool RefuseForeignModule(uintptr_t resolved, std::string* outModule) {
     if (!s_moduleAnchor || !resolved) return false;
     const HMODULE mainExe   = GetModuleHandleW(nullptr);
     const HMODULE anchorMod = ModuleOfAddress(s_moduleAnchor);
@@ -989,11 +993,7 @@ static bool RefuseForeignModule(uintptr_t resolved, const char* targetName, cons
     const HMODULE candMod = ModuleOfAddress(resolved);
     if (candMod == mainExe) return false;
 
-    Sein::Warn("SCAN", "[%s] %s: REFUSED 0x%llX — it is in '%s' but GObjects resolved inside the "
-               "main executable, so this build is monolithic and the engine globals cannot live "
-               "in another module",
-               targetName, sigId, (unsigned long long)resolved,
-               ModuleNameOf(candMod).c_str());
+    if (outModule && outModule->empty()) *outModule = ModuleNameOf(candMod);
     return true;
 }
 
@@ -1306,12 +1306,17 @@ static uintptr_t ScanForTarget(
 
                 uintptr_t bestResult = 0;
                 uintptr_t bestMatchAddr = 0;
+                int         refusedCount = 0;
+                uintptr_t   refusedAddr  = 0;
+                std::string refusedModule;
                 for (uintptr_t matchAddr : multiMatches) {
                     uintptr_t resolved = TryResolveMatch(matchAddr, *sig, validate);
                     // Gate on the RESOLVED address, not the match site: the match is only
                     // where the instruction sits, while `resolved` is the pointer we are
                     // about to hand the whole dumper.
-                    if (resolved && RefuseForeignModule(resolved, report.targetName, sig->id)) {
+                    if (resolved && RefuseForeignModule(resolved, &refusedModule)) {
+                        ++refusedCount;
+                        refusedAddr = resolved;
                         continue;
                     }
                     if (resolved) {
@@ -1319,6 +1324,13 @@ static uintptr_t ScanForTarget(
                         bestMatchAddr = matchAddr;
                         break;
                     }
+                }
+                if (refusedCount) {
+                    Sein::Warn("SCAN", "[%s] %s: REFUSED %d match(es) resolving to 0x%llX in '%s' "
+                               "— GObjects resolved inside the main executable, so this build is "
+                               "monolithic and the engine globals cannot live in another module",
+                               report.targetName, sig->id, refusedCount,
+                               (unsigned long long)refusedAddr, refusedModule.c_str());
                 }
 
                 if (g_validationDbgCount > kMaxValidationDbgLogs) {
