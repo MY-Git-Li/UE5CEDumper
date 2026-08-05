@@ -36,38 +36,45 @@
 
 其餘（B18、B19、B2、B25、B26、B13/B41…）都不會造成錯誤資料或當機，可以慢慢來。
 
-### ✅ `Stop conn drain TIMEOUT` —— 根因已確定（不必再等它發生）
+### 🔍 `Stop conn drain TIMEOUT` —— invoke 那個假設已經被排除；**先不要動 code**
 
-原本的兩個假設是「卡在 `ReadFile`（cancel 沒攔到）」對「卡在指令裡（cancel 幫不上忙）」。
-**答案是第二個。** 全部的答案就是 `pipe-20260804-221945.log`（build 2638）裡連續五行：
+> **這一段一度寫成「根因已確定」。那是錯的，而收回這件事比當初那個結論有價值。**
+> 當時的推論是：`teleport_get_pose`／`teleport_get_pov` 在 22:19:39.590/591 進來、
+> *「從來沒回覆」*，所以連線卡在指令裡面。
+> **但這份 pipe log 對任何指令都沒有「回覆」標記** —— 193 個 `Received`、0 個 `Sent`。
+> 所以「沒有回覆那一行」什麼都不能證明：同一個檔案裡 78 個 `teleport_get_pov`
+> 在一整段健康的 session 中全部同樣「沒有回覆」。
 
-```
-22:19:39.590  Received: {"cmd":"teleport_get_pose","id":291}   <- 從來沒回覆
-22:19:39.591  Received: {"cmd":"teleport_get_pov","id":292}    <- 從來沒回覆
-22:19:40.034  Stop entry (conns=2)
-22:19:40.034  Stop cancels+wake done (0 ms)        <- cancel 有跑，而且完全沒作用
-22:19:45.035  Stop conn drain TIMEOUT, 2 left (5000 ms)
-```
+**log 真正能確定的事**（`pipe-20260804-221945.log`，build 2638）：
+`Stop entry (conns=2)` → `cancels+wake done (0 ms)` → `conn drain TIMEOUT, 2 left (5000 ms)`。
+兩條連線執行緒同時撐過了 `Tot::RequestShutdown()` 和對每一個連線 handle 的 `CancelIoEx`
+（`Fern.cpp:481`、`:507-510`），然後把 5 秒預算燒完。
 
-兩條連線都**卡在指令裡面**，而且已經進去 0.44 秒，兩個都沒有回覆。
-原因在 `Wirbel.cpp:835`：`teleport_get_pov` 會做 `InvokeRetVec(GetCameraLocation)` +
-`InvokeRetVec(GetCameraRotation)`，兩個 **5 秒 timeout** 的 game-thread invoke ——
-那段程式碼上面的註解其實早就預言了這個形狀（「two per poll = a ~10s stall」）。
-invoke 從 39.59 開始，drain 在 45.035 放棄；兩個 5 秒是同一個 5 秒。
+**讀 code 排除掉的事 —— invoke 那個假設，完全排除。**
+`UE5_Shutdown`（`Frieren.cpp:587`）是先呼叫 **`Stark::Shutdown()`，才呼叫 `s_pipeServer.Stop()`**，
+而 `Stark::Shutdown` 會把整個 invoke queue 排空、每個 pending promise 設成 `-7`
+（`Stark.cpp:328-340`）。所以卡在 `EnqueueInvoke` 的 `future.wait_for` 的 pipe thread
+**在 `Stop()` 被進入之前就已經被放掉了** —— 這個順序當初就是為了這件事，註解也是這樣寫的。
 
-**`Tot` 的取消機制在這裡幫不上忙** —— 卡在 Stark dispatch queue 上的執行緒不是處在可取消的等待，
-這正是為什麼 `cancels+wake done (0 ms)` 後面接的是一個完整長度的 drain。
-上面那個 `IsGameThreadResponsive()` 只在「已知卡住」時才跳過 invoke；
-一個還在 tick、只是很慢的執行緒仍然要付完整的 timeout。
+因此「讓 Stark 的 invoke 等待去看 `Tot::Requested()`」會是
+**替一個在這條路徑上不可能發生的情況加一個輪詢迴圈**。2026-08-05 評估後否決。
 
-**重現方式（很便宜，不需要懂遊戲）**：Teleport 分頁**開著自動更新**
-（它會輪詢 `teleport_get_pose` + `teleport_get_pov`），UI 連著，然後取消勾選 CE record。
+> 另外就算單獨看它本身也該否決：去看完整的 `Tot::Requested()` 會讓
+> **已經 latch 的 `g_perCommand`**（一條 lane 掉線時設起來，只有在全部斷線後重新連線才清除）
+> 去中斷**另一條 lane** 上的 invoke —— 等於製造一個全新的、B4 家族的無聲失敗。
+> 如果哪天真的要做，必須只看 `ShutdownRequested()`。
 
-**兩個候選修法，而且都不是「ReadFile 的 cancel」那個方向**：
-(a) 讓 Stark 的 invoke 等待會看 `Tot::Requested()`，這樣關閉時 5 秒 timeout 會直接塌掉；
-(b) 讓 drain 不要等一條「已知正在 dispatch 裡面」的連線。
-**(a) 才是真正的修法** —— 它同時縮短所有「關閉時剛好有 invoke 在飛」的情況。
-Effort **S–M** · Risk 中（動到所有 game-thread 指令共用的那個等待）。
+**剩下的部分不需要任何聰明的做法。** build 2641 已經加了 straggler 診斷
+（`Fern.cpp:576-595`），它會對每一條還活著的連線印出
+`INSIDE a command (cancel cannot reach it until it returns)` 或
+`idle in ReadFile (the I/O cancel should have freed it)`，外加指令名稱和已經卡了幾毫秒。
+**22:19:45 那筆是 build 2638，比它早，這就是問題還開著的原因。**
+之後沒有再觸發過，因為 2026-08-05 兩次都沒有重現條件 ——
+兩次的 `Stop entry` 都是 `conns=0`，也就是 UI 早就斷開了。
+
+**剩下要做的只是一個 30 秒的重現，不是改 code**：把 UI 連上、**保持連著**、取消勾選 CE record。
+如果 CE 凍住了，`grep "straggler:" pipe-0.log` 就會直接說是哪一半。
+那兩半需要相反的修法，用猜的比 grep 貴。
 
 ### 兩個失敗共同的教訓
 

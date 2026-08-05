@@ -1719,44 +1719,47 @@ Pick up when the active plan finishes or when blocked.
 > |---|---|---|
 > | **1** | **B28** — CJK FText mojibake | The only open item that shows the user **wrong data**. Needs a CJK-language game; trigger is an even-length string containing a `U+xx00` char (一, 第…一, 統一). Counter-check STVoyager (UTF-8 FText) still reads correctly — that is the regression direction. |
 > | **2** | **B4** — CE mailbox survives a dead UI client | Fails **silently**: lookups answer 0 while reporting `scanned=<full pool>`, which reads as "the object isn't there". A CE-only session stays broken for its whole life. |
-> | **3** | ~~`Stop conn drain TIMEOUT`~~ | **ANSWERED 2026-08-05 — the capture was already on disk, no recurrence needed. It is the "inside a command" half.** See below. |
+> | **3** | `Stop conn drain TIMEOUT` | Still open — but **one of the two hypotheses is now eliminated**, and no code should be written until the straggler line fires. See below. |
 >
 > The rest (B18, B19, B2, B25, B26, B13/B41 …) cannot produce wrong data or a crash, so they can wait.
 >
-> ### ✅ `Stop conn drain TIMEOUT` — root cause, from `pipe-20260804-221945.log` (build 2638)
+> ### 🔍 `Stop conn drain TIMEOUT` — the invoke hypothesis is DEAD; do not "fix" it
 >
-> The two hypotheses were "parked in `ReadFile` (cancel missed it)" vs "inside a command (cancel
-> cannot help)". **It is the second.** The whole answer is five consecutive lines:
+> > **This entry briefly claimed the root cause was found. It was not, and the retraction is worth
+> > more than the claim.** The reasoning was: `teleport_get_pose`/`teleport_get_pov` arrive at
+> > 22:19:39.590/591, *"never answered"*, therefore the connections were inside a command. **The pipe
+> > log has no response marker for ANY command** — 193 `Received`, zero `Sent` — so "no response
+> > line" is not evidence of anything. 78 `teleport_get_pov` in that same file are equally
+> > "unanswered" throughout a perfectly healthy session.
 >
-> ```
-> 22:19:39.590  Received: {"cmd":"teleport_get_pose","id":291}   <- never answered
-> 22:19:39.591  Received: {"cmd":"teleport_get_pov","id":292}    <- never answered
-> 22:19:40.034  Stop entry (conns=2)
-> 22:19:40.034  Stop cancels+wake done (0 ms)        <- the cancel ran, and did nothing
-> 22:19:45.035  Stop conn drain TIMEOUT, 2 left (5000 ms)
-> ```
+> **What the log DOES establish** (`pipe-20260804-221945.log`, build 2638):
+> `Stop entry (conns=2)` → `cancels+wake done (0 ms)` → `conn drain TIMEOUT, 2 left (5000 ms)`.
+> Two connection threads survived both `Tot::RequestShutdown()` and a `CancelIoEx` on every live
+> connection handle (`Fern.cpp:481`, `:507-510`), then burned the full 5 s budget.
 >
-> Both connections were **inside a command**, 0.44 s deep, and neither logged a response.
-> `Wirbel.cpp:835` is why: `teleport_get_pov` does `InvokeRetVec(GetCameraLocation)` +
-> `InvokeRetVec(GetCameraRotation)`, two game-thread invokes at the **5 s** invoke timeout — the
-> comment right above it already predicted this shape ("two per poll = a ~10s stall that serializes
-> behind every other pipe command"). The invokes started at 39.59 and the drain gave up at 45.035;
-> the two 5 s timeouts are the same 5 s.
+> **What reading the code eliminates — the invoke hypothesis, completely.**
+> `UE5_Shutdown` (`Frieren.cpp:587`) calls **`Stark::Shutdown()` BEFORE `s_pipeServer.Stop()`**, and
+> `Stark::Shutdown` drains the invoke queue setting every pending promise to `-7` (`Stark.cpp:328-340`).
+> A pipe thread blocked in `EnqueueInvoke`'s `future.wait_for` is therefore **already released before
+> `Stop()` is even entered** — the ordering exists for exactly this reason and the comment says so.
+> So "make the Stark invoke wait observe `Tot::Requested()`" would be **a poll loop for a case that
+> cannot occur on this path**. Considered and rejected 2026-08-05.
 >
-> **`Tot` cancellation cannot help here** — a thread blocked on the Stark dispatch queue is not in a
-> cancellable wait, which is exactly why `cancels+wake done (0 ms)` is followed by a full-length
-> drain. The `IsGameThreadResponsive()` guard above it only skips the invoke when the thread is
-> *known* stalled; a thread that is ticking but slow still pays the full timeout.
+> > Rejected on its own merits too, for the record: honouring the full `Tot::Requested()` would let a
+> > **latched `g_perCommand`** (set when one lane drops, cleared only on a fresh connect into an empty
+> > registry) abort invokes on the *other* lane — manufacturing a new silent-failure bug of exactly
+> > the B4 family. If it is ever wanted, it must key on `ShutdownRequested()` alone.
 >
-> **Repro (cheap, no game knowledge needed):** Teleport tab with **auto-refresh ON** (it polls
-> `teleport_get_pose` + `teleport_get_pov`), UI connected, then untick the CE record. The freeze is
-> the drain waiting on the in-flight poll.
+> **What is left, and why it needs no cleverness.** The straggler diagnostic shipped in build 2641
+> (`Fern.cpp:576-595`) prints, per surviving connection, `INSIDE a command (cancel cannot reach it
+> until it returns)` vs `idle in ReadFile (the I/O cancel should have freed it)` plus the command
+> name and its age. **The 22:19:45 capture predates it (build 2638), which is why the question is
+> still open.** It has not fired since because neither 2026-08-05 run reproduced the condition —
+> both logged `conns=0` at `Stop entry`, i.e. the UI was already disconnected.
 >
-> **Two candidate fixes, and they are not the ReadFile-cancel one:** (a) make the Stark invoke wait
-> observe `Tot::Requested()` so a shutdown collapses the 5 s timeout, or (b) have the drain not wait
-> on a connection already known to be inside a dispatch. (a) is the real fix — it also shortens every
-> other shutdown that catches an invoke in flight. Effort **S–M** · Risk med (touches the invoke wait
-> that every game-thread command shares).
+> **The whole remaining task is a 30-second repro, not a code change:** connect the UI, leave it
+> connected, untick the CE record. If CE freezes, `grep "straggler:" pipe-0.log` names which half it
+> is. Those two need opposite fixes, and guessing costs more than the grep.
 >
 > ⬜ does **not** mean "probably fine". It means nobody has looked. Most of the fourteen were
 > simply not exercised (no wrapper installed, no UI killed mid-command, no Extra Scan).
