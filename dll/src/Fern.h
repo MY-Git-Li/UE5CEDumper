@@ -56,6 +56,16 @@ private:
         std::string        cmdName;           // last/current command on this connection
         std::atomic<long long> cmdStartMs{0}; // steady-clock ms when it began
         std::atomic<bool>  closed{false};     // CloseHandle done exactly once
+        // A duplicate of the SERVING thread's own handle, so Stop can call
+        // CancelSynchronousIo on it. CancelIoEx cancels ASYNCHRONOUS requests; these
+        // pipe instances are created without FILE_FLAG_OVERLAPPED, so a thread parked in
+        // ReadFile has no pending IRP for CancelIoEx to find and it returns
+        // ERROR_NOT_FOUND. Measured 2026-08-05 on the first Stop that ever caught two
+        // idle connections: "0 accepted, 2 had nothing pending", then 49 re-asserts over
+        // the full 5 s budget, all reporting the same. CancelSynchronousIo is the API for
+        // a synchronous operation blocking a known thread, and it needs the THREAD handle
+        // -- which only the serving thread itself can hand us.
+        std::atomic<HANDLE> servingThread{nullptr};
     };
 
     Routine::SafeThread        m_acceptThread;

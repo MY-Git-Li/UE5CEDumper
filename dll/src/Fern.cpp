@@ -520,6 +520,12 @@ void Fern::Stop() {
                 continue;
             if (CancelIoEx(c->pipe, nullptr)) ++accepted;
             else                              ++notFound;
+            // AND the synchronous one, which is the case that actually occurs here.
+            // CancelIoEx is kept because it is correct for anything genuinely async and
+            // costs nothing when there is nothing to find; CancelSynchronousIo is what
+            // frees a thread sitting in a blocking ReadFile on a non-overlapped handle.
+            if (HANDLE th = c->servingThread.load(std::memory_order_acquire))
+                CancelSynchronousIo(th);
         }
     };
 
@@ -867,6 +873,23 @@ void Fern::CloseConnOnce(Connection& conn) {
 void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
     HANDLE pipe = conn->pipe;
 
+    // Publish a real handle to THIS thread so Stop can cancel the synchronous ReadFile
+    // it will spend almost all its life parked in. GetCurrentThread() is a pseudo-handle
+    // that always means "the calling thread", so it is useless to anyone else -- it has
+    // to be duplicated into a genuine one. Closed in the cleanup below.
+    {
+        HANDLE dup = nullptr;
+        if (DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
+                            GetCurrentProcess(), &dup,
+                            THREAD_TERMINATE, FALSE, DUPLICATE_SAME_ACCESS)) {
+            conn->servingThread.store(dup, std::memory_order_release);
+        } else {
+            Sein::Warn("PIPE:cmd", "PipeServer: could not duplicate serving-thread handle "
+                       "(err=%lu) — this connection cannot be woken out of ReadFile on Stop",
+                       GetLastError());
+        }
+    }
+
     // Batch-suppress repetitive command logging (e.g. 244 x get_object_list)
     std::string lastCmd;
     int repeatCount = 0;
@@ -959,6 +982,12 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
     }
 
     CloseConnOnce(*conn);
+
+    // Release the duplicated thread handle. Exchange first so Stop, which reads it
+    // under m_connMutex, can never see a handle this thread has already closed --
+    // and by here we are past the erase from m_conns, so Stop cannot be iterating us.
+    if (HANDLE th = conn->servingThread.exchange(nullptr, std::memory_order_acq_rel))
+        CloseHandle(th);
 
     if (last) {
         Radar::SessionManager::Instance().DropAll();

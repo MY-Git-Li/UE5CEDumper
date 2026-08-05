@@ -1802,15 +1802,36 @@ Pick up when the active plan finishes or when blocked.
 > cancel should have freed it)"* but **not whether the cancel had anything to free** — those are
 > different bugs: `Stop cancel issued: N accepted, M had nothing pending`.
 >
-> **① Log-derivable. Verification is one grep, and it needs the same repro:** UI connected, untick
-> the CE record. `grep "Stop conn drain" pipe-0.log`.
-> **PASS** = `satisfied, 0 left (… ms, N cancel re-asserts)` — and **N ≥ 1 is the proof the fix did
-> work**, because N = 0 only means no connection ever survived the first cancel (the fix was not
-> needed that run). **FAIL** = `TIMEOUT` still, with `straggler: idle in ReadFile` — that would mean
-> `CancelIoEx` cannot wake this handle at all rather than having missed a window, and the new
-> `Stop cancel issued:` line says which (`M had nothing pending` = missed window; `N accepted` with
-> the thread still parked = the cancel is accepted and ignored, a different fix).
-> ⬜ unverified — shipped after the capture, not yet re-run.
+> ### ❌ That fix FAILED, and its own instrumentation said why — build 2651 has the real one
+>
+> Re-run 2026-08-05 12:55 (DumperTest, DLL build 2650), and the answer was in the line added for
+> exactly this:
+>
+> ```
+> Stop entry (conns=2)
+> Stop cancel issued: 0 accepted, 2 had nothing pending
+> straggler: idle in ReadFile ×2  (last cmd 'teleport_get_markers' / 'walk_world')
+> Stop conn drain TIMEOUT, 2 left (5027 ms, 49 cancel re-asserts)
+> ```
+>
+> **49 re-asserts, every one reporting nothing pending.** So it is not a missed window — my
+> hypothesis is refuted by my own diagnostic. `CancelIoEx` cancels **asynchronous** requests; these
+> pipe instances are created without `FILE_FLAG_OVERLAPPED`, so a thread parked in a blocking
+> `ReadFile` has no pending IRP for it to find and it returns `ERROR_NOT_FOUND` every time, forever.
+>
+> **`CancelSynchronousIo` is the API for a synchronous operation blocking a known thread** — and it
+> takes the **thread** handle, which only the serving thread can produce. Build 2651: each
+> connection publishes a `DuplicateHandle` of its own thread, `Stop` calls `CancelSynchronousIo` on
+> it alongside the (kept, harmless) `CancelIoEx`, and the handle is closed by the owner after it
+> unregisters.
+>
+> **Same grep, same repro:** UI connected, untick the CE record → `grep "Stop conn drain"`.
+> **PASS** = `satisfied, 0 left (… ms, N cancel re-asserts)`. **FAIL** = `TIMEOUT` again, which
+> would mean the thread is not in `ReadFile` at all and the straggler line is wrong about it.
+> ⬜ unverified — 2651 shipped after this capture.
+>
+> *The re-assert loop is kept. It cost nothing (49 iterations of a failing syscall over 5 s) and it
+> is what proved the diagnosis wrong quickly; a single shot would have looked like bad luck.*
 >
 > ⬜ does **not** mean "probably fine". It means nobody has looked. Most of the fourteen were
 > simply not exercised (no wrapper installed, no UI killed mid-command, no Extra Scan).
@@ -1954,8 +1975,31 @@ Pick up when the active plan finishes or when blocked.
   to 0 and `ipc` absorbed the probe's own 93–125 ms round-trip. These are the numbers
   [multipipe-eval.md](multipipe-eval.md) reasons from.
 
-- ⬜ **CJK FText no longer renders as ASCII mojibake** (build 2599, B28) — *no log needed; the
-  evidence is on screen.*
+- ✅ **CJK FText no longer renders as ASCII mojibake** (build 2599, B28) — **VERIFIED 2026-08-05 on
+  the DumperTest sample, Shipping package, DLL build 2650.** All **eight** FText fields render as
+  CJK in Live Walker, and every control holds:
+
+  | field | rendered | role |
+  |---|---|---|
+  | `Text_Even2_OneNull` 統一 · `Text_Even2_TwoNull` 一言 · `Text_Even4_TwoNull` 統一言語 | correct | the trigger cases (even length, U+xx00) |
+  | `Text_Odd3_OneNull` · `Text_Even6_NoNull` 日本語テスト | correct | length/parity controls |
+  | `Text_Ascii` `DumperTest FText ASCII` | correct | **the other-direction control** — a fix that swung to always-UTF-16 would have broken this |
+  | `Text_Localized` 統一言語 | correct | different `FTextHistory`, agrees with `Text_Even4_TwoNull` ⇒ the fault was never history traversal |
+  | `Str_*` ×4, `Name_Cjk` | correct | FString + FNamePool paths, unaffected as expected |
+
+  **This closes the one open item that could show the user WRONG DATA.** The counter-check on
+  STVoyager's UTF-8 FText is a separate, licensee-specific case and stays open.
+
+  > **Two observations from the same screen, neither of them B28:**
+  > 1. `Text_Empty` renders as **`No`**. An `FText::GetEmpty()` should read as empty; `No` looks
+  >    like a truncated `None` or a mis-typed render. Cheap to chase, cosmetic, but it is the empty
+  >    display-string path and nothing else covers it. **NEW, unfiled.**
+  > 2. The package under test was built from a **stale** `DumperTestActor.cpp` (退一步 where the
+  >    repo had 走一步), so the odd-length control was not the documented one. It renders correctly
+  >    either way, so B28's result stands — but see the identity-record note below; this is exactly
+  >    what `capture_package_identity.py --project` now detects.
+
+  *Original instructions below.*
   > **❌ NOT tested by the 2026-08-05 DQ7R pass, and the near-miss is worth recording so the next
   > attempt does not repeat it.** The rows inspected (`Name` / `DisplayName` / `ListName` = 忘名)
   > are **`StrProperty`** — FString, which goes through the UTF-16-only reader and **never had this
@@ -2298,7 +2342,22 @@ Shipped + unit-tests-pass but unproven on real games:
     match tightened; per-instance restore bases instead of one representative). L4's prune guard was
     touched again in build 2531 — see the Solide pool-truncation entry below, verify them together. ⬜
 
-- **Value Search `TSet<T>` / `TMap<K,V>` scan (key: V1a)** (build 927). Scan a known value held
+- ✅ **Value Search `TSet<T>` / `TMap<K,V>` scan (key: V1a)** — **VERIFIED 2026-08-05 (DumperTest,
+  build 2650), ⬜ since build 927.** Scanning `4242` returned `DumperTestActor.Set_Int[1]`
+  (IntProperty, Reflected, offset `0x358`) on both the live actor and the CDO; scanning `222`
+  returned `DumperTestActor.Map_NameToInt.Value[1]` at `0x3A8`. Both render with the element index,
+  which is what the row format promised. The sparse-walk geometry hands back the slots we expect.
+  *Not yet exercised: container reallocation between scans (the degrade-don't-lie case).*
+- ✅ **Value Search `TOptional<T>` scan (key: V1c)** — **VERIFIED 2026-08-05, ⬜ since build 942.**
+  `24680` returned `DumperTestActor.Opt_Int_Set` (IntProperty, `0x468`), and — the criterion that
+  actually matters because it is negative — **a scan for `0` did NOT surface `Opt_Int_Unset`**, so
+  the `bIsSet` gate holds and an unset optional is not being read as a zero.
+- ✅ **Value Search `NumericAll` (byte families included)** — **VERIFIED 2026-08-05, ⬜ since build
+  796.** `-5` (Int8Property) and `255` (ByteProperty) both returned results with NumericAll
+  selected. *The remaining half is a UX judgement, not a defect: whether the result volume for a
+  1-byte value is usable. The panel's own orange warning says it will flood, and this sample cannot
+  settle "usable" — that needs a real game's object count.*
+- **Value Search `TSet<T>` / `TMap<K,V>` scan — original instructions** (build 927). Scan a known value held
   in a `TSet<int>` / `TMap<K,int>` UPROPERTY → rows must render as `Set[idx]` / `Map.Key[idx]` /
   `Map.Value[idx]`, and a Next Scan must prune. The sparse-walk geometry
   (`Ubel::GetSetElementStride` / `GetMapPairLayout`) is shared with the container-aware Address

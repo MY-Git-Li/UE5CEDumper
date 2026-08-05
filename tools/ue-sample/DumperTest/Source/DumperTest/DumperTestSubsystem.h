@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // DumperTestSubsystem — spawns ADumperTestActor into every game world.
 //
 // WHY A SUBSYSTEM RATHER THAN PLACING THE ACTOR IN THE LEVEL. A level is a

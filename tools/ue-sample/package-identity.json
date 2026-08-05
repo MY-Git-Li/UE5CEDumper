@@ -1,7 +1,8 @@
 {
   "engine": "UE 5.4",
-  "source_commit": "8b812a5",
-  "captured_utc": "2026-08-05T04:40:00+00:00",
+  "source_commit": "2a561bd",
+  "source_sha256": "5c708ef27fef35f96976076a75a149193c6a3be7ddc5a7b3df7611543583ccac",
+  "captured_utc": "2026-08-05T05:04:12+00:00",
   "build_command": "\"C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Build\\BatchFiles\\Build.bat\" DumperTestEditor Win64 Development -Project=\"<project>\\DumperTest.uproject\" -WaitMutex",
   "packaged_root": "D:/UE_Analyze_Data/For Testing/DumperTest",
   "configs": {
@@ -21,7 +22,8 @@
         "RawInt": 0,
         "RawFloat": 0,
         "RawDouble": 0
-      }
+      },
+      "exe_mtime": "2026-08-05T04:35:15+00:00"
     },
     "Shipping": {
       "file": "DumperTest-Win64-Shipping.exe",
@@ -39,8 +41,16 @@
         "RawInt": 0,
         "RawFloat": 0,
         "RawDouble": 0
-      }
+      },
+      "exe_mtime": "2026-08-05T04:36:42+00:00"
     }
   },
-  "problems": []
+  "problems": [
+    "STALE BINARY: Development was built before 'DumperTestTypes.h' was last edited -- re-package before trusting any value from it",
+    "STALE BINARY: Shipping was built before 'DumperTestTypes.h' was last edited -- re-package before trusting any value from it"
+  ],
+  "built_from": {
+    "path": "D:/Unreal Projects/DumperTest\\Source\\DumperTest",
+    "source_sha256": "5c708ef27fef35f96976076a75a149193c6a3be7ddc5a7b3df7611543583ccac"
+  }
 }

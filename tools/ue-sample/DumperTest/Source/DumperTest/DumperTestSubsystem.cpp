@@ -1,4 +1,4 @@
-#include "DumperTestSubsystem.h"
+﻿#include "DumperTestSubsystem.h"
 
 #include "DumperTestActor.h"
 #include "Engine/World.h"
@@ -57,6 +57,34 @@ void ApplyIdleWhenNotForeground()
 	       CVar->GetInt());
 }
 
+/// Cap the frame rate. A ThirdPerson template on a modern GPU will happily render this
+/// empty level at several hundred FPS and pin the card doing it -- absurd for a test
+/// harness that exists to be alt-tabbed away from while you read property values.
+///
+/// Set from code for the same reason as the idle switch: this sample deliberately makes
+/// NO ini changes (see the cook-breaking ini in README.md), and keeping that property
+/// intact is worth more than saving three lines. `t.MaxFPS` is safe either way -- unlike
+/// t.IdleWhenNotForeground it is registered with no flags at all (UnrealEngine.cpp), so
+/// it is ECVF_Default and an ini would have been legal. Verified, not assumed.
+///
+/// Override with -DumperTestMaxFPS=N; 0 or less uncaps it.
+void ApplyMaxFPS()
+{
+	float MaxFPS = 60.f;
+	FParse::Value(FCommandLine::Get(), TEXT("DumperTestMaxFPS="), MaxFPS);
+
+	IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("t.MaxFPS"));
+	if (!CVar)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DumperTest] t.MaxFPS not found \u2014 frame rate left uncapped."));
+		return;
+	}
+
+	CVar->Set(*FString::SanitizeFloat(MaxFPS), ECVF_SetByCode);
+	UE_LOG(LogTemp, Warning, TEXT("[DumperTest] frame rate capped at %.0f FPS "
+	                              "(-DumperTestMaxFPS=0 to uncap)."), MaxFPS);
+}
+
 } // namespace
 
 bool UDumperTestSubsystem::ShouldCreateSubsystem(UObject* Outer) const
@@ -88,6 +116,7 @@ void UDumperTestSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		return;   // already spawned for this world
 	}
 
+	ApplyMaxFPS();
 	ApplyIdleWhenNotForeground();
 
 	FActorSpawnParameters Params;
