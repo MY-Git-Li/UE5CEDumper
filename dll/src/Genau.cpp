@@ -4,6 +4,7 @@
 // ============================================================
 
 #include "Genau.h"
+#include "Utf8Helpers.h"
 #include "Flamme.h"
 #include "Macht.h"
 #include "Stark.h"
@@ -932,6 +933,72 @@ static uintptr_t TryResolveMatch(uintptr_t matchAddr, const AobSignature& sig, V
 // per batch instead of once per pattern.
 static constexpr int kBatchSize = 8;
 
+// ── Module anchor for the multi-module fallback (D1) ─────────────────────────
+//
+// GObjects resolves FIRST, so by the time GNames/GWorld/GEngine scan we know which
+// module the engine's globals actually live in. That fact is worth more than any list.
+//
+// THE BUG THIS EXISTS FOR (measured 2026-08-05, stock UE 5.4 Development package):
+// every in-executable GNames pattern missed — the tables are Shipping-tuned — so the
+// multi-module fallback ran and matched a data pattern inside
+// `Engine\Binaries\Win64\EOSSDK-Win64-Shipping.dll`, whose pointer happened to reach a
+// plausible name pool. ValidateGNames accepted it, and GObjects (in the exe, 0x7FF675…)
+// and GNames (0x7FFCEF…) ended up in different modules on a MONOLITHIC build, which
+// cannot be right. Everything downstream failed from that one address: no Guid/Vector
+// struct -> offsets fell back to defaults wrong for this build -> GWorld would not
+// deref -> Start-from-GWorld and Value Search both failed. One misresolution, four
+// symptoms, and the scan reported success throughout.
+//
+// The rule is structural, NOT a denylist of SDK names. A denylist is a list, and this
+// repo has been bitten three times by fixes verified against their own list rather than
+// against the world (B34's CE filenames, B14's thread procs, B47's session). "The engine
+// globals are all in one module unless the build is modular" needs no maintenance and
+// cannot go stale.
+//
+// Multi-module support itself stays: a genuinely modular build puts GNames in
+// CoreUObject.dll, which is exactly why the pattern that won here is named GNAM_SAT425
+// (Satisfactory 4.25). When the anchor is a DLL we only REORDER; we refuse nothing.
+static uintptr_t s_moduleAnchor = 0;
+
+static HMODULE ModuleOfAddress(uintptr_t addr) {
+    HMODULE h = nullptr;
+    if (!addr) return nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCWSTR>(addr), &h);
+    return h;
+}
+
+static std::string ModuleNameOf(HMODULE h) {
+    wchar_t path[MAX_PATH] = {};
+    if (!h || !GetModuleFileNameW(h, path, MAX_PATH)) return "(unknown)";
+    std::wstring w(path);
+    auto slash = w.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) w = w.substr(slash + 1);
+    return Utf8Helpers::EncodeUtf16(w.c_str(), w.size());
+}
+
+/// Should a multi-module candidate at `resolved` be refused?
+/// Only when the anchor says the build is monolithic and the candidate is elsewhere.
+static bool RefuseForeignModule(uintptr_t resolved, const char* targetName, const char* sigId) {
+    if (!s_moduleAnchor || !resolved) return false;
+    const HMODULE mainExe   = GetModuleHandleW(nullptr);
+    const HMODULE anchorMod = ModuleOfAddress(s_moduleAnchor);
+    if (!anchorMod || anchorMod != mainExe) return false;   // modular build — allow
+
+    const HMODULE candMod = ModuleOfAddress(resolved);
+    if (candMod == mainExe) return false;
+
+    Sein::Warn("SCAN", "[%s] %s: REFUSED 0x%llX — it is in '%s' but GObjects resolved inside the "
+               "main executable, so this build is monolithic and the engine globals cannot live "
+               "in another module",
+               targetName, sigId, (unsigned long long)resolved,
+               ModuleNameOf(candMod).c_str());
+    return true;
+}
+
+void SetModuleAnchor(uintptr_t gobjects) { s_moduleAnchor = gobjects; }
+
 static uintptr_t ScanForTarget(
     const AobSignature* patterns, size_t count,
     ValidatorFn validate, ScanReport& report,
@@ -1223,10 +1290,30 @@ static uintptr_t ScanForTarget(
                     continue;
                 }
 
+                // Try candidates in the ANCHOR's module first. On a monolithic build a
+                // match anywhere else is then refused outright rather than merely
+                // deprioritised — see the s_moduleAnchor block above for the EOSSDK
+                // misresolution this prevents.
+                if (s_moduleAnchor) {
+                    const HMODULE anchorMod = ModuleOfAddress(s_moduleAnchor);
+                    std::stable_sort(multiMatches.begin(), multiMatches.end(),
+                        [&](uintptr_t a, uintptr_t b) {
+                            const bool aIn = ModuleOfAddress(a) == anchorMod;
+                            const bool bIn = ModuleOfAddress(b) == anchorMod;
+                            return aIn && !bIn;   // same-module first, order otherwise kept
+                        });
+                }
+
                 uintptr_t bestResult = 0;
                 uintptr_t bestMatchAddr = 0;
                 for (uintptr_t matchAddr : multiMatches) {
                     uintptr_t resolved = TryResolveMatch(matchAddr, *sig, validate);
+                    // Gate on the RESOLVED address, not the match site: the match is only
+                    // where the instruction sits, while `resolved` is the pointer we are
+                    // about to hand the whole dumper.
+                    if (resolved && RefuseForeignModule(resolved, report.targetName, sig->id)) {
+                        continue;
+                    }
                     if (resolved) {
                         bestResult = resolved;
                         bestMatchAddr = matchAddr;
@@ -1376,6 +1463,16 @@ uintptr_t FindGObjects(const char* hintPatternId) {
         Sein::Warn("SCAN:GObj", "FindGObjects: All patterns failed, trying data-section scan fallback...");
         result = FindGObjectsByDataScan();
         if (result) s_gobjectsMethod = "data_scan";
+    }
+
+    // Anchor every LATER target's multi-module fallback to whichever module GObjects
+    // came from. This is the only place that knows it, and it must be set however
+    // GObjects was found -- the data-scan fallback anchors just as well as the AOB.
+    if (result) {
+        SetModuleAnchor(result);
+        Sein::Info("SCAN:GObj", "Module anchor set to '%s' — later targets must resolve there "
+                   "unless this build is modular",
+                   ModuleNameOf(ModuleOfAddress(result)).c_str());
     }
 
     if (!result) {

@@ -1677,8 +1677,8 @@ Pick up when the active plan finishes or when blocked.
 Both came out of the config-only A/B (**same source, Shipping vs Development**) that this file has
 called the highest-value first cell since 2026-07-29. It produced them on day one.
 
-**D1 — GNames resolves into `EOSSDK-Win64-Shipping.dll` on a Development package.** Effort **M** ·
-Risk med. On the Shipping build of the *same source* everything resolves cleanly
+**D1 — GNames resolves into `EOSSDK-Win64-Shipping.dll` on a Development package.** ✅ **FIXED
+build 2661** — see the fix note at the end of this item. Effort **M** · Risk med. On the Shipping build of the *same source* everything resolves cleanly
 (`validated=yes`, GWorld fine). On Development:
 
 ```
@@ -1703,6 +1703,31 @@ fail.** One misresolution, four visible symptoms.
 why the winning pattern is named `GNAM_SAT425` (Satisfactory 4.25). The fix is not to remove it but
 to **rank same-module-as-GObjects first, and refuse an unrelated third-party DLL** (`EOSSDK`,
 redistributables) when GObjects resolved inside the main executable.
+
+> ### ✅ Fixed build 2661 — a module ANCHOR, not a denylist
+>
+> GObjects resolves first, so by the time GNames/GWorld/GEngine scan we already know which module
+> the engine's globals live in. `Genau.cpp` now records that as `s_moduleAnchor` (set however
+> GObjects was found — the data-scan fallback anchors as well as the AOB), and the multi-module
+> pass uses it two ways: candidates in the anchor's module are tried **first**, and if the anchor is
+> the **main executable** — i.e. the build is monolithic — a candidate resolving anywhere else is
+> **refused outright**, naming the module it came from.
+>
+> **Deliberately not a list of SDK names.** This repo has been bitten three times by a fix verified
+> against its own list rather than against the world (B34's three CE filenames, B14's seven thread
+> procs, B47's session). *"The engine globals are all in one module unless the build is modular"* is
+> structural, needs no maintenance, and cannot go stale as new redistributables appear.
+>
+> **Multi-module support is untouched for modular builds** — a real modular build puts GNames in
+> `CoreUObject.dll`, which is precisely why the pattern that mis-won here is named `GNAM_SAT425`
+> (Satisfactory 4.25). When the anchor is a DLL, the fix only reorders; it refuses nothing.
+>
+> **① Log-derivable, and the target is on disk.** Re-run the DumperTest **Development** package.
+> **PASS** = `Module anchor set to 'DumperTest.exe'`, then GNames resolving to an address in the
+> same `0x7FF6…` range as GObjects, `validated=yes` in the DynOff summary, and Start-from-GWorld +
+> Value Search working. **FAIL, but informatively** = `REFUSED 0x… — it is in 'EOSSDK-Win64-Shipping.dll'`
+> followed by no GNames at all, which would mean the in-executable patterns genuinely have no
+> coverage for a UE 5.4 Development build and the answer is a new AOB, not a ranking rule. ⬜
 
 **D2 — Group Scan cannot see the object's own scalar UPROPERTYs.** Effort **M** · Risk med.
 On the Shipping package (where the pointers ARE correct), a Group First Scan over
