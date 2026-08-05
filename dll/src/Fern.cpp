@@ -361,6 +361,10 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
     item["defining_class_name"] = definingClass;
 
     json slotsJson = json::array();
+    // Leaf addresses already claimed by an earlier slot's displayed value, so the row
+    // shows a genuine ASSIGNMENT rather than each slot's independent first choice.
+    std::vector<uintptr_t> shownLeaves;
+    shownLeaves.reserve(gc.slotMatches.size());
     for (size_t s = 0; s < gc.slotMatches.size(); ++s) {
         const Radar::SlotSpec& spec = slots[s];
         const auto& matches = gc.slotMatches[s];
@@ -379,21 +383,45 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
 
         if (!matches.empty()) {
             // Prefer the leaf the filter actually matched; fall back to the first kept.
+            // Pick a representative that is NOT already shown for an earlier slot.
+            //
+            // Each slot used to report its own matches[0], which is not an assignment:
+            // when two slots kept the same leaf first, the row read
+            // "PrimaryActorTick.TickInterval=0, PrimaryActorTick.TickInterval=0" — a value
+            // apparently paired with ITSELF, which is precisely what MatchGroup forbids.
+            // HasDistinctAssignment had already proven a distinct assignment exists; the
+            // row simply was not showing one, so a correct match looked like a bug.
+            //
+            // Greedy first-unused. It can theoretically fail where a proper matching
+            // exists, but the existence check has already passed, so at worst the row
+            // falls back to a duplicate rather than claiming no match.
             size_t pick = 0;
-            if (!highlight.empty()) {
-                const std::string needle = Radar::ToLowerAscii(highlight);
-                for (size_t k = 0; k < matches.size(); ++k) {
+            bool picked = false;
+            const std::string needle = highlight.empty() ? std::string()
+                                                         : Radar::ToLowerAscii(highlight);
+            auto isFree = [&](size_t k) {
+                for (uintptr_t used : shownLeaves)
+                    if (used == matches[k].leafAddr) return false;
+                return true;
+            };
+            // Pass 1: a free leaf that also satisfies the active filter.
+            if (!needle.empty()) {
+                for (size_t k = 0; k < matches.size() && !picked; ++k) {
+                    if (!isFree(k)) continue;
                     const Radar::FieldDescriptor& dk = descriptors[matches[k].descriptorIdx];
                     if (Radar::GroupTextContainsCI(dk.fieldName, needle) ||
                         Radar::GroupTextContainsCI(dk.className, needle) ||
                         Radar::GroupTextContainsCI(dk.definingClassName, needle) ||
                         Radar::GroupTextContainsCI(
                             Radar::GroupSlotValueString(matches[k], spec, descriptors), needle)) {
-                        pick = k;
-                        break;
+                        pick = k; picked = true;
                     }
                 }
             }
+            // Pass 2: any free leaf.
+            for (size_t k = 0; k < matches.size() && !picked; ++k)
+                if (isFree(k)) { pick = k; picked = true; }
+            shownLeaves.push_back(matches[pick].leafAddr);
             // How many leaves this slot actually holds. `locked` already says "exactly
             // one"; this says how much the single displayed value is standing in for, so
             // a row can no longer imply the candidate matched on one field when it

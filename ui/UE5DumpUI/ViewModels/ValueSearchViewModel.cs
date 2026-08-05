@@ -71,6 +71,19 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// The DLL clamps to [8, 4096] regardless of what is sent.</summary>
     [ObservableProperty] private int    _groupPerSlotCap = Constants.GroupPerSlotCap;
 
+    /// <summary>Powers of two from the DLL's minimum to its maximum. Only these are
+    /// offered: nothing between them changes behaviour, so a free-entry box would just
+    /// invite a value the DLL then clamps.</summary>
+    public IReadOnlyList<int> PerSlotCapChoices { get; } = BuildPerSlotCapChoices();
+
+    private static IReadOnlyList<int> BuildPerSlotCapChoices()
+    {
+        var list = new List<int>();
+        for (int v = Constants.GroupPerSlotCapMin; v <= Constants.GroupPerSlotCapMax; v *= 2)
+            list.Add(v);
+        return list;
+    }
+
     partial void OnGroupPerSlotCapChanged(int value)
     {
         if (value < Constants.GroupPerSlotCapMin)      GroupPerSlotCap = Constants.GroupPerSlotCapMin;

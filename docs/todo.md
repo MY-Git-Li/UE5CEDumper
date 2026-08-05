@@ -1903,6 +1903,19 @@ and `Health.CurrentValue` falling, so the values genuinely change.
 > Audit #4's 4a root cause again — *the report and the reality computed by different code paths* —
 > and this time the user was told to distrust a correct answer.
 >
+> **A second, worse form of the same thing (build 2695).** Each slot reported its own `matches[0]`,
+> which is not an ASSIGNMENT: when two slots kept the same leaf first, the row read
+> `PrimaryActorTick.TickInterval=0, PrimaryActorTick.TickInterval=0` — a value apparently paired
+> with **itself**, which is exactly what `MatchGroup` forbids and `HasDistinctAssignment` had
+> already proven impossible. The match was valid; the row was not showing it. Reported as *"找出來
+> 的沒和其它數值配，是自己配自己"*. The renderer now claims leaves greedily across slots so the row
+> is a real assignment.
+>
+> **This is also the answer to "Unchanged + Changed cannot find `Health.BaseValue` +
+> `Health.CurrentValue`".** It can, and did — `BaseValue` was in the Unchanged slot's kept list all
+> along, but `matches[0]` is base-class-first so `PrimaryActorTick.TickInterval` occupied the
+> display. Not a design limitation, and nothing about the scan needed changing.
+>
 > **Fixed build 2690:** when a server-side filter is active the row reports the leaf that **matched
 > it**, using the same helpers the filter uses (`GroupTextContainsCI` / `GroupSlotValueString`, now
 > exported from `Radar` rather than duplicated). Each slot also carries `match_count`, so a row can
