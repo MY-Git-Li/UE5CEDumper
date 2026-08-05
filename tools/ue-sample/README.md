@@ -69,9 +69,23 @@ never promise "an even-length FText containing U+4E00 is on screen right now".
    > `VisualStudio2022` (`UEBuildWindows.cs:138`), so if you ever *do* need the IDE, open the solution
    > with **VS 2022** and build **only the `DumperTest` project** (right-click → Build), never
    > *Build Solution*. The `.sln` is disposable — regenerate it from the `.uproject` context menu.
-5. Press Play. The output log must show
-   `[DumperTest] ADumperTestActor ready at 0x…` — if it does not, nothing below will work and the
-   problem is the subsystem, not the dumper.
+5. Press Play. **Three green/yellow lines appear top-left once a second:**
+
+   ```
+   [DumperTest] TickCount=17  (must climb)
+   [DumperTest] Health.CurrentValue=83  (must fall, wraps to 100)
+   [DumperTest] Health.BaseValue=100  FrozenInt=424242  (both must NOT move)
+   ```
+
+   **That readout IS the health check.** `ADumperTestActor` is invisible by design — no mesh, no
+   HUD, no gameplay — so without it *"is the timer actually running?"* cannot be answered without
+   attaching the dumper and walking the object, and **a scan that finds nothing changed looks
+   exactly like a game that is not ticking**. That ambiguity cost several rounds of log forensics
+   on 2026-08-05 before the readout existed. If the numbers move, the sample is alive and a
+   `0 results` belongs to the scan; if they are frozen, the sample is the problem.
+   `-DumperTestNoHud` suppresses it for a clean screenshot.
+
+   The output log also carries `[DumperTest] ADumperTestActor ready at 0x…`.
 6. **Package twice**: Platforms → Windows → Build Configuration → **Shipping**, Package Project;
    then again with **Development**.
 

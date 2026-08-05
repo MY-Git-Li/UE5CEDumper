@@ -210,5 +210,11 @@ public:
 private:
 	void OnSecondTick();
 
+	/// Draw TickCount / Health on screen once a second. The actor is invisible by
+	/// design, so without this "is the timer running?" needs the dumper attached and
+	/// the object walked -- and a scan that finds nothing changed is indistinguishable
+	/// from a game that is not ticking. -DumperTestNoHud suppresses it.
+	void DrawHeartbeat() const;
+
 	FTimerHandle TickHandle;
 };

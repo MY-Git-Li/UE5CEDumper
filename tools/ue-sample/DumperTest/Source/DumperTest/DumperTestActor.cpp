@@ -10,7 +10,10 @@
 // ============================================================
 
 #include "DumperTestActor.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "TimerManager.h"
 
 #define LOCTEXT_NAMESPACE "DumperTest"
@@ -197,6 +200,40 @@ void ADumperTestActor::OnSecondTick()
 	}
 
 	// FrozenInt and BaseValue are deliberately NOT touched.
+
+	DrawHeartbeat();
+}
+
+/// Put the two ticking values ON SCREEN.
+///
+/// WHY. This actor is invisible by design -- no mesh, no HUD, it exists only to be read
+/// by the dumper -- so "is the timer actually running?" was unanswerable without
+/// attaching the dumper and walking the object. That question came up three times in one
+/// session and cost several rounds of log forensics, because a group scan finding nothing
+/// CHANGED and a game that is not ticking look identical from the outside.
+///
+/// Now it is a glance. If the numbers on screen are moving, the sample is alive and any
+/// "0 results" belongs to the scan; if they are frozen, the sample is the problem.
+/// That is the whole diagnostic, available before the dumper is even injected.
+///
+/// -DumperTestNoHud turns it off for a clean screenshot.
+void ADumperTestActor::DrawHeartbeat() const
+{
+	if (!GEngine || FParse::Param(FCommandLine::Get(), TEXT("DumperTestNoHud")))
+	{
+		return;
+	}
+
+	// A fixed key so each line REPLACES its previous self instead of scrolling a wall of
+	// text off the screen -- these fire once a second for the life of the process.
+	GEngine->AddOnScreenDebugMessage(/*Key*/ 1001, /*Time*/ 1.5f, FColor::Green,
+		FString::Printf(TEXT("[DumperTest] TickCount=%d  (must climb)"), TickCount));
+	GEngine->AddOnScreenDebugMessage(1002, 1.5f, FColor::Yellow,
+		FString::Printf(TEXT("[DumperTest] Health.CurrentValue=%.0f  (must fall, wraps to %.0f)"),
+		                Health.CurrentValue, Health.BaseValue));
+	GEngine->AddOnScreenDebugMessage(1003, 1.5f, FColor::Silver,
+		FString::Printf(TEXT("[DumperTest] Health.BaseValue=%.0f  FrozenInt=%d  (both must NOT move)"),
+		                Health.BaseValue, FrozenInt));
 }
 
 #undef LOCTEXT_NAMESPACE
