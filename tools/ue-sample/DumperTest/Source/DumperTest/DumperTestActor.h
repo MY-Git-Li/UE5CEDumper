@@ -77,7 +77,7 @@ public:
 	/// 統一言語 — 4 chars (EVEN), two U+xx00. Longer even case.
 	UPROPERTY() FText Text_Even4_TwoNull;
 
-	/// 退一步 — 3 chars (ODD), contains U+4E00. CONTROL: odd length must render
+	/// 走一步 — 3 chars (ODD), exactly one U+xx00 (一). CONTROL: odd length must render
 	/// correctly both before and after the fix; if only this one works, the
 	/// length parity is still being used as an encoding signal.
 	UPROPERTY() FText Text_Odd3_OneNull;

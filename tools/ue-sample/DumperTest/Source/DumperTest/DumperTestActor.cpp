@@ -31,8 +31,11 @@ namespace DumperTestStrings
 	// 統一言語 — U+7D71 U+4E00 U+8A00 U+8A9E. 4 chars (even), two low-byte-00.
 	static const TCHAR* Even4_TwoNull = TEXT("\u7D71\u4E00\u8A00\u8A9E");
 
-	// 退一步 — U+9000 U+4E00 U+6B65. 3 chars (ODD), two low-byte-00.
-	static const TCHAR* Odd3_OneNull = TEXT("\u9000\u4E00\u6B65");
+	// 走一步 — U+8D70 U+4E00 U+6B65. 3 chars (ODD), exactly ONE low-byte-00.
+	// 退 (U+9000) was here first and made the constant's NAME lie: it is also
+	// low-byte-00, so the string held two. check_ue_sample_values invariant 4 caught
+	// it on its first run - which is the whole argument for that gate existing.
+	static const TCHAR* Odd3_OneNull = TEXT("\u8D70\u4E00\u6B65");
 
 	// 日本語テスト — U+65E5 U+672C U+8A9E U+30C6 U+30B9 U+30C8.
 	// 6 chars (even), NOT ONE low byte is 00 (E5 2C 9E C6 B9 C8).

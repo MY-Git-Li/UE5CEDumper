@@ -1698,8 +1698,10 @@ Pick up when the active plan finishes or when blocked.
 > sequence, a specific game, a specific third-party install). Each of these carries its exact steps
 > and the PASS/FAIL observation.
 >
-> **STATUS after five rounds of live testing (2026-08-04 → 08-05, builds 2622 → 2645):**
-> **11 ✅ verified · 2 🟡 half (B8, Dump Explorer) · 13 ⬜ not yet exercised.**
+> **STATUS after five rounds of live testing (2026-08-04 → 08-05, builds 2622 → 2650):**
+> **11 ✅ verified · 2 🟡 half (B8, Dump Explorer) · 14 ⬜ not yet exercised.**
+> *(Dump Explorer's ⬜→🟡 came out of the "shipped but unproven" list below, not out of the 14 — an
+> earlier revision of this line said 13 and was wrong. The 14 is the count of `- ⬜` bullets.)*
 > Verified: B49, B31, B5(passive), B47, B35, B42, B36, **B34**, **B14+R5**, **B38**,
 > the clean-scan report, and B8's main path.
 >

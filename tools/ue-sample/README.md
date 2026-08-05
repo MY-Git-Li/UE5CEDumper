@@ -163,11 +163,12 @@ stored `00 4E` — a NUL at an even byte offset.
 | `Text_Even2_OneNull` | 統一 | 2 chars, one U+xx00 — **primary trigger** |
 | `Text_Even2_TwoNull` | 一言 | 2 chars, bytes `00 4E 00 8A` — **strongest trigger** |
 | `Text_Even4_TwoNull` | 統一言語 | 4 chars, two U+xx00 |
-| `Text_Odd3_OneNull` | 退一步 | **CONTROL** — odd length. If only this renders, parity is still being used as an encoding signal |
+| `Text_Odd3_OneNull` | 走一步 | **CONTROL** — odd length. If only this renders, parity is still being used as an encoding signal |
 | `Text_Even6_NoNull` | 日本語テスト | **CONTROL** — even, but no low byte is 00. Even length alone must trigger nothing |
 | `Text_Ascii` | `DumperTest FText ASCII` | **CONTROL for the other direction** — a fix that swings to always-UTF-16 breaks this |
 | `Text_Localized` | 統一言語 | Same glyphs, different `FTextHistory` (LOCTEXT). Disagreement with `Text_Even4_TwoNull` means the fault is history traversal, not decoding |
 | `Text_Empty` | *(empty)* | the empty display-string path |
+| `Name_Cjk` | 統一 | FName holding CJK — the FNamePool path (Serie), which is neither reader above |
 | `Str_*` | same four strings | **CONTROL GROUP** — FString never had B28. If an `Str_` is wrong too, the fault is not B28 and the FText result means nothing |
 
 **PASS** = every `Text_*` reads as CJK. **FAIL** = short ASCII punctuation soup (`,{1`, `-N?e`).
@@ -183,7 +184,7 @@ stored `00 4E` — a NUL at an even byte offset.
 | `Map_NameToInt` | Alpha:111 Beta:222 Gamma:333 | scan **222** → `Map.Value[idx]` |
 | `Map_IntToFloat` | 1:1.5 2:2.5 3:3.5 | non-FName key shape |
 | `Arr_Int` | `{10,20,30,40,50}` | |
-| `Arr_Struct` | Attack:7777, Defence:6666 (each with an FText `Label`) | struct-element container — the deep-descent level, with an FText inside it |
+| `Arr_Struct` | 2 × `FDumperTestStat` — `StatName` Attack/Defence, `Value` 7777/6666, `Label` an FText | struct-element container — the deep-descent level, with an FText inside it |
 | `Opt_Int_Set` | **24680** | V1c — appears under the optional's field name; Next Scan prunes |
 | `Opt_Float_Set` | 99.5 | |
 | `Opt_Str_Set` | `OptionalPresent` | |
@@ -199,11 +200,11 @@ stored `00 4E` — a NUL at an even byte offset.
 | `I32` / `I64` | 1234567 / 8899001122334455 | |
 | `F32` | **513.36** | the Round/Trunc/Ceil worked example |
 | `F64` | 2718.281828 | |
-| `bFlagA/B/C` | 1 / 0 / 1 | three bitfields in one byte — bool masks |
+| `bFlagA` / `bFlagB` / `bFlagC` | 1 / 0 / 1 | three bitfields in one byte — bool masks |
 | `Grade` | `Elite` (=2) | enum with a **hole** at 3..6 (`Legend`=7), so index≠value cannot pass by accident |
-| `FixedArr[8]` | 100..800 | `ArrayDim > 1` — a different property shape from TArray |
-| `Health` | Base 100, Current ticking | nested StructProperty in GAS-attribute shape → also the "Flatten GAS attributes" CE-export toggle |
-| `Payload` | a `UDumperTestPayload` | Related Objects edge · Locate-in-GWorld through a pointer · Solide force-to-null (strong ptr, so allowed) |
+| `FixedArr` (8 elements) | 100..800 | `ArrayDim > 1` — a different property shape from TArray |
+| `Health` — `BaseValue` / `CurrentValue` | Base 100, Current ticking | nested StructProperty in GAS-attribute shape → also the "Flatten GAS attributes" CE-export toggle |
+| `Payload` → `PayloadText` / `PayloadString` / `PayloadValue` | 統一言語, same as FString, 909090 | Related Objects edge · Locate-in-GWorld through a pointer · Solide force-to-null (strong ptr, so allowed) |
 | `RawInt` / `RawFloat` / `RawDouble` | 0x5A5A5A5A / 777.75 / 31415.926535 | **not** UPROPERTY — the interior holes "Guess What" and the Native-C scan must find |
 
 ### Group Scan / Snapshot Mode B (temporal)
