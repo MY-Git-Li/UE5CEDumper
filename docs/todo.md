@@ -1503,7 +1503,27 @@ measurements taken on this config are measuring the stride, not the matcher.
 > of them, and a round "N% named" in the object tree is that alias.*
 >
 > **Verify:** re-run the Development package. **PASS** = `FUObjectItem size detected as 32 bytes`,
-> `Name sanity: 10/10`, and an Object Tree that reads 100% named rather than 50.0%. ⬜
+> `Name sanity: 10/10`, and an Object Tree that reads 100% named rather than 50.0%.
+>
+> ### ✅ VERIFIED — the evidence was already on disk, filed 2026-08-06
+>
+> Six post-2673 runs of the Development package, `Logs\DumperTest\`, all identical:
+>
+> ```
+> offsets-*.log   ObjectArray: FUObjectItem size detected as 32 bytes
+>                 (200 items with valid names, 200 total valid, 0 bad)
+> init-*.log      UE5_Init: Name sanity: 10/10 objects resolved
+> ```
+>
+> `detected as` (not `tentatively set to`), **200/200 validated with 0 bad** against a probe budget
+> of 200, and 10/10 name sanity where the broken run resolved only the even indices at 5/10. The
+> third criterion — the object tree reading 100% rather than 50.0% — follows from the same run:
+> D2's group scan verified on this package, and the stride alias is precisely what had made that
+> scan walk **0** objects.
+>
+> **Nobody had to re-run anything** — the ⬜ outlived its own answer by a day because the check was
+> filed as "re-run the Development package" rather than as a grep against logs the package had
+> already written. Where a marker is passive, state the grep, not the run.
 
 
 Both came out of the config-only A/B (**same source, Shipping vs Development**) that this file has
@@ -1891,12 +1911,15 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
 > **STATUS after the 2026-08-05 DumperTest sessions (builds 2622 → 2701):** the self-built sample
 > closed **B28, V1a, V1c and NumericAll** — three of them ⬜ since builds 796/927/942 purely for
 > want of a game containing the right UPROPERTY — and exposed **three dumper defects** nothing else
-> had (D1/D2/D3 above, all fixed). **13 ⬜ bullets remain.**
+> had (D1/D2/D3 above, **all fixed and now all verified** — D3's ✅ filed 2026-08-06 from logs the
+> package had already written). **13 ⬜ bullets remain.**
 >
-> **Still the two that can produce silently wrong data:** **B4** (CE mailbox after the UI dies) and
-> the **drain straggler** (below — four attempts deep, now proven to be genuinely parked in
-> `ReadFile` with both cancel APIs failing; the next move is structural, not another guess).
-> **B8 is blocked** behind the PE-hook misdetection reproduced on stock UE 5.4.
+> **B4 (CE mailbox after the UI dies) is now the only open item that can produce silently wrong
+> data** — the one it used to share that line with, the **drain straggler**, is no longer a
+> verification item at all: four attempts deep, the phase instrumentation has proven it genuinely
+> parked in `ReadFile` with both cancel APIs failing, so what remains is a structural code change,
+> not a guess and not a check. **B8 is blocked** behind the PE-hook misdetection reproduced on
+> stock UE 5.4.
 >
 > *Earlier line kept for the record:*
 > **STATUS after five rounds of live testing (2026-08-04 → 08-05, builds 2622 → 2650):**
@@ -1932,9 +1955,10 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
 >
 > | # | Item | Why it leads |
 > |---|---|---|
-> | **1** | **B28** — CJK FText mojibake | The only open item that shows the user **wrong data**. Needs a CJK-language game; trigger is an even-length string containing a `U+xx00` char (一, 第…一, 統一). Counter-check STVoyager (UTF-8 FText) still reads correctly — that is the regression direction. |
-> | **2** | **B4** — CE mailbox survives a dead UI client | Fails **silently**: lookups answer 0 while reporting `scanned=<full pool>`, which reads as "the object isn't there". A CE-only session stays broken for its whole life. |
-> | **3** | ~~`Stop conn drain TIMEOUT`~~ | **DIAGNOSED + FIXED (build 2650). Verification is one grep — see below.** |
+> | **1** | **B4** — CE mailbox survives a dead UI client | Fails **silently**: lookups answer 0 while reporting `scanned=<full pool>`, which reads as "the object isn't there". A CE-only session stays broken for its whole life. **Now the only open item that can produce wrong data.** |
+> | **2** | **B16** — five dead coord-grid sort headers | Two minutes, and it needs nothing but the AOT build already in `dist`. Cheapest ⬜ on the list. |
+> | **3** | ~~**B28** — CJK FText mojibake~~ | **✅ CLOSED 2026-08-05** on the DumperTest sample (8 FText fields, both directions). Only the STVoyager UTF-8 counter-check remains, and it is licensee-specific. |
+> | — | ~~`Stop conn drain TIMEOUT`~~ | **ANSWERED, and no longer a verify item** — see the phase capture below. What is left is a structural fix. |
 >
 > The rest (B18, B19, B2, B25, B26, B13/B41 …) cannot produce wrong data or a crash, so they can wait.
 >
@@ -2057,10 +2081,52 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
 >
 > **Next run, same repro, one grep:** `grep "straggler" pipe-0.log`. It now names the real phase.
 > `StoppingWatches` would mean the fix belongs in the watch-thread join, not in I/O cancellation at
-> all — a different subsystem from the three already tried. ⬜
+> all — a different subsystem from the three already tried.
 >
 > *The re-assert loop is kept. It cost nothing (49 iterations of a failing syscall over 5 s) and it
 > is what proved the diagnosis wrong quickly; a single shot would have looked like bad luck.*
+>
+> ### ✅ ANSWERED — the phase is `Reading`, three times over. **This is no longer a verify item.**
+>
+> Filed 2026-08-06 from captures already on disk. Three post-2657 runs, and the instrumentation
+> said the same thing every time:
+>
+> ```
+> 13:38:45  straggler: parked in ReadFile (waiting for the next command) for  73871 ms, last cmd 'get_object_list'
+> 16:42:55  straggler: parked in ReadFile (waiting for the next command) for 264184 ms, last cmd 'walk_functions'
+> 18:43:36  straggler: parked in ReadFile (waiting for the next command) for 145063 ms, last cmd 'query_group_slot_leaves'
+>           Stop cancel issued: 0 accepted, 2 had nothing pending
+>           Stop conn drain TIMEOUT, 2 left (5030 ms, 49 cancel re-asserts)
+> ```
+>
+> **Phase `Reading`, parked 264 seconds.** Not `Dispatching`, not `Writing`, and **not
+> `StoppingWatches`** — which was the hypothesis this instrumentation was added to test, and it is
+> refuted too. The connection is genuinely blocked in a synchronous `ReadFile`.
+>
+> **Four attempts, each refuted by the diagnostic added for the previous one:**
+>
+> | # | Hypothesis | Refuted by |
+> |---|---|---|
+> | 1 | Stuck inside a command | `inFlight == false`; `Stark::Shutdown` already runs before `Stop()` |
+> | 2 | `CancelIoEx` missed the window (2650: re-assert) | 49 re-asserts, every one `nothing pending` |
+> | 3 | `CancelSynchronousIo` is the right API (2651) | called, handles published, still TIMEOUT |
+> | 4 | "idle in ReadFile" is an inference, not an observation (2657: measure the phase) | the phase **is** `Reading` — so 1–3 were aimed at the right place and the wrong mechanism |
+>
+> **Root cause:** the pipe instances are created without `FILE_FLAG_OVERLAPPED`, so there is no
+> pending IRP for `CancelIoEx` to find — `ERROR_NOT_FOUND`, forever, by construction.
+>
+> **What remains is a code change, not a verification.** Both remaining options are structural, and
+> **neither is a fifth guess at the cancel API**:
+> - close the connection handle from `Stop` so the blocking `ReadFile` returns an error, or
+> - make the pipe overlapped.
+>
+> **When that fix ships**, the acceptance is unchanged and is one grep on the same repro (UI
+> connected, untick the CE record): `grep "Stop conn drain" pipe-0.log` → **PASS** =
+> `satisfied, 0 left (… ms, N cancel re-asserts)`.
+>
+> *Method note worth keeping: three consecutive fixes were written against the phrase "idle in
+> ReadFile", which was a LABEL the code asserted, not something it had measured. Replacing the
+> label with an observation cost one build and ended the thread.*
 >
 > ⬜ does **not** mean "probably fine". It means nobody has looked. Most of the fourteen were
 > simply not exercised (no wrapper installed, no UI killed mid-command, no Extra Scan).
@@ -2279,7 +2345,9 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
   *Original instructions:* The whole answer is in the
   log, and the trigger is the *ordinary* way to turn Fly off on an idle-when-unfocused title.
   **To test:** Teleport tab → Fly ON + Noclip → fly through a wall → **alt-tab to the UI** (wait
-  >500 ms so ProcessEvent goes quiet) → click Disable. Grep `init-0.log` for `Fly:`.
+  >500 ms so ProcessEvent goes quiet) → click Disable. Grep **`walk-0.log`** for `Fly:` —
+  NOT `init-0.log`: `Dunste.cpp` sets `LOG_CAT "FLY"`, which `Sein.cpp`'s `s_catMap` routes to
+  `LF_Walk`. Confirmed against real logs 2026-08-06.
   **PASS** = `Fly: DISABLED but the pawn's collision is still OFF (game thread unresponsive)`,
   then — after you click back into the game — `Fly: game thread resumed after N ms — pawn collision
   restored`. **FAIL** = the old shape: a plain `Fly: DISABLED` and nothing else, after which the
@@ -2293,8 +2361,9 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
   pre-2596 to compare it against. Either keep this number as the new baseline and compare the
   next capture of the SAME snapshot on the same game, or settle the correctness half alone
   (struct types / enum names / bool masks still populate). Snapshot capture is
-  wrapped in a `DiagnosticsProbe`, so no new logging is needed: grep `pipe-0.log` for
-  `PERF Snapshot capture`. **PASS** = `wall … ms` is materially lower than the same capture on a
+  wrapped in a `DiagnosticsProbe`, so no new logging is needed: grep
+  **`Logs\UE5DumpUI\view-0.log`** (or the game folder's `ui-view-*.log`) for
+  `PERF Snapshot capture` — it is a UI-side probe, NOT in `pipe-0.log`. Corrected 2026-08-06. **PASS** = `wall … ms` is materially lower than the same capture on a
   pre-2596 build (the memo removes a 100–300 × `FieldInfo` deep copy per struct-array *element*),
   and correctness is unchanged — property grids still show struct types, enum names and bool masks,
   which are exactly the fields `WalkClassEx` adds on top of `WalkClass`. **FAIL** = those columns go
