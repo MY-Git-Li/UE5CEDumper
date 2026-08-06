@@ -59,6 +59,9 @@ public static class ProtectionScriptGenerator
         Line(sb, "  if memrec then memrec.Active = false end");
         Line(sb, "  return");
         Line(sb, "end");
+        // Contract check BEFORE the first write: if the layout moved we would
+        // otherwise scribble on whatever now lives at those offsets.
+        CeLuaHygiene.AppendContractCheck(sb, "GodMode", MailboxTimeout.UntickAndReturn);
         Line(sb);
 
         // Mailbox round-trip: write op + value, trigger CMD_PROTECT=9, poll status.
@@ -66,19 +69,15 @@ public static class ProtectionScriptGenerator
         Line(sb, $"writeQword(mb + {CeMailboxLayout.OffUfuncAddr}, {value})    -- value: {value} = {label}");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)    -- clear status");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdProtect})    -- CMD_PROTECT (write LAST)");
-        Line(sb, "local elapsed = 0");
-        Line(sb, $"while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
-        Line(sb, "  sleep(1)");
-        Line(sb, "  elapsed = elapsed + 1");
-        Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
-        Line(sb, "    showMessage('[GodMode] mailbox timeout (DLL not responding?)')");
-        Line(sb, "    return");
-        Line(sb, "  end");
-        Line(sb, "end");
+        // Shared wait: real-time deadline, status-specific diagnosis, and the untick
+        // that stops a timed-out row claiming to be active.
+        CeLuaHygiene.AppendMailboxWait(sb, "GodMode");
         Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=immune, 0=can be damaged, <0=error");
         Line(sb, $"dbg('[GodMode] {label} -> state=' .. tostring(state))");
         Line(sb, "if state < 0 then");
         Line(sb, $"  showMessage('[GodMode] {label} -- no pawn? (enter gameplay first)')");
+        // Nothing was applied on this branch, so the record must not stay ticked.
+        Line(sb, "  if memrec then memrec.Active = false end");
         Line(sb, "elseif DEBUG == 0 then");
         Line(sb, $"  {CeLuaHygiene.CloseCall}   -- clean success: close the Lua Engine window");
         Line(sb, "end");

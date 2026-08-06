@@ -124,6 +124,7 @@ local OFF_PARAMS     = 0x328
 
 local CMD_LIST_INSTANCES = 6
 local STATUS_DONE        = 1
+local STATUS_IDLE        = 0    -- untouched: the DLL never picked the command up
 
 -- Mailbox round-trip is bounded: GObjects walk + memcpy of <=1024 bytes.
 -- 5 s is generous for a 2000-instance cap.
@@ -198,6 +199,41 @@ end
 -- Internal: mailbox helpers
 -- ============================================================
 
+-- ============================================================
+-- CE Lua <-> DLL contract check
+-- ============================================================
+-- Versioned on the CONTRACT (mailbox offsets, Cmd values, per-command ops,
+-- status/result meanings), NOT on the build number: a .CT saved months ago stays
+-- valid against a newer DLL as long as nothing it depends on moved. The DLL
+-- publishes a RANGE so the two failure directions can be told apart -- too-old
+-- script means regenerate, too-old DLL means update the DLL. See dll/src/Mimic.h.
+local UE5_SCRIPT_CONTRACT = 1
+
+-- Returns true, or false + a message. Call BEFORE writing to the mailbox: if the
+-- layout moved, writing first scribbles on whatever now lives at those offsets.
+local function checkContract()
+  local cv = getAddressSafe('g_mailboxContract')
+  if not cv or cv == 0 then cv = getAddressSafe('UE5Dumper.g_mailboxContract') end
+  if not cv or cv == 0 then
+    return false, 'this UE5Dumper.dll is older than this script (no contract symbol) -- update the DLL'
+  end
+  if readInteger(cv + 0x00) ~= 1127564629 then
+    return false, 'the contract symbol resolved to the wrong memory (stale address) -- re-inject the DLL'
+  end
+  local cur, min = readInteger(cv + 0x04), readInteger(cv + 0x08)
+  if UE5_SCRIPT_CONTRACT < min then
+    return false, string.format(
+      'this script is too old for the DLL (script %d, DLL needs %d+) -- regenerate the table',
+      UE5_SCRIPT_CONTRACT, min)
+  end
+  if UE5_SCRIPT_CONTRACT > cur then
+    return false, string.format(
+      'the DLL is older than this script (script %d, DLL speaks %d) -- update UE5Dumper.dll',
+      UE5_SCRIPT_CONTRACT, cur)
+  end
+  return true
+end
+
 local function findMailbox()
   -- getAddressSafe (not getAddress) -- returns nil on missing symbol
   -- instead of raising. Either name is valid depending on whether the
@@ -211,6 +247,12 @@ local function findMailbox()
       '[ue5_freeze] g_invokeMailbox symbol not found -- is ' ..
       'UE5Dumper.dll injected?'
   end
+  -- Validated HERE because every path reaches the mailbox through this function,
+  -- and it has to happen before the caller writes anything: if the layout moved,
+  -- a write lands on whatever now occupies those offsets. Reported through this
+  -- function's own (nil, message) contract rather than raising.
+  local ok, why = checkContract()
+  if not ok then return nil, '[ue5_freeze] ' .. why end
   return mb, nil
 end
 
@@ -222,14 +264,37 @@ local function writeMbStr(mb, off, str)
   writeBytes(mb + off, b)
 end
 
+-- Wait for the mailbox round-trip to finish.
+--
+-- The limit is REAL milliseconds. It used to count sleep(1) calls and still print the
+-- result as "%dms": sleep(1) measures 15.47 ms in CE -- the ~64 Hz Windows scheduler
+-- tick, identical to three decimals on two very different CPUs -- so a 5000 "ms" limit
+-- was really ~77 seconds, reported as 5000ms. getTickCount() was probed in CE's Lua
+-- Engine on 2026-08-06 (present, returns ms); the iteration count survives only as a
+-- fallback for a build without it, at ~15 ms per iteration.
+--
+-- The timeout message names WHICH fault, because the status already distinguishes them:
+-- STATUS_IDLE means the DLL never picked the command up (a stale g_invokeMailbox address
+-- is the usual cause), anything else means it took the command and did not finish.
 local function waitDone(mb, timeoutMs)
-  local elapsed = 0
   local limit = timeoutMs or DEFAULT_TIMEOUT_MS
-  while readInteger(mb + OFF_STATUS) ~= STATUS_DONE do
+  local tick  = (type(getTickCount) == 'function') and getTickCount or nil
+  local t0, iters = tick and tick() or 0, 0
+  local st = readInteger(mb + OFF_STATUS)
+  while st ~= STATUS_DONE do
     sleep(1)
-    elapsed = elapsed + 1
-    if elapsed >= limit then
-      return false, string.format('mailbox timeout after %dms', limit)
+    iters = iters + 1
+    st = readInteger(mb + OFF_STATUS)
+    local over = tick and (tick() - t0 >= limit) or (iters >= math.floor(limit / 15))
+    if st ~= STATUS_DONE and over then
+      if st == STATUS_IDLE then
+        return false, string.format(
+          'mailbox timeout after %dms -- the DLL never picked this up ' ..
+          '(stale g_invokeMailbox address? re-inject, or re-enable the table)', limit)
+      end
+      return false, string.format(
+        'mailbox timeout after %dms -- the DLL took the command but did not ' ..
+        'finish it (status=%d)', limit, st)
     end
   end
   return true

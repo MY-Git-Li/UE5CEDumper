@@ -85,6 +85,9 @@ public static class TimeDilationScriptGenerator
         }
         Line(sb, "  return");
         Line(sb, "end");
+        // Contract check BEFORE the first write (see AppendContractCheck).
+        CeLuaHygiene.AppendContractCheck(sb, "Time",
+            enable ? MailboxTimeout.UntickAndReturn : MailboxTimeout.SilentReturn);
         Line(sb);
         Line(sb, $"writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, {op})        -- op: {(enable ? "SET" : "RESET")}");
         Line(sb, $"writeQword(mb + {CeMailboxLayout.OffUfuncAddr}, {(int)target})        -- target: {label}");
@@ -92,30 +95,18 @@ public static class TimeDilationScriptGenerator
             Line(sb, $"writeDouble(mb + {CeMailboxLayout.OffParamsData}, {Lua(value)})   -- dilation (1.0 = normal)");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)        -- clear status");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdTime})       -- CMD_TIME (write LAST)");
-        Line(sb, "local elapsed = 0");
-        Line(sb, $"while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
-        Line(sb, "  sleep(1); elapsed = elapsed + 1");
-        if (enable)
-        {
-            Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
-            Line(sb, "    showMessage('[Time] mailbox timeout (DLL not responding?)')");
-            Line(sb, "    return");
-            Line(sb, "  end");
-        }
-        else
-        {
-            // Timeout on an untick is an error, not a clean finish -- return so the
-            // success-close below is unreachable (leave the window as-is), matching
-            // the [ENABLE] path. (break would fall through into the auto-close.)
-            Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then return end");
-        }
-        Line(sb, "end");
+        // Shared wait: real-time deadline, status-specific diagnosis, and (on ENABLE)
+        // the untick that stops a timed-out row claiming to be active.
+        CeLuaHygiene.AppendMailboxWait(sb, "Time",
+            enable ? MailboxTimeout.UntickAndReturn : MailboxTimeout.SilentReturn);
         if (enable)
         {
             Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=active, 0=off, <0=error");
             Line(sb, $"dbg('[Time] {label} {Mult(value)} -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
             Line(sb, $"  showMessage('[Time] {label} -- {(target == Target.Global ? "no WorldSettings (enter a level first)" : "no player pawn (enter gameplay first)")}.')");
+            // Applied nothing -> the row must not stay ticked.
+            Line(sb, "  if memrec then memrec.Active = false end");
             Line(sb, "elseif DEBUG == 0 then");
             Line(sb, $"  {CeLuaHygiene.CloseCall}   -- clean success: close the Lua Engine window");
             Line(sb, "end");

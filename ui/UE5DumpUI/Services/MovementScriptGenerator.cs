@@ -76,35 +76,27 @@ public static class MovementScriptGenerator
         }
         Line(sb, "  return");
         Line(sb, "end");
+        // Contract check BEFORE the first write (see AppendContractCheck).
+        CeLuaHygiene.AppendContractCheck(sb, "Movement",
+            enable ? MailboxTimeout.UntickAndReturn : MailboxTimeout.SilentReturn);
         Line(sb);
         Line(sb, $"writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, {(int)knob})        -- knobId: {label}");
         Line(sb, $"writeDouble(mb + {CeMailboxLayout.OffParamsData}, {Lua(sent)})   -- percent (100 = off)");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)        -- clear status");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdMovement})       -- CMD_MOVEMENT (write LAST)");
-        Line(sb, "local elapsed = 0");
-        Line(sb, $"while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
-        Line(sb, "  sleep(1); elapsed = elapsed + 1");
-        if (enable)
-        {
-            Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
-            Line(sb, "    showMessage('[Movement] mailbox timeout (DLL not responding?)')");
-            Line(sb, "    return");
-            Line(sb, "  end");
-        }
-        else
-        {
-            // Timeout on an untick is an error, not a clean finish -- return so the
-            // success-close below is unreachable (leave the window as-is), matching
-            // the [ENABLE] path. (break would fall through into the auto-close.)
-            Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then return end");
-        }
-        Line(sb, "end");
+        // Shared wait: real-time deadline, status-specific diagnosis, and (on ENABLE)
+        // the untick that stops a timed-out row claiming to be active.
+        CeLuaHygiene.AppendMailboxWait(sb, "Movement",
+            enable ? MailboxTimeout.UntickAndReturn : MailboxTimeout.SilentReturn);
         if (enable)
         {
             Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=active, 0=off, <0=error");
             Line(sb, $"dbg('[Movement] {label} {Pct(percent)} -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
+            // Nothing was applied, so the row must not stay ticked (same rule as the
+            // timeout path above; this one was missed for the same reason).
             Line(sb, $"  showMessage('[Movement] {label} -- no pawn / no CharacterMovement (enter gameplay first)')");
+            Line(sb, "  if memrec then memrec.Active = false end");
             Line(sb, "elseif DEBUG == 0 then");
             Line(sb, $"  {CeLuaHygiene.CloseCall}   -- clean success: close the Lua Engine window");
             Line(sb, "end");
@@ -162,6 +154,9 @@ public static class MovementScriptGenerator
         }
         Line(sb, "  return");
         Line(sb, "end");
+        // Contract check BEFORE the first write (see AppendContractCheck).
+        CeLuaHygiene.AppendContractCheck(sb, "Movement",
+            enable ? MailboxTimeout.UntickAndReturn : MailboxTimeout.SilentReturn);
         Line(sb);
         Line(sb, $"writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, 3)        -- knobId 3 = GravityDirection");
         Line(sb, $"writeDouble(mb + {CeMailboxLayout.OffParamsData}, {Lua(sx)})   -- X");
@@ -169,30 +164,16 @@ public static class MovementScriptGenerator
         Line(sb, $"writeDouble(mb + 0x338, {Lua(sz)})   -- Z");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)        -- clear status");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdMovement})       -- CMD_MOVEMENT (write LAST)");
-        Line(sb, "local elapsed = 0");
-        Line(sb, $"while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
-        Line(sb, "  sleep(1); elapsed = elapsed + 1");
-        if (enable)
-        {
-            Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
-            Line(sb, "    showMessage('[Movement] mailbox timeout (DLL not responding?)')");
-            Line(sb, "    return");
-            Line(sb, "  end");
-        }
-        else
-        {
-            // Timeout on an untick is an error, not a clean finish -- return so the
-            // success-close below is unreachable (leave the window as-is), matching
-            // the [ENABLE] path. (break would fall through into the auto-close.)
-            Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then return end");
-        }
-        Line(sb, "end");
+        CeLuaHygiene.AppendMailboxWait(sb, "Movement",
+            enable ? MailboxTimeout.UntickAndReturn : MailboxTimeout.SilentReturn);
         if (enable)
         {
             Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=active, 0=off, <0=error/unavailable");
             Line(sb, "dbg('[Movement] Gravity Direction -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
+            // Applied nothing -> the row must not stay ticked.
             Line(sb, "  showMessage('[Movement] Gravity Direction -- unavailable (needs UE5.4+) or no pawn.')");
+            Line(sb, "  if memrec then memrec.Active = false end");
             Line(sb, "elseif DEBUG == 0 then");
             Line(sb, $"  {CeLuaHygiene.CloseCall}   -- clean success: close the Lua Engine window");
             Line(sb, "end");

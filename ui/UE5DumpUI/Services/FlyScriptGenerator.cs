@@ -92,6 +92,8 @@ public static class FlyScriptGenerator
         Line(sb, "  if memrec then memrec.Active = false end");
         Line(sb, "  return");
         Line(sb, "end");
+        // Contract check BEFORE the first write (see AppendContractCheck).
+        CeLuaHygiene.AppendContractCheck(sb, name);
         Line(sb);
 
         // In [ENABLE] of a preset Fly, pick the key set first (poll-only round-trip).
@@ -113,21 +115,19 @@ public static class FlyScriptGenerator
         Line(sb, $"writeQword(mb + {CeMailboxLayout.OffUfuncAddr}, {value})    -- value = {value}");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)    -- clear status");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdFly})    -- CMD_FLY (write LAST)");
-        Line(sb, "local elapsed = 0");
-        Line(sb, $"while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
-        Line(sb, "  sleep(1)");
-        Line(sb, "  elapsed = elapsed + 1");
-        Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
-        Line(sb, $"    showMessage('[{name}] mailbox timeout (DLL not responding?)')");
-        Line(sb, "    return");
-        Line(sb, "  end");
-        Line(sb, "end");
+        // Shared wait: real-time deadline, status-specific diagnosis, and the untick
+        // that stops a timed-out row claiming to be active. Emitted once per call, and
+        // a preset Fly emits TWO calls into one chunk — its locals are block-scoped, so
+        // the second declaration simply shadows the first.
+        CeLuaHygiene.AppendMailboxWait(sb, name);
         if (readState)
         {
             Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=active, 0=off, <0=error");
             Line(sb, $"dbg('[{name}] op={op} -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
             Line(sb, $"  showMessage('[{name}] -- no pawn / no CharacterMovement? (enter gameplay first)')");
+            // Applied nothing -> the record must not stay ticked.
+            Line(sb, "  if memrec then memrec.Active = false end");
             Line(sb, "elseif DEBUG == 0 then");
             Line(sb, $"  {CeLuaHygiene.CloseCall}   -- clean success: close the Lua Engine window");
             Line(sb, "end");

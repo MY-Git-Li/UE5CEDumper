@@ -54,9 +54,82 @@ internal static class CeMailboxLayout
     public const int TimeOpSet   = 0;
     public const int TimeOpReset = 1;
 
-    // Shared mailbox poll timeout (ms) — the upper bound of the `while status ~= 1`
-    // busy-wait loop in every emitted mailbox round-trip.
+    // ── CE Lua ↔ DLL contract version (must match Mimic.h) ──────────────────
+    //
+    // NOT the build number. A .CT saved months ago stays valid against a newer DLL
+    // as long as nothing it depends on moved, so what is versioned is the CONTRACT
+    // — the mailbox offsets, the Cmd values, the per-command op values, and the
+    // status/result meanings. Mimic.h holds the full rule for what does and does
+    // not bump it; do not restate it here, because two copies of a rule is how the
+    // timeout defect got into seven files.
+    //
+    // Emitted into every generated script, which then checks itself against what
+    // the DLL publishes. The DLL answers with a RANGE, so the two failure
+    // directions can be told apart: too-old script => regenerate the .CT, too-old
+    // DLL => update the DLL. Today the second case is silent corruption.
+    public const int ContractVersion = 1;
+
+    /// <summary>Exported symbol carrying the contract. Deliberately NOT a field of
+    /// the mailbox struct: reading the layout version out of the struct whose layout
+    /// is in question is circular, and the check has to run BEFORE any write.</summary>
+    public const string ContractSymbol = "g_mailboxContract";
+
+    // Field offsets within that symbol (Mimic::MailboxContract).
+    public const string OffContractMagic = "0x00";
+    public const string OffContractCur   = "0x04";
+    public const string OffContractMin   = "0x08";
+
+    /// <summary>'UE5C'. Proves the symbol resolved to the DLL's real data and not to
+    /// a stale address from a previous injection — a failure mode measured on
+    /// 2026-08-06, where CE held a mailbox address the DLL no longer owned.</summary>
+    public const long ContractMagic = 0x43354555L;
+
+    // Mailbox status values (must match Mimic.h MailboxStatus). Emitted into the
+    // generated Lua so a timed-out script can say WHICH fault it hit instead of
+    // guessing: the DLL sets Processing the instant its poller picks a command up
+    // (Mimic.cpp:246) and Done+cmd=IDLE when it finishes (:1285-1286, :1296-1297),
+    // so on timeout the status still distinguishes "never seen" from "wedged".
+    public const int StatusIdle       = 0;      // untouched — the DLL never saw it
+    public const int StatusDone       = 1;      // finished
+    public const int StatusProcessing = 0xFF;   // picked up, still working
+
+    /// <summary>
+    /// Upper bound of the <c>while status ~= 1</c> busy-wait in every emitted mailbox
+    /// round-trip, in REAL milliseconds — measured with <c>getTickCount()</c>, not
+    /// counted in loop iterations.
+    ///
+    /// <para><b>Why that distinction is load-bearing.</b> The loop used to count one
+    /// <c>sleep(1)</c> per iteration and bail at 10000 of them, on the assumption that
+    /// <c>sleep(1)</c> sleeps 1 ms. **Measured in CE's Lua Engine on 2026-08-06
+    /// (Windows 11 26200): it sleeps 15.47 ms.** <c>sleep(1)</c> through
+    /// <c>sleep(10)</c> all cost the same ~15.47 ms — a hard floor at the default
+    /// Windows tick — and <c>sleep(16)</c> jumps to 30.3 ms, i.e. it quantises to
+    /// multiples of ~15.6 ms. CE does not raise the timer resolution for itself, and
+    /// the DLL's own <c>timeBeginPeriod(1)</c> is per-process so it does not leak in.
+    /// So "10000" was really <b>~155 seconds</b>, and a user with a stale mailbox
+    /// address sat through two and a half minutes of a frozen Lua Engine window before
+    /// being told anything.</para>
+    ///
+    /// <para><b>That floor is the Windows scheduler tick, NOT a per-machine constant</b>
+    /// — which is what makes it safe to bake <see cref="MailboxPollTimeoutIters"/> from
+    /// it. Measured on two deliberately different CPUs (a 9950X3D desktop and a 9955HX3D
+    /// laptop, very different TDP): every value below the floor matched to three
+    /// decimals — <c>sleep(1)</c> 15.470 on both, <c>sleep(5)</c> 15.630 on both. Only
+    /// the 15/16 ms readings differed (18.59 vs 17.50, 30.31 vs 29.53), which is one
+    /// tick of quantisation noise from a 15 ms timer measuring 15 ms events. The
+    /// hypothesis that this was a performance-dependent per-PC offset is refuted: it is
+    /// the ~64 Hz kernel tick, so EVERY user had the ~155 s timeout, not one machine.</para>
+    /// </summary>
     public const int MailboxPollTimeoutMs = 10000;
+
+    /// <summary>
+    /// Fallback bound for a CE build with no <c>getTickCount</c>, counted in
+    /// <c>sleep(1)</c> iterations. Derived from the measurement above:
+    /// 650 x 15.47 ms ~= 10.1 s, matching <see cref="MailboxPollTimeoutMs"/>.
+    /// Only reached if the probe fails — <c>getTickCount()</c> was verified present
+    /// and returning ms in CE's Lua Engine on 2026-08-06.
+    /// </summary>
+    public const int MailboxPollTimeoutIters = 650;
 
     /// <summary>How long an emitted script waits for the mailbox to go IDLE before
     /// declaring it busy, in ms (sleep(1) per iteration).
