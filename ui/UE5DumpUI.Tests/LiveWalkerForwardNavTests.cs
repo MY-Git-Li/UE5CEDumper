@@ -287,6 +287,255 @@ public class LiveWalkerForwardNavTests
         Assert.True(vm.CanGoForward);
     }
 
+    // ── Re-rooting navigations: a spine REPLACED, not truncated ─────────────
+    //
+    // Two navigations throw the whole spine away instead of popping one level off it:
+    // a bookmark load, and NavigateToAddressAsync (the Go box, the Find Refs owner
+    // drill, every cross-tab "Open in Live Walker" handoff). A crumb on the forward
+    // stack cannot express that — it re-ATTACHES to whatever is on screen — so these
+    // push a whole-spine step instead, and Back reads the one-deep re-root slot.
+
+    /// <summary>A spine plus the crumbs a bookmark would restore into it.</summary>
+    private static LiveWalkerViewModel WithThreeLevelSpine(out BreadcrumbItem[] spine)
+    {
+        var vm = MakeVm();
+        spine = new[] { Crumb("Root", "0x1000"), Crumb("Mid", "0x2000"), Crumb("Leaf", "0x3000") };
+        foreach (var c in spine) vm.Breadcrumbs.Add(c);
+        return vm;
+    }
+
+    [Fact]
+    public async Task NavigateToAddress_LetsBackReturnToTheSpineItReplaced()
+    {
+        // Before this, the re-root nulled the slot and Back at the new root did
+        // nothing at all — the Find Refs drill was a one-way door.
+        var vm = WithThreeLevelSpine(out _);
+
+        await vm.NavigateToAddressCommand.ExecuteAsync("0x5000");
+        Assert.Single(vm.Breadcrumbs);                       // spine replaced
+
+        await vm.GoBackCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { "Root", "Mid", "Leaf" }, Names(vm));
+    }
+
+    [Fact]
+    public async Task NavigateToAddress_FromAnEmptyWalker_LeavesNothingToGoBackTo()
+    {
+        // Nothing was replaced, so Back must not invent a destination.
+        var vm = MakeVm();
+
+        await vm.NavigateToAddressCommand.ExecuteAsync("0x5000");
+        var landed = Names(vm);
+        await vm.GoBackCommand.ExecuteAsync(null);
+
+        Assert.Equal(landed, Names(vm));
+        Assert.False(vm.CanGoForward);
+    }
+
+    [Fact]
+    public async Task SteppingOutOfARerootedSpine_KeepsTheForwardHistoryBuiltInsideIt()
+    {
+        // THE regression. Walking out of a re-rooted spine builds forward entries;
+        // the Back that leaves the spine used to Clear+Add the collection, which
+        // reached the invalidation hook as a fresh navigation and wiped every one of
+        // them — greying Forward on the press that most obviously ought to be undoable.
+        var vm = WithThreeLevelSpine(out _);
+        await vm.NavigateToAddressCommand.ExecuteAsync("0x5000");
+
+        // Drill twice inside the new spine, then walk back out of both.
+        vm.Breadcrumbs.Add(Crumb("A", "0x6000"));
+        vm.Breadcrumbs.Add(Crumb("B", "0x7000"));
+        await vm.GoBackCommand.ExecuteAsync(null);   // drop B
+        await vm.GoBackCommand.ExecuteAsync(null);   // drop A
+        Assert.True(vm.CanGoForward);
+
+        await vm.GoBackCommand.ExecuteAsync(null);   // step OUT of the re-rooted spine
+
+        Assert.Equal(new[] { "Root", "Mid", "Leaf" }, Names(vm));
+
+        // NOT merely CanGoForward: the spine step pushes one entry of its own, so the
+        // flag stays true even when the wipe eats A and B. (Verified — with the
+        // ReplaceSpine guard disabled, a CanGoForward-only assertion still passed.)
+        // The entries built INSIDE the spine have to be reachable.
+        await vm.GoForwardCommand.ExecuteAsync(null);   // back into the re-rooted spine
+        await vm.GoForwardCommand.ExecuteAsync(null);   // and on to A
+        Assert.Equal(new[] { "Custom", "A" }, Names(vm));
+    }
+
+    [Fact]
+    public async Task SteppingOutOfARerootedSpine_IsItselfUndoable()
+    {
+        var vm = WithThreeLevelSpine(out _);
+        await vm.NavigateToAddressCommand.ExecuteAsync("0x5000");
+
+        await vm.GoBackCommand.ExecuteAsync(null);
+        Assert.Equal(3, vm.Breadcrumbs.Count);
+        Assert.True(vm.CanGoForward);
+
+        await vm.GoForwardCommand.ExecuteAsync(null);
+
+        // The whole spine is swapped back — NOT appended to the one we were on.
+        Assert.Single(vm.Breadcrumbs);
+        Assert.Equal("Custom", vm.Breadcrumbs[0].FieldName);
+    }
+
+    [Fact]
+    public async Task ForwardIntoASpine_ReArmsTheBackOutOfIt()
+    {
+        // Symmetry: Forward must put what it left into the one-deep slot, or the pair
+        // would ratchet — one Back out, and never able to get out again.
+        var vm = WithThreeLevelSpine(out _);
+        await vm.NavigateToAddressCommand.ExecuteAsync("0x5000");
+
+        await vm.GoBackCommand.ExecuteAsync(null);      // out
+        await vm.GoForwardCommand.ExecuteAsync(null);   // back in
+        await vm.GoBackCommand.ExecuteAsync(null);      // out again
+
+        Assert.Equal(new[] { "Root", "Mid", "Leaf" }, Names(vm));
+    }
+
+    [Fact]
+    public async Task WalkOutOfASpine_ThenStepOut_ForwardRetracesEveryStep()
+    {
+        // The full interleave: crumb steps and a spine step on one stack, replayed in
+        // the exact order the user pressed Back. This is why they share a stack — two
+        // stacks could not order a spine step against the crumb steps around it.
+        var vm = WithThreeLevelSpine(out _);
+        await vm.NavigateToAddressCommand.ExecuteAsync("0x5000");
+        vm.Breadcrumbs.Add(Crumb("A", "0x6000"));
+        vm.Breadcrumbs.Add(Crumb("B", "0x7000"));
+
+        await vm.GoBackCommand.ExecuteAsync(null);   // drop B      (crumb step)
+        await vm.GoBackCommand.ExecuteAsync(null);   // drop A      (crumb step)
+        await vm.GoBackCommand.ExecuteAsync(null);   // out of spine (spine step)
+        Assert.Equal(new[] { "Root", "Mid", "Leaf" }, Names(vm));
+
+        await vm.GoForwardCommand.ExecuteAsync(null);
+        Assert.Equal(new[] { "Custom" }, Names(vm));
+        await vm.GoForwardCommand.ExecuteAsync(null);
+        Assert.Equal(new[] { "Custom", "A" }, Names(vm));
+        await vm.GoForwardCommand.ExecuteAsync(null);
+        Assert.Equal(new[] { "Custom", "A", "B" }, Names(vm));
+        Assert.False(vm.CanGoForward);
+    }
+
+    [Fact]
+    public async Task ARerootThatFollowsAnother_ReplacesTheOneBack_AndSaysSo()
+    {
+        // The slot is ONE deep by design (each entry pins a whole crumb list). Prove
+        // the depth rather than leaving it as a comment: the SECOND re-root's Back
+        // returns to the first re-root, not all the way to the original spine.
+        var vm = WithThreeLevelSpine(out _);
+
+        await vm.NavigateToAddressCommand.ExecuteAsync("0x5000");
+        await vm.NavigateToAddressCommand.ExecuteAsync("0x8000");
+        await vm.GoBackCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { "Custom" }, Names(vm));
+        Assert.Equal("0x5000", vm.Breadcrumbs[0].Address);
+
+        // And the original spine is genuinely gone, not merely one press further away.
+        await vm.GoBackCommand.ExecuteAsync(null);
+        Assert.Equal(new[] { "Custom" }, Names(vm));
+    }
+
+    [Fact]
+    public async Task ARerootWithAGarbageAddress_StillLetsBackOut_ButOffersNoForwardIntoNothing()
+    {
+        // The capture happens before the address is validated, so a typo in the Go box
+        // leaves an EMPTY walker with a live slot. Back out of that is the whole point;
+        // a Forward back into the empty spine would walk the "" address.
+        var vm = WithThreeLevelSpine(out _);
+
+        await vm.NavigateToAddressCommand.ExecuteAsync("0xnothex");
+        Assert.Empty(vm.Breadcrumbs);
+
+        await vm.GoBackCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { "Root", "Mid", "Leaf" }, Names(vm));
+        Assert.False(vm.CanGoForward);
+    }
+
+    [Fact]
+    public async Task BookmarkLoad_StepsOutThroughTheSameOneBack()
+    {
+        // The bookmark path was the original owner of this slot; it now shares the
+        // mechanism with the address re-root, so its Back must still behave.
+        var vm = WithThreeLevelSpine(out _);
+        var slot = new BookmarkSlot
+        {
+            SlotIndex = 0,
+            IsOccupied = true,
+            SavedAddress = "0x9000",
+            SavedBreadcrumbs = new List<BreadcrumbItem> { Crumb("Marked", "0x9000") },
+        };
+
+        await vm.LoadBookmarkCommand.ExecuteAsync(slot);
+        Assert.Equal(new[] { "Marked" }, Names(vm));
+
+        // Walk one level deeper and back out, so there is an inner forward entry for
+        // the step-out to preserve — the bookmark path is where this was first broken.
+        vm.Breadcrumbs.Add(Crumb("Deeper", "0x9100"));
+        await vm.GoBackCommand.ExecuteAsync(null);   // drop Deeper
+        await vm.GoBackCommand.ExecuteAsync(null);   // step out of the bookmark spine
+
+        Assert.Equal(new[] { "Root", "Mid", "Leaf" }, Names(vm));
+
+        await vm.GoForwardCommand.ExecuteAsync(null);
+        Assert.Equal(new[] { "Marked" }, Names(vm));
+        await vm.GoForwardCommand.ExecuteAsync(null);
+        Assert.Equal(new[] { "Marked", "Deeper" }, Names(vm));
+    }
+
+    // ── Telling the user the way back exists ────────────────────────────────
+
+    [Fact]
+    public async Task ARerootSaysHowToGetBack()
+    {
+        // The only affordance: Back is always clickable and the crumb strip shows the
+        // NEW spine, so without a status line the return path is invisible.
+        var vm = WithThreeLevelSpine(out _);
+
+        await vm.NavigateToAddressCommand.ExecuteAsync("0x5000");
+
+        Assert.Contains("Back returns to", vm.StatusText);
+        Assert.Contains("Leaf", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task ARerootFromAnEmptyWalker_PromisesNoWayBack()
+    {
+        var vm = MakeVm();
+
+        await vm.NavigateToAddressCommand.ExecuteAsync("0x5000");
+
+        Assert.DoesNotContain("Back returns to", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task OpenReferenceOwner_ItsHintSurvivesTheNavigationThatUsedToWipeIt()
+    {
+        // The hint was assigned BEFORE calling NavigateToAddressAsync, whose first
+        // statement is ClearStatus() — so it was written and wiped inside one click
+        // and never reached the screen.
+        var vm = WithThreeLevelSpine(out _);
+        var match = new ReferenceMatch
+        {
+            OwnerAddress = "0x5000",
+            OwnerName = "PlayerInventory",
+            FieldName = "Items",
+            ElementIndex = 3,
+        };
+
+        await vm.OpenReferenceOwnerCommand.ExecuteAsync(match);
+
+        Assert.Contains("PlayerInventory", vm.StatusText);
+        Assert.Contains("Items", vm.StatusText);
+        Assert.Contains("[3]", vm.StatusText);
+        Assert.Contains("Back returns to", vm.StatusText);
+    }
+
     private static string[] Names(LiveWalkerViewModel vm)
         => vm.Breadcrumbs.Select(b => b.FieldName).ToArray();
 
