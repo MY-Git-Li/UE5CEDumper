@@ -56,26 +56,31 @@ public static class DebugCameraScriptGenerator
         Line(sb, "  if memrec then memrec.Active = false end");
         Line(sb, "  return");
         Line(sb, "end");
+        // Contract check BEFORE the first write: if the layout moved we would
+        // otherwise scribble on whatever now lives at those offsets.
+        CeLuaHygiene.AppendContractCheck(sb, "DebugCamera", MailboxTimeout.UntickAndReturn);
         Line(sb);
 
         // Mailbox round-trip: write request, trigger CMD_SET_DEBUG_CAMERA=7, poll.
         Line(sb, $"writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, {req})   -- request: {req} = {label}");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)    -- clear status");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffCmd}, {CeMailboxLayout.CmdSetDebugCamera})    -- CMD_SET_DEBUG_CAMERA (write LAST)");
-        Line(sb, "local elapsed = 0");
-        Line(sb, $"while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
-        Line(sb, "  sleep(1)");
-        Line(sb, "  elapsed = elapsed + 1");
-        Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
-        Line(sb, "    showMessage('[DebugCamera] mailbox timeout (DLL not responding?)')");
-        Line(sb, "    return");
-        Line(sb, "  end");
-        Line(sb, "end");
+        // Shared wait: real-time deadline, status-specific diagnosis, and the untick
+        // that stops a timed-out row claiming to be active.
+        CeLuaHygiene.AppendMailboxWait(sb, "DebugCamera");
         Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=ON, 0=OFF, -1=error");
         Line(sb, $"dbg('[DebugCamera] {label} -> state=' .. tostring(state))");
-        Line(sb, "if state == -1 then");
-        Line(sb, $"  showMessage('[DebugCamera] {label} -- no live CheatManager? " +
-                  "(enter gameplay first)')");
+        // Test against the REQUEST, not against -1. `UE5_SetDebugCamera` re-reads the
+        // state after firing ToggleDebugCamera and returns whatever it finds
+        // (Frieren.cpp:1037-1046) — so a toggle that fired cleanly but did not take
+        // returns 0 on an ENABLE, with no error code. Checking only -1 read that as
+        // success: no message, window closed, row left ticked on a camera that never
+        // turned on.
+        Line(sb, $"if state ~= {req} then");
+        Line(sb, $"  showMessage('[DebugCamera] {label} failed (state=' .. tostring(state) .. ') " +
+                  "-- no live CheatManager, or the game refused the toggle.')");
+        // Nothing was applied on this branch, so the record must not stay ticked.
+        Line(sb, "  if memrec then memrec.Active = false end");
         Line(sb, "elseif DEBUG == 0 then");
         Line(sb, $"  {CeLuaHygiene.CloseCall}   -- clean success: close the Lua Engine window");
         Line(sb, "end");

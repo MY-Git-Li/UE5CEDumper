@@ -56,6 +56,15 @@ static constexpr uint32_t kFuncFlag_Static = 0x00002000u;
 // The exported mailbox — zero-initialized by default
 extern "C" __declspec(dllexport) Mimic::MailboxData g_invokeMailbox = {};
 
+// Statically initialised: a script must be able to read this the instant the DLL
+// is mapped, before StartThread and before any init has run. Nothing writes it at
+// runtime — it is a constant published through the export table.
+extern "C" __declspec(dllexport) Mimic::MailboxContract g_mailboxContract = {
+    Mimic::MAILBOX_CONTRACT_MAGIC,
+    Mimic::MAILBOX_CONTRACT,
+    Mimic::MAILBOX_CONTRACT_MIN,
+};
+
 namespace Mimic {
 
 // Polling thread state

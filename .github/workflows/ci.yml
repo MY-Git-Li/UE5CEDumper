@@ -105,6 +105,26 @@ jobs:
           # same text. Stdlib-only, no Avalonia, <1s.
           & $py tools/check_axaml_strings.py
           if ($LASTEXITCODE -ne 0) { throw "check_axaml_strings FAILED ($LASTEXITCODE) - an en.axaml key is referenced-but-undefined (a load-time crash) or defined-but-unreferenced (dead). Run 'py tools/check_axaml_strings.py --list' for both sets." }
+          # CE Lua <-> DLL mailbox contract. Every generated script bakes a contract version
+          # and checks itself against what the DLL publishes - but that is only worth anything
+          # if the version actually moves when the contract does. A FORGOTTEN bump is worse
+          # than no versioning: every old script then asserts it is compatible while writing to
+          # offsets that moved, and the check meant to catch that says "fine". So the surface
+          # (MailboxData fields + Cmd + every per-command op enum + Status/InitState) is hashed
+          # against a golden value, and the C# mirror - the constant actually baked into the
+          # scripts - must agree with the DLL. Stdlib-only, <1s.
+          & $py tools/check_mailbox_contract.py
+          if ($LASTEXITCODE -ne 0) { throw "check_mailbox_contract FAILED ($LASTEXITCODE) - the CE Lua mailbox contract changed without a version bump, or CeMailboxLayout.ContractVersion disagrees with Mimic::MAILBOX_CONTRACT. The failure message says which of the two numbers to move." }
+          # Derived counts stated in prose. CLAUDE.md already carried the rule ("Docs numbers are
+          # DERIVED - regenerate, never hand-edit") and the docs broke it anyway, the way a rule
+          # with no check always breaks: right on the day it was typed, never re-derived. A
+          # 2026-08-06 audit found the pipe-command count as ~87 in five places, 31 in a sixth and
+          # ~30 in a seventh while Renge.h held 99. Each is harmless alone; together they make the
+          # CORRECT numbers untrustworthy too, because a reader cannot tell which is which.
+          # Claims are registered explicitly rather than regex-swept, so deltas and historical
+          # snapshots ("+3 commands", "~48 total") are not false-flagged. Stdlib-only, <1s.
+          & $py tools/check_derived_counts.py
+          if ($LASTEXITCODE -ne 0) { throw "check_derived_counts FAILED ($LASTEXITCODE) - a doc states a count that disagrees with the tree, or a registered claim was reworded so the check silently stopped covering it. The failure prints the paste-able value per file." }
           # tools/ue-sample: the README IS the acceptance criteria for a test nothing can run
           # here - what it verifies is a live process being injected into and walked. So the one
           # thing CI CAN do is stop the doc and the code from drifting apart: the numbers a

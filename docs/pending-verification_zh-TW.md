@@ -12,7 +12,27 @@
 
 -----
 
-## 目前狀態（2026-08-06，build 2732）
+## 目前狀態（2026-08-06，build 2743）
+
+> ### 🆕 build 2743：CE Lua mailbox 三個缺陷已修，兩個留著
+>
+> 詳見 [dev-log.md](dev-log.md) 2026-08-06。**這三個不是待驗證項目，是已修**：
+> 逾時後 CE 勾選框仍打勾（7 份手抄的 wait loop **全部**都錯）、
+> 逾時訊息猜錯原因（`status` 早就有答案）、
+> 以及逾時實際是 **~155 秒**而不是宣稱的 10 秒。
+>
+> 最後那項由使用者在 CE Lua Engine 實測定案：`sleep(1)` = **15.47 ms**。
+> **而且在兩顆 TDP 差很多的 CPU 上（9950X3D 桌機 / 9955HX3D 筆電）小數點後三位相同**，
+> 所以那是 Windows 的 ~64 Hz 排程 tick，不是每台機器不同的效能偏移 ——
+> 代表**每一個使用者**都吃到那 155 秒，不是單一機器的現象。
+>
+> **Teleport 原本就是對的，不要「修」它**：它的列是 momentary，靠 deferred timer
+> 無條件 untick 並抑制關窗，套上 toggle 那招（提早 `return`）反而會弄壞它。
+>
+> 另外**兩個 Teleport 缺陷刻意留下**（要的是產品決定不是機械改動），
+> 記在 [todo.md](todo.md) 的「CE Lua」段：
+> `Get camera POV` / `Get current coords` 在預設 `DEBUG == 0` 下什麼都不顯示、
+> 以及 `Clear all markers` 一次點擊可能跳三個對話框。
 
 | 組別 | 剩幾項 | 內容 |
 |---|---|---|
@@ -22,6 +42,16 @@
 | ④ Vendor 更新 | 1 ⬜ | Z1 zydis |
 
 其中屬於 audit #4 的 `- ⬜` 條目是 **13 項**（與英文正本的計數一致）。
+
+> **B4 的分類要看清楚：修正早就 ship 了（build 2592），⬜ 的是「驗證」。**
+> 程式碼已核對過：`Tot.h:75-76` 的獨立旗標 `t_cancelImmune` + `MarkCancelImmune()`、
+> `Tot.h:80` 讓 `MarkBackgroundWorker()` 同時設兩個（既有 worker 行為不變）、
+> `Mimic.cpp:218` poller 只標記 cancel-immune、`Frieren.cpp:1650` 的 `IsBackgroundWorker()`
+> 仍讀**另一個**旗標。正是 finding 要求的「獨立旗標」而不是那個一行版。
+
+**2026-08-06 第二輪（SEED BATTLE DESTINY REMASTERED，build 2738）：register 一項都沒結掉。**
+那個 session 是拿來驗 Live Walker 的 spine-step Back/Forward（已通過，不屬於本清單），
+順手檢查 B4 卻是空跑 —— 原因寫在下面 B4 那一節，**不要把「WARN 沒出現」讀成 FAIL**。
 
 **2026-08-06 對照現有 log 重掃的結果 —— 這一輪不用進遊戲就結掉了三項：**
 
@@ -112,8 +142,14 @@ Log 根目錄：`%LOCALAPPDATA%\UE5CEDumper\Logs`
 1. 啟動遊戲（DLL 已注入或走 proxy），連上 UI。
 2. 開始一個會跑很久的操作 —— Property Search 打開 **Deep** 搜一個常見字，
    或 Instance Finder 對 `Actor` 做一次完整掃描。
-3. **趁它還在跑**，用工作管理員 **End task** 掉 `UE5DumpUI.exe`。
-   （要用強制結束，不要按視窗關閉鈕 —— 這裡要模擬的是 client 猝死。）
+3. **趁它還在跑**，強制殺掉 `UE5DumpUI.exe`。**唯一可靠的一行**：
+
+   ```
+   taskkill /F /IM UE5DumpUI.exe
+   ```
+
+   （`/F` 是關鍵。視窗關閉鈕、工作管理員「處理程序」分頁的「結束工作」都**不算**，
+   兩者都會先給程式乾淨收尾的機會 —— 這裡要模擬的是 client 猝死。）
 4. 回到 CE，做任何一個 CE 端查詢：`.CT` 的 Find Instance，
    或在一款靠 class-scan fallback 的遊戲上按 teleport / GodMode 熱鍵。
 5. `grep "per-command cancel is latched" pipe-0.log`
@@ -124,8 +160,63 @@ Log 根目錄：`%LOCALAPPDATA%\UE5CEDumper\Logs`
 - **PASS** = 該 WARN 出現，**而且**接在它後面的那個指令回報的結果數**不是零**。
 - **FAIL** = 沒有 WARN，而查詢回答 `0` 並附帶 `scanned=<full pool>`。
 
-> 第 3 步的「強制結束」是關鍵：正常關閉會讓 UI 有機會乾淨地斷線，
-> `g_perCommand` 就不會被 latch 住，整個測試會變成空跑。
+> ### ⚠ 工作管理員「處理程序」分頁的「結束工作」殺不掉它 —— 2026-08-06 實測
+>
+> 那顆按鈕會**先送 `WM_CLOSE`**，只有在程式沒反應時才升級成強制終止。所以一個還在回應的
+> UI 會**正常關閉**，`g_perCommand` 永遠不會被 latch，整個測試變成空跑。
+> 要**「詳細資料」分頁 →「結束處理程序」**，或 `taskkill /F /IM UE5DumpUI.exe`。
+>
+> **實測證據**（SEED BATTLE DESTINY REMASTERED，build 2738，就是這樣關的）：
+> - UI 仍然寫出了 `UE5DumpUI shutting down...` —— 這行 `TerminateProcess` **寫不出來**
+> - 伺服器端 `Stop entry (conns=0)`、
+>   `Stop conn drain satisfied, 0 left (0 ms, **0 cancel re-asserts**)`
+>
+> **所以「WARN 沒出現」不等於 FAIL。** 先看上面那兩行，才能分辨
+> 「防護有效」和「這次根本沒測到」。
+>
+> 另一半條件同樣重要：UI 死掉的**當下必須有長時間操作正在跑**。
+> 那個 session 最後一筆 pipe 流量在關閉前 40 秒，根本沒有指令可以讓
+> disconnect monitor 去 latch 一個 cancel。
+
+> ### ⚠ 先確認「有沒有武裝」—— `client gone mid-command` —— 2026-08-06 第二次實測
+>
+> latch 自己有一行 WARN，就印在設定 latch 的前一行
+> （[`Fern.cpp:769`](../dll/src/Fern.cpp:769)）：
+> `client gone mid-command (err=…) — aborting in-flight op`。
+> **要先 grep 這一行，再去 grep B4 那一行。**
+> 抓不到 ⇒ `g_perCommand` 根本沒被 latch ⇒ B4 的 WARN 不印是**正確**的，這次什麼都沒測到。
+> 只有這行在的時候，「B4 那行沒出現」才有意義。
+>
+> ### 軸不是「久」，是「單一次呼叫卡住好幾秒」
+>
+> `MonitorLoop` 每 **200 ms** 輪詢一次（[`Fern.cpp:732`](../dll/src/Fern.cpp:732)），
+> 而且只 peek `inFlight` 為真的連線（`:743`），所以那個指令必須在輪詢落下的**那一刻**還在跑。
+> **分頁 / 串流式的操作再久都武裝不了它** —— 那是幾千個短指令，中間全是空隙。
+>
+> 兩個看起來最像正解、實際上都是陷阱（2026-08-06 各燒掉一次實測）：
+> - **Dump All Metadata** —— `DumpAllService` 是
+>   `GetObjectListAsync(offset, pageSize)` 的 `do/while`
+>   （[`DumpAllService.cs:115-133`](../ui/UE5DumpUI/Services/DumpAllService.cs:115)），
+>   加上每批 200 個的 `WalkClassesBatchAsync`（`:262`）。
+>   **實測每頁間隔 50–80 ms**（19:45:16.124 → .201 → .249 → .323），輪詢一次都沒抓到。
+>   最後是連線自己的寫入先發現 client 死了 —— 同一毫秒內
+>   `Failed to write response` → `Client disconnected` —— latch 完全沒設。
+> - **Snapshot capture** —— `Renge.h:161-165` 直接寫明：`begin_snapshot` + `snapshot_chunk`
+>   串流 `[offset, offset+limit)`，**「like get_object_list」**。同一個形狀，同樣空跑。
+>
+> 要改用**單一個阻塞式掃描**。它們全在 `Aura.cpp` —— 該檔案握有 DLL 裡 30 處
+> `Tot::Requested()` 檢查，正是因為這些才是被設計成會跑很久的：
+>
+> | 指令 | UI 位置 | 為什麼久 |
+> |---|---|---|
+> | `begin_value_scan` | Value Search 第一次掃描 | 每物件 × 每屬性，預設最重 |
+> | `find_path_from_gworld` | 🌍 Locate in GWorld | BFS，工具列 **depth 滑桿**是直接的成本旋鈕 |
+> | `find_refs_to_uobject` | Live Walker → Find Refs | 反向掃全池，含巢狀 struct/container |
+> | `find_instances` | Instance Finder | 全池掃描 |
+>
+> 物件池小的時候（SEED BATTLE：69,688 個）連這些都可能很快跑完 ——
+> 所以要看的是**那行武裝訊息**，不是碼錶。
+> 四個裡面只有 **Locate in GWorld** 有可以一直往上轉到夠慢的旋鈕。
 
 ## ⬜ B29（log 半）—— CE plugin 重複注入的防護會放行外來 wrapper
 **build 2577** · 力氣 **中**（要先有 wrapper，見 ② 的人工半）

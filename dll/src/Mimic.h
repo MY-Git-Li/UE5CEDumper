@@ -317,3 +317,67 @@ uintptr_t GetAddress();
 // Exported global — CE Lua uses getAddress("g_invokeMailbox") to find it.
 // No function call needed! CE resolves the symbol from the DLL export table.
 extern "C" __declspec(dllexport) extern Mimic::MailboxData g_invokeMailbox;
+
+// ============================================================
+// CE Lua ↔ DLL contract version
+// ============================================================
+//
+// WHY THIS IS NOT THE BUILD NUMBER. A .CT the user saved months ago is still
+// perfectly valid against a newer DLL as long as nothing it depends on moved.
+// Versioning on the build would condemn every old script on every release; what
+// actually has to match is the CONTRACT — and it changes rarely. Same shape as
+// Genau::kVersionDetectLogicRev, which bumps only when the detection LOGIC
+// changes rather than on every build.
+//
+// WHAT IS IN THE CONTRACT (change any of these ⇒ bump):
+//   1. MailboxData field offsets, or its size
+//   2. Cmd values
+//   3. Op values inside a command (TeleportOp / FlyOp / ProtectOp / QueryPtrOp /
+//      TimeOp / ForegroundOp, and Laufen's knobIds)
+//   4. Status / InitState values, or result-code meanings
+//   5. The meaning of an EXISTING field at an existing offset
+//
+// WHAT IS NOT (additive ⇒ bump MAILBOX_CONTRACT only, leave the MIN alone):
+//   a new Cmd, a new op at a previously unused number, a new knobId. Old scripts
+//   never referenced them, so they stay valid.
+//
+// TWO numbers, because the answer is a RANGE and the two failure directions need
+// different advice:
+//   script <  MAILBOX_CONTRACT_MIN  → the script is too old   → regenerate the .CT
+//   script >  MAILBOX_CONTRACT      → the DLL is too old       → update the DLL
+//   otherwise                        → compatible, however many builds apart
+// Today's "new .CT + old DLL" case is silent corruption; the second line is the
+// whole reason the check reads a range instead of testing equality.
+namespace Mimic {
+
+/// Current contract revision. Bump when any item 1-5 above changes.
+constexpr int32_t MAILBOX_CONTRACT = 1;
+
+/// Oldest script contract still accepted. Bump ONLY when a change actually
+/// invalidates older scripts — an additive change must not move this.
+constexpr int32_t MAILBOX_CONTRACT_MIN = 1;
+
+/// 'UE5C' — proves the symbol resolved to OUR data rather than to a stale
+/// address left behind by a previous injection. That is not hypothetical: a
+/// 2026-08-06 session showed CE holding a mailbox address the DLL no longer
+/// owned, and the script wrote into it for ~155 s before giving up.
+constexpr uint32_t MAILBOX_CONTRACT_MAGIC = 0x43354555u;
+
+/// Published for CE Lua as its own exported symbol, NOT as a field inside
+/// MailboxData — reading the layout-version out of the struct whose layout is in
+/// question is circular, and this must be readable BEFORE anything is written.
+#pragma pack(push, 1)
+struct MailboxContract {
+    uint32_t magic;     // 0x00: MAILBOX_CONTRACT_MAGIC
+    int32_t  current;   // 0x04: MAILBOX_CONTRACT
+    int32_t  minimum;   // 0x08: MAILBOX_CONTRACT_MIN
+};
+#pragma pack(pop)
+
+static_assert(sizeof(MailboxContract) == 12, "CE Lua reads these at fixed offsets");
+static_assert(MAILBOX_CONTRACT_MIN <= MAILBOX_CONTRACT,
+              "the accepted range cannot be empty");
+
+} // namespace Mimic
+
+extern "C" __declspec(dllexport) extern Mimic::MailboxContract g_mailboxContract;

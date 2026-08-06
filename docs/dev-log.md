@@ -22,6 +22,277 @@ builds ≤696 in
 
 -----
 
+## 2026-08-06 - The CE Lua scripts and the DLL now agree on a contract, and CI keeps them honest (build 2747)
+
+A generated `.CT` and the DLL had **no version relationship at all**. A table saved months ago
+against a DLL whose mailbox has since moved writes to the old offsets and gets silence or garbage;
+the reverse - a new table against an old DLL - is the same, and neither says anything.
+
+**The design question was which axis to version, and the obvious answer is wrong.** Versioning on
+the BUILD number would condemn every saved table on every release: a v1800 script is perfectly valid
+against a v1900 DLL if nothing it depends on moved. What has to match is the **contract** - the
+`MailboxData` offsets, the `Cmd` values, the per-command op values, the status/result meanings - and
+that changes rarely. The repo already had this exact pattern for a different problem:
+`Genau::kVersionDetectLogicRev` bumps only when the detection LOGIC changes, not per build.
+
+**Two numbers, because the answer is a RANGE.** The DLL publishes `MAILBOX_CONTRACT` and
+`MAILBOX_CONTRACT_MIN`; a script bakes the contract it was generated against and is compatible when
+`MIN <= script <= CONTRACT`. That is what lets a months-old table survive hundreds of builds, and it
+separates the two failure directions, which need opposite advice:
+
+| condition | meaning | what the script says |
+|---|---|---|
+| `script < MIN` | the script is too old | regenerate the `.CT` |
+| `script > CONTRACT` | **the DLL** is too old | update `UE5Dumper.dll` |
+
+That second row does not exist today at all - a new table against an old DLL is silent corruption.
+
+**Published as its own exported symbol, `g_mailboxContract`, not as a field of the mailbox.** Reading
+the layout version out of the struct whose layout is in question is circular, and the check has to
+run BEFORE the first write: if the layout moved, writing first scribbles on whatever now occupies
+those offsets. It carries a magic (`'UE5C'`) because the symbol resolving to a **stale address** is
+not hypothetical - that is exactly what a 2026-08-06 session showed CE doing, holding a mailbox
+address the DLL no longer owned while the script wrote into it for ~155 s.
+
+Emitted by one shared `CeLuaHygiene.AppendContractCheck` into all 11 generated toggle/momentary
+scripts, and wired into both standalone helpers at `findMailbox` - the single place every path
+obtains the mailbox. The bail-out unticks the record **even for momentary scripts**, which the
+timeout path does not: their deferred untick timer is created further down the block, so at
+contract-check time a bare `return` would reach nothing.
+
+**The hard part is not the check, it is the discipline** - a forgotten bump is WORSE than no
+versioning, because every old script then asserts compatibility while writing to offsets that moved,
+and the check meant to catch it says "fine". So `tools/check_mailbox_contract.py` hashes the contract
+surface (every `MailboxData` field in declaration order, every `Cmd`, every per-command op enum,
+`Status`/`InitState`) against a golden value, and separately requires
+`CeMailboxLayout.ContractVersion` - the constant actually baked into scripts - to equal the DLL's.
+Comments and prose are stripped, so documentation edits do not trip it. Now the seventh CI gate.
+
+Both directions negative-controlled: renumbering `CMD_TIME` without a bump fails with "MAILBOX_CONTRACT
+was NOT bumped" and a two-line explanation of which number to move; bumping the C++ constant alone
+fails on the C# mirror first, which is the more dangerous case of the two.
+
+3419 C# tests green; DLL rebuilt (`-Target DLL`, not `-Target Test`) and `g_mailboxContract` confirmed
+in the export table at ordinal 64; AOT-trimmed publish verified.
+
+**One test defect worth recording, because it is the same shape as the bug being fixed:** the
+ordering assertion first matched the substring `"write"`, which hits the word inside the scripts' own
+header comments - a cheap proxy standing in for the predicate that actually mattered (a write CALL).
+It failed on two generators whose ordering was correct. That is audit #4's 4b root cause, committed
+in a test written to catch exactly that class of error.
+
+-----
+
+## 2026-08-06 - Three defects in every emitted mailbox wait, and one of them was a 155-second freeze (build 2743)
+
+Started from one screenshot — `[Movement] mailbox timeout (DLL not responding?)` — and the DLL was
+demonstrably fine. Its poller had started at 20:01:00.266 with `poll=1ms`, was still answering at
+20:05:54, and logs `Mailbox: received cmd=%d` unconditionally for every command it sees
+(received == answered, 4/4 and 2/2). The message sent the user to inspect a healthy DLL.
+
+**Three defects, all present in all seven hand-rolled copies of the wait loop.** That count is the
+finding: a rule applied by hand-copying it lands at N-k, and here k was every copy.
+
+**D1 - the checkbox lied.** Every generator cleared `memrec.Active` on the "mailbox not found" path
+and **none** cleared it on the timeout path, so a timed-out enable left the CE row TICKED with
+nothing applied. Same class as B30/B40, which was fixed in `UE5CEDumper.CT` and
+`CeInjectScriptGenerator` and never propagated. The audit then found the same hole on the
+"the DLL answered with an error" branches, which the hand pass had missed in every file.
+
+**D2 - the message guessed, and the answer was already in memory.** `status` is
+`IDLE=0 / DONE=1 / PROCESSING=0xFF`; the DLL sets PROCESSING the instant its poller picks a command
+up and DONE when it finishes. So on timeout the status separates two faults that send the user to
+completely different places: **0 = the DLL never saw it** (stale mailbox address - re-inject, or
+re-tick so CE re-resolves the symbol) and **0xFF = it took the command and wedged**. The old text
+asserted the second and the observed case was the first.
+
+**D3 - the timeout was 15.5x its stated value, and a user-run probe settled it.** The loop counted
+`sleep(1)` iterations and bailed at `MailboxPollTimeoutMs = 10000`. A CE Lua probe measured
+`sleep(1)` at **15.47 ms**, so the real bound was **~155 s** of frozen Lua Engine before any message.
+`sleep(1)` through `sleep(10)` all cost the same ~15.47 ms and `sleep(16)` jumps to ~30 ms - it
+quantises to the ~15.6 ms tick. `getTickCount()` was probed in the same run (it exists and returns
+ms), which is what made a real deadline safe to emit rather than an invented API.
+
+> **The second machine is the reason this is a fact and not an anecdote.** Re-run on a 9955HX3D
+> laptop against the original 9950X3D desktop - very different TDP - every value below the floor
+> matched to three decimals (`sleep(1)` 15.470 on both, `sleep(5)` 15.630 on both). Only the 15/16 ms
+> readings differed (18.59 vs 17.50, 30.31 vs 29.53) = one tick of quantisation noise from a 15 ms
+> timer measuring 15 ms events. **The "performance-dependent per-PC offset" hypothesis is refuted:**
+> it is the ~64 Hz kernel tick, so EVERY user had the ~155 s timeout.
+
+**The fix is one emitter, not seven patches.** `CeLuaHygiene.AppendMailboxWait` owns the loop, the
+deadline, the status diagnosis and the bail-out. It takes a `MailboxTimeout` mode because the repo
+has **two script shapes and they are not interchangeable**:
+
+- **Stateful toggles** (Movement / GodMode / Fly / SeeThrough / Foreground / DebugCamera /
+  TimeDilation) - `UntickAndReturn`.
+- **Momentary actions** (Teleport's 17 rows) - `FlagAndBreak`. Teleport was **already correct on D1**
+  and applying the toggles' fix would have BROKEN it: its record self-unticks from a deferred timer
+  that also suppresses the success-close, so an early `return` would skip both. B15's comment in that
+  generator had already reasoned this out; the shared emitter respects it instead of overriding it.
+
+**Three more Teleport defects the audit found, none of which were D1/D2/D3:**
+
+- **A silent no-op that closed the window like a clean success, on 16 of the 17 rows.** `Generate`
+  sampled `cmd` ONCE with no `else`. The R3 bounded-idle-wait fix had reached `GenerateClearAll` and
+  CoordLibrary but never this method - and back-to-back firing is the ORDINARY use here (hotkey-spam
+  "TP facing direction", Save then Recall). When it tripped: nothing written, no message, `hadError`
+  still false, so the deferred timer closed the window. Now uses the existing
+  `CeLuaHygiene.AppendIdleWait` plus the missing `else`.
+- **Nine of ten result codes were thrown away.** `Wirbel` defines ten negative codes; only `-7` had a
+  message. The rest reached `dbg()` - silent at the shipped `DEBUG == 0` - so "Recall marker 2" on an
+  empty slot (`-6`) looked exactly like a successful recall.
+- **A stale `code` read on the timeout path.** The timeout `break`s, then `code` was read from a
+  command that never completed; a leftover `-7` would pop "marker saved on another map" on top of the
+  timeout dialog. Both result arms are now gated on `not hadError`.
+
+**And one in DebugCamera that the hand pass missed:** the failure test was `state == -1`, but
+`UE5_SetDebugCamera` re-reads the state after firing `ToggleDebugCamera` and returns whatever it
+finds (`Frieren.cpp:1037-1046`) - so a toggle that fired cleanly and did not take returns **0** on an
+ENABLE, with no error code. It now tests against the REQUEST (`state ~= req`).
+
+**Tests: one rule asserted once, structurally.** `CeMailboxBailoutTests` walks each generated ENABLE
+block and requires every failure message to reach an untick before control leaves its branch, plus
+every non-guard `return` to have already unticked. Counting messages does NOT work and the first
+version of the test was wrong for exactly that reason - the shared timeout branch has three
+alternative messages sharing one untick, so a count says "3 bail-outs, 1 untick". A negative control
+confirmed the rewrite: removing one untick fails exactly one test. A second test pins the momentary
+shape separately so a future "fix" cannot flatten Teleport into the toggle pattern, and a third
+asserts every generator's wait loop is byte-identical apart from its tag. 3385 C# tests green;
+AOT-trimmed publish verified (54.2 MB).
+
+**Reported, not fixed** (they need a UX decision, not a mechanical change): `Get camera POV` and
+`Get current coords` format their numbers only through `dbg`, so at the shipped `DEBUG == 0` the two
+rows whose whole purpose is displaying a number show nothing and then close the window; and
+`ClearAll`'s busy/timeout `break` exits the inner wait rather than the `for slot` loop, so one click
+can raise up to three dialogs. See [todo.md](todo.md).
+
+-----
+
+## 2026-08-06 - The leftover list stops describing a file it already recycled (build 2736)
+
+Reported from a real session, and `view-0.log` had the whole thing:
+
+```
+18:30:20  Orphan scan: 55 candidate folder(s) examined, 3 leftover(s) found
+18:30:35  Recycled leftover proxy ...Fantasynth...version.dll
+18:30:35  Recycled leftover proxy ...NEKOPALIVE...version.dll
+18:30:35  Recycled leftover proxy ...StellarBlade...version.dll
+18:30:39  Orphan scan: 55 candidate folder(s) examined, 0 leftover(s) found
+```
+
+**The delete worked perfectly; the panel just never said so.** A cleaned row stayed on the list
+still promising, in the FUTURE tense, to "Recycle version.dll, then remove up to 3 folder(s) it
+leaves empty" - for a file already in the Recycle Bin, because `ActionSummary` switches on `Verdict`
+alone and `OnIsRemovedChanged` re-raises it without changing it. The 18:30:39 line is the user
+pressing **Find leftovers** a second time to find out what had actually happened.
+
+**Cleaned rows are now dropped, and the equivalence is exact rather than approximate.** `Success`
+from `RemoveOrphanProxyAsync` means the proxy DLL is off disk (recycled, or already gone - a partial
+FOLDER prune is still a success), and the scan enumerates rows BY that DLL, so a re-scan could not
+have re-found the row. Dropping it produces the list a scan would, instantly.
+
+**Why NOT the auto re-scan, which was the other option asked for:** it is strictly worse for the
+rows that stay. It would re-find every FAILED row with a **blank status**, and that status - "in use
+by a running program: version.dll. Close the game or Cheat Engine and try again", "read-only, left
+alone deliberately" - is the only actionable thing a failed delete produces. It also costs the 4-6 s
+the log shows, on every pass, and `ScanOrphansAsync` refuses to run while a removal is in flight.
+
+Everything is left **unchecked**, successes and failures alike: a failed row that stayed checked
+would re-submit itself on the next click of a button still labelled "Delete checked (1)". With
+nothing checked `HasOrphanSelection` is false and the button greys out, which is the "pass is over"
+signal. When the list empties, `OrphanScanRan` keeps `ShowNoOrphansFound` true so the green
+"No leftover proxy DLLs found." takes over rather than leaving an unexplained blank.
+
+The summary line carries the **file/folder tally** ("Cleaned 3 of 3 leftover(s) - 3 file(s)
+recycled, 7 folder(s) removed; 1 still listed with the reason"). The per-row SUCCESS messages are
+the one thing dropping rows costs, so the totals have to survive somewhere on screen; per-row detail
+for both outcomes, including why a prune stopped early, is in the ProxyDeploy log either way.
+
+9 new tests driven through the REAL scan->delete path (stub service, not a hand-populated
+collection, so the per-row `PropertyChanged` wiring the scan installs is exercised too). 5 of the 9
+fail with the drop disabled. One intended test was **deleted rather than weakened**: the
+"Delete checked (N)" label resolves through the Avalonia resource dictionary, which is not loaded
+headlessly, so it returns `""` and the test measured the resource system rather than the behaviour -
+`SelectedOrphanCount` / `HasOrphanSelection` are the same fact, testably. 3325 C# tests green;
+AOT-trimmed publish verified (54.2 MB).
+
+-----
+
+## 2026-08-06 - Live Walker: the two navigations Back/Forward could not see (build 2734)
+
+A survey of all 19 tabs for "which other panel deserves browser-style Back/Forward" returned an
+answer nobody was looking for: **the reference implementation does not cover its own worst case.**
+Both holes are one shape - a navigation that **REPLACES** the spine instead of truncating it, which
+a `Stack<BreadcrumbItem>` structurally cannot express because a crumb re-**attaches** to whatever is
+on screen.
+
+**Hole 1 - stepping out of a bookmark spine wiped the forward history.** `GoBackAsync`'s
+pre-bookmark branch did `Breadcrumbs.Clear()` + `Add`, which reaches the invalidation hook as
+Reset-then-Add - a fresh navigation - so N Backs' worth of forward entries vanished and the Forward
+button greyed on the one press most obviously undoable. It also never called `PushForward`, so the
+step-out itself could not be undone. No test touched `_preBookmarkBreadcrumbs`.
+
+**Hole 2 - `NavigateToAddressAsync` was a one-way door.** It NULLED the pre-bookmark slot and
+cleared the spine, so Back did nothing at all. That is the sink for the Go box, the Find Refs owner
+drill, and every cross-tab "Open in Live Walker" handoff - the paths a user reaches with one click
+and no warning.
+
+**One mechanism fixes both.** `ForwardStep` is now `(BreadcrumbItem? Crumb, SpineSnapshot? Spine)`
+on a **single** stack - two stacks could not order a spine step against the crumb steps around it.
+`ReplaceSpine` performs the swap under the existing replay guard (renamed `_replayingForward` ->
+`_replayingHistory`, since Back uses it now too). The `_preBookmark*` triple becomes one
+`SpineSnapshot? _replacedSpine`, captured by `CaptureReplacedSpine()` from BOTH the bookmark load
+and the address re-root. `_preBookmarkAddress` was written in three places and read in none - dropped.
+Forward's spine step is the mirror image: it puts what is on screen back into the slot, so the pair
+does not ratchet. Still ONE deep, deliberately - each entry pins a whole crumb list.
+
+**Explicitly NOT captured:** Start from GWorld / GameEngine and the Locate-in-GWorld re-spine. The
+user asked for a fresh root; a Back into the discarded one would contradict the button they pressed.
+
+**Two things found while fixing, both real:**
+- `OpenReferenceOwnerAsync` set its "held the previous object in 'X'" hint **before** calling
+  `NavigateToAddressAsync`, whose first statement is `ClearStatus()`. The hint was written and wiped
+  inside one click and had never once reached the screen. Now set after, and it carries the
+  `← Back returns to <leaf>` hint - the only affordance for the new return path, since the Back
+  button has no enabled-state and the crumb strip shows the NEW spine.
+- The hook's own comment claimed "7 crumb-push sites and 6 Clear sites today". Actual: **14 and 7**.
+  The counts are gone rather than corrected - the drift *is* the argument for the hook.
+
+**13 new tests, and two of them were too weak until a negative control said so.** Disabling the
+`ReplaceSpine` guard failed only 1 of 3 intended tests: `CanGoForward` stays true from the spine
+step's own entry even when the wipe eats everything else, so the flag assertion proved nothing.
+Rewritten to walk Forward and assert the inner entries come back - 3 fail with the guard off, 8 fail
+with the hole-2 capture off. 3316 C# tests green; AOT-trimmed publish verified (54.2 MB).
+
+> ### ✅ VERIFIED in-game 2026-08-06 — SEED BATTLE DESTINY REMASTERED (UE4.27), build 2738
+>
+> All four presses, with the log to match. The register entry is deleted rather than ticked.
+>
+> - **1. Find Refs re-root.** On screen: `Opened LifeGameModeBase — held the previous object in
+>   'GameState'  ·  ← Back returns to PlayerArray`. The half of that string that predates this
+>   build had never once been displayed.
+> - **2. Back out of the re-root.** `NAV←Back out of re-rooted spine | BC=GWorld > PersistentLevel
+>   > OwningWorld > GameState > **PlayerArray(C,0x238,1E80)**` — and the `(C,…)` is the bonus:
+>   the restored leaf is a CONTAINER, so the `RepopulateContainerView` branch of the swap dispatch
+>   (the one flagged "unproven and cheap") is verified too, not just the plain re-walk.
+> - **3. Forward.** `NAV→Fwd spine (1 crumbs) left=0 | BC=Custom(P,0x0,CB80)` — the spine comes back
+>   whole, not appended. It round-tripped **twice** (19:26:31 and 19:26:34), which is the re-arm
+>   working: without it the pair would ratchet and the second Back could not have happened.
+> - **4. Crumb steps interleaved with it.** After a bookmark load, five Backs down to `BC=GWorld`
+>   then five Forwards with `left=` counting `4,3,2,1,0` back to the full spine, ending
+>   `NAV→Fwd [0] left=0 … > SaveSlotList(C,0x7D0,5160) > [0](S,0x0,0010)` — forward into a
+>   container ELEMENT.
+>
+> **One press was not made, and it is named rather than glossed:** the final Back at a BOOKMARK
+> spine's root (the step-out). The branch it would take was exercised 4× from the Find-Refs capture
+> site, both sites call the same `CaptureReplacedSpine()`, and `BookmarkLoad_StepsOutThroughTheSameOneBack`
+> covers it headlessly — so what is untested is one line choosing to call a shared helper.
+
+
+
+-----
+
 ## 2026-08-05 - Logs compress in place; the 21-day purge does not notice (build 2730)
 
 Retention bounds the AGE of the log corpus, not its SIZE. Three weeks of multi-game sessions
@@ -1797,9 +2068,11 @@ hash** and emits debug-directory entry **type 16 (`IMAGE_DEBUG_TYPE_REPRO`)**. M
 * **Studios choose for themselves** — Hogwarts is `/Brepro` at 4.27 while DQ7R, same version, is
   not. The UE version predicts nothing for a shipped game.
 
-`pdb_match.py` now reports the flag on every check. Conclusion recorded in todo.md: a corroborating
-signal only when type 16 is absent, never the primary answer; for "is this the same build?" use
-`binary_md5` or a PDB CodeView GUID.
+`pdb_match.py` now reports the flag on every check. **The standing rule, which lives here:** a PE
+`TimeDateStamp` is a DATE only when `IMAGE_DEBUG_TYPE_REPRO` (type 16) is absent — a corroborating
+signal then, never the primary answer. A `/Brepro` hash is still deterministic per link, so it works
+as a weak IDENTITY; it is just never a clock. For "is this the same build?" skip timestamps entirely:
+`binary_md5` answers it exactly, and for a PDB the CodeView **GUID+Age** is a true per-link identity.
 
 ### `tools/pe/pdb_match.py` — "can I trust this PDB for this binary?"
 

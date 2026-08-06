@@ -50,12 +50,42 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // Everything needed to re-render a level already lives on its BreadcrumbItem
     // (that is how Back re-renders `prev`), so replaying one is just pushing the
     // crumb back and rendering it — no extra state is captured here.
-    private readonly Stack<BreadcrumbItem> _forwardStack = new();
+    private readonly Stack<ForwardStep> _forwardStack = new();
 
-    /// <summary>Set while <c>GoForwardAsync</c> re-pushes a crumb so the
-    /// CollectionChanged invalidation hook doesn't mistake that Add for a fresh
-    /// navigation and wipe the very stack we're walking.</summary>
-    private bool _replayingForward;
+    /// <summary>
+    /// One step <c>GoForwardAsync</c> can replay. Exactly one field is non-null,
+    /// because the walker has TWO kinds of backwards navigation and a bare crumb
+    /// can only express one of them:
+    ///
+    /// <list type="bullet">
+    /// <item><b>Crumb</b> — a level Back / a breadcrumb jump TRUNCATED off the spine.
+    /// The levels below it are still on screen, so Forward re-APPENDS this one.</item>
+    /// <item><b>Spine</b> — a whole spine that a re-rooting navigation REPLACED
+    /// (stepping back out of a bookmark restore, or out of an address re-root).
+    /// Its crumbs do not attach to what is on screen now, so Forward swaps the
+    /// whole list back in.</item>
+    /// </list>
+    ///
+    /// A single stack holds both so one Forward press always means "undo the last
+    /// Back", whichever kind it was — which is the only way the two can interleave
+    /// correctly (walk out of a bookmark spine with N Backs, step out of the spine,
+    /// then Forward N+1 times and arrive exactly where you started).
+    /// </summary>
+    private readonly record struct ForwardStep(BreadcrumbItem? Crumb, SpineSnapshot? Spine);
+
+    /// <summary>
+    /// A whole breadcrumb spine plus the world cache it was rendered against, kept
+    /// so a navigation that REPLACED the spine can be undone. The crumb list is a
+    /// shallow copy — the same <see cref="BreadcrumbItem"/> objects stay live, which
+    /// is what carries each level's captured view state (selection + scroll anchor)
+    /// through the round trip.
+    /// </summary>
+    private sealed record SpineSnapshot(List<BreadcrumbItem> Crumbs, WorldWalkResult? CachedWorld);
+
+    /// <summary>Set while Back / Forward swaps the spine, so the CollectionChanged
+    /// invalidation hook doesn't mistake that Clear+Add (or a Forward's re-push) for
+    /// a fresh navigation and wipe the very history we're walking.</summary>
+    private bool _replayingHistory;
 
     /// <summary>Drives the Forward button's IsEnabled. Kept as state rather than a
     /// computed property because <see cref="_forwardStack"/> isn't observable.</summary>
@@ -508,10 +538,27 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private ObservableCollection<BookmarkSlot> _bookmarkSlots = new();
     [ObservableProperty] private bool _isBookmarkSaveMode;  // True while waiting for user to pick a slot
 
-    // Pre-bookmark navigation state (for Back-after-bookmark)
-    private List<BreadcrumbItem>? _preBookmarkBreadcrumbs;
-    private string _preBookmarkAddress = "";
-    private WorldWalkResult? _preBookmarkCachedWorld;
+    /// <summary>
+    /// The spine that the last RE-ROOTING navigation replaced, so Back can put it
+    /// back once the user has walked out of the new one. Originally captured only by
+    /// a bookmark load ("Back after bookmark"); it now also covers
+    /// <see cref="NavigateToAddressAsync"/>, which is the sink for the Go box, the
+    /// Find Refs owner drill and every cross-tab "Open in Live Walker" handoff — all
+    /// of which used to <see cref="ObservableCollection{T}.Clear"/> the spine with no
+    /// way back at all.
+    ///
+    /// <para>ONE deep, deliberately. Each entry pins a whole crumb list, and a crumb
+    /// can hold a container field's element list — the same reason the forward stack
+    /// stores name+offset view records rather than live rows. Re-rooting twice
+    /// therefore loses the first spine; that is the depth the bookmark path has
+    /// always had, and it is bounded rather than growing with a long session.</para>
+    ///
+    /// <para>Explicit "start over" actions (Start from GWorld / GameEngine) and the
+    /// Locate-in-GWorld re-spine deliberately CLEAR this instead of capturing: the
+    /// user asked for a fresh root, so offering a Back into the discarded one would
+    /// contradict the button they just pressed.</para>
+    /// </summary>
+    private SpineSnapshot? _replacedSpine;
 
     // Per-game bookmark persistence (keyed by PE hash). _bookmarks is null when the
     // store wasn't injected (tests). _activePeHash identifies which game's file to
@@ -618,12 +665,16 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             IsRootGWorld = Breadcrumbs.Count > 0 && Breadcrumbs[0].FieldName == "GWorld";
 
             // Forward-history invalidation rides the same subscription for the same
-            // reason: there are 7 crumb-push sites and 6 Clear sites today, and a
-            // hand-placed ClearForwardStack() at each would silently miss the NEXT
-            // navigation path someone adds. Add/Reset = a fresh navigation, so any
-            // forward history is dead. Remove = Back / a breadcrumb jump, which
-            // PUSHES onto the stack and must not clear it.
-            if (_replayingForward) return;
+            // reason: there are well over a dozen crumb-push sites and a handful of
+            // Clear sites, and a hand-placed ClearForwardStack() at each would
+            // silently miss the NEXT navigation path someone adds. (Don't restate the
+            // counts here — an earlier revision of this comment said "7 and 6" and was
+            // 14 and 7 by the time anyone re-read it. The drift is the argument.)
+            // Add/Reset = a fresh navigation, so any forward history is dead.
+            // Remove = Back / a breadcrumb jump, which PUSHES onto the stack and must
+            // not clear it. _replayingHistory exempts Back's and Forward's own spine
+            // swaps, which are replays of history rather than new navigations.
+            if (_replayingHistory) return;
             if (e.Action is NotifyCollectionChangedAction.Add
                          or NotifyCollectionChangedAction.Reset)
                 ClearForwardStack();
@@ -697,7 +748,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             ClearStatus();
             IsLoading = true;
             StopAutoRefreshTimer();
-            _preBookmarkBreadcrumbs = null;
+            _replacedSpine = null;   // explicit "start over" — see _replacedSpine
             IsBookmarkSaveMode = false;
 
             var world = await _dump.WalkWorldAsync(Constants.WorldWalkMaxDepth, arrayLimit: ArrayLimit);
@@ -748,7 +799,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             ClearStatus();
             IsLoading = true;
             StopAutoRefreshTimer();
-            _preBookmarkBreadcrumbs = null;
+            _replacedSpine = null;   // explicit "start over" — see _replacedSpine
             IsBookmarkSaveMode = false;
 
             var engine = await _dump.ResolveGameEngineAsync();
@@ -1769,8 +1820,68 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// Forward can put it back.</summary>
     private void PushForward(BreadcrumbItem crumb)
     {
-        _forwardStack.Push(crumb);
+        _forwardStack.Push(new ForwardStep(crumb, null));
         CanGoForward = true;
+    }
+
+    /// <summary>Record a whole spine that Back just stepped out of, so Forward can
+    /// swap it back in. Sits on the SAME stack as the crumb steps so the two
+    /// interleave in the order the user actually pressed Back.</summary>
+    private void PushForwardSpine(SpineSnapshot spine)
+    {
+        _forwardStack.Push(new ForwardStep(null, spine));
+        CanGoForward = true;
+    }
+
+    /// <summary>
+    /// Swap the entire spine for <paramref name="crumbs"/>. Guarded, because the
+    /// Clear+Add underneath would otherwise reach the CollectionChanged hook as a
+    /// Reset followed by Adds — i.e. as a fresh navigation — and wipe the forward
+    /// history that this very swap is a step of.
+    /// </summary>
+    private void ReplaceSpine(IReadOnlyList<BreadcrumbItem> crumbs)
+    {
+        _replayingHistory = true;
+        try
+        {
+            Breadcrumbs.Clear();
+            foreach (var bc in crumbs)
+                Breadcrumbs.Add(bc);
+        }
+        finally { _replayingHistory = false; }
+    }
+
+    /// <summary>
+    /// Snapshot the spine currently on screen so a re-rooting navigation can be
+    /// undone by Back. Call BEFORE clearing the spine, and only from navigations
+    /// that REPLACE the root — see <see cref="_replacedSpine"/> for the ones that
+    /// deliberately don't.
+    /// </summary>
+    private void CaptureReplacedSpine()
+    {
+        if (Breadcrumbs.Count == 0) { _replacedSpine = null; return; }
+
+        // Snapshot the view too, so the Back that restores this trail also restores
+        // what was on screen. The list copy is shallow, so the capture lands on the
+        // same crumb objects the restore will read.
+        CaptureCrumbViewState();
+        _replacedSpine = new SpineSnapshot(Breadcrumbs.ToList(), _cachedWorld);
+    }
+
+    /// <summary>
+    /// One-line status telling the user that Back now leads out of a re-rooted spine.
+    /// It is the ONLY affordance for it: the Back button carries no enabled-state (it
+    /// is always clickable) and the breadcrumb strip shows the new spine, so without
+    /// this the return path is invisible. Empty when there is nothing to go back to.
+    /// </summary>
+    private string ReRootedHint()
+    {
+        if (_replacedSpine is not { } prev || prev.Crumbs.Count == 0) return "";
+        var leaf = prev.Crumbs[^1];
+        var name = leaf.FieldName ?? leaf.Label;
+        return string.IsNullOrEmpty(name)
+            ? "← Back returns to the previous object"
+            : $"← Back returns to {name}";
     }
 
     /// <summary>
@@ -1854,24 +1965,47 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         // Back shows different (previous) data — drop the field-search filter.
         ClearFieldSearchForNavigation();
 
-        // If at root breadcrumb and we have pre-bookmark state, restore it
-        if (Breadcrumbs.Count < 2 && _preBookmarkBreadcrumbs != null)
+        // At the root of a spine that a RE-ROOTING navigation replaced (a bookmark
+        // load, or an address re-root — the Go box / Find Refs / a cross-tab handoff):
+        // step back out of it and restore the spine that was on screen before.
+        //
+        // This is the one Back that REPLACES the spine instead of truncating it, and
+        // that is why it needs its own forward step. Clearing + refilling Breadcrumbs
+        // reaches the invalidation hook as Reset-then-Add — a fresh navigation — so
+        // before ReplaceSpine existed this Back silently wiped the forward entries the
+        // user had just built up walking OUT of this very spine, and greyed the Forward
+        // button on the one press that most obviously ought to be undoable.
+        if (Breadcrumbs.Count < 2 && _replacedSpine != null)
         {
             try
             {
                 ClearStatus();
                 IsLoading = true;
 
-                var savedBreadcrumbs = _preBookmarkBreadcrumbs;
-                var savedCachedWorld = _preBookmarkCachedWorld;
-                _preBookmarkBreadcrumbs = null;
-                _preBookmarkAddress = "";
-                _preBookmarkCachedWorld = null;
+                // Swap: the spine on screen becomes a Forward step, the saved one comes
+                // back. Capture the view first so Forward re-renders this root with the
+                // selection + scroll the user is leaving it with.
+                CaptureCrumbViewState();
+                var abandoned = new SpineSnapshot(Breadcrumbs.ToList(), _cachedWorld);
+                var restore = _replacedSpine;
+                _replacedSpine = null;   // consumed: the slot is one deep
 
-                Breadcrumbs.Clear();
-                foreach (var bc in savedBreadcrumbs)
-                    Breadcrumbs.Add(bc);
-                _cachedWorld = savedCachedWorld;
+                ReplaceSpine(restore.Crumbs);
+                _cachedWorld = restore.CachedWorld;
+                // Only offer Forward when there is something to go forward TO. The
+                // spine can legitimately be EMPTY here: a re-root captures the outgoing
+                // spine and clears the collection BEFORE validating the address, so a
+                // typo in the Go box leaves an empty walker with a live slot. Back out
+                // of that is right; a Forward back INTO an empty spine would walk the
+                // "" address.
+                if (abandoned.Crumbs.Count > 0)
+                    PushForwardSpine(abandoned);
+
+                // Set BEFORE the render dispatch, not after: all four render paths below
+                // return early, and UpdateDisplay's freed/recycled warning must be able to
+                // overwrite this rather than be overwritten by it.
+                StatusText = "Returned to the previous view";
+                _log.Info($"NAV←Back out of re-rooted spine | BC={FormatBreadcrumbTrace()}");
 
                 var lastBc = Breadcrumbs.LastOrDefault();
                 if (lastBc != null)
@@ -1902,12 +2036,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     UpdateDisplay(result);
                     RestoreCrumbView(lastBc);
                 }
-
-                StatusText = "Returned to pre-bookmark view";
-                _log.Info("NAV←Back restored pre-bookmark state");
             }
             catch (Exception ex)
             {
+                // The spine has already been swapped and the forward step pushed. That
+                // is CONSISTENT — what is on screen is the restored spine, and Forward
+                // still offers the one we left — so unlike GoForwardAsync's optimistic
+                // push there is nothing to roll back here.
                 SetError(ex);
             }
             finally
@@ -1983,9 +2118,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Browser-style Forward: re-enter the level Back (or a breadcrumb jump) just
-    /// left. The crumb carries everything needed to re-render it, so this pushes it
-    /// back onto the spine and renders it through the same four cases Back uses.
+    /// Browser-style Forward: undo the last Back (or breadcrumb jump), whichever kind
+    /// it was. A crumb step carries everything needed to re-render its level, so it is
+    /// pushed back onto the spine and rendered through the same four cases Back uses;
+    /// a spine step swaps the whole spine back in and re-arms
+    /// <see cref="_replacedSpine"/>, so the Back that produced it stays available.
     ///
     /// Unlike Back, this re-READS the object from the game, so the level may have
     /// changed underneath us — UE can free or recycle a UObject while the user is
@@ -2011,17 +2148,35 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         // Snapshot the level we're leaving so an immediate Back returns to it intact.
         CaptureCrumbViewState();
 
-        var next = _forwardStack.Pop();
+        var step = _forwardStack.Pop();
         CanGoForward = _forwardStack.Count > 0;
 
-        // Re-pushing a crumb is a replay, not a fresh navigation — suppress the
-        // CollectionChanged invalidation hook so the REST of the forward history
-        // survives and the user can keep going forward.
-        _replayingForward = true;
-        try { Breadcrumbs.Add(next); }
-        finally { _replayingForward = false; }
+        BreadcrumbItem next;
+        if (step.Spine is { } spine)
+        {
+            // Spine step — the mirror image of the Back that produced it. What is on
+            // screen goes back into the one-deep re-root slot so that Back can step
+            // out again, and the saved spine is swapped in whole. Nothing is appended:
+            // these crumbs do not belong to the spine we are leaving.
+            _replacedSpine = new SpineSnapshot(Breadcrumbs.ToList(), _cachedWorld);
+            ReplaceSpine(spine.Crumbs);
+            _cachedWorld = spine.CachedWorld;
 
-        _log.Info($"NAV→Fwd {next.FieldName ?? next.Label} left={_forwardStack.Count} | BC={FormatBreadcrumbTrace()}");
+            next = Breadcrumbs.LastOrDefault() ?? new BreadcrumbItem();
+            _log.Info($"NAV→Fwd spine ({spine.Crumbs.Count} crumbs) left={_forwardStack.Count} | BC={FormatBreadcrumbTrace()}");
+        }
+        else
+        {
+            next = step.Crumb!;
+            // Re-pushing a crumb is a replay, not a fresh navigation — suppress the
+            // CollectionChanged invalidation hook so the REST of the forward history
+            // survives and the user can keep going forward.
+            _replayingHistory = true;
+            try { Breadcrumbs.Add(next); }
+            finally { _replayingHistory = false; }
+
+            _log.Info($"NAV→Fwd {next.FieldName ?? next.Label} left={_forwardStack.Count} | BC={FormatBreadcrumbTrace()}");
+        }
 
         try
         {
@@ -2076,17 +2231,29 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            // Undo the optimistic push. Back can afford to leave its spine truncated
+            // Undo the optimistic move. Back can afford to leave its spine truncated
             // on failure — that spine is still CONSISTENT — but Forward would leave a
             // level sitting on the spine that never rendered. Put the user back where
-            // they pressed the button, with the crumb still available to retry.
-            // (Remove doesn't trip the invalidation hook; the re-push is guarded for
-            // symmetry with the Add above.)
-            if (Breadcrumbs.Count > 0 && ReferenceEquals(Breadcrumbs[^1], next))
+            // they pressed the button, with the step still available to retry.
+            if (step.Spine is { } failedSpine)
             {
-                _replayingForward = true;
+                // Spine step: the swap already happened and _replacedSpine holds the
+                // spine we came from, so putting it back is the same swap reversed.
+                if (_replacedSpine is { } cameFrom)
+                {
+                    ReplaceSpine(cameFrom.Crumbs);
+                    _cachedWorld = cameFrom.CachedWorld;
+                }
+                _replacedSpine = null;
+                PushForwardSpine(failedSpine);
+            }
+            else if (Breadcrumbs.Count > 0 && ReferenceEquals(Breadcrumbs[^1], next))
+            {
+                // (Remove doesn't trip the invalidation hook; the re-push is guarded
+                // for symmetry with the Add above.)
+                _replayingHistory = true;
                 try { Breadcrumbs.RemoveAt(Breadcrumbs.Count - 1); }
-                finally { _replayingForward = false; }
+                finally { _replayingHistory = false; }
                 PushForward(next);
             }
             SetError(ex);
@@ -2265,11 +2432,26 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 || fieldName == firstSegment + ".Value");
         _pendingDrillElementIndex = canAutoDrill ? match.ElementIndex : -1;
 
-        // Append a status hint so the user knows where to look on the new
-        // page (the field that's holding the pointer).
-        StatusText = $"Opened {match.OwnerName} — held the previous object in '{match.FieldName}'"
-            + (match.ElementIndex >= 0 ? $"[{match.ElementIndex}]" : "");
         await NavigateToAddressAsync(match.OwnerAddress);
+
+        // Status hint so the user knows where to look on the new page (the field
+        // that's holding the pointer), plus the way back out of the re-root.
+        //
+        // Set AFTER the navigation, not before: NavigateToAddressAsync opens with
+        // ClearStatus(), so the hint this method used to set never survived to the
+        // screen — it was written and wiped within the same click.
+        if (Breadcrumbs.Count > 0)
+            StatusText = BuildOpenedRefStatus(match);
+    }
+
+    /// <summary>Status line for an Open-from-Find-Refs landing: where the pointer was
+    /// held, then how to get back.</summary>
+    private string BuildOpenedRefStatus(ReferenceMatch match)
+    {
+        var where = $"Opened {match.OwnerName} — held the previous object in '{match.FieldName}'"
+                  + (match.ElementIndex >= 0 ? $"[{match.ElementIndex}]" : "");
+        var back = ReRootedHint();
+        return string.IsNullOrEmpty(back) ? where : $"{where}  ·  {back}";
     }
 
     [RelayCommand]
@@ -2294,7 +2476,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             ClearStatus();
             IsLoading = true;
             StopAutoRefreshTimer();
-            _preBookmarkBreadcrumbs = null;
+            // This is a RE-ROOT: the spine below is about to be thrown away wholesale,
+            // not truncated, so Back has nothing to pop and used to do nothing at all.
+            // Hand the outgoing spine to the one-deep re-root slot and Back can put the
+            // user back where they were — which matters most on the paths that reach
+            // here from a single click: the Find Refs owner drill, and every cross-tab
+            // "Open in Live Walker" handoff.
+            CaptureReplacedSpine();
             IsBookmarkSaveMode = false;
             Breadcrumbs.Clear();
             // Stale references panel from a previous lookup target shouldn't
@@ -2314,6 +2502,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             }
 
             await NavigateToAsync(normalizedAddr, "Custom", 0, "Custom", isPointer: true);
+            StatusText = ReRootedHint();
         }
         catch (Exception ex)
         {
@@ -2424,7 +2613,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             ClearStatus();
             IsLoading = true;
             StopAutoRefreshTimer();
-            _preBookmarkBreadcrumbs = null;
+            _replacedSpine = null;   // Locate re-spines the SAME object — see _replacedSpine
             IsBookmarkSaveMode = false;
 
             var path = await _dump.FindPathFromGWorldAsync(objectAddr, objectAddr, GWorldLocateDepth, ct, rootKind,
@@ -2781,7 +2970,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             ClearStatus();
             IsLoading = true;
             StopAutoRefreshTimer();
-            _preBookmarkBreadcrumbs = null;
+            _replacedSpine = null;   // Locate re-spines the SAME object — see _replacedSpine
             IsBookmarkSaveMode = false;
 
             var path = await _dump.FindPathFromGWorldAsync(match.OwnerAddress, match.OwnerAddress,
@@ -3172,17 +3361,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             IsLoading = true;
             StopAutoRefreshTimer();
 
-            // Save current state for Back-after-bookmark
-            if (Breadcrumbs.Count > 0)
-            {
-                // Snapshot the view too, so the Back that restores this trail also
-                // restores what was on screen. The list copy is shallow, so the
-                // capture lands on the same crumb objects the restore will read.
-                CaptureCrumbViewState();
-                _preBookmarkBreadcrumbs = Breadcrumbs.ToList();
-                _preBookmarkAddress = CurrentAddress;
-                _preBookmarkCachedWorld = _cachedWorld;
-            }
+            // Save current state for Back-after-bookmark. Shares the re-root slot with
+            // NavigateToAddressAsync — a bookmark load and an address re-root replace
+            // the spine the same way, so they get the same one Back out of it.
+            CaptureReplacedSpine();
 
             // Restore breadcrumbs. A persisted bookmark's saved addresses go stale
             // after a game RESTART — ASLR re-randomizes every pointer, so the saved
@@ -3572,9 +3754,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     {
         foreach (var slot in BookmarkSlots)
             ClearBookmark(slot);
-        _preBookmarkBreadcrumbs = null;
-        _preBookmarkAddress = "";
-        _preBookmarkCachedWorld = null;
+        _replacedSpine = null;
         IsBookmarkSaveMode = false;
     }
 

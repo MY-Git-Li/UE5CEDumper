@@ -19,165 +19,22 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
-## ▶ Ghidra is out of the sweep — SHIPPED 2026-08-01, acceptance passed (build 2545)
+## Closed work is not here
 
-`py tools/ghidra/pe_sweep.py` replays the whole signature database from the **game binaries**, with
-**byte-identical output**, no JVM and no Ghidra install. Measured on the laptop (32 logical cores,
-8 Python workers): **138 s** against **773 s** for `sweep.sh` at `SWEEP_JOBS=3` — and the 138 s
-figure is the same whether or not a Ghidra JVM is running alongside it.
+Three sections used to sit at the top of this file — the Ghidra-free sweep (build 2545), the
+2026-07-29 corpus state, and the PE build-identity investigation. All three were **finished**, and
+this file's own rule at the top says finished work gets deleted here and written up in
+[dev-log.md](dev-log.md). They were also near-verbatim copies of it, which is the failure mode that
+matters: two copies agree until one drifts, and one of them had already drifted (it argued from
+"five CI gates" after an eighth landed).
 
-* **`compare_sweeps.py out/sweep-ref-ghidra2 out/pe-sweep` → 210/210 files byte-identical**,
-  0 differing, 0 only-in-B. `aggregate_sweep.py`'s `REPORT.md` matches too, modulo one line naming
-  the broken imports the PE route cannot produce. Matrix unchanged: **162 ✅ / 59 ⚠️ / 2 ❌** over
-  55 oracle rows / 70 programs.
-* **`check_pe_memory.py` → 70/70 EXACT** — image base, complete block map and a **per-block MD5**,
-  all reconstructed from the PE. The 74 Ghidra-side maps are committed
-  ([`tools/ghidra/memory-maps/`](../tools/ghidra/memory-maps/), 62 KB) so this runs on a machine
-  with the archive and no Ghidra, and so `pe_memory.py` has a regression oracle.
-
-Ghidra is still required to **author** a new AOB (decompiler, xrefs, symbols). Only the replay
-moved.
-
-### The re-import rule is now SATISFIED — and still does not license deleting anything
-
-`py tools/ghidra/reimport_verify.py` rebuilds a project from the archived binary and grades it on
-the executable hashes, a **SHA-256 over the whole symbol table**, the block map with per-block MD5,
-and byte-identical sweep output. Measured 2026-08-01: `UE4.10-Game` (`-noanalysis`)
-**REBUILT-IDENTICAL** in 95 s; `FactoryGame-CoreUObject` (4.2 MB, 684,805 instructions, full PDB +
-analysis) **REBUILT-IDENTICAL** in 422 s. Two `--analyze` rebuilds of one input came out
-field-for-field identical, so Ghidra's analysis is deterministic here. Full write-up in
-[corpus-preservation.md](corpus-preservation.md) §0b/§0c and [dev-log.md](dev-log.md).
-
-**Backup status: `X:\Ghidra_Projs_Backup` lives on the OTHER machine, not this one.** An earlier
-draft of this section called the corpus "single-copy" on the strength of `X:` being absent *here* —
-that is a one-machine observation stated as a global fact, and it is withdrawn. What remains true
-is that a rebuild costs minutes per binary for the 42 PDB-loaded, disassembled programs, so
-rebuilding is a recovery path, not a substitute for the copy.
-
-Four things to keep in view when the deletion decision is actually made:
-
-* ~~`ES2-0517`'s per-open language upgrade~~ — **FIXED 2026-08-01.** Upgraded in place (one run
-  without `-readOnly`): **12 m 43 s once**, and the same scan went from **>10 min, not finishing**
-  to **30 s**. Behaviour-preserving — scan/consensus/blocks byte-identical, symbol digest and all
-  507,555 functions / 28,635,821 instructions unchanged. It was the only project needing it.
-  Upgrading beats re-importing: the migration keeps the analysis, a re-import would re-run it.
-  See [corpus-preservation.md](corpus-preservation.md) §0d.
-* **18 patterns have exactly one program where they resolve correctly** — Satisfactory 7 across
-  four DLLs, UE4.22-Satisfactory 4, Solarpunk 4, Everspace 2. That reads as a reason to keep those
-  `.rep`s and is not: `pe_sweep.py` reads binaries, so the risk attaches to the **binary**, and all
-  **11 sole-source programs have an archived binary** (0 missing).
-* The 74 **identity fingerprints are committed** ([`tools/ghidra/identity/`](../tools/ghidra/identity/),
-  163 KB). They are what outlives a `.rep` — delete a project without one and there is nothing left
-  to verify a future rebuild against.
-* Four projects hold a **stub re-import** beside the real program (image base `0000:0000`, ~1 KB of
-  DOS header mapped as code). They are pure Ghidra artifacts, and their scan output is noise.
-
------
-
-## ▶ Corpus state as of 2026-07-29 (build 2505) — the sweep is CURRENT
-
-`sweep.sh` is at **57 rows**. A full sweep ran 2026-07-29 and `out/sweep/REPORT.md`, `Himmel.h`'s
-header counts (**70 programs / 55 oracles**, UE **4.10–5.8**) and this file all agree.
-`preflight.py` returns **`GO (exit 0)`** — the manifest was regenerated and covers exactly the 57
-sweep tags. Nothing is stale or blocked. Matrix: **162 ✅ / 59 ⚠️ / 2 ❌**.
-
-⏱ **The full sweep costs minutes, not the ~30–50 min the docs claimed for months — but WHICH minutes
-depends on the machine.** Measured at `SWEEP_JOBS=3`: **4m38s on the desktop** (9950X3D, 57 rows) and
-**12-15 min on the laptop** (9955HX3D, 57 rows / 74 programs, internal NVMe; the spread is cache state) — a **2.6-3.1×**
-spread, so never quote one without the other; `GROUND-TRUTH.md` carries the table. Those *old*
-~30–50 min figures were never taken at all — they date from the pre-script era of hand-running each
-project *with* Auto Analyze, and one was even "updated" by scaling the wrong number with the row
-count. **So never reach for a tag filter to save time**; use one only to
-isolate a row while debugging. The correctness argument for always running the full sweep (a
-filtered run leaves `REPORT.md` describing a corpus that no longer exists) now costs nothing.
-
-**One ❌ in the regression matrix, and it is deliberate: UE 4.10 GObjects on both rows. Leave it.**
-It measures the pre-4.11 support floor rather than asserting it — full reasoning in `Himmel.h`'s
-corpus block and GROUND-TRUTH.md §"Settled facts". Do not mine a `GetUObjectArray` pattern to
-"fix" it; 4.10 has no `FUObjectItem` at all, so finding the address would not make it readable.
-
-Tooling, all no-Ghidra: `tools/pe/pdb_globals.py` (truth from a PDB — now also points at the
-pre-4.11 magic-static route when GObjects has no symbol), `tools/ghidra/replay_patterns.py`
-(corroborate by byte replay), `tools/pe/func_bytes.py` (is a function hollow?),
-`tools/ghidra/capture_provenance.py` (build-identity snapshot).
-
-⚡ **Adding a new engine VERSION is now nearly free — check for prebuilt targets first.** A
-launcher-installed engine ships monolithic `UE4Game*.exe` / `UnrealGame*.exe` **with full PDBs** in
-`Engine/Binaries/Win64`. Surveyed on this machine: 4.23 / 4.27 / **5.4** / 5.7 / 5.8 have all three
-configs; 4.10 and 4.15 have Shipping + Development. That is what made 4.10 possible at all (it
-needs VS2015, which is not installed). **UE 5.4 is installed and ready to harvest with no
-packaging and no compiler** — copy, `pdb_globals.py`, import `-noanalysis`, add rows.
-
------
-
-## Build-identity signals: what `duplicate_copies` and PE link timestamps can and cannot tell you
-
-*Parent: the 2026-07-29 manifest regenerate; [dev-log.md](dev-log.md) build 2505.*
-**Effort S · Risk low. The `duplicate_copies` half is FIXED; the timestamp half is a rule to follow.**
-
-### FIXED — `duplicate_copies` was silently empty on exactly the rows that need it
-
-The regenerate wrote, for Palworld: `duplicate_copies: []` and *"the `.rep` is the last copy"* —
-while **two** byte-identical copies of the corpus build sat in `Game Binary backup`.
-
-⚠ **The first diagnosis of this was wrong and the correction matters.** It was NOT "compares
-against today's bytes instead of `binary_md5`" — line 302 has always compared against
-`rec['exe_md5']`, Ghidra's import-time hash, i.e. the corpus build. The real cause was a **cheap
-size prefilter** sizing candidates against whatever file sits at `binary_last_seen` *today*. On a
-DRIFTED row that is the build which REPLACED the corpus one, so the surviving copy — which has the
-old size — was skipped **before its md5 was ever computed**. An optimisation valid only under the
-assumption "the file on disk is the corpus build", which is precisely false where it matters.
-
-Fixed by passing `size_prefilter=(state == 'MATCH')`. Verified: Palworld `0 → 2` copies.
-**Generalise the shape, it is the reusable part:** when a fast path guards a correct check, ask
-what the guard assumes — a wrong guard makes the correct check unreachable and looks like a
-confident negative. Note also that a null reads as *unknown* while `[]` plus that note is a
-**positive false claim**, which is why this was worse than the `steam_buildid` nulling.
-
-### RULE — a PE `TimeDateStamp` is a date ONLY if `IMAGE_DEBUG_TYPE_REPRO` is absent
-
-Worth knowing because file mtime dates the *copy*, not the build, and the COFF `TimeDateStamp`
-looks like the fix. Sometimes it is. **There is an authoritative test, so never guess:** with
-`/Brepro` (reproducible builds) the linker overwrites that field with a **content hash** and emits
-a debug-directory entry of **type 16 (`IMAGE_DEBUG_TYPE_REPRO`)**. That entry IS the answer.
-`tools/pe/pdb_match.py` now reports it on every check.
-
-⚠ **Plausibility is worthless, and an earlier pass of this entry got it wrong by relying on it.**
-It classified by "does the value fall in a 2000–2030 window", which is true of roughly a fifth of
-32-bit hashes. Two corpus rows are hashes reading as perfectly ordinary dates:
-
-| binary | reads as | actually |
-|---|---|---|
-| **Hogwarts Legacy** (4.27) | `2025-11-12` | **`/Brepro` hash** — and the earlier pass called it REAL |
-| **The Adventures of Elliot** (5.4) | `2026-07-15` | **`/Brepro` hash** |
-| UE 5.7 StackOBot | `2022-09-28` | hash (before 5.7 existed) |
-| UE 5.4 Shipping | `2039-01-13` | hash (the value that prompted the recheck) |
-
-**It is per-CONFIG, not per-version** — the other thing the earlier pass got wrong. Measured across
-the self-built oracles, where the builder and toolchain are controlled:
-
-| | Shipping | Development | DebugGame |
-|---|---|---|---|
-| 4.15 / 4.23 / 4.27 | real | real | real |
-| 5.3 / 5.4 / 5.7 | **`/Brepro`** | real | real |
-| 5.8 | **`/Brepro`** | `TimeDateStamp = 0` | `TimeDateStamp = 0` |
-
-So Epic's UBT enables `/Brepro` on **Shipping only**, from ~5.3, and 5.8 non-Shipping zeroes the
-field outright — a third state that is neither a time nor a hash. This also kills the "cross-config
-spread" discriminator a previous pass proposed: the 5.4 spread was huge because it compared a hash
-against a *real* time, not because both were hashes. Right conclusion, wrong reasoning, and it
-would fail whenever both sides are hashed.
-
-**Third-party studios choose for themselves.** Hogwarts is `/Brepro` at **4.27** while DQ7R, the
-same engine version, is not. So for a shipped game the UE version predicts nothing — test the flag.
-And since every shipped game is a Shipping build, the useful-signal case is the *rare* one.
-
-Bottom line: usable as a corroborating signal only when type 16 is absent, and never as the primary
-answer. When the question is "is this the same build?", skip timestamps entirely — `binary_md5`
-answers it exactly, and for a PDB the CodeView **GUID+Age** is a true per-link identity. A
-`/Brepro` hash is still deterministic per link, so it works as a weak identity — just never as a
-clock.
-
+Where they live now:
+- **Ghidra out of the sweep / `pe_sweep.py` acceptance** — [dev-log.md](dev-log.md), build 2545
+  (the 138 s vs 773 s replay, 210/210 byte-identical, 162 ✅ / 59 ⚠ / 2 ❌, 70/70 EXACT).
+- **Corpus state + the never-drop set** — [corpus-preservation.md](corpus-preservation.md), which is
+  the authority; the copy here was a snapshot of it.
+- **PE build-identity (`/Brepro`, `duplicate_copies`)** — [dev-log.md](dev-log.md), and the standing
+  rule about `IMAGE_DEBUG_TYPE_REPRO` is stated with it.
 -----
 
 ## UE5 non-Shipping: GNames reaches nothing — decide whether to mine a pattern
@@ -568,9 +425,12 @@ implements the real check correctly.** A secondary 4b thread, *silent defaults a
 (B27, B31, B38, B45), is why B27's composition-root test is worth more than its one-line production fix.
 
 **`ce-artifacts` is the area to give standing attention.** Three of 4b's five MEDIUMs live there, each can
-leave a working setup broken with a confidently wrong message, and — unlike the AOB tooling, which now has
-five CI gates — the `.CT`, the emitted Lua and the CE-plugin entry path have **no automated coverage at
-all**. `axaml-strings`, the AOT/dependency surface and the generated-proxy family came back effectively
+leave a working setup broken with a confidently wrong message. **Partly closed since this was written**
+(build 2747): CI now runs **eight** python gates, and `check_mailbox_contract.py` covers the CE surface
+that had none — it hashes the mailbox contract and requires the version baked into every emitted script to
+match the DLL. What is still uncovered is the **emitted Lua text itself** and the **CE-plugin entry path**;
+`CeMailboxBailoutTests` asserts the generators' bail-out shape, but nothing executes the Lua.
+`axaml-strings`, the AOT/dependency surface and the generated-proxy family came back effectively
 clean, which is a real result worth recording.
 
 -----
@@ -1453,6 +1313,28 @@ Pick up when the active plan finishes or when blocked.
   if a UE6 game ships it ON, the hardcoded `OFF_UOBJECT_*` offsets shift by `sizeof(FRemoteObjectId)` and
   FUObjectItem packing is forced off — a real handler branch would then be needed.
   *Parent: UE6-vs-5.8 parity audit (2026-06-30); per-structure detail in technical-notes.md.*
+
+-----
+
+## CE Lua — two Teleport-row defects left open by the build-2743 sweep
+
+Both were found by the audit behind [dev-log.md](dev-log.md) 2026-08-06 (build 2743) and
+deliberately NOT fixed in it: each needs a product decision, not a mechanical change.
+
+- **`Get camera POV` and `Get current coords` display nothing by default.** Effort **S** · Risk low.
+  Both format their numbers only through `dbg(...)`
+  ([`TeleportScriptGenerator.cs`](../ui/UE5DumpUI/Services/TeleportScriptGenerator.cs), the `op == 11`
+  and `op == 0` blocks), which is silent at the shipped `DEBUG == 0` — so the two rows whose ENTIRE
+  purpose is to show a number show nothing and then auto-close the window. **The decision:** a bare
+  `print()` reopens the Lua Engine window this project works hard to keep shut; `showMessage` is
+  modal and awkward to copy from; writing the value into a CE memory record is the most CE-native
+  but needs a record to write to. Pick one before coding.
+
+- **`Clear all markers` can raise three dialogs for one click.** Effort **S** · Risk low. The
+  busy/timeout `break` lands inside the idle-wait / status `while`, not the `for slot = 0, 2` loop,
+  so after a wedged mailbox on slot 0 the loop still runs slots 1 and 2. `hadError` does correctly
+  suppress the false "all markers cleared" line and the auto-close, so this is UX cost rather than a
+  correctness lie — which is why it was left. Fix = a flag checked at the top of the slot loop.
 
 -----
 
@@ -2379,6 +2261,63 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
   **PASS** = that WARN appears **and** the command that follows it reports a non-zero result count.
   **FAIL** = the old signature: no WARN, and a lookup answering `0` with `scanned=<full pool>` —
   the message that made this bug read like "the object isn't there".
+  > **⚠ Task Manager's Processes tab does NOT kill it.** "End task" there sends `WM_CLOSE` first and
+  > only escalates if the app stops responding — so a responsive UI closes GRACEFULLY and the latch
+  > is never set. Use the **Details** tab → *End process*, or `taskkill /F /IM UE5DumpUI.exe`.
+  > **Measured 2026-08-06** (SEED BATTLE DESTINY REMASTERED, build 2738) on a session that did
+  > exactly this: the UI still wrote `UE5DumpUI shutting down...` — a line `TerminateProcess`
+  > cannot produce — and the server logged `Stop entry (conns=0)` /
+  > `Stop conn drain satisfied, 0 left (0 ms, 0 cancel re-asserts)`. `g_perCommand` was never
+  > latched, so the run proved nothing. **Absence of the WARN is not a FAIL** — check those two
+  > lines first to tell "the guard worked" apart from "the test no-opped".
+  > The other half matters just as much: **something long has to be IN FLIGHT** when the UI dies.
+  > That session's last pipe traffic was 40 s before the close, so there was no command for the
+  > disconnect monitor to latch a cancel against.
+  >
+  > **In normal use this only triggers on a real UI crash** — every orderly exit disconnects
+  > cleanly — which is why it has stayed unverified and why it is worth keeping the cold WARN in.
+  > It is NOT hard to provoke, though: one `taskkill /F` during a Deep Property Search is the
+  > whole test.
+  >
+  > ### ⚠ Check the ARMING line first — `client gone mid-command`
+  >
+  > The latch has its own WARN, emitted immediately before it
+  > ([`Fern.cpp:769`](../dll/src/Fern.cpp:769)): `client gone mid-command (err=…) — aborting
+  > in-flight op`. **Grep for that BEFORE grepping for the B4 line.** Absent ⇒ `g_perCommand` was
+  > never latched ⇒ the B4 WARN was right to stay silent and the run proved nothing. Only when it
+  > IS present does the absence of the B4 line mean anything.
+  >
+  > ### The axis is not "long" — it is "ONE call that blocks for seconds"
+  >
+  > `MonitorLoop` sleeps **200 ms** between polls ([`Fern.cpp:732`](../dll/src/Fern.cpp:732)) and
+  > peeks only connections whose `inFlight` is set (`:743`), so a single command has to still be
+  > running when a poll lands. **A CHUNKED operation never arms it, however many minutes it takes**
+  > — it is thousands of short commands with gaps in between.
+  >
+  > Two that look like the obvious choice and are **both traps** (each cost a real run on
+  > 2026-08-06):
+  > - **Dump All Metadata** — `DumpAllService` is a `do/while` over
+  >   `GetObjectListAsync(offset, pageSize)` ([`DumpAllService.cs:115-133`](../ui/UE5DumpUI/Services/DumpAllService.cs:115))
+  >   plus `WalkClassesBatchAsync` in chunks of 200 (`:262`). **Measured: `get_object_list` pages
+  >   50–80 ms apart** (19:45:16.124 → .201 → .249 → .323) — no poll ever caught one. The client's
+  >   death surfaced through the connection's own write instead (`Failed to write response` →
+  >   `Client disconnected`, same millisecond) and no latch was set.
+  > - **Snapshot capture** — `Renge.h:161-165` says it outright: `begin_snapshot` + `snapshot_chunk`
+  >   stream `[offset, offset+limit)` **"like get_object_list"**. Same shape, same no-op.
+  >
+  > Use one of the **single blocking scans** instead — all in `Aura.cpp`, which holds 30 of the
+  > DLL's `Tot::Requested()` checks precisely because these are the ops expected to run long:
+  >
+  > | Command | UI | Why it is long |
+  > |---|---|---|
+  > | `begin_value_scan` | Value Search, first scan | every object × every property; heaviest by default |
+  > | `find_path_from_gworld` | 🌍 Locate in GWorld | BFS, and the toolbar **depth slider** is a direct cost knob |
+  > | `find_refs_to_uobject` | Live Walker → Find Refs | reverse-scans the whole pool incl. nested structs/containers |
+  > | `find_instances` | Instance Finder | full-pool scan |
+  >
+  > On a small pool (SEED BATTLE: 69,688 objects) even these can finish fast — which is why the
+  > arming line, not a stopwatch, is the thing to check. Locate-in-GWorld with the depth slider
+  > raised is the only one with a knob you can turn until it is slow enough.
 
 #### ② Manual-only
 

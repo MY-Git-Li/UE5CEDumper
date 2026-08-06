@@ -26,6 +26,30 @@ namespace UE5DumpUI.Services;
 /// convention can't drift between generators; each generator places its own
 /// success-close (<see cref="AppendCloseOnSuccess"/>) where its lifecycle allows.
 /// </summary>
+/// <summary>
+/// How a generated block ends when its mailbox round-trip times out. The two live
+/// modes are NOT interchangeable — they exist because the repo has two script shapes:
+/// <list type="bullet">
+/// <item><b>Stateful toggle</b> (Movement / GodMode / Fly / SeeThrough / Foreground /
+/// DebugCamera): the record stays ticked for as long as the cheat is on, so a bail-out
+/// has to untick it or the row claims to be active.</item>
+/// <item><b>Momentary action</b> (Teleport's rows): the record self-unticks from a
+/// deferred timer that ALSO suppresses the success-close, so the bail-out must reach
+/// that timer — it flags and leaves the loop rather than returning past it.</item>
+/// </list>
+/// </summary>
+public enum MailboxTimeout
+{
+    /// <summary>Stateful toggle: untick the record, then return.</summary>
+    UntickAndReturn,
+    /// <summary>Momentary action: set <c>hadError</c> and break, leaving the caller's
+    /// deferred untick + close-suppression to run.</summary>
+    FlagAndBreak,
+    /// <summary>A <c>[DISABLE]</c> block: return quietly. There is no record to untick
+    /// (it is already going false) and a dialog over the game on an untick is noise.</summary>
+    SilentReturn,
+}
+
 public static class CeLuaHygiene
 {
     /// <summary>The exact Lua expression that closes the CE Lua Engine window.
@@ -207,6 +231,201 @@ public static class CeLuaHygiene
             }
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Emit the contract check. Place it immediately after the <c>mb</c> lookup and
+    /// BEFORE the first write — if the layout moved, writing first scribbles on
+    /// whatever now lives at those offsets, and the check exists precisely because we
+    /// cannot assume the layout.
+    ///
+    /// <para>The DLL publishes a RANGE (<c>minimum..current</c>) rather than one
+    /// number, which is what makes a months-old <c>.CT</c> keep working across builds
+    /// that changed nothing it depends on — versioning on the build number would
+    /// condemn every saved table on every release. It also separates the two failure
+    /// directions, which need opposite advice: a script below the DLL's minimum must
+    /// be regenerated, a script above the DLL's current means the DLL is the old one.
+    /// That second case is silent corruption today.</para>
+    ///
+    /// <para>Degrades in two steps, both of which mean "do not write to the mailbox":
+    /// the symbol not resolving at all is a DLL that predates versioning, and a wrong
+    /// magic is a symbol that resolved to a stale address — the exact failure measured
+    /// on 2026-08-06, where CE held a mailbox address the DLL no longer owned and the
+    /// script wrote into it until it timed out.</para>
+    /// </summary>
+    /// <param name="tag">Script name for the messages, e.g. <c>"Movement"</c>.</param>
+    /// <param name="onFail">What to do when the check fails. Same modes, and the same
+    /// reason, as <see cref="AppendMailboxWait"/>.</param>
+    public static void AppendContractCheck(
+        StringBuilder sb, string tag,
+        MailboxTimeout onFail = MailboxTimeout.UntickAndReturn,
+        string indent = "")
+    {
+        bool announce = onFail != MailboxTimeout.SilentReturn;
+        string say = announce ? "showMessage" : "dbg";
+
+        sb.Append(indent).Append("local _cv = getAddressSafe('")
+          .Append(CeMailboxLayout.ContractSymbol).Append("')\n");
+        sb.Append(indent).Append("if not _cv or _cv == 0 then _cv = getAddressSafe('UE5Dumper.")
+          .Append(CeMailboxLayout.ContractSymbol).Append("') end\n");
+        sb.Append(indent).Append("local _want = ").Append(CeMailboxLayout.ContractVersion)
+          .Append("   -- contract this script was generated against\n");
+        sb.Append(indent).Append("if not _cv or _cv == 0 then\n");
+        sb.Append(indent).Append("  ").Append(say).Append("('[").Append(tag)
+          .Append("] this UE5Dumper.dll is older than this script (no contract symbol).")
+          .Append("\\n\\nUpdate the DLL, or regenerate this table against the DLL you have.')\n");
+        AppendBail(sb, onFail, indent + "  ");
+        sb.Append(indent).Append("end\n");
+        sb.Append(indent).Append("if readInteger(_cv + ").Append(CeMailboxLayout.OffContractMagic)
+          .Append(") ~= ").Append(CeMailboxLayout.ContractMagic).Append(" then\n");
+        sb.Append(indent).Append("  ").Append(say).Append("('[").Append(tag)
+          .Append("] the contract symbol resolved to the wrong memory (stale address).")
+          .Append("\\n\\nRe-inject UE5Dumper.dll, or untick and re-tick this table so CE re-resolves it.')\n");
+        AppendBail(sb, onFail, indent + "  ");
+        sb.Append(indent).Append("end\n");
+        sb.Append(indent).Append("local _cur = readInteger(_cv + ")
+          .Append(CeMailboxLayout.OffContractCur).Append(")\n");
+        sb.Append(indent).Append("local _min = readInteger(_cv + ")
+          .Append(CeMailboxLayout.OffContractMin).Append(")\n");
+        sb.Append(indent).Append("if _want < _min then\n");
+        sb.Append(indent).Append("  ").Append(say).Append("('[").Append(tag)
+          .Append("] this script is too old for the DLL (script contract ' .. _want ..")
+          .Append(" ', DLL needs ' .. _min .. ' or newer).\\n\\nRegenerate this table from UE5DumpUI.')\n");
+        AppendBail(sb, onFail, indent + "  ");
+        sb.Append(indent).Append("elseif _want > _cur then\n");
+        sb.Append(indent).Append("  ").Append(say).Append("('[").Append(tag)
+          .Append("] the DLL is older than this script (script contract ' .. _want ..")
+          .Append(" ', DLL speaks ' .. _cur .. ').\\n\\nUpdate UE5Dumper.dll.')\n");
+        AppendBail(sb, onFail, indent + "  ");
+        sb.Append(indent).Append("end\n");
+    }
+
+    /// <summary>
+    /// The bail-out half of the contract check, shared so its three failures cannot end
+    /// differently by accident.
+    ///
+    /// <para>It unticks DIRECTLY even for <see cref="MailboxTimeout.FlagAndBreak"/>,
+    /// which the timeout path does not — and the asymmetry is deliberate, not an
+    /// oversight. A momentary script relies on a deferred timer to untick, but that
+    /// timer is created LATER in the block: at contract-check time it does not exist
+    /// yet, so returning here would reach nothing and strand the record ticked. The
+    /// timeout path can flag-and-break because by then the timer is downstream of the
+    /// loop. Same rule as the mailbox-not-found bail-out these scripts already have,
+    /// which unticks itself for exactly this reason.</para>
+    /// </summary>
+    private static void AppendBail(StringBuilder sb, MailboxTimeout mode, string indent)
+    {
+        if (mode != MailboxTimeout.SilentReturn)
+            sb.Append(indent).Append("if memrec then memrec.Active = false end\n");
+        sb.Append(indent).Append("return\n");
+    }
+
+    /// <summary>
+    /// Emit the mailbox round-trip's WAIT loop plus its bail-out. Every generator that
+    /// talks to <c>g_invokeMailbox</c> must use this rather than hand-rolling the loop,
+    /// because three separate things were wrong in all seven hand-rolled copies and a
+    /// per-file fix would only have drifted again.
+    ///
+    /// <list type="number">
+    /// <item><b>The checkbox lied.</b> Every copy cleared <c>memrec.Active</c> on the
+    /// "mailbox not found" path and none cleared it on the timeout path, so a timed-out
+    /// enable left the CE row TICKED with nothing applied. Same class as the audit's
+    /// B30/B40, which was fixed in <c>UE5CEDumper.CT</c> and
+    /// <c>CeInjectScriptGenerator</c> and never propagated here.</item>
+    ///
+    /// <item><b>The message blamed the wrong thing.</b> "(DLL not responding?)" was a
+    /// guess, and the mailbox already holds the answer: <c>status</c> is still
+    /// <see cref="CeMailboxLayout.StatusIdle"/> when the DLL never saw the command
+    /// (stale mailbox address / poller down) and
+    /// <see cref="CeMailboxLayout.StatusProcessing"/> when it took the command and
+    /// wedged. Measured 2026-08-06 on ES2: a real timeout occurred while the DLL's
+    /// poller was demonstrably alive at 1 ms, so the message sent the user to inspect a
+    /// healthy DLL.</item>
+    ///
+    /// <item><b>The timeout was 15.5x its stated value.</b> The loop counted
+    /// <c>sleep(1)</c> iterations; <c>sleep(1)</c> measures 15.47 ms in CE. See
+    /// <see cref="CeMailboxLayout.MailboxPollTimeoutMs"/>. This emits a real
+    /// <c>getTickCount()</c> deadline, with the iteration count kept only as a fallback
+    /// for a CE build that lacks it.</item>
+    /// </list>
+    ///
+    /// <para>The bail-out <c>return</c>s, so a caller's success-close stays unreachable
+    /// on this path — the "a timeout is an error" half of the auto-close rule.</para>
+    /// </summary>
+    /// <param name="tag">Script name for the message, e.g. <c>"Movement"</c>.</param>
+    /// <param name="onTimeout">How the caller's block ends — see
+    /// <see cref="MailboxTimeout"/>. Getting this wrong is not cosmetic: a momentary
+    /// action that <c>return</c>s would strand its record ticked (that is why
+    /// <see cref="MailboxTimeout.FlagAndBreak"/> exists), and a toggle that only
+    /// <c>break</c>s would fall through into its success path.</param>
+    public static void AppendMailboxWait(
+        StringBuilder sb, string tag,
+        MailboxTimeout onTimeout = MailboxTimeout.UntickAndReturn,
+        string indent = "")
+    {
+        bool announce = onTimeout != MailboxTimeout.SilentReturn;
+        string mb = "mb + " + CeMailboxLayout.OffStatus;
+        sb.Append(indent).Append("local _tick = (type(getTickCount) == 'function') and getTickCount or nil\n");
+        sb.Append(indent).Append("local _t0, _iters = _tick and _tick() or 0, 0\n");
+        sb.Append(indent).Append("local _st = readInteger(").Append(mb).Append(")\n");
+        sb.Append(indent).Append("while _st ~= ").Append(CeMailboxLayout.StatusDone).Append(" do\n");
+        sb.Append(indent).Append("  sleep(1); _iters = _iters + 1\n");
+        sb.Append(indent).Append("  _st = readInteger(").Append(mb).Append(")\n");
+        // Real elapsed time when getTickCount exists; iteration count only as fallback.
+        sb.Append(indent).Append("  local _over = _tick and (_tick() - _t0 >= ")
+          .Append(CeMailboxLayout.MailboxPollTimeoutMs).Append(") or (_iters >= ")
+          .Append(CeMailboxLayout.MailboxPollTimeoutIters).Append(")\n");
+        sb.Append(indent).Append("  if _st ~= ").Append(CeMailboxLayout.StatusDone)
+          .Append(" and _over then\n");
+        if (announce)
+        {
+            sb.Append(indent).Append("    if _st == ").Append(CeMailboxLayout.StatusIdle)
+              .Append(" then\n");
+            sb.Append(indent).Append("      showMessage('[").Append(tag)
+              .Append("] timed out and the DLL never saw this command.\\n\\n")
+              .Append("Most likely a stale g_invokeMailbox address: re-inject UE5Dumper.dll, ")
+              .Append("or untick and re-tick this table so CE re-resolves the symbol.')\n");
+            sb.Append(indent).Append("    elseif _st == ").Append(CeMailboxLayout.StatusProcessing)
+              .Append(" then\n");
+            sb.Append(indent).Append("      showMessage('[").Append(tag)
+              .Append("] the DLL took this command but never finished it.\\n\\n")
+              .Append("Is the game paused, or the game thread stalled?')\n");
+            sb.Append(indent).Append("    else\n");
+            sb.Append(indent).Append("      showMessage('[").Append(tag)
+              .Append("] timed out on an unexpected mailbox status: ' .. tostring(_st))\n");
+            sb.Append(indent).Append("    end\n");
+        }
+        switch (onTimeout)
+        {
+            case MailboxTimeout.UntickAndReturn:
+                sb.Append(indent).Append("    if memrec then memrec.Active = false end\n");
+                sb.Append(indent).Append("    return\n");
+                break;
+            case MailboxTimeout.FlagAndBreak:
+                // The caller's deferred timer unticks unconditionally and suppresses the
+                // success-close on hadError, so returning here would skip BOTH.
+                sb.Append(indent).Append("    hadError = true\n");
+                sb.Append(indent).Append("    break\n");
+                break;
+            default:
+                sb.Append(indent).Append("    return\n");
+                break;
+        }
+        sb.Append(indent).Append("  end\n");
+        sb.Append(indent).Append("end\n");
+    }
+
+    /// <summary>
+    /// Emit an ENABLE-block bail-out that applied NOTHING: show the reason, untick the
+    /// record, return. The untick is the point — a bail-out that leaves the row ticked
+    /// tells the user a cheat is active when it is not.
+    /// </summary>
+    public static void AppendFailedEnable(
+        StringBuilder sb, string luaMessageExpr, string indent = "")
+    {
+        sb.Append(indent).Append("showMessage(").Append(luaMessageExpr).Append(")\n");
+        sb.Append(indent).Append("if memrec then memrec.Active = false end\n");
+        sb.Append(indent).Append("return\n");
     }
 
     /// <summary>Emit the success-path close: closes the Lua Engine window unless

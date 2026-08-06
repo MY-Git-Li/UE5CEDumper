@@ -3,10 +3,19 @@
 // PipeServer: Named Pipe JSON IPC implementation
 // ============================================================
 
+// BEFORE every include, not just before Sein.h. Fern.h pulls in Routine.h, which
+// EXPANDS LOG_WARN / LOG_ERROR in its own inline bodies — so the category is bound
+// at that point, and defining it afterwards was both a C4005 redefinition warning
+// and a real misrouting: the B14 thread guard's "UNCAUGHT exception - contained"
+// messages were logging under "" (init-0.log) instead of PIPE:svr (pipe-0.log),
+// i.e. the one place a torn-down pipe server reports itself was in the wrong file.
+// Fern.cpp was the only TU with this ordering; the other nine Routine.h users
+// already defined it first.
+#define LOG_CAT "PIPE:svr"
+
 #include "Fern.h"
 #include "Renge.h"
 #include "Grimoire.h"
-#define LOG_CAT "PIPE:svr"
 #include "Sein.h"
 #include "Macht.h"
 #include "Genau.h"

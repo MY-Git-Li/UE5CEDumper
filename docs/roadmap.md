@@ -9,224 +9,26 @@ state.
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **Branch parity is not tracked
 > here** — a hand-maintained "dev = main @ build N" line is stale on the next commit, and this one
 > was 57 commits out by 2026-08-05. Ask git: `git rev-list --count main..dev`.
-> Newer work lives in [dev-log.md](dev-log.md):
-> - builds **2301–2335 (2026-07-23)** — **the measurement cycle**, and a 4th proxy.
->   **`winmm.dll` proxy** (LIVE-VERIFIED on Elliot UE5.4 + SEED UE4.27, 180/180 exports
->   forwarded lazily): built as a spare *slot*, not for coverage — an n=24 census
->   (`scripts/analysis/scan_proxy_imports.py`) showed winmm and dxgi both reach 100% of installed
->   UE games, but a proxy only works if its filename is FREE, and ReShade commonly takes `dxgi.dll`
->   while some games ship their own `version.dll`. Generated, never hand-written
->   (`scripts/gen_proxy_forwarders.py`). Prerequisite shipped first: Mimic stopped statically
->   importing winmm (a self-call would have silently no-op'd the 1 ms mailbox tick).
->   **New `Sense` diagnostics module** + a System-tab card + automatic `PERF` records around every
->   heavy operation, which together **answered a question open since 2026-06**:
->   `multipipe-eval.md`'s premise was wrong. Measured over 24,178 dispatches on two games, the DLL
->   dispatcher is **idle ~70%** of wall-clock and the worst single dispatch is **14.3 ms** — so
->   **Phase 1 (non-blocking dispatch) is now WON'T-DO** (§10); it had already been built and
->   reverted once on that premise. The real cost was **round-trip count**: a Copy CE XML issued
->   **22,500** `walk_instance` calls. **`walk_instance_batch`** + a breadth-first struct-tree
->   prefetch made that export **1.71× faster** (5,893 → 3,437 ms, 22,522 → 1,355 dispatches), and
->   corrected the cost model on the way — **IPC is only ~2/3 per-round-trip; the rest is
->   payload-proportional** (§10.5). Also: Undeploy now removes every proxy flavour of ours rather
->   than only the selected radio.
-> - builds **2291–2299 (2026-07-23)** — **four ranked DLL-delivery routes**, and the ranking is
->   now stated in the UI (Proxy Deploy header line + every button tooltip) and leads
->   [tips.md](tips.md). **① proxy DLL > ② in-UI inject > ③ from Cheat Engine > ④ standalone
->   `.CT`.** ③ gained both flavours: **Tools → Install CE autorun Helper** (writes
->   `ue5_autorun.lua` into `<CheatEngine>\autorun\`, auto-locating the install from a running CE
->   process — every table then has `ue5_inject()` permanently, no `.CT` and no AOBMaker plugin)
->   and **Tools → Add "Inject DLL" Record** (pushes the bootstrap into the table already open via
->   `CreateAAScript`). The blind 15 s wait is gone everywhere: all routes poll the DLL's new
->   `Mimic::InitState` (mailbox `+0x0C`, a pure memory read — never `executeCodeEx`, which needs
->   `CreateRemoteThread` that games block at start-up), and a timeout is now a real error instead
->   of "complete (or failed)". Shared emitter `CeReadinessLua` keeps the three call sites from
->   drifting. Also: the double-inject guards learned `dinput8`/`dxgi` (they still tested the old
->   `version`+`winmm` pair), and **Undeploy is type-agnostic** — it sweeps every proxy flavour of
->   ours rather than only the selected radio, while never touching another program's DLL.
->   **LIVE-VERIFIED: all three CE routes** — standalone `.CT`, the pushed *Inject DLL* record, and
->   the `autorun\` helper (which also settles the evaluation's open question: `getMainForm().Menu`
->   *is* reachable that early in CE start-up).
-> - builds **2220 + 2238 (2026-07-19)** — **MindsEye licensee-fork support** (Build A Rocket
->   Boy, UE 5.4.4). Two independent failures solved: **GObjects** was reported `OK` **on
->   garbage** (the AOB found the real array but the preset was written one struct-level down,
->   so the relaxed tier accepted an unrelated heap blob) → new `MindsEye-Extended` chunked
->   preset + a **preset-bound `LayoutPreset::itemHint`** for its 32-byte `FUObjectItem` with
->   `UObject*`@`+0x10` (evidence-gated, consulted *before* the shared stride sweep — it must
->   never join `candidates[]` because 32/+0x10 aliases stride 16 perfectly and would steal
->   TQ2 / Octopath) + an upper-bound-only sanity check on the relaxed tier. **GNames** had
->   never been found for this title: the fork keeps the stock header but inserts a `u16` tag
->   at `+0x02` and XOR-obfuscates the chars at `+0x04`, keyed **per tag** — we locate the
->   fork's own key table statically and **read** it (never calling its de-obfuscator, whose
->   SRW lock is taken before the probe). Experimental-gated end to end via the new
->   `Flamme::IsExperimentalEnabled`; a title without the fingerprint runs byte-identical code.
->   **LIVE-VERIFIED on game version 7.3.1 only** (PE hash `0863E3B90C993000`) — `Count=530638`,
->   name sanity 10/10, full Live Walker descent. Re-derivation playbook:
->   [mindseye-fork-notes.md](mindseye-fork-notes.md).
-> - builds **2207 + 2215 (2026-07-15)** — **Time Dilation is now DUAL-ROW**: independent
->   **Whole world** (0–3×) and **Player pawn** (0–10×) levers held *simultaneously*, replacing
->   the single slider + "Player only" toggle. UI-only — `Hemmung` already kept a per-target
->   slot and `get_time_state` already returned both knobs. Effective pawn rate is
->   **world × pawn**, so World ½× + Player 2× = bullet time; the Player row shows a live
->   **Combined player speed** readout and the tooltip documents the **Player = 1 ÷ World**
->   compensation. CE export ships two independently tickable records (Time: World / Time:
->   Player). ⚠ Persisted option keys renamed with no migration; the world lever is still
->   unit-tested only (never live-exercised).
-> - build **2166 (2026-07-13)** — **Auto Snapshot** (session-only periodic capture loop with a
->   `max(interval − duration, 60)` gap and KeepRecent/FixedCount retention) + a **free-disk-space
->   guard** (`min(%, GB)`, `0` disables that term) that blocks *all* captures, manual included.
->   UI-only.
-> - build **2168 (2026-07-14)** — **`Solide` (ForceField)** — the honest subset of the
->   "enemies can't detect you" eval (no universal detection bool). New DLL module (Hemmung
->   sibling) holds a *discovered* reflected field (bool ON/OFF / ObjectProperty→null /
->   numeric→absolute) across **all live instances** of a class via a write-on-drift re-assert
->   worker (cap 256, CDO-skip, re-resolve/tick), + `FindStealthMeter` keyword auto-finder. **UI:**
->   Property Search row context "Force" submenu + "Forced fields (N held)" strip; Teleport
->   "Stealth Meter" card (Detect→Hold@0→Reset); Teleport right-click quick-jump nav. All
->   experimental-gated, pipe-only. **VERIFIED in-game (Elliot):** force_field held 83 instances,
->   clean worker lifecycle.
-> - builds **2147–2151 (2026-07-13)** — **Time/Timer control L1** (eval: layered detect/lock/
->   reset/adjust/persist, memory `project-timer-feature-eval`). **Global slow-mo / freeze / speed-up:**
->   new `Hemmung` DLL module (the absolute-value sibling of Laufen) holds reflected dilation floats —
->   global `AWorldSettings::TimeDilation` (whole-world; GWorld→PersistentLevel→WorldSettings chain +
->   `FindInstancesByClass` fallback) + per-pawn `AActor::CustomTimeDilation` — via a write-on-drift
->   re-assert worker; exports `UE5_Set/ResetTimeDilation`, Mimic `CMD_TIME=15`, pipe
->   `set/reset_time_dilation`+`get_time_state`. **UI:** a Time Dilation card in the Teleport panel
->   (*as first shipped:* a Player-only toggle + one 0–3× slider + presets Freeze/¼×/½×/1×/2× —
->   **superseded at build 2207 by the dual-row card above**) + `TimeDilationScriptGenerator`
->   CE Lua/.CT export (`CMD_TIME` SET/RESET) + persistence (live read-back on connect = markers model
->   + disk `TeleportUiOptions`). **Discovery:** new `PropertyCategory.Timing` (Interesting Properties)
->   + `TimeStructTypes` + function-side cooldown/dilation keywords. **LIVE-VERIFIED on The Adventures
->   of Elliot (UE4.27):** per-pawn `CustomTimeDilation` held 0.5/2.0× + reset clean (rc=0). L2 (GAS
->   cooldowns) / L3 (live FTimerManager) deferred — reflection-invisible, native RE.
-> - builds **2134–2142 (2026-07-11)** — **Proxy Deploy "Last-Known-Good" suggestion**: a
->   per-game **Suggested proxy** column. Priority: **confirmed-working** (Phase 2 — the DLL
->   self-reports `load_mode` from `GetModuleFileNameW(g_hDllModule)` at init, recorded after a
->   20 s stability gate) > last deployed pick > injection known-good > version default. Keyed
->   by game .exe name (NOT peHash — survives reinstall/patch); import-table parsing is
->   *viability* context only (never auto-escalates to dxgi). All in `ui-options.json`.
-> - builds **2109–2130 (2026-07-11)** — **Live Funcs tab: Live ProcessEvent Call Profiler**
->   (new `Linie` module) — behaviour-based UFunction discovery: Start → do ONE in-game action
->   → Stop → ranked fired-function list. Baseline diff (NEW/increased rows first), Hide UI
->   widgets / Hide events+delegates filters, first-fired **Order** column (causal entry-point
->   signal). Hot path free when off (one relaxed atomic gate on Stark's PE hook). Plus the
->   opt-in **Gameplay Actions** keyword pack + **BP/Exec only** filter in Interesting
->   Functions (build 2103).
-> - builds **2088–2098 (2026-07-10/11)** — **keyword-search unification** (every filter box:
->   space=AND via `ObjectTreeFilter.MatchesAllTerms` + per-box `KeywordSearchMemory` LRU
->   autocomplete; now a CLAUDE.md MUST rule) + the **IsEnginePath format fix** (C# matched
->   `/Script/Engine.` but the DLL emits `//Script/Engine/Actor` → GameOnly dump was a no-op)
->   + **Object Tree global instance explorer** (Instances-only toggle hiding the full
->   reflection layer via `ReflectionMetaClassifier`; server-side space=AND top Search over
->   name+class with honest truncation; per-instance row drill-downs to Live Walker / Related
->   / Locate).
-> - builds **2028–2044 (2026-07-10)** — **Dump Explorer tab** (offline "Dump All" `.jsonl`
->   browser: ONE keyword search over classes+props+funcs, ✅ in-current-game via restart-safe
->   class-name match + Jump-to-Live-Walker + 🔍 Instances bridge, ⤓ Last-export quick-load;
->   client-only) + **CE export String Len slider** (16–4096 per string leaf) + **Fabricate**
->   (pad a selected top-level TArray with template rows up to 4096 on Copy CE Field;
->   next-layer-only gate; globally-unique slot keys).
-> - builds **2006–2026 (2026-07-08/09)** — **See-through occluders** (new `Schlacht` module:
->   ~10 Hz camera→VIEW-forward LineTraceSingle, hide the nearest N non-Pawn occluders via
->   SetActorHiddenInGame, Pawns/Characters stay visible; VERIFIED Tower of Mask + DQ7R; NO-OP
->   on collision/render-split games like FF7R; CE `CMD_SEETHROUGH=14`) + **Auto-Detect Player
->   Stats** (`prop_flags`/`array_dim` on wire; structural scorer: GAS GameplayAttributeData
->   +4, SaveGame/BlueprintVisible flags, Current/Max pairing; experimental **Detect Stats**
->   panel with live-instance confirm + snapshot Δ; VERIFIED TQ2/ES2/SEED) + experimental
->   gating for Keep-Foreground/Fly/Trainer cards (build 1995).
-> - builds **1944–1992 (2026-07-06/08)** — **Keep-Foreground lock** (new `Grausam` module:
->   MinHook GetForegroundWindow + WndProc subclass rewriting WM_ACTIVATEAPP/WM_ACTIVATE/
->   WM_NCACTIVATE→active + ClipCursor/SetCursorPos release; defeats `t.IdleWhenNotForeground`
->   background pause; LIVE-VERIFIED P3R; CE `CMD_FOREGROUND=12`) + **in-UI DLL injection**
->   (CreateRemoteThread+LoadLibraryW into a running game, auto-elevate on Access-Denied, +
->   `inject-ue.ps1` CLI; picker flags already-loaded dumpers) + **generic non-Steam drive
->   scan** in Proxy Deploy + **Teleport Global Pointers → CE symbols** (`UE_GWorld` registered
->   on the static slot, `UE_GameEngine` prefers the `&GEngine` slot and falls back to a snapshot buffer; `CMD_QUERY_PTR=13` ops 0/1/2) + CE export
->   XML/Field/CSX **cancellable** (builds 1974-1977).
-> - builds **1888–1913 (2026-07-03/04)** — **standalone no-DLL CE Lua trainer** export +
->   **game-thread stall detection** (POV fast-fail + app-wide amber "paused" banner) +
->   **invoke FString INPUT params** (DLL builds the FString; generators + PIPE FIRE; OUT-string
->   params skipped) + return-value print under `UE5_DEBUG` + magic-number centralization.
-> - builds **1836–1856 (2026-06-28/30)** — **multi-pipe IPC evaluation** (Phase 0 scan
->   thread-priority guard SHIPPED; Phase 1 REDO = discrete-style two-connection lane split,
->   PR #396, in-game VERIFIED) + System-tab **Pipe Activity** log + **CE export flatten**
->   (leaf records / record colors / collapse single-leaf pointers, PRs #401/#402).
-> - builds **1827–1832 (2026-06-27)** — **Snapshot captures gameplay classes' top-level
->   scalar arrays** (e.g. a Pawn's `SupportActionGauge[]` `TArray<float>`) — previously
->   skipped at capture so Diff/SPC/Pivot couldn't see them (Value Search always could);
->   gated by `IsSnapshotGameplayClass` (in-game VERIFIED on Elliot). Plus an **app-wide
->   DataGrid horizontal-overflow fix** (17 grids: star→fixed `Width`+`MinWidth` +
->   `HorizontalScrollBarVisibility="Auto"`) and a **"Diff is always deep"** note by Run Diff.
-> - builds **1764–1799 (2026-06-26)** — **Movement tuning** (Laufen module): force the
->   player pawn's `UCharacterMovementComponent` floats — **Move Speed** (MaxWalkSpeed),
->   **Gravity** (GravityScale), **Super Jump** (JumpZVelocity; slider is jump *height*,
->   10%–3000%) — to a multiplier of their captured base, held by a re-assert worker
->   (write-on-drift, respawn re-capture) like Solitar's GodMode. Three Teleport-tab cards
->   + per-knob Locate-in-GWorld + global toggle hotkeys + CE-Lua/.CT via the new
->   `CMD_MOVEMENT=10` mailbox (`SetKnobPercent`: 100% = off, jump height→velocity √).
->   **LIVE-VERIFIED on The Adventures of Elliot (UE4.27) and Avowed (UE5.3, packed
->   FUObjectItem)**. 2071 C# green. Still deferred: UE5.4+ gravity *direction* vector.
-> - builds **1531–1544 (2026-06-22)** — **Locate in GWorld** gained a per-row 🌍 on
->   **Interesting Properties** (the last clean gap) and a prominent **⚠ failure
->   banner** in Live Walker — a failed `not_reachable` locate no longer looks like
->   the idle empty state, and exceptions surface too (PR #344). **Locate in
->   GameEngine** (⚙) shipped as a GEngine-rooted companion on all 10 🌍 surfaces —
->   `root_kind=engine` on the existing path handler — reaching engine-layer objects
->   (GameInstance / LocalPlayer / UMG widgets) that no GWorld chain reaches, a
->   deliberate complement (weaker for world actors by design; PR #345).
-> - builds **1181–1199 (2026-06-16)** — **Locate in GWorld** (forward-BFS shortest
->   pointer chain GWorld→target, the inverse of Find Refs) on every "open in Live
->   Walker" source, plus **deeply-nested container reach**: `find_by_address` now
->   recursively descends struct-array / map-value / set elements
->   (`Aura::FindInContainersDeep`, fallback-only so the fast path is untouched) to
->   find values in separately-allocated nested containers, and the Instance Finder
->   container 🌍 drills the full multi-level chain to land ON the value.
->   **LIVE-VERIFIED on SEED** incl. the deep `SaveSlotList[1].MsTuneData.MsTunes[0].
->   WeaponTuneList[0].Tunes[2]` repro (28116 objs / 50ms). Build 1199 also fixed the
->   Live Walker per-row `Addr` copy in container-element views (use the resolved
->   `FieldAddress`) and moved "Locate in GWorld depth" to the top Options flyout.
-> - builds **1202-1207 (2026-06-16)** — **deeply-nested container values reach end-to-end
->   across ALL four consumers.** A value at ANY (bounded, depth 4) container depth — e.g.
->   `SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[N]` — is now found by
->   **Instance Finder address search**, **Value Search** (by value), **Snapshot capture**,
->   and so **SPC Query + Snapshot Diff** (Class Pivot already had array support). A shared
->   recursive `Aura::WalkContainerLeaves` drives Value Search + Snapshot capture; Snapshot
->   bakes the full path into `array_field` (no schema change). 1-level cases use the fast
->   static paths; gated per class so the common case pays nothing. 1520 C# / 510 dll green.
-> - builds **1027–1112 (2026-06-12…14)** — **Teleport** tab (Wirbel module):
->   BugIt-style marker save/recall (3 slots) + cursor teleport for 2.5D/45° games
->   + BugItGo interop + Debug-Camera force on/off + **read-only camera POV**
->   (`Wirbel::GetPov`; getters with a fully-reflected `CameraCachePrivate.POV` raw
->   fallback). CE integration = mailbox AA records (the old `createHotkey` Lua
->   bundle was removed build 1111). mailbox `CMD_TELEPORT=8`. Full contract in
->   [teleport-spec.md](teleport-spec.md). **LIVE-VERIFIED**: teleport works where
->   the possessed pawn IS the visible character (SEED, DQ III HD-2D); TQ2 = known
->   separate-actor limit; Octopath moves but camera doesn't follow. **POV reads on
->   all four tested titles** (getters on SEED/DQ III; raw fallback on TQ2/Octopath).
-> - builds **926-937 (2026-06-06)** — Value Search **lean Candidate** (V3-A/B) +
->   **TSet/TMap scan** (V1a); **app-wide DataGrid sorting fix** (compiled bindings
->   need explicit `SortMemberPath`); **Value Search keyword filter**; **DLL-side
->   cooperative cancellation** (`Cancel.h` + Fern disconnect-monitor + shutdown-abort
->   — long ops stop when the UI closes / DLL shuts down). See the Value Search section
->   below + [todo.md](todo.md) for the V1/V2/V3 plan.
-> - builds **805-923** — experimental Snapshot / SPC Query / Class Pivot tabs (N1 noise
->   picker, cancellation, persisted pivot index) in
->   [experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md) +
->   dev-log builds 908-923; Windows-only Native-AOT Avalonia backend in dev-log 918-919.
+> **This file is STATE, not history.** Shipped work belongs in
+> [dev-log.md](dev-log.md); it used to be summarised here too, and the copy went stale
+> independently — including a "multipipe Phase 0 SHIPPED" line that survived the
+> 2026-08-05 sweep run to kill it, in a file that contradicted itself 124 lines apart.
+> One owner, so there is nothing to keep in sync.
 >
-> The build-797 shipments:
->
-> - **Multi-numeric Value Search meta types** (build 794-797) — `NumericNoByte` (PR #220) scans every word/dword/qword/float/double field in one pass, each compared by its OWN declared width; `NumericAll` (PR #221) adds Int8/UInt8 plus a result-volume warning. Unlike CE's raw "All", our structured property walk knows each field's declared type → no byte-reinterpret false hits. Both in-game verified OK. See the Value Search section below + [dev-log.md](dev-log.md) build 794-795 / 796-797.
-> - **Parallel GObjects-walk scans** (build 792) — `ScanForValue` / `FindInContainers` / `FindReferencesToUObject` now fan their object-array walk across `clamp(cores-2, 1, 16)` worker threads (`ParallelIndexRanges`), with per-thread caches + ascending-tid merge that reproduces the serial result set byte-for-byte. `Ubel`'s class/name/enum/struct-field caches + `CorrectSubclassOffsets` calibration are now mutex-guarded for concurrent access. ~cores× First-Scan speedup on 1M+ object games; **in-game verified OK 2026-05-29** (correct results, no hang/crash, speedup confirmed). See [dev-log.md](dev-log.md) 2026-05-29 + [todo.md](todo.md). The prior 2026-05-27 shipments below are unchanged:
->
-> - **Value Search Phase 2** (build 757) — FString / FName / FText with `Contains` / `StartsWith` / `EndsWith` + case-sensitive toggle; FVector / FRotator component-wise compare; TArray\<T\> primitive/string/vector element scan with `Num > 10M` soft circuit-breaker. **FTransform footnote**: wire-stable but zero hits pending per-version Translation offset detection. See [dev-log.md](dev-log.md) 2026-05-27 entry.
-> - **Multi-row → One .CT batch generator** (build 760, #3) — Interesting Funcs + Interesting Properties tabs gain Extended-mode multi-select + 📦 Generate CT toolbar button. Output: one CT with root group → per-category sub-groups (alphabetical) → one CheatEntry per row.
-> - **`scripts/analysis/diff_dumps.py`** (#4) — pure-Python same-game patch diff at UProperty granularity. Reports moved fields / type changes / function signature changes / added-removed. `--minimal` mode for "things that broke my cheat table". `--self-test` for synthetic-fixture coverage.
-> - **Structured-return DataGrid** (build 775, #5) — InvokeParamDialog shows a 4-column property grid (Field / Type / Value / Offset) below the existing single-line decode for FVector / FRotator / FHitResult / user USTRUCT returns. Resolution: KnownStructLayouts → dynamic StructFields → empty.
-> - **UCheatManager stripped-body hint** (build 778, #6) — Console panel surfaces an orange footer warning when the selected exec's class or super name contains "CheatManager"; redirects users from `Result=0 + no effect` (cooker `#if !UE_BUILD_SHIPPING` strip) to a game-specific verification target. Memory `feedback_ucheatmanager_stripped.md` + lessons-learned bullet.
-> - **NuGet bump + dotnet test → MTP mode** (build 771) — .NET 10 SDK + `Microsoft.Testing.Platform` 2.x compat. New `global.json` `{"test": {"runner": "Microsoft.Testing.Platform"}}`; build.ps1 uses `--project` instead of positional; dropped explicit `Microsoft.Testing.Platform.MSBuild` pins (xunit.v3 owns the transitives).
-> - **AOT warning sweep on #5 DataGrid** (build 780) — switched four `DataGridTextColumn` + string-path `Binding` to `DataGridTemplateColumn` + `FuncDataTemplate<StructFieldValue>(lambda)`. Zero IL2026 / IL3050 warnings on `dotnet publish`.
->
-> Test totals at this snapshot: **247 DLL helpers + 31 utf8 + 1080 C# = 1358**.
+> ⚠ **The rows below were last swept at build 797 (2026-05-29); the repo is well past it.**
+> A 2026-08-06 audit sampled 14 rows: 8 still true, **6 false**. Verify against the tree
+> before acting on any row here. Known-false as of that audit, not yet rewritten:
+> - Native C++ (non-`UPROPERTY`) fields are **not** excluded from Value Search — Native-C
+>   scanning shipped; the banner now offers it.
+> - The value-scan deadline is **not** a hard 15 s — it is user-adjustable 10-90 s, default 25.
+> - MulticastSparseDelegate at UE 4.23 is **not** untested — PDB-confirmed 2026-07-28.
+> - The verified engine floor is **4.11** (NEKOPALIVE), not 4.15.
+> - Per-game counts and the tested-games list disagree with
+>   [test-games.md](test-games.md), which is the authority for both.
+> - Nothing shipped after build 797 is described below at all (Coordinate Library,
+>   bookmarks, log compression, leftover-proxy cleanup, the pre-UE4 gate, Live Walker
+>   Back/Forward, and the `Hemmung` / `Solide` / `Linie` / `Schlacht` / `Grausam` /
+>   `Laufen` modules).
 
 -----
 
@@ -244,7 +46,7 @@ state.
 | MulticastSparseDelegate (UE 5.0+) | ✅ bindings via SPARSE_ES2_1 AOB (build 561-577) | ✅ v4 sparse pass (build 565) |
 | MulticastSparseDelegate (UE 4.27) | ✅ same raw-pointer layout as UE5 — `SPARSE_ES2_1` resolves on 4.27, + `SPARSE_DI427_1/2` (build 2399). The "FObjectKey outer key" blocker was a wrong premise, see technical-notes | ✅ |
 | MulticastSparseDelegate (UE 4.25) | ✅ PDB-confirmed raw `UObjectBase const*` key, same as 4.27/5.x — `SPARSE_DI427_1/2` + `SPARSE_ES2_1` all UNIQUE-OK (build 2405) | ✅ |
-| MulticastSparseDelegate (UE 4.23-4.24) | ⚠ untested — no symbolised sample. Walker probes the live key shape and declines if it is not a raw pointer | ⚠ |
+| MulticastSparseDelegate (UE 4.23-4.24) | ✅ **4.23 PDB-confirmed 2026-07-28** on a self-built 4.23.1 sample — raw `UObjectBase const*` key, same as 4.25/4.27/5.x (see [reference-builds.md](reference-builds.md) + `tools/ghidra/GROUND-TRUTH.md`). 4.24 still has no symbolised sample; the walker probes the live key shape and declines if it is not a raw pointer | ✅ (4.23) |
 | OptionalProperty\<pointer / weak\> | ✅ | ✅ |
 | OptionalProperty\<scalar Int/Float/Bool/Byte/Enum\> | ✅ trailing-bIsSet | — |
 | OptionalProperty\<String / Name / Text\> | ✅ intrusive sentinel + value (build 530) | — |
@@ -344,10 +146,10 @@ families.
 | Component | What it does |
 |---|---|
 | `ValueScan::SessionManager` (DLL) | 5-min idle-expiry session container; holds candidate vector + DataType between RPCs. |
-| `Aura::ScanForValue` | Walks GObjects (skips UClass meta), per-class field index cached lazily via `Ubel::WalkClassEx` filtered to matching DataType, typed-read + `ComparePredicate` for primitives, `CompareStringPredicate` for strings, `CompareVectorPredicate` for vectors. TArray inner expansion when ArrayProperty's Inner matches. 15s deadline. |
+| `Aura::ScanForValue` | Walks GObjects (skips UClass meta), per-class field index cached lazily via `Ubel::WalkClassEx` filtered to matching DataType, typed-read + `ComparePredicate` for primitives, `CompareStringPredicate` for strings, `CompareVectorPredicate` for vectors. TArray inner expansion when ArrayProperty's Inner matches. Caller-supplied deadline. |
 | `Aura::RefineCandidates` | Re-reads each candidate's bytes/string, applies predicate (prev-value scan types compare against stored `Candidate.prevValue`/`prevStr`), prunes failing, updates snapshots on survivors. Re-reads strings via `c.addr` so array-element strings work uniformly with direct string fields. |
 | `Fern.cpp` handlers | `begin_value_scan` / `refine_value_scan` / `end_value_scan` / **`query_candidates`** (V3-C). Wire schema (Phase 2): optional `case_sensitive` for string DataTypes, `tolerance` now also applies to FVector/FRotator (per-axis). `IsScanTypeValidFor` gating rejects nonsensical combos (`FString + Bigger`, `Int32 + Contains`) with explicit errors. **V3-C (build 949):** begin/refine return `total` + only the first `page_size` page (scan order); `query_candidates(session, offset, limit, filter, sort_key, sort_desc)` filters + sorts the WHOLE session set server-side (over the DLL's own pools — no game-memory reads) and returns one window. The DLL session is the single dataset owner; the UI is a windowed view. |
-| `ValueSearchPanel.axaml` | Hard-locked banner: "Native C++ fields (non-UPROPERTY) cannot be found here — use Cheat Engine's raw memory scan for those." DataType + ScanType selectors (ScanType dropdown filters per DataType via `VisibleScanTypeOptions`), Value/Value2 inputs, Case-sensitive checkbox (string types only), Tolerance NumericUpDown (float/vector types), Candidates DataGrid. |
+| `ValueSearchPanel.axaml` | Banner: "Native C++ fields (non-`UPROPERTY`) are invisible to a reflection-driven scan. **Enable \"Native-C\" below to scan those raw.** Use Cheat Engine's raw memory scan for full control." (It was a hard lock until Native-C scanning shipped.) DataType + ScanType selectors (ScanType dropdown filters per DataType via `VisibleScanTypeOptions`), Value/Value2 inputs, Case-sensitive checkbox (string types only), Tolerance NumericUpDown (float/vector types), Candidates DataGrid. |
 
 **Supported DataTypes** (build 757):
 - **Numeric** (MVP, build 738): Int8/16/32/64, UInt8/16/32/64, Float, Double, Bool (BoolProperty bitfields normalised to 0/1 via FieldMask).
@@ -360,7 +162,7 @@ families.
 **Scan bounds** (how many array elements get scanned, and the global caps):
 - **Per-array: ALL elements** are scanned (`for idx = 0 .. Num-1`) — Value Search deliberately does **not** inherit the export-side array-size cap, because a hit at a high index is still a legitimate hit (see memory `project_value_search_caveats`). The only per-array limit is the **soft circuit-breaker**: an array whose `Num` is negative or `> 10,000,000` is skipped whole with `LOG_WARN` (corruption / freed-memory / OptionalProperty-misread guard, not a "scan first N" cap). `Max < Num`, null `Data`, and `Num == 0` are also skipped.
 - **Global `maxResults` cap** (default 50,000; UI-configurable 100..**1,000,000** since V2/build 954): bounds the total candidate count **across all objects and array elements combined**, not per array. In the parallel walk it's a per-thread local cap, then the ascending-tid merge truncates to `maxResults` (so the kept set is the lowest-index matches the serial walk would have stopped at). Hitting it sets no special flag — the user simply sees fewer than the true total; raise Max or narrow the predicate. **Since V3-C (build 949)** the UI no longer materializes the whole set: begin/refine return `total` + the first page, and the grid pages via `query_candidates` (server-side filter/sort over the full set). The DLL holding a large set is cheap (lean Candidate, V3-A). **V2 (build 954)** then raised the ceiling to 1M and verified the server-side ordered view stays sub-second at that size (~640 ms sort / ~715 ms filter over 1M in the scale bench).
-- **15s deadline**: the whole scan bails after 15 seconds and sets `deadline_hit` → the status row shows a "scan truncated" note.
+- **Deadline (user-adjustable)**: the scan bails at the deadline and sets `deadline_hit` → the status row shows a "scan truncated" note and points at the Timeout slider. **10–90 s, default 25** (`ValueSearchViewModel._scanTimeoutSeconds`); it was a hard 15 s once, and `Constants.ScanSessionDeadlineMs = 15000` survives only as the interface default for callers that pass nothing — Value Search always passes its own.
 
 The combined effect: ordinary arrays (equipment/buff lists, etc.) are fully enumerated; the practical ceiling a user hits first is usually the 50k global cap, especially with NumericAll on a small value.
 - **NumericNoByte** (multi-numeric meta, build 794-795): one pass over **every** word/dword/qword/float/double field, each compared by its OWN declared width — the "I know the value but not whether it's int or float" starting point. Distinct from CE's raw "All" (no byte-reinterpret false hits — our walk knows each field's declared type). Excludes Int8/UInt8/Bool to prevent small-value result explosion. `BuildNumericTargets` pre-parses the value into one buffer per fitting width (`70000` → no 16-bit; `100.5` → float/double only; hex → integer only); each field resolves its own DataType via `TryDataTypeFromPropertyTypeName` and compares against the matching buffer. Results-grid Type column shows which width matched. Tolerance applies per-member to float/double fields only.
@@ -373,7 +175,7 @@ The combined effect: ordinary arrays (equipment/buff lists, etc.) are fully enum
 | Vector | Same 8 (component-wise per axis; "Increased" triggers when ANY axis moves up) |
 | String | Exact / Contains / StartsWith / EndsWith + Changed / Unchanged |
 
-Native C++ fields (non-UPROPERTY) are explicitly excluded — banner directs the user to CE for those. Cross-tab navigation: per-row "Open in Live Walker" opens the owning instance with the field address pre-populated.
+Native C++ (non-`UPROPERTY`) fields are **opt-in, not excluded** — the "Native-C (raw)" toggle scans the holes inside `PropertiesSize`; see [native-c-value-scan-spec.md](native-c-value-scan-spec.md). Cross-tab navigation: per-row "Open in Live Walker" opens the owning instance with the field address pre-populated.
 
 **Live verification (ES2, UE 5.5, build 757)**: FString Contains "Engine" → 54 candidates / 323ms; FName Contains "Engine" → 7119 / 415ms; FText Contains "Engine" → 1 / 396ms; FVector Exact tol=0.01 → 49966 / 303ms; FRotator Exact tol=0.01 → 16819 / 290ms. No `LOG_WARN: skipping TArray` fired across ~1.15M scanned objects.
 
@@ -678,8 +480,10 @@ Delete-cache button; a UE version override still wins over everything.
   placeholder strings — no publisher thumbprint match expected.
 - **Extinction** ✅ (UE 4.15, 230K objects, build 560 user logs,
   publisher: Modus Games, exe `Extinction.exe` under `Blink/Binaries/
-  Win64/`): **lowest UE version verified end-to-end** — expands the
-  previously-documented 4.18+ floor down to 4.15. Flat (non-chunked)
+  Win64/`): flat-array UE 4.15, verified end-to-end. **Not the floor** —
+  NEKOPALIVE (UE 4.11) is, and `Grimoire::MIN_SUPPORTED_UE_VERSION = 411`
+  matches it; this row said "expands the 4.18+ floor down to 4.15" until
+  2026-08-06, two engine revisions after that stopped being true. Flat (non-chunked)
   `FFixedUObjectArray`, UProperty mode (UE < 4.25), `UField::Next=+0x28`.
   Patterns: GOBJ_RE2 (1.8s, 2 batches) / GNAM_CT3 (4.6s, 4 batches) /
   GWLD_G42_1 (3.3s, 3 batches) — ~10s total scan but all three globals
@@ -774,9 +578,8 @@ Delete-cache button; a UE version override still wins over everything.
 
 GWorld success ratio: **100% of all tested games** — see the
 [test-games.md](test-games.md) GWorld Status Summary for the authoritative tally
-(**33 / 33** as of 2026-07-19, incl. Stellar Blade UE4.26-fork, Persona 3
-Reload via GWLD_GH_1 direct, Pionero Capital Demo — stock UE5.7 Object@+0x08,
-GWLD_TQ_1 direct, dxgi proxy — and MindsEye, UE5.4.4 licensee fork, game v7.3.1 only);
+— **the count is deliberately not restated here**, because two copies of a
+tally drift and this one was 2 behind by 2026-08-06);
 the list above itemises only a subset and is otherwise last-verified 2026-06-11.
 Satisfactory (modular DLL build): scan side OK — `Macht::AOBScanAllModules`
 falls through to `FactoryGameSteam-CoreUObject-Win64-Shipping.dll`

@@ -105,8 +105,25 @@ public static class TeleportScriptGenerator
         Line(sb, "  if memrec then memrec.Active = false end");
         Line(sb, "  return");
         Line(sb, "end");
+        // Contract check BEFORE the first write. UntickAndReturn even though these
+        // rows are momentary: the deferred untick timer is created further down, so
+        // at THIS point a bare return would reach nothing (see AppendBail).
+        CeLuaHygiene.AppendContractCheck(sb, "Teleport");
         Line(sb);
         Line(sb, "local hadError = false");
+        // Bounded wait for IDLE before sampling cmd. This is the R3 fix, and it reached
+        // GenerateClearAll (below) and CoordLibrary but never got applied HERE — where
+        // back-to-back firing is the ORDINARY use: hotkey-spamming "TP facing direction",
+        // or Save immediately followed by Recall. A single sample meant the whole
+        // round-trip below was skipped with no else branch: nothing written, no message,
+        // hadError still false — so the deferred timer closed the window as if it were a
+        // clean success. A silent no-op that looks like it worked is the worst outcome
+        // this file can produce, and it affected 16 of the 17 shipped rows.
+        // hadError is set AT the break, not only in the else below: a bare `then break end`
+        // is exactly the silent-timeout shape CeLuaHygieneTests forbids, and the rule is
+        // right — the flag has to be true from the moment the wait gives up. The message
+        // lives in the else so it is emitted once.
+        CeLuaHygiene.AppendIdleWait(sb, "mb", "hadError = true; break");
         Line(sb, $"if readInteger(mb + {CeMailboxLayout.OffCmd}) == 0 then");
         if (op == 4)
         {
@@ -133,19 +150,18 @@ public static class TeleportScriptGenerator
         Line(sb, $"  writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, {op})             -- op");
         Line(sb, $"  writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)             -- clear status");
         Line(sb, $"  writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdTeleport})  -- CMD_TELEPORT (write LAST)");
-        Line(sb, "  local elapsed = 0");
-        Line(sb, $"  while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
-        Line(sb, "    sleep(1); elapsed = elapsed + 1");
         // A timeout is an ERROR (CLAUDE.md's CE-Lua hygiene rule). A bare `break` fell
         // straight through to the auto-close, so the Lua Engine window shut on the one
         // outcome the user needed to see. A bare `return` would be wrong too — it would
         // strand the record ticked — so set hadError, say so, and leave the loop. (B15)
-        Line(sb, $"    if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
-        Line(sb, "      hadError = true");
-        Line(sb, "      showMessage('[Teleport] mailbox timeout -- is the game running and the DLL injected?')");
-        Line(sb, "      break");
-        Line(sb, "    end");
-        Line(sb, "  end");
+        //
+        // That reasoning is why this passes FlagAndBreak rather than the toggles'
+        // UntickAndReturn: these rows are MOMENTARY, and the deferred timer below both
+        // unticks and suppresses the close. What the shared emitter adds is the half
+        // B15 did not cover — a real getTickCount deadline instead of a count of
+        // sleep(1) calls (measured 15.47 ms each, so the old bound was ~155 s), and a
+        // message that reads `status` rather than guessing at the cause.
+        CeLuaHygiene.AppendMailboxWait(sb, "Teleport", MailboxTimeout.FlagAndBreak, indent: "  ");
         Line(sb, $"  local code = readInteger(mb + {CeMailboxLayout.OffResult})");
         Line(sb, $"  dbg('[Teleport] {label} -> code=' .. code)");
         if (op == 11)
@@ -170,11 +186,29 @@ public static class TeleportScriptGenerator
             Line(sb, "      readDouble(mb + 0x340), readDouble(mb + 0x348), readDouble(mb + 0x350)))");
             Line(sb, "  end");
         }
-        Line(sb, "  if code == -7 then");
+        // Both arms are gated on `not hadError`: a timeout BREAKS out of the wait, so
+        // `code` then holds whatever the PREVIOUS command left in the mailbox. Ungated,
+        // a stale -7 would pop "marker saved on another map" on top of the timeout
+        // dialog and send the user chasing a fault that did not happen.
+        Line(sb, "  if not hadError and code == -7 then");
         Line(sb, "    hadError = true");
         Line(sb, "    showMessage('[Teleport] marker saved on another map -- recall refused. " +
                  "Use the UI Force button.')");
+        // Wirbel defines TEN negative codes; only -7 had a message, so the other nine
+        // (-6 empty marker, -8 no hit, -9 no cursor, ...) reached dbg() — silent at the
+        // shipped DEBUG==0 — left hadError false, and closed the window. "Recall marker
+        // 2" on an empty slot looked exactly like a successful recall. Report the rest
+        // generically rather than inventing per-code prose the DLL can outgrow.
+        Line(sb, "  elseif not hadError and code < 0 then");
+        Line(sb, "    hadError = true");
+        Line(sb, $"    showMessage('[Teleport] {label} failed (code ' .. tostring(code) .. ')')");
         Line(sb, "  end");
+        Line(sb, "else");
+        // The idle wait above expired with the mailbox still busy. Say so once, and keep
+        // hadError set so the window stays open instead of closing on a no-op.
+        Line(sb, "  hadError = true");
+        Line(sb, "  showMessage('[Teleport] mailbox busy -- the previous command has not " +
+                 "finished yet. Try again.')");
         Line(sb, "end");
         Line(sb);
         Line(sb, "-- Deferred self-untick (avoids reentrancy on the activating thread).");
@@ -217,6 +251,10 @@ public static class TeleportScriptGenerator
         Line(sb, "  if memrec then memrec.Active = false end");
         Line(sb, "  return");
         Line(sb, "end");
+        // Contract check BEFORE the first write. UntickAndReturn even though these
+        // rows are momentary: the deferred untick timer is created further down, so
+        // at THIS point a bare return would reach nothing (see AppendBail).
+        CeLuaHygiene.AppendContractCheck(sb, "Teleport");
         Line(sb);
         Line(sb, "for slot = 0, 2 do");
         // R3: this used to sample cmd ONCE and silently SKIP the slot when it was
@@ -230,15 +268,8 @@ public static class TeleportScriptGenerator
         Line(sb, $"    writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, 6)               -- op = CLEAR_MARKER");
         Line(sb, $"    writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)             -- clear status");
         Line(sb, $"    writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdTeleport})  -- CMD_TELEPORT (write LAST)");
-        Line(sb, "    local elapsed = 0");
-        Line(sb, $"    while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
-        Line(sb, "      sleep(1); elapsed = elapsed + 1");
-        Line(sb, $"      if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
-        Line(sb, "        hadError = true");
-        Line(sb, "        showMessage('[Teleport] mailbox timeout while clearing markers.')");
-        Line(sb, "        break");
-        Line(sb, "      end");
-        Line(sb, "    end");
+        // Same shape as the single-op wait above: momentary row, so flag and break.
+        CeLuaHygiene.AppendMailboxWait(sb, "Teleport", MailboxTimeout.FlagAndBreak, indent: "    ");
         Line(sb, "  end");
         Line(sb, "end");
         Line(sb, "if not hadError then dbg('[Teleport] all markers cleared') end");
