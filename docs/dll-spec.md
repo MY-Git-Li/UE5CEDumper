@@ -641,7 +641,7 @@ private:
 // PIPE_BUF_SIZE = 65536
 ```
 
-For the JSON protocol (31 commands, including `find_refs_to_uobject`), see
+For the JSON protocol (99 commands, including `find_refs_to_uobject`), see
 [pipe-protocol.md](pipe-protocol.md). Command name constants live in `Renge.h`
 (legacy alias: `PipeProtocol`).
 
