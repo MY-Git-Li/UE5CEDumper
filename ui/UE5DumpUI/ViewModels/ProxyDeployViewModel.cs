@@ -763,7 +763,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
             return;
         }
 
-        int ok = 0, fail = 0;
+        int ok = 0, fail = 0, files = 0, dirs = 0;
         var live = LiveBinariesDirs();
         try
         {
@@ -777,16 +777,28 @@ public partial class ProxyDeployViewModel : ViewModelBase
                 row.StatusText = result.Message;
                 row.StatusIsError = !result.Success;
                 row.IsRemoved = result.Success;
-                if (result.Success) { row.IsSelected = false; ok++; } else fail++;
+                // Unchecked either way: a pass is over when it is over. A failed row that stayed
+                // checked would re-submit itself on the next click of a button whose label still
+                // read "Delete checked (1)" — the retry has to be something the user asks for.
+                row.IsSelected = false;
+
+                if (result.Success)
+                {
+                    ok++;
+                    files += result.FilesRecycled;
+                    dirs += result.DirsRemoved;
+                    DropOrphanRow(row);
+                }
+                else fail++;
             }
             NotifyOrphanSelectionChanged();
-            SetOperationResult($"Cleaned {ok} of {picked.Count} leftover(s)", fail);
+            SetOperationResult(DescribeCleanup(ok, picked.Count, files, dirs, fail, cancelled: false), fail);
         }
         catch (OperationCanceledException)
         {
             // Report what DID happen — a cancel that discards the tally would hide a half-pruned chain.
             NotifyOrphanSelectionChanged();
-            SetOperationResult($"Cleanup cancelled after {ok} of {picked.Count} leftover(s)", fail);
+            SetOperationResult(DescribeCleanup(ok, picked.Count, files, dirs, fail, cancelled: true), fail);
         }
         catch (Exception ex)
         {
@@ -798,6 +810,50 @@ public partial class ProxyDeployViewModel : ViewModelBase
         {
             IsRemovingOrphans = false;
         }
+    }
+
+    /// <summary>
+    /// Take a cleaned row off the list, so what is on screen is what is still on disk.
+    ///
+    /// <para>This is the whole reason no automatic re-scan runs here, and the equivalence is exact
+    /// rather than approximate: <c>Success</c> from <c>RemoveOrphanProxyAsync</c> means the proxy
+    /// DLL is off disk (recycled, or already gone — a partial FOLDER prune is still a success), and
+    /// the scan enumerates rows BY that DLL. A re-scan therefore could not find this row again, so
+    /// dropping it produces the same list a scan would, without the seconds and without needing the
+    /// scan's own guard against running while a removal is in flight.</para>
+    ///
+    /// <para>The re-scan is also strictly WORSE for the rows that stay: it would re-find every
+    /// FAILED row with a blank status, and that status — "in use by a running program", "read-only,
+    /// left alone deliberately" — is the only actionable output a failed delete produces.</para>
+    ///
+    /// <para>Unsubscribes first, mirroring the scan's own cleanup: the handler holds a reference
+    /// back into this ViewModel.</para>
+    /// </summary>
+    private void DropOrphanRow(OrphanProxy row)
+    {
+        row.PropertyChanged -= OnOrphanRowChanged;
+        Orphans.Remove(row);
+    }
+
+    /// <summary>
+    /// Summary line for a cleanup pass.
+    ///
+    /// <para>It carries the file/folder TALLY because the rows that would have shown it are gone by
+    /// the time anyone reads it — the per-row success messages are the one thing dropping rows
+    /// costs, so the totals have to survive somewhere on screen. Per-row detail for both outcomes
+    /// (including why a folder prune stopped early) is in the ProxyDeploy log regardless.</para>
+    /// </summary>
+    private static string DescribeCleanup(int ok, int attempted, int files, int dirs, int fail, bool cancelled)
+    {
+        string text = cancelled
+            ? $"Cleanup cancelled after {ok} of {attempted} leftover(s)"
+            : $"Cleaned {ok} of {attempted} leftover(s)";
+        if (files > 0 || dirs > 0)
+            text += $" — {files} file(s) recycled, {dirs} folder(s) removed";
+        // Say where the failures went, or an emptied list reads as "everything worked".
+        if (fail > 0)
+            text += $"; {fail} still listed with the reason";
+        return text;
     }
 
     /// <summary>Set by MainWindowViewModel: connect the pipe after a successful
