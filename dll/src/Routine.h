@@ -17,7 +17,12 @@
 // observed. Every tick therefore runs inside RunTickGuarded, once, here.
 //
 // LOG_CAT: the macros below expand at the INCLUDE site, so include this header after
-// the module's `#define LOG_CAT "..."` (every module already defines it first). Each
+// the module's `#define LOG_CAT "..."`. The parenthetical that used to sit here —
+// "(every module already defines it first)" — was FALSE and is why this went unnoticed:
+// Fern.cpp defined it three lines too late, so this header's guard messages logged under
+// "" (init-0.log) for the whole of the pipe server, and the only visible symptom was a
+// C4005 macro-redefinition warning that read as cosmetic. Do not restate the claim; the
+// compiler already enforces it, because getting it wrong warns. Each
 // module's worker then logs under its own category, exactly as the hand-copied
 // versions did.
 // ============================================================
