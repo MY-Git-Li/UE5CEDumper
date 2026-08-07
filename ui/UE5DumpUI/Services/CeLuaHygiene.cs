@@ -160,15 +160,24 @@ public static class CeLuaHygiene
     /// the two must not share names.</para>
     /// </summary>
     public static void AppendIdleWait(StringBuilder sb, string mbExpr, string onBusy,
-                                      string indent = "")
+                                      string indent = "", string? onUnreadable = null)
     {
         Line(sb, indent, "-- Bounded wait for IDLE, not a single sample: the DLL publishes status=DONE");
         Line(sb, indent, "-- BEFORE clearing cmd, so a second back-to-back command can still see the");
         Line(sb, indent, "-- previous one for an instant and would spuriously report 'busy'.");
         Line(sb, indent, "local _idleTick = (type(getTickCount) == 'function') and getTickCount or nil");
         Line(sb, indent, "local _idleT0, _idleIters = _idleTick and _idleTick() or 0, 0");
-        Line(sb, indent, $"while readInteger({mbExpr} + {CeMailboxLayout.OffCmd}) ~= 0 do");
+        Line(sb, indent, $"local _idleCmd = readInteger({mbExpr} + {CeMailboxLayout.OffCmd})");
+        Line(sb, indent, "while _idleCmd ~= 0 do");
+        // An UNREADABLE mailbox is not a busy one. readInteger returns nil when the target
+        // process is gone, and `nil ~= 0` is TRUE in Lua, so without this the loop spins to
+        // its deadline and then blames a mailbox that no longer exists — the same
+        // guess-instead-of-read defect the status branches below were written to kill.
+        // Observed on Elliot 2026-08-07: closing the game produced "the DLL mailbox is
+        // busy -- try again in a moment", twice, 1.5 s each.
+        Line(sb, indent, $"  if _idleCmd == nil then {onUnreadable ?? onBusy} end");
         Line(sb, indent, "  sleep(1); _idleIters = _idleIters + 1");
+        Line(sb, indent, $"  _idleCmd = readInteger({mbExpr} + {CeMailboxLayout.OffCmd})");
         // Real elapsed time when getTickCount exists; iteration count only as fallback.
         Line(sb, indent, $"  local _idleOver = _idleTick and (_idleTick() - _idleT0 >= " +
                          $"{CeMailboxLayout.MailboxIdleWaitMs}) or (_idleIters >= " +
@@ -416,9 +425,12 @@ public static class CeLuaHygiene
         sb.Append(indent).Append("  sleep(1); _iters = _iters + 1\n");
         sb.Append(indent).Append("  _st = readInteger(").Append(mb).Append(")\n");
         // Real elapsed time when getTickCount exists; iteration count only as fallback.
-        sb.Append(indent).Append("  local _over = _tick and (_tick() - _t0 >= ")
+        // `_st == nil` short-circuits the deadline: readInteger returns nil once the target
+        // process is gone, and waiting the full timeout to say so helps nobody. It reaches
+        // the caller's normal bail with the nil case named in _msg (AppendTimeoutReason).
+        sb.Append(indent).Append("  local _over = _st == nil or (_tick and (_tick() - _t0 >= ")
           .Append(CeMailboxLayout.MailboxPollTimeoutMs).Append(") or (_iters >= ")
-          .Append(CeMailboxLayout.MailboxPollTimeoutIters).Append(")\n");
+          .Append(CeMailboxLayout.MailboxPollTimeoutIters).Append("))\n");
         sb.Append(indent).Append("  if _st ~= ").Append(CeMailboxLayout.StatusDone)
           .Append(" and _over then\n");
 
@@ -477,7 +489,15 @@ public static class CeLuaHygiene
     private static void AppendTimeoutReason(StringBuilder sb, string indent)
     {
         sb.Append(indent).Append("local _msg\n");
-        sb.Append(indent).Append("if _st == ").Append(CeMailboxLayout.StatusIdle).Append(" then\n");
+        // nil FIRST: it is not a status value, it is the absence of one. Every other branch
+        // compares _st against a number, and in Lua `nil == 0` is false, so without this the
+        // dead-process case fell into the else and told the user its status was "nil".
+        sb.Append(indent).Append("if _st == nil then\n");
+        sb.Append(indent).Append("  _msg = 'the mailbox could not be read.\\n\\n")
+          .Append("The game process has most likely exited. If it is still running, ")
+          .Append("re-inject UE5Dumper.dll, or untick and re-tick this table so CE ")
+          .Append("re-resolves g_invokeMailbox.'\n");
+        sb.Append(indent).Append("elseif _st == ").Append(CeMailboxLayout.StatusIdle).Append(" then\n");
         sb.Append(indent).Append("  _msg = 'timed out and the DLL never saw this command.\\n\\n")
           .Append("Most likely a stale g_invokeMailbox address: re-inject UE5Dumper.dll, ")
           .Append("or untick and re-tick this table so CE re-resolves the symbol.'\n");

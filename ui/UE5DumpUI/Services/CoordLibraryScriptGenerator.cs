@@ -259,7 +259,8 @@ public static class CoordLibraryScriptGenerator
             // succession is the ordinary use of this script, and that is exactly the
             // pattern the single read gets wrong.
             CeLuaHygiene.AppendIdleWait(sb, "mb",
-                "return nil, 'the DLL mailbox is busy -- try again in a moment'", "  ");
+                "return nil, 'the DLL mailbox is busy -- try again in a moment'", "  ",
+            "return nil, 'the mailbox could not be read -- the game process has most likely exited (re-inject UE5Dumper.dll if it is still running)'");
             Line(sb, "  if writeParams then writeParams(mb + MB_PARAMS) end");
             Line(sb, "  writeQword(mb + MB_UFUNC, 0)");
             Line(sb, "  writeQword(mb + MB_INST, op)");
@@ -277,12 +278,18 @@ public static class CoordLibraryScriptGenerator
             // the picker form is still open.
             CeLuaHygiene.AppendMailboxWait(
                 sb, "Coordinate Library", MailboxTimeout.ReturnReason, indent: "  ");
-            Line(sb, "  return readInteger(mb + MB_RESULT), nil, mb");
+            // Signed: the Wirbel rc is an int32 and readInteger defaults to UNSIGNED, which
+            // surfaced -1 to the user as "code 4294967295" (Coordinate Library, 2026-08-07).
+            Line(sb, "  return readInteger(mb + MB_RESULT, true), nil, mb");
             Line(sb, "end");
             Line(sb);
             Line(sb, "-- Current map, read from GET_POSE's pose block (map name at params+48).");
             Line(sb, "local function currentMap()");
             Line(sb, $"  local code, err, mb = call({OpGetPose}, nil)");
+            // Propagate err. Dropping it made the caller run a SECOND round-trip that
+            // failed the same way, so a dead game cost two full idle-wait deadlines
+            // before saying anything (observed 2026-08-07: ~3 s, message shown once).
+            Line(sb, "  if err ~= nil then return nil, err end");
             Line(sb, "  if code ~= 0 or mb == nil then return nil end");
             Line(sb, "  return readString(mb + MB_PARAMS + 48, 127, false)");
             Line(sb, "end");
@@ -574,7 +581,11 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "    -- Re-read the map HERE. It was previously captured once when the window");
         Line(sb, "    -- opened, so after the game changed level the guard compared against a");
         Line(sb, "    -- map you had already left. There is no UI polling this for us.");
-        Line(sb, "    local fresh = currentMap()");
+        Line(sb, "    local fresh, ferr = currentMap()");
+        // Abort on the FIRST failed round-trip. Without this the teleport below runs anyway
+        // and fails the same way, so a dead game cost two full idle-wait deadlines (~3 s)
+        // and still showed only one message.
+        Line(sb, "    if ferr ~= nil then showMessage('[Coordinate Library] ' .. ferr); return end");
         Line(sb, "    if fresh ~= nil and fresh ~= '' and fresh ~= mapNow then");
         Line(sb, "      mapNow = fresh");
         Line(sb, "      rebuild()   -- the 'current map only' filter was stale too");

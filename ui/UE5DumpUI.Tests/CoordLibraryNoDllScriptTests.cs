@@ -292,7 +292,7 @@ public class CoordLibraryNoDllScriptTests
         {
             int go = s.IndexOf("local function go(force)", StringComparison.Ordinal);
             Assert.True(go > 0);
-            Assert.Contains("local fresh = currentMap()", s[go..]);
+            Assert.Contains("local fresh, ferr = currentMap()", s[go..]);
         }
     }
 

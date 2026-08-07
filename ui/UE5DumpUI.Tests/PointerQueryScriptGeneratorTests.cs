@@ -98,7 +98,12 @@ public class PointerQueryScriptGeneratorTests
         // CeMailboxBailoutTests.BothWaitsAreTheSharedEmittersVerbatim pins that it really
         // is the emitter's bytes; this one stays a behavioural check.
         var s = PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GameEngine);
-        Assert.Contains("while readInteger(mb + 0x00) ~= 0 do", s);
+        Assert.Contains("local _idleCmd = readInteger(mb + 0x00)", s);
+        Assert.Contains("while _idleCmd ~= 0 do", s);
+        // nil is the absence of a status, not a busy mailbox: readInteger returns nil
+        // once the process is gone, and `nil ~= 0` is true, so without this guard the
+        // loop spun to its deadline and blamed the wrong thing.
+        Assert.Contains("if _idleCmd == nil then", s);
         Assert.Contains("_idleIters = _idleIters + 1", s);
         Assert.DoesNotContain("if readInteger(mb + 0x00) ~= 0 then return nil", s);
     }

@@ -130,7 +130,8 @@ public static class PointerQueryScriptGenerator
         // a failed op is NOT necessarily fatal here, so it must not untick by itself.
         Line(sb, "local function query(op)");
         CeLuaHygiene.AppendIdleWait(sb, "mb",
-            "return nil, 'the DLL mailbox is busy -- try again in a moment'", "  ");
+            "return nil, 'the DLL mailbox is busy -- try again in a moment'", "  ",
+            "return nil, 'the mailbox could not be read -- the game process has most likely exited (re-inject UE5Dumper.dll if it is still running)'");
         Line(sb, $"  writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, op)");
         Line(sb, $"  writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)             -- clear status");
         Line(sb, $"  writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdQueryPtr})  -- CMD_QUERY_PTR (write LAST)");
@@ -146,7 +147,9 @@ public static class PointerQueryScriptGenerator
         // back to a snapshot, so a failure here is not necessarily fatal and must not
         // untick by itself. The reason is untagged; the caller adds '[GWorld] '.
         CeLuaHygiene.AppendMailboxWait(sb, tag, MailboxTimeout.ReturnReason, indent: "  ");
-        Line(sb, $"  local code = readInteger(mb + {CeMailboxLayout.OffResult})");
+        // Signed: rc is an int32 and readInteger defaults to unsigned, so a negative code
+        // would print as a ten-digit number instead of, say, -1.
+        Line(sb, $"  local code = readInteger(mb + {CeMailboxLayout.OffResult}, true)");
         // The two SOFT reasons carry their own "enter gameplay first?" hint, because the
         // caller can no longer append it blindly: it is right for "the DLL answered, it
         // just does not have this yet" and misleading on a timeout or a busy mailbox,

@@ -132,6 +132,15 @@ public class CeMailboxBailoutTests
         Assert.True(enable.Contains("never finished it", StringComparison.Ordinal),
             $"{name}: does not name the status-PROCESSING case (the DLL wedged)");
         Assert.Contains($"_st == {CeMailboxLayout.StatusProcessing}", enable, StringComparison.Ordinal);
+
+        // nil is the THIRD case and it is not a status at all: readInteger returns nil once
+        // the target process is gone. It must be named first, because `nil == 0` is false in
+        // Lua so it would otherwise fall into the catch-all and tell the user its status was
+        // "nil". It must also short-circuit the deadline — waiting 10 s to report a process
+        // that already exited helps nobody. Found on Elliot 2026-08-07 by closing the game.
+        Assert.Contains("if _st == nil then", enable, StringComparison.Ordinal);
+        Assert.Contains("the mailbox could not be read", enable, StringComparison.Ordinal);
+        Assert.Contains("local _over = _st == nil or", enable, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -858,7 +867,8 @@ public class CeMailboxBailoutTests
             // Must match what PointerQuery and CoordLibrary actually pass, verbatim — this
             // theory's whole point is that the emitted text is the shared emitter's output
             // and not a re-typed copy.
-            "return nil, 'the DLL mailbox is busy -- try again in a moment'", "  ");
+            "return nil, 'the DLL mailbox is busy -- try again in a moment'", "  ",
+            "return nil, 'the mailbox could not be read -- the game process has most likely exited (re-inject UE5Dumper.dll if it is still running)'");
         Assert.True(script.Contains(idle.ToString(), StringComparison.Ordinal),
             $"{name}: the idle wait is not CeLuaHygiene.AppendIdleWait's output verbatim");
 
