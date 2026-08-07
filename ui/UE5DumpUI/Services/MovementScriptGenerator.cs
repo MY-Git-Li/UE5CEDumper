@@ -90,7 +90,7 @@ public static class MovementScriptGenerator
             enable ? MailboxTimeout.UntickAndReturn : MailboxTimeout.SilentReturn);
         if (enable)
         {
-            Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=active, 0=off, <0=error");
+            Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult}, true)   -- 1=active, 0=off, <0=error");
             Line(sb, $"dbg('[Movement] {label} {Pct(percent)} -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
             // Nothing was applied, so the row must not stay ticked (same rule as the
@@ -168,7 +168,7 @@ public static class MovementScriptGenerator
             enable ? MailboxTimeout.UntickAndReturn : MailboxTimeout.SilentReturn);
         if (enable)
         {
-            Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=active, 0=off, <0=error/unavailable");
+            Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult}, true)   -- 1=active, 0=off, <0=error/unavailable");
             Line(sb, "dbg('[Movement] Gravity Direction -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
             // Applied nothing -> the row must not stay ticked.

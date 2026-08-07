@@ -101,7 +101,7 @@ public static class TimeDilationScriptGenerator
             enable ? MailboxTimeout.UntickAndReturn : MailboxTimeout.SilentReturn);
         if (enable)
         {
-            Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=active, 0=off, <0=error");
+            Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult}, true)   -- 1=active, 0=off, <0=error");
             Line(sb, $"dbg('[Time] {label} {Mult(value)} -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
             Line(sb, $"  showMessage('[Time] {label} -- {(target == Target.Global ? "no WorldSettings (enter a level first)" : "no player pawn (enter gameplay first)")}.')");

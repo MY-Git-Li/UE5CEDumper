@@ -72,7 +72,7 @@ public static class ProtectionScriptGenerator
         // Shared wait: real-time deadline, status-specific diagnosis, and the untick
         // that stops a timed-out row claiming to be active.
         CeLuaHygiene.AppendMailboxWait(sb, "GodMode");
-        Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=immune, 0=can be damaged, <0=error");
+        Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult}, true)   -- 1=immune, 0=can be damaged, <0=error");
         Line(sb, $"dbg('[GodMode] {label} -> state=' .. tostring(state))");
         Line(sb, "if state < 0 then");
         Line(sb, $"  showMessage('[GodMode] {label} -- no pawn? (enter gameplay first)')");

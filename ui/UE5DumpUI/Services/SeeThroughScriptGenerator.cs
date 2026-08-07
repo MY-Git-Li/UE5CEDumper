@@ -82,7 +82,7 @@ public static class SeeThroughScriptGenerator
         // Shared wait: real-time deadline, status-specific diagnosis, and the untick
         // that stops a timed-out row claiming to be active.
         CeLuaHygiene.AppendMailboxWait(sb, "SeeThrough");
-        Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=on, 0=off, <0=error");
+        Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult}, true)   -- 1=on, 0=off, <0=error");
         Line(sb, $"dbg('[SeeThrough] {label} -> state=' .. tostring(state))");
         Line(sb, "if state < 0 then");
         Line(sb, $"  showMessage('[SeeThrough] {label} failed (error ' .. tostring(state) .. ')')");

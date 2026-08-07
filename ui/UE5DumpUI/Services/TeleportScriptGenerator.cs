@@ -162,7 +162,7 @@ public static class TeleportScriptGenerator
         // sleep(1) calls (measured 15.47 ms each, so the old bound was ~155 s), and a
         // message that reads `status` rather than guessing at the cause.
         CeLuaHygiene.AppendMailboxWait(sb, "Teleport", MailboxTimeout.FlagAndBreak, indent: "  ");
-        Line(sb, $"  local code = readInteger(mb + {CeMailboxLayout.OffResult})");
+        Line(sb, $"  local code = readInteger(mb + {CeMailboxLayout.OffResult}, true)");
         Line(sb, $"  dbg('[Teleport] {label} -> code=' .. code)");
         if (op == 11)
         {

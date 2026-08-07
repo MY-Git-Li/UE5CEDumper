@@ -122,7 +122,7 @@ public static class FlyScriptGenerator
         CeLuaHygiene.AppendMailboxWait(sb, name);
         if (readState)
         {
-            Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=active, 0=off, <0=error");
+            Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult}, true)   -- 1=active, 0=off, <0=error");
             Line(sb, $"dbg('[{name}] op={op} -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
             Line(sb, $"  showMessage('[{name}] -- no pawn / no CharacterMovement? (enter gameplay first)')");

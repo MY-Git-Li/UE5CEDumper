@@ -186,7 +186,7 @@ public static class InvokeScriptGenerator
         Line(sb);
 
         Line(sb, $"local instanceAddr = readQword(mb + {OffInstanceAddr})");
-        Line(sb, $"if readInteger(mb + {OffResult}) ~= 0 or instanceAddr == 0 then");
+        Line(sb, $"if readInteger(mb + {OffResult}, true) ~= 0 or instanceAddr == 0 then");
         Line(sb, "    local err = readErr()");
         Line(sb, "    print('ERROR: No instance of [' .. OWNER_CLASS .. '] found: ' .. err)");
         Line(sb, "    showMessage('ERROR: No live instance of [' .. OWNER_CLASS .. '] found!\\n' .. err .. '\\nMake sure you are in-game.')");
@@ -208,7 +208,7 @@ public static class InvokeScriptGenerator
         Line(sb);
 
         Line(sb, $"local ufuncPtr = readQword(mb + {OffUfuncAddr})");
-        Line(sb, $"if readInteger(mb + {OffResult}) ~= 0 or ufuncPtr == 0 then");
+        Line(sb, $"if readInteger(mb + {OffResult}, true) ~= 0 or ufuncPtr == 0 then");
         Line(sb, "    print(string.format('ERROR: Function [%s] not found on %s!', FUNC_NAME, OWNER_CLASS))");
         Line(sb, "    showMessage(string.format('ERROR: Function [%s] not found on %s!', FUNC_NAME, OWNER_CLASS))");
         AppendCleanupTimer(sb, 1);
@@ -238,7 +238,7 @@ public static class InvokeScriptGenerator
         Line(sb, "waitDone()");
         Line(sb);
 
-        Line(sb, $"local result = readInteger(mb + {OffResult})");
+        Line(sb, $"local result = readInteger(mb + {OffResult}, true)");
         Line(sb, "if result == 0 then dbg('  INVOKED OK!')");
         Line(sb, "else print('  INVOKE FAILED: error code ' .. tostring(result) .. ' ' .. readErr()); showMessage('INVOKE FAILED:\\nerror code ' .. tostring(result)) end");
         // DEBUG-only: decode + print the return value from the params buffer.
@@ -389,7 +389,7 @@ public static class InvokeScriptGenerator
         Line(sb, $"    writeInteger(mb + {OffCmd}, 1)");
         Line(sb, "    dbg('  Invoking via mailbox...')");
         Line(sb, "    waitDone()");
-        Line(sb, $"    local result = readInteger(mb + {OffResult})");
+        Line(sb, $"    local result = readInteger(mb + {OffResult}, true)");
         Line(sb, "    if result == 0 then dbg('  INVOKED OK!')");
         Line(sb, "    else print('  INVOKE FAILED: error code ' .. tostring(result) .. ' ' .. readErr()); showMessage('INVOKE FAILED:\\nerror code ' .. tostring(result)) end");
         // DEBUG-only: decode + print the return value (the created form closes

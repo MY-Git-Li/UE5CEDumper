@@ -165,6 +165,14 @@ public class CeMailboxBailoutTests
         // instead of reporting it.
         Assert.Contains("reinitializeSymbolhandler()", enable, StringComparison.Ordinal);
         Assert.Contains("even after re-reading the module list", enable, StringComparison.Ordinal);
+
+        // The result code is a SIGNED int32 and CE's readInteger defaults to UNSIGNED, so
+        // every `if state < 0 then` error branch in these scripts was DEAD CODE: -1 reads
+        // back as 4294967295 and a DLL-side failure was reported as success. Surfaced by a
+        // Coordinate Library teleport printing "code 4294967295" (2026-08-07); the display
+        // was the visible half, the dead branch was the dangerous one.
+        Assert.DoesNotContain($"readInteger(mb + {CeMailboxLayout.OffResult})", enable,
+            StringComparison.Ordinal);
         // Negative control: the claim that was false must be gone, not merely reworded.
         Assert.DoesNotContain("is older than this script (no contract symbol)", enable,
             StringComparison.Ordinal);

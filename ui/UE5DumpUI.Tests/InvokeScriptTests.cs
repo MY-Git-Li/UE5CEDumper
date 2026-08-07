@@ -319,7 +319,9 @@ public class InvokeScriptTests
         Assert.Contains("readQword(mb + 0x10)", script);  // instanceAddr
         Assert.Contains("readQword(mb + 0x18)", script);  // ufuncPtr
         // Reads result code
-        Assert.Contains("readInteger(mb + 0x08)", script); // result
+        // Signed. readInteger defaults to unsigned, which made every  error branch in
+        // the generated scripts unreachable -- a DLL failure read back as 4294967295.
+        Assert.Contains("readInteger(mb + 0x08, true)", script); // result (signed int32)
     }
 
     [Fact]

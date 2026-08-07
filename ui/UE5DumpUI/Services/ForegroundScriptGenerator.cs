@@ -74,7 +74,7 @@ public static class ForegroundScriptGenerator
         // Shared wait: real-time deadline, status-specific diagnosis, and the untick
         // that stops a timed-out row claiming to be active.
         CeLuaHygiene.AppendMailboxWait(sb, "KeepForeground");
-        Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=on, 0=off, <0=hook error");
+        Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult}, true)   -- 1=on, 0=off, <0=hook error");
         Line(sb, $"dbg('[KeepForeground] {label} -> state=' .. tostring(state))");
         Line(sb, "if state < 0 then");
         Line(sb, $"  showMessage('[KeepForeground] {label} failed (hook error ' .. tostring(state) .. ')')");

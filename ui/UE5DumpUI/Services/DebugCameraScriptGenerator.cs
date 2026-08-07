@@ -68,7 +68,7 @@ public static class DebugCameraScriptGenerator
         // Shared wait: real-time deadline, status-specific diagnosis, and the untick
         // that stops a timed-out row claiming to be active.
         CeLuaHygiene.AppendMailboxWait(sb, "DebugCamera");
-        Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=ON, 0=OFF, -1=error");
+        Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult}, true)   -- 1=ON, 0=OFF, -1=error");
         Line(sb, $"dbg('[DebugCamera] {label} -> state=' .. tostring(state))");
         // Test against the REQUEST, not against -1. `UE5_SetDebugCamera` re-reads the
         // state after firing ToggleDebugCamera and returns whatever it finds
