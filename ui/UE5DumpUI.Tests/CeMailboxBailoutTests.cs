@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using Xunit;
 
@@ -173,6 +174,23 @@ public class CeMailboxBailoutTests
     [Theory]
     [MemberData(nameof(MailboxScripts))]
     public void EveryScriptChecksTheContractBeforeWritingAnything(string name, string script)
+        => AssertChecksTheContractBeforeWriting(name, script);
+
+    [Theory]
+    [MemberData(nameof(MailboxScripts))]
+    public void TheContractCheckNamesBothFailureDirections(string name, string script)
+        => AssertNamesBothFailureDirections(name, script);
+
+    [Theory]
+    [MemberData(nameof(MailboxScripts))]
+    public void AFailedContractCheckUnticksTheRecord(string name, string script)
+        => AssertAFailedCheckUnticksTheRecord(name, script);
+
+    // The three rules live in ONE place each, because the shapes below assert exactly the
+    // same three things about differently-shaped scripts and two copies of a rule is how
+    // this file's own header says the original defect got in.
+
+    private static void AssertChecksTheContractBeforeWriting(string name, string script)
     {
         string enable = EnableBlock(script);
 
@@ -186,6 +204,12 @@ public class CeMailboxBailoutTests
         // Matched on the actual write CALLS, not on the substring "write": these scripts
         // carry header comments that use the word (e.g. "cmd (write LAST to trigger)"),
         // and the first version of this test tripped on those instead of on real writes.
+        //
+        // TEXTUAL position, deliberately, even though what matters is execution order. A
+        // write inside a `local function` does not run when the definition is emitted —
+        // but a check placed after that definition is one refactor away from being after
+        // the CALL too, and the text is the only thing a test can see. Emitting the check
+        // above every write, helper or not, keeps the two orders the same thing.
         int w = new[] { "writeQword(", "writeInteger(", "writeDouble(", "writeBytes(", "writeByte(" }
             .Select(fn => enable.IndexOf(fn, StringComparison.Ordinal))
             .Where(i => i >= 0)
@@ -195,9 +219,7 @@ public class CeMailboxBailoutTests
             $"{name}: writes to the mailbox at offset {w} before checking the contract at {check}");
     }
 
-    [Theory]
-    [MemberData(nameof(MailboxScripts))]
-    public void TheContractCheckNamesBothFailureDirections(string name, string script)
+    private static void AssertNamesBothFailureDirections(string name, string script)
     {
         string enable = EnableBlock(script);
         // The two directions need OPPOSITE advice, and today the second one is silent
@@ -211,9 +233,7 @@ public class CeMailboxBailoutTests
         Assert.Contains("stale address", enable, StringComparison.Ordinal);
     }
 
-    [Theory]
-    [MemberData(nameof(MailboxScripts))]
-    public void AFailedContractCheckUnticksTheRecord(string name, string script)
+    private static void AssertAFailedCheckUnticksTheRecord(string name, string script)
     {
         // Even for momentary scripts, whose deferred untick timer does not exist yet at
         // this point in the block — a bare return there would strand the row ticked.
@@ -231,6 +251,117 @@ public class CeMailboxBailoutTests
         // (that the DLL agrees); here we only pin that the emitted number IS the constant.
         string script = ProtectionScriptGenerator.Generate();
         Assert.Contains($"local _want = {CeMailboxLayout.ContractVersion}", script, StringComparison.Ordinal);
+    }
+
+    // ── A THIRD shape: the round-trip lives inside a `local function` ────────
+    //
+    // PointerQuery's query(), CoordLibrary's call()/teleport(), Invoke's writeMbStr /
+    // waitDone. That is the whole reason build 2743's conversion skipped these three:
+    // the sweep looked for a wait loop in the block's own control flow and found none.
+    // The contract check has no such excuse — it runs at CHUNK level in all three,
+    // before the helper is even defined — so the same three rules apply verbatim.
+    //
+    // They are NOT in MailboxScripts because the BAIL-OUT theories above assume a flat
+    // toggle and these legitimately end differently: the coordinate picker keeps its
+    // window open after refusing a cross-map jump (nothing to untick — the record is
+    // the window), and the invoke form unticks from OnClose rather than inline. Folding
+    // them into MailboxScripts would mean weakening those theories for every generator
+    // to accommodate three, which is the opposite trade.
+    public static IEnumerable<object[]> HelperShapedScripts()
+    {
+        var coords = new[]
+        {
+            new CoordEntry
+            {
+                Uid = "u1", Label = "Chest 1", Group = "Chests", Map = "Map01",
+                X = 1, Y = 2, Z = 3,
+            },
+        };
+
+        return new List<object[]>
+        {
+            new object[] { "PointerQuery.GWorld",
+                PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GWorld) },
+            new object[] { "PointerQuery.GameEngine",
+                PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GameEngine) },
+            new object[] { "CoordLibrary.Dll",
+                CoordLibraryScriptGenerator.Generate(
+                    coords, CoordLibraryScriptGenerator.Flavour.Dll, out _) },
+            new object[] { "Invoke.NoParams",
+                InvokeScriptGenerator.Generate("Shop_C", "OpenShop",
+                    new FunctionInfoModel { Name = "OpenShop", Params = new() }) },
+            new object[] { "Invoke.WithParams",
+                InvokeScriptGenerator.Generate("Shop_C", "Buy", new FunctionInfoModel
+                {
+                    Name = "Buy",
+                    ParmsSize = 4,
+                    Params = new List<FunctionParamModel>
+                    {
+                        new() { Name = "ItemId", TypeName = "IntProperty", Size = 4, Offset = 0 },
+                    },
+                }) },
+        };
+    }
+
+    [Theory]
+    [MemberData(nameof(HelperShapedScripts))]
+    public void EveryHelperShapedScriptChecksTheContractBeforeWritingAnything(
+        string name, string script)
+        => AssertChecksTheContractBeforeWriting(name, script);
+
+    [Theory]
+    [MemberData(nameof(HelperShapedScripts))]
+    public void TheHelperShapedContractCheckNamesBothFailureDirections(
+        string name, string script)
+        => AssertNamesBothFailureDirections(name, script);
+
+    [Theory]
+    [MemberData(nameof(HelperShapedScripts))]
+    public void AFailedHelperShapedContractCheckUnticksTheRecord(string name, string script)
+        => AssertAFailedCheckUnticksTheRecord(name, script);
+
+    [Fact]
+    public void TheCheckRunsBeforeTheHelperThatWritesIsEvenDefined()
+    {
+        // The distinction the three above cannot make on text position alone. In these
+        // scripts the writes sit inside a closure that runs LATER — from a button click,
+        // or a second query — so "before the first write" only means anything if the
+        // check precedes the enclosing `local function`. Pinned per generator because
+        // moving the check inside the helper would still satisfy the ordering assertion
+        // for a script whose helper happens to be defined after it.
+        foreach (var (name, script, helper) in new[]
+        {
+            ("PointerQuery", PointerQueryScriptGenerator.Generate(
+                PointerQueryScriptGenerator.Target.GameEngine), "local function query("),
+            ("CoordLibrary", CoordLibraryScriptGenerator.Generate(
+                Array.Empty<CoordEntry>(), CoordLibraryScriptGenerator.Flavour.Dll, out _),
+                "local function call("),
+            ("Invoke", InvokeScriptGenerator.Generate("C", "F",
+                new FunctionInfoModel { Name = "F", Params = new() }),
+                "local function writeMbStr("),
+        })
+        {
+            string enable = EnableBlock(script);
+            int check = enable.IndexOf(CeMailboxLayout.ContractSymbol, StringComparison.Ordinal);
+            int def = enable.IndexOf(helper, StringComparison.Ordinal);
+            Assert.True(def >= 0, $"{name}: `{helper}` is gone — has the shape changed?");
+            Assert.True(check >= 0 && check < def,
+                $"{name}: the contract check does not precede `{helper}`");
+        }
+    }
+
+    [Fact]
+    public void TheNoDllCoordinatePickerHasNoContractCheck()
+    {
+        // Not an oversight, and the reason is worth pinning: the no-DLL flavour teleports
+        // by raw memory write through the standalone trainer's baked offsets and never
+        // touches g_invokeMailbox. There is no mailbox layout in question, so a contract
+        // check there could only ever refuse to open a picker that would have worked.
+        string script = CoordLibraryScriptGenerator.Generate(
+            Array.Empty<CoordEntry>(), CoordLibraryScriptGenerator.Flavour.NoDll, out _);
+
+        Assert.DoesNotContain(CeMailboxLayout.ContractSymbol, script, StringComparison.Ordinal);
+        Assert.DoesNotContain("g_invokeMailbox", script, StringComparison.Ordinal);
     }
 
     // ── The OTHER script shape: momentary actions ───────────────────────────

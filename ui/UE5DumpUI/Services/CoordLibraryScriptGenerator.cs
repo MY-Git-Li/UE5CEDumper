@@ -216,6 +216,17 @@ public static class CoordLibraryScriptGenerator
         string formVar = FormGlobal(flavour);
         if (dll)
         {
+            // Contract check BEFORE the first write, at chunk level -- before call() and
+            // teleport() are even defined. Those helpers do not run now: they run later,
+            // from a button click, possibly hours into a session and possibly from a .CT
+            // saved months ago. Verifying the layout once at ENABLE is the only point
+            // where a mismatch can still be reported instead of scribbled into memory.
+            //
+            // The NO-DLL flavour deliberately gets no check: it never touches the
+            // mailbox, so there is no layout in question (see the else branch below).
+            CeLuaHygiene.AppendContractCheck(sb, "Coordinate Library",
+                                             MailboxTimeout.UntickAndReturn);
+            Line(sb);
             // Offsets come from CeMailboxLayout (the single source of truth mirroring
             // dll/src/Mimic.h) -- never hand-written here.
             Line(sb, $"local MB_CMD, MB_STATUS, MB_RESULT = {CeMailboxLayout.OffCmd}, " +

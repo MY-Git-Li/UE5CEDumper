@@ -109,6 +109,13 @@ public static class PointerQueryScriptGenerator
         Line(sb, "  if memrec then memrec.Active = false end");
         Line(sb, "  return");
         Line(sb, "end");
+        // Contract check BEFORE the first write. It runs HERE, at chunk level, rather
+        // than inside query(): every write this script makes lives in that helper, so
+        // verifying the layout once before the helper exists covers all of them, and
+        // covers them before the first one can land on offsets that moved. A stateful
+        // toggle, so a failed check unticks the row instead of leaving it claiming to
+        // have published a symbol.
+        CeLuaHygiene.AppendContractCheck(sb, tag, MailboxTimeout.UntickAndReturn);
         Line(sb);
 
         // One mailbox round-trip, factored into a local so the GameEngine path can run it
