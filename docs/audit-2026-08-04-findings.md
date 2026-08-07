@@ -206,7 +206,7 @@ existing behaviour / perf.
 |----|---------|----------|------|
 | R1 ✅ | done | S/low | `docs/naming-convention.md` — three module lists, the first two 8 modules stale |
 | R2 ✅ | done | S/low | Delete 3 private Lua escapers + the private preamble/close copies; use `CeLuaHygiene` |
-| R3 ✅ | done | S/low | `CeLuaHygiene.AppendIdleWait` at the **2** generators that sample `cmd` once (not 11) |
+| R3 ✅ | done | S/low | `CeLuaHygiene.AppendIdleWait` at the **2** generators that sample `cmd` once (not 11) — **the scoping was wrong, see the note below the table** |
 | R4 ✅ | done | S/low | `DumpExplorerViewModel` — the sole holdout of the space=AND keyword MUST rule |
 | R5 ✅ | done | S–M/low | ~~One `ReassertWorker` helper for the six hold modules~~ **DONE build 2596** — new `Routine.h` (`ReassertLoop` / `RunTickGuarded` / `SleepSliced`) + `Grimoire::WORKER_SLEEP_SLICE_MS` |
 | R6 ✅ | done | S/low | `en.axaml` — 24 inert keys, 2 shadowed by hardcoded C#; **zero dangling references** |
@@ -214,6 +214,37 @@ existing behaviour / perf.
 | ~~R8~~ | **refuted** | — | ~~`build.ps1` dist native payload never refreshed outside `-Clean`~~ — **the refresh half is false** (`build.ps1:514-516` re-copies every native with `-Force` each Publish; the old mtimes are the NuGet packages' own). Raised on an mtime proxy — the audit's own 4b root cause. Prune-only remainder is benign. Closed 2026-08-05 |
 | — | later | — | `RunGuardedAsync` over TeleportVM's 55 busy/error blocks · LiveWalkerVM's hand-rolled debounce → `KeywordSearchMemory` · 135 hardcoded AXAML strings · the 12-generator mailbox emitter (after B15) · `ValidateAndFixOffsets` Step extraction · `Fern::DispatchCommand` handler table |
 | — | **never as filed** | — | The 8-copy player-chain extraction *with* "fixing" Schlacht's omission (it is deliberate — the fallback is a 486K full-pool scan on a 10 Hz timer) · the `Aura.cpp` split beyond steps 1–2 · `MovementKnobCardViewModel` (33 binding paths, silent AOT failure, zero user gain) |
+
+> **R3's scoping was wrong, and the way it was wrong is reusable.** The row bounded exposure by
+> asking *"which generators read `cmd`?"* — 2 of 11 — and concluded the other 9 "cannot spuriously
+> report busy". True, and beside the point: the hazard is not a bad READ, it is a `cmd` **write** that
+> races the DLL's trailing `cmd = CMD_IDLE`. Enumerating the readers therefore *excluded* the worst
+> case — `InvokeScriptGenerator`, which read `cmd` not once but **never**, and fires **three**
+> back-to-back round-trips (`CMD_FIND_INSTANCE` → `CMD_FIND_FUNCTION` → `CMD_INVOKE`). A wiped
+> command there surfaces as `waitDone` timing out with "the DLL never saw this command", which sends
+> the user to re-inject a healthy DLL. Fixed 2026-08-07 (one emitted `waitIdle()` helper, 4 call
+> sites); pinned by `CeMailboxBailoutTests.HelperShapedScripts`. The correct predicate is **"writes
+> `cmd`"**.
+>
+> **`PointerQueryScriptGenerator` was a fourth site the same enumeration missed, and it was NOT
+> cosmetic** — folding it in (2026-08-07) turned up two live defects in its *second* hand-rolled loop,
+> the status poll, which had never been counted at all because R3 was scoped to idle waits: it
+> counted `sleep(1)` iterations against a millisecond constant, so its stated 10 s deadline was
+> **~155 s** of frozen Lua Engine, and it announced `'mailbox timeout (DLL not responding?)'` — the
+> exact guess `CeMailboxBailoutTests.TheOldGuessingTimeoutMessage_IsGone` was written to forbid,
+> surviving in a file that test never covered. Its `query()` helper returns `nil, reason` so the
+> GameEngine path can fall through from the `&GEngine` slot to a snapshot, which no existing
+> `MailboxTimeout` mode expressed; hence the new `ReturnReason` mode. It was also missing
+> `AppendContractCheck` entirely. Pinned by `HelperReturningScripts`.
+>
+> Two method lessons, both cheap: **the guessing-message test existed and passed for 40+ builds while
+> the string it forbids sat in an uncovered generator** — a `[Theory]` is only as wide as its
+> `MemberData`, so a rule with a fixed script list is a rule with a silent exemption list. And
+> **folding a hand-rolled copy onto a shared emitter invalidates the tests that pinned the copy**: one
+> broke loudly (`waited` → `idleWaited`) and one went **vacuously green** — a `DoesNotContain("elapsed >= ")`
+> that passed because the refactor deleted the construct, with its comment still describing it.
+> `PointerQueryScriptGeneratorTests` now asserts the construct is present *before* asserting it is
+> escaped.
 
 ---
 

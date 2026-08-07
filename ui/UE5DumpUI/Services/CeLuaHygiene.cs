@@ -48,6 +48,20 @@ public enum MailboxTimeout
     /// <summary>A <c>[DISABLE]</c> block: return quietly. There is no record to untick
     /// (it is already going false) and a dialog over the game on an untick is noise.</summary>
     SilentReturn,
+    /// <summary>A round-trip factored into a Lua HELPER whose failure the CALLER judges:
+    /// show nothing, untick nothing, and hand back <c>nil</c> plus a reason string.
+    ///
+    /// <para>PointerQuery's GameEngine path is why this exists, and it is not a stylistic
+    /// preference. A failed <c>&amp;GEngine</c>-SLOT query there is EXPECTED — a game whose
+    /// GEngine AOB never validated is supposed to fall through to the <c>UEngine*</c>
+    /// snapshot — so announcing the failure inside the wait would pop a dialog on what is
+    /// actually the success path.</para>
+    ///
+    /// <para>The three status cases are still told apart. They are RETURNED rather than
+    /// shown, which is the whole distinction from <see cref="SilentReturn"/>: that one
+    /// discards the reason, this one delegates it. <c>tag</c> is unused here — the caller
+    /// prefixes its own, and emitting one too would read <c>[GWorld] [GWorld] …</c>.</para></summary>
+    ReturnReason,
 }
 
 public static class CeLuaHygiene
@@ -363,7 +377,8 @@ public static class CeLuaHygiene
         MailboxTimeout onTimeout = MailboxTimeout.UntickAndReturn,
         string indent = "")
     {
-        bool announce = onTimeout != MailboxTimeout.SilentReturn;
+        bool announce = onTimeout != MailboxTimeout.SilentReturn
+                     && onTimeout != MailboxTimeout.ReturnReason;
         string mb = "mb + " + CeMailboxLayout.OffStatus;
         sb.Append(indent).Append("local _tick = (type(getTickCount) == 'function') and getTickCount or nil\n");
         sb.Append(indent).Append("local _t0, _iters = _tick and _tick() or 0, 0\n");
@@ -395,6 +410,24 @@ public static class CeLuaHygiene
               .Append("] timed out on an unexpected mailbox status: ' .. tostring(_st))\n");
             sb.Append(indent).Append("    end\n");
         }
+        else if (onTimeout == MailboxTimeout.ReturnReason)
+        {
+            // The same three cases, and the same refusal to guess between them — returned
+            // instead of shown. Each branch returns, so no bail is emitted below.
+            sb.Append(indent).Append("    if _st == ").Append(CeMailboxLayout.StatusIdle)
+              .Append(" then\n");
+            sb.Append(indent).Append("      return nil, 'timed out and the DLL never saw this command")
+              .Append(" -- most likely a stale g_invokeMailbox address: re-inject UE5Dumper.dll,")
+              .Append(" or untick and re-tick this table so CE re-resolves the symbol'\n");
+            sb.Append(indent).Append("    elseif _st == ").Append(CeMailboxLayout.StatusProcessing)
+              .Append(" then\n");
+            sb.Append(indent).Append("      return nil, 'the DLL took this command but never finished it")
+              .Append(" -- is the game paused, or the game thread stalled?'\n");
+            sb.Append(indent).Append("    else\n");
+            sb.Append(indent).Append("      return nil, 'timed out on an unexpected mailbox status: '")
+              .Append(" .. tostring(_st)\n");
+            sb.Append(indent).Append("    end\n");
+        }
         switch (onTimeout)
         {
             case MailboxTimeout.UntickAndReturn:
@@ -406,6 +439,9 @@ public static class CeLuaHygiene
                 // success-close on hadError, so returning here would skip BOTH.
                 sb.Append(indent).Append("    hadError = true\n");
                 sb.Append(indent).Append("    break\n");
+                break;
+            case MailboxTimeout.ReturnReason:
+                // Nothing: all three status branches above already returned nil + reason.
                 break;
             default:
                 sb.Append(indent).Append("    return\n");

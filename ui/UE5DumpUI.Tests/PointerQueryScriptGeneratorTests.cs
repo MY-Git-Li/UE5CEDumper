@@ -92,9 +92,14 @@ public class PointerQueryScriptGeneratorTests
         // The DLL writes status=DONE before it clears cmd, so a second back-to-back
         // query can observe the previous command for an instant. A single sample would
         // report "busy" and silently abandon the GEngine-slot -> snapshot fallback.
+        //
+        // The loop is CeLuaHygiene.AppendIdleWait's output now, not hand-rolled — hence
+        // `idleWaited`, the shared emitter's counter, where this used to say `waited`.
+        // CeMailboxBailoutTests.BothWaitsAreTheSharedEmittersVerbatim pins that it really
+        // is the emitter's bytes; this one stays a behavioural check.
         var s = PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GameEngine);
         Assert.Contains("while readInteger(mb + 0x00) ~= 0 do", s);
-        Assert.Contains("waited = waited + 1", s);
+        Assert.Contains("idleWaited = idleWaited + 1", s);
         Assert.DoesNotContain("if readInteger(mb + 0x00) ~= 0 then return nil", s);
     }
 
@@ -164,13 +169,18 @@ public class PointerQueryScriptGeneratorTests
     [Fact]
     public void WrapAaScriptXml_escapes_the_script_body()
     {
-        // The AA body contains XML-hostile chars (e.g. '>' in the "elapsed >= …"
-        // timeout guard); they must be entity-escaped so the CE XML parser reads a
-        // single well-formed <AssemblerScript> text node.
+        // The AA body contains XML-hostile chars — the '>' in the wait loops' deadline
+        // guards — and they must be entity-escaped so the CE XML parser reads a single
+        // well-formed <AssemblerScript> text node.
         var script = PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GameEngine);
         var xml = CheatTableBuilder.WrapAaScriptXml("Get GameEngine → symbol UE_GameEngine", script);
 
-        Assert.Contains("&gt;=", xml);              // "elapsed >= N" → "elapsed &gt;= N"
-        Assert.DoesNotContain("elapsed >= ", xml);  // no raw '>' survives in the body
+        // Assert the construct is REALLY in the body first, or the escape check below is a
+        // test of nothing. It used to name `elapsed >= N` from the hand-rolled status poll;
+        // folding that onto CeLuaHygiene.AppendMailboxWait deleted the string, and the
+        // DoesNotContain went vacuously green while its comment still described it.
+        Assert.Contains("_t0 >= ", script);
+        Assert.Contains("&gt;= ", xml);            // "_t0 >= N" → "_t0 &gt;= N"
+        Assert.DoesNotContain("_t0 >= ", xml);     // no raw '>' survives in the body
     }
 }
