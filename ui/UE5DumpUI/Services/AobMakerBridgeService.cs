@@ -493,6 +493,12 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
             _pipe = new NamedPipeClientStream(".", PipeName,
                 PipeDirection.InOut, PipeOptions.Asynchronous);
             await _pipe.ConnectAsync(ConnectTimeoutMs, ct);
+            // A new pipe means a new Cheat Engine, and a new CE means a table without our
+            // reminder row. Re-arm so the next push puts it back. Without this the one-shot
+            // tracks "this UI session sent it" rather than "the table CE has open contains
+            // it" -- and the UI outlives CE restarts, so the note would silently stop
+            // appearing for the rest of the day.
+            Interlocked.Exchange(ref _reminderSent, 0);
             return true;
         }
         catch
