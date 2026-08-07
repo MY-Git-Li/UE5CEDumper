@@ -151,6 +151,17 @@ public class CeMailboxBailoutTests
         Assert.Contains("could not be READ", enable, StringComparison.Ordinal);
         // _want < _min against a nil raises instead of diagnosing.
         Assert.Contains("if _cur == nil or _min == nil then", enable, StringComparison.Ordinal);
+
+        // The symbol-lookup branch sits above all of those and had the same defect in its
+        // strongest form: getAddressSafe returns nil for EVERY reason a symbol can fail to
+        // resolve, and the message asserted the rarest one. Verified 2026-08-07 against a
+        // DLL that exports g_mailboxContract (dumpbin ordinal 64) while CE sat on a stale
+        // PID -- the user was told to rebuild a DLL that was already correct.
+        Assert.Contains("could not resolve g_mailboxContract", enable, StringComparison.Ordinal);
+        Assert.Contains("not attached to the running game", enable, StringComparison.Ordinal);
+        // Negative control: the claim that was false must be gone, not merely reworded.
+        Assert.DoesNotContain("is older than this script (no contract symbol)", enable,
+            StringComparison.Ordinal);
     }
 
     [Theory]

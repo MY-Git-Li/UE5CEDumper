@@ -326,8 +326,18 @@ public static class CeLuaHygiene
           .Append("   -- contract this script was generated against\n");
         sb.Append(indent).Append("if not _cv or _cv == 0 then\n");
         sb.Append(indent).Append("  ").Append(say).Append("('[").Append(tag)
-          .Append("] this UE5Dumper.dll is older than this script (no contract symbol).")
-          .Append("\\n\\nUpdate the DLL, or regenerate this table against the DLL you have.')\n");
+          // NOT "the DLL is old". getAddressSafe returns nil for every reason a symbol can
+          // fail to resolve, and an old DLL is the RAREST of them. Verified 2026-08-07: a
+          // freshly built DLL that demonstrably exports g_mailboxContract (dumpbin ordinal
+          // 64) still produced this message, because Cheat Engine was attached to a stale
+          // PID. The old wording sent the user to rebuild a DLL that was already correct.
+          // List the causes in likelihood order and assert none of them.
+          .Append("] could not resolve g_mailboxContract.")
+          .Append("\\n\\nMost likely Cheat Engine is not attached to the running game ")
+          .Append("(check the process it has open -- a stale PID from an earlier run looks ")
+          .Append("identical to this), or UE5Dumper.dll is not injected into that process.")
+          .Append("\\n\\nIf CE is attached and the DLL IS injected, then the DLL predates this ")
+          .Append("script: update it, or regenerate this table against the DLL you have.')\n");
         AppendBail(sb, onFail, indent + "  ");
         sb.Append(indent).Append("end\n");
         // Read ONCE into a local, and separate "cannot read" from "read the wrong value".
