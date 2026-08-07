@@ -254,11 +254,18 @@ public static class CoordLibraryScriptGenerator
             Line(sb, "  writeQword(mb + MB_INST, op)");
             Line(sb, "  writeInteger(mb + MB_STATUS, 0)");
             Line(sb, $"  writeInteger(mb + MB_CMD, {CmdTeleport})   -- write LAST");
-            Line(sb, "  local waited = 0");
-            Line(sb, "  while readInteger(mb + MB_STATUS) ~= 1 do");
-            Line(sb, "    sleep(1); waited = waited + 1");
-            Line(sb, $"    if waited >= {CeMailboxLayout.MailboxPollTimeoutMs} then return nil, 'the DLL did not respond' end");
-            Line(sb, "  end");
+            // The shared wait, in its by-value mode. Hand-rolled until now, and it
+            // carried the same two defects build 2743 fixed elsewhere: it counted
+            // sleep(1) iterations against a millisecond constant (15.47 ms each, so "10
+            // s" was ~155 s), and 'the DLL did not respond' asserted a cause the mailbox
+            // can actually distinguish.
+            //
+            // ReturnReason, not the toggles' UntickAndReturn: `call` answers its caller
+            // with (code, err) and go() does the reporting. A return here would leave
+            // only this helper, and unticking from inside it would kill the record while
+            // the picker form is still open.
+            CeLuaHygiene.AppendMailboxWait(
+                sb, "Coordinate Library", MailboxTimeout.ReturnReason, indent: "  ");
             Line(sb, "  return readInteger(mb + MB_RESULT), nil, mb");
             Line(sb, "end");
             Line(sb);

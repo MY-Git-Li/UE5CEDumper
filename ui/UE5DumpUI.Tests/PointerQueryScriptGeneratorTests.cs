@@ -94,7 +94,7 @@ public class PointerQueryScriptGeneratorTests
         // report "busy" and silently abandon the GEngine-slot -> snapshot fallback.
         var s = PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GameEngine);
         Assert.Contains("while readInteger(mb + 0x00) ~= 0 do", s);
-        Assert.Contains("waited = waited + 1", s);
+        Assert.Contains("_idleIters = _idleIters + 1", s);
         Assert.DoesNotContain("if readInteger(mb + 0x00) ~= 0 then return nil", s);
     }
 
@@ -164,13 +164,17 @@ public class PointerQueryScriptGeneratorTests
     [Fact]
     public void WrapAaScriptXml_escapes_the_script_body()
     {
-        // The AA body contains XML-hostile chars (e.g. '>' in the "elapsed >= …"
-        // timeout guard); they must be entity-escaped so the CE XML parser reads a
+        // The AA body contains XML-hostile chars (e.g. '>' in the "_tick() - _t0 >= N"
+        // timeout deadline); they must be entity-escaped so the CE XML parser reads a
         // single well-formed <AssemblerScript> text node.
         var script = PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GameEngine);
         var xml = CheatTableBuilder.WrapAaScriptXml("Get GameEngine → symbol UE_GameEngine", script);
 
-        Assert.Contains("&gt;=", xml);              // "elapsed >= N" → "elapsed &gt;= N"
-        Assert.DoesNotContain("elapsed >= ", xml);  // no raw '>' survives in the body
+        // Anchored on the shared emitter's actual text, not on a shape this generator no
+        // longer emits: the old assertion named the hand-rolled `elapsed >= N` counter,
+        // so once that was replaced BOTH halves passed for the wrong reason — nothing
+        // was left to escape and nothing was left to find.
+        Assert.Contains($"_t0 &gt;= {CeMailboxLayout.MailboxPollTimeoutMs}", xml);
+        Assert.DoesNotContain($"_t0 >= {CeMailboxLayout.MailboxPollTimeoutMs}", xml);
     }
 }
