@@ -15,8 +15,11 @@ CE-specific quirks and undocumented behaviours hit while building against Cheat 
 > - **The public source is 7.5-era; the shipping binary is 7.7.** CE's GitHub repo lags its
 >   releases, so "present in the source" does **not** prove "present in 7.7", and "absent from the
 >   source" does not prove it was fixed. Each item below says which one it was checked against.
-> - HEAD is **1 commit ahead of upstream** — the local `Assemblerunit.pas` fix in §4. That fix is
->   **not** in upstream and therefore not in any official build.
+> - HEAD is **1 commit ahead of upstream** — the local `Assemblerunit.pas` fix in §4. It is not in
+>   the public source. **Do not conclude from that it is missing from released CE**: §4 was then
+>   measured in 7.7 and the shipping binary already behaves correctly. That inference was made in
+>   an earlier revision of this file and the test disproved it, which is the cheapest possible
+>   reminder that these two coordinates are separate evidence, not one fact stated twice.
 >
 > ⚠ Line numbers here are DERIVED from an external tree and `tools/check_derived_counts.py`
 > cannot guard them (it only derives from this repo). Re-grep the identifier before trusting one.
@@ -173,15 +176,25 @@ See [ce-plugin-sdk-notes.md](ce-plugin-sdk-notes.md) §10 and
 
 ## 4. r/m16, imm8 sign-extension bug for value 0x80–0xFF
 
-> **Status (2026-08-07): still present upstream; fixed only in this fork.**
-> `upstream/master` (`ec45d5f4`, 2025-04-19) still reads `if vtype=16 then` at
-> `Assemblerunit.pas:6845`. The fix below is local commit `4178e037`, which is the single commit
-> `D:\Github\cheat-engine` is ahead by — it has **not** been upstreamed, so no official CE build
-> contains it.
-> **Not verified against the 7.7 binary.** The public source lags the release, so the source
-> alone cannot settle whether 7.7.0.10568 still mis-encodes this. A 10-second check settles it:
-> in CE, open **Memory View → Tools → Auto Assemble**, type `cmp bx, AA`, and look at the bytes.
-> `66 83 FB AA` = still buggy; `66 81 FB AA 00` = fixed upstream since.
+> **Status (2026-08-07): FIXED in the shipping 7.7 binary. Still present in the last public source.**
+>
+> **Measured, not inferred.** `cmp bx, AA` typed into CE **7.7.0.10568**'s Auto Assemble produces:
+> ```
+> 7FF6F29B0000 - 66 81 FB AA00         - cmp bx,00AA
+> ```
+> That is the "Expected (Correct)" row of the verification table below — `81` opcode, 16-bit
+> immediate, no sign extension. A released 7.7 does **not** have this bug.
+>
+> **The source says the opposite, and that is the whole reason this file now carries two version
+> coordinates.** `upstream/master` (`ec45d5f4`, 2025-04-19) still reads `if vtype=16 then` at
+> `Assemblerunit.pas:6845`, and local commit `4178e037` — the single commit our checkout is ahead
+> by — is what patches it. CE's public repo lags its releases, so reading the source alone would
+> have left this entry asserting a defect that the CE you actually run does not have. This is the
+> first item where the two coordinates genuinely disagreed, and the binary won.
+>
+> Everything below is kept as the analysis of a **real defect in the last public source**. It still
+> applies if you build CE from GitHub — which is why the fork carries the patch — and it is a
+> worked example of how to find this class of bug. It does **not** describe a released 7.7.
 
 ### Problem
 When we use instructions like `cmp bx, AA`, the assembler is wrong. It use `r/m16, imm8` (opcode `83`) encoding. The CPU will do sign-extend for `0xAA` and it become `0xFFAA` (-86), but user actually want `0x00AA` (170).
