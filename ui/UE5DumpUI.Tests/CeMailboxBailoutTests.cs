@@ -158,7 +158,13 @@ public class CeMailboxBailoutTests
         // DLL that exports g_mailboxContract (dumpbin ordinal 64) while CE sat on a stale
         // PID -- the user was told to rebuild a DLL that was already correct.
         Assert.Contains("could not resolve g_mailboxContract", enable, StringComparison.Ordinal);
-        Assert.Contains("not attached to the running game", enable, StringComparison.Ordinal);
+        // The self-heal is the point, not the message: CE snapshots the module list when it
+        // OPENS a process, and "open the process, then inject" is the NORMAL flow (the
+        // UE5CEDumper (DLL) record injects from inside CE), so the symbol table is stale by
+        // construction. Retrying after reinitializeSymbolhandler() fixes the common case
+        // instead of reporting it.
+        Assert.Contains("reinitializeSymbolhandler()", enable, StringComparison.Ordinal);
+        Assert.Contains("even after re-reading the module list", enable, StringComparison.Ordinal);
         // Negative control: the claim that was false must be gone, not merely reworded.
         Assert.DoesNotContain("is older than this script (no contract symbol)", enable,
             StringComparison.Ordinal);

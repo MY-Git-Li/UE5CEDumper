@@ -322,6 +322,21 @@ public static class CeLuaHygiene
           .Append(CeMailboxLayout.ContractSymbol).Append("')\n");
         sb.Append(indent).Append("if not _cv or _cv == 0 then _cv = getAddressSafe('UE5Dumper.")
           .Append(CeMailboxLayout.ContractSymbol).Append("') end\n");
+        // Self-heal the most common cause before reporting anything. CE snapshots the
+        // module list when it OPENS a process, so a DLL injected after that point has no
+        // exports in the symbol table and every lookup returns nil — with CE attached to
+        // the right process and the DLL demonstrably working over the pipe. Verified on
+        // DumperTest 2026-08-07: CE on the correct PID, UI showing "Connected, DLL 2761",
+        // and the symbol still unresolvable until the handler re-enumerated.
+        // reinitializeSymbolhandler is registered at LuaHandler.pas:16357 and celua.txt:218
+        // documents this exact case ("E.g when new modules have been loaded").
+        sb.Append(indent).Append("if not _cv or _cv == 0 then\n");
+        sb.Append(indent).Append("  reinitializeSymbolhandler()\n");
+        sb.Append(indent).Append("  _cv = getAddressSafe('")
+          .Append(CeMailboxLayout.ContractSymbol).Append("')\n");
+        sb.Append(indent).Append("  if not _cv or _cv == 0 then _cv = getAddressSafe('UE5Dumper.")
+          .Append(CeMailboxLayout.ContractSymbol).Append("') end\n");
+        sb.Append(indent).Append("end\n");
         sb.Append(indent).Append("local _want = ").Append(CeMailboxLayout.ContractVersion)
           .Append("   -- contract this script was generated against\n");
         sb.Append(indent).Append("if not _cv or _cv == 0 then\n");
@@ -332,12 +347,20 @@ public static class CeLuaHygiene
           // 64) still produced this message, because Cheat Engine was attached to a stale
           // PID. The old wording sent the user to rebuild a DLL that was already correct.
           // List the causes in likelihood order and assert none of them.
-          .Append("] could not resolve g_mailboxContract.")
-          .Append("\\n\\nMost likely Cheat Engine is not attached to the running game ")
-          .Append("(check the process it has open -- a stale PID from an earlier run looks ")
-          .Append("identical to this), or UE5Dumper.dll is not injected into that process.")
-          .Append("\\n\\nIf CE is attached and the DLL IS injected, then the DLL predates this ")
-          .Append("script: update it, or regenerate this table against the DLL you have.')\n");
+          .Append("] could not resolve g_mailboxContract, even after re-reading the module list.")
+          .Append("\\n\\nThe usual cause -- CE having opened the process BEFORE the DLL was ")
+          .Append("injected -- was already retried automatically and did not fix it, so one of ")
+          .Append("these is true instead:")
+          .Append("\\n  - UE5Dumper.dll is not injected into the process CE has open")
+          .Append("\\n  - CE is attached to a different process, or to a stale PID from an ")
+          .Append("earlier run (that looks identical to being attached)")
+          .Append("\\n  - the DLL predates this script -- replace UE5Dumper.dll with a build ")
+          .Append("at least as new as this table")
+          // Do not assume a UI. Plenty of users have only the .CT plus a proxy DLL, and for
+          // them "regenerate the table" is not an available action -- swapping the DLL is.
+          .Append("\\n\\nIf you inject with a proxy (version.dll / dinput8.dll / dxgi.dll / ")
+          .Append("winmm.dll), check UE5Dumper.dll actually sits beside the game exe: a proxy ")
+          .Append("that loads but cannot find it leaves the game running with no mailbox at all.')\n");
         AppendBail(sb, onFail, indent + "  ");
         sb.Append(indent).Append("end\n");
         // Read ONCE into a local, and separate "cannot read" from "read the wrong value".
