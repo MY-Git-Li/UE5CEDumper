@@ -60,7 +60,19 @@ public enum MailboxTimeout
     /// <c>return nil, _msg</c>, matching the <c>nil, reason</c> contract
     /// PointerQuery's <c>query</c> and CoordLibrary's <c>call</c> already have. No
     /// dialog and no untick — the caller owns both, and unticking here would kill a
-    /// record on an attempt that is allowed to fail.</summary>
+    /// record on an attempt that is allowed to fail.
+    ///
+    /// <para>PointerQuery's GameEngine path is why this exists, and it is not a stylistic
+    /// preference. A failed <c>&amp;GEngine</c>-SLOT query there is EXPECTED — a game whose
+    /// GEngine AOB never validated is supposed to fall through to the <c>UEngine*</c>
+    /// snapshot — so announcing the failure inside the wait would pop a dialog on what is
+    /// actually the success path. CoordLibrary's would fire it with the picker form still
+    /// open.</para>
+    ///
+    /// <para>The three status cases are still told apart; they are RETURNED rather than
+    /// shown, which is the whole distinction from <see cref="SilentReturn"/> — that one
+    /// discards the reason, this one delegates it. The reason is emitted UNTAGGED so the
+    /// caller's own prefix does not double up into <c>[GWorld] [GWorld] …</c>.</para></summary>
     ReturnReason,
     /// <summary>A helper function that answers by unwinding: emits
     /// <c>error('[tag] ' .. _msg)</c>. Invoke's <c>waitDone</c> is called from two

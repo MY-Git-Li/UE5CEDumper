@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using Xunit;
 
@@ -505,5 +506,361 @@ public class CeMailboxBailoutTests
         int n = 0, i = 0;
         while ((i = haystack.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; }
         return n;
+    }
+
+    // ── The THIRD script shape: helper-shaped, back-to-back round-trips ──────
+    //
+    // InvokeScriptGenerator is not one flat round-trip. It emits Lua helper functions and
+    // drives THREE round-trips through them back to back — CMD_FIND_INSTANCE(2),
+    // CMD_FIND_FUNCTION(3), CMD_INVOKE(1) — which is exactly the shape that trips the
+    // DLL's publication order. `SetDone`/`SetError` write `status = STATUS_DONE` BEFORE
+    // clearing `cmd` (Mimic.cpp, deliberately, with the comment saying so). A script that
+    // polls status, sees DONE, and immediately writes `status = 0` + `cmd = N` can have
+    // that command WIPED by the DLL's trailing `cmd = CMD_IDLE`. The DLL then never
+    // dispatches it, `status` stays 0, and the wait times out reporting "the DLL never saw
+    // this command" — technically true, and it sends the user to re-inject a healthy DLL.
+    //
+    // The R3 bounded idle wait reached TeleportScriptGenerator, CoordLibraryScriptGenerator
+    // and PointerQueryScriptGenerator and never reached Invoke, which was the only mailbox
+    // generator writing `cmd` straight off a status poll.
+
+    private static FunctionInfoModel NoParams() => new()
+    {
+        Name = "OpenShop",
+        Params = new List<FunctionParamModel>(),
+    };
+
+    /// <summary>A string param is deliberately in here: it makes the generator inline its
+    /// FString builder, whose body writes to a CE-allocated buffer of its own. That is not
+    /// a mailbox write and must not be mistaken for one — see <see cref="IsMailboxWrite"/>.</summary>
+    private static FunctionInfoModel WithParams() => new()
+    {
+        Name = "AddMoney",
+        NumParms = 2,
+        ParmsSize = 20,
+        Params = new List<FunctionParamModel>
+        {
+            new() { Name = "Amount", TypeName = "IntProperty", Size = 4,  Offset = 0 },
+            new() { Name = "Reason", TypeName = "StrProperty", Size = 16, Offset = 4 },
+        },
+    };
+
+    /// <summary>Both Invoke flavours: no-params goes down the direct-invoke path, params
+    /// goes down the FIRE-form path whose third round-trip lives in a closure.</summary>
+    public static IEnumerable<object[]> InvokeShapedScripts() => new List<object[]>
+    {
+        new object[] { "Invoke.NoParams",   InvokeScriptGenerator.Generate("ShopKeeper_C", "OpenShop", NoParams()) },
+        new object[] { "Invoke.WithParams", InvokeScriptGenerator.Generate("Player_C", "AddMoney", WithParams()) },
+    };
+
+    /// <summary>
+    /// The rule: nothing goes into the mailbox until the previous command has been
+    /// observed cleared. Asserted as a WINDOW scan rather than "a waitIdle() exists
+    /// somewhere", because the defect is purely one of ORDER — a write emitted before its
+    /// wait is exactly as lost as a write with no wait at all.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(InvokeShapedScripts))]
+    public void NoMailboxWriteEscapesTheIdleWait(string name, string script)
+    {
+        var lines = EnableBlock(script).Split('\n');
+
+        // Scan from the mailbox lookup. Everything above it is helper DEFINITIONS, and
+        // one of those bodies (`writeMbStr`) does write to `mb + offset` — but only when
+        // it is called, which is always inside a guarded window below.
+        int start = Array.FindIndex(lines,
+            l => l.Contains("getAddress('g_invokeMailbox')", StringComparison.Ordinal));
+        Assert.True(start >= 0,
+            $"{name}: no mailbox lookup — the anchor this scan starts from is gone");
+
+        bool guarded = false;
+        int guards = 0, triggers = 0;
+
+        for (int i = start; i < lines.Length; i++)
+        {
+            if (lines[i].Contains("waitIdle()", StringComparison.Ordinal))
+            {
+                guarded = true;
+                guards++;
+                continue;
+            }
+            if (!IsMailboxWrite(lines[i])) continue;
+
+            Assert.True(guarded,
+                $"{name}: line {i + 1} writes into the mailbox with no idle wait since the " +
+                $"last command — the DLL's trailing `cmd = CMD_IDLE` can wipe it:\n  {lines[i].Trim()}");
+
+            // The cmd store is the trigger, and it closes the window: whatever comes next
+            // is a new round-trip and needs its own wait.
+            if (lines[i].Contains($"writeInteger(mb + {CeMailboxLayout.OffCmd},", StringComparison.Ordinal))
+            {
+                triggers++;
+                guarded = false;
+            }
+        }
+
+        Assert.Equal(3, triggers);        // FIND_INSTANCE(2), FIND_FUNCTION(3), INVOKE(1)
+        Assert.Equal(triggers, guards);   // one wait per round-trip — no fewer, and no spares
+    }
+
+    /// <summary>Writes that land INSIDE the mailbox: the <c>mb + off</c> and
+    /// <c>PD + off</c> forms, plus the emitted <c>writeMbStr</c> (which takes an offset,
+    /// not an address). Deliberately not a bare "write" match — the inlined FString
+    /// builder does <c>writeQword(addr, buf)</c> into its own CE allocation, which is not
+    /// the mailbox and would make this a test of nothing if it counted.</summary>
+    private static bool IsMailboxWrite(string line) =>
+        line.Contains("writeMbStr(", StringComparison.Ordinal)
+        || (line.Contains("write", StringComparison.Ordinal)
+            && (line.Contains("(mb + ", StringComparison.Ordinal)
+                || line.Contains("(PD + ", StringComparison.Ordinal)));
+
+    /// <summary>
+    /// The three TOP-LEVEL guards bail like every other ENABLE bail-out in this file:
+    /// say why, untick, return. A busy mailbox there means nothing was sent at all, so a
+    /// row left ticked tells the user a cheat is active when it is not.
+    /// </summary>
+    [Fact]
+    public void ATopLevelBusyMailboxBail_UnticksTheRecordAndSaysWhy()
+    {
+        // The no-params flavour: all three of its round-trips are at block level.
+        var lines = EnableBlock((string)InvokeShapedScripts().First()[1]).Split('\n');
+
+        int found = 0;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (!lines[i].Contains("if not waitIdle() then", StringComparison.Ordinal)) continue;
+            found++;
+            Assert.True(Within(lines, i + 1, 8, "memrec.Active = false"),
+                $"the busy-mailbox bail on line {i + 1} leaves the CE row ticked with nothing applied");
+            Assert.True(Within(lines, i + 1, 8, "showMessage("),
+                $"the busy-mailbox bail on line {i + 1} is silent — it reads exactly like success");
+        }
+        Assert.Equal(3, found);
+    }
+
+    /// <summary>
+    /// The fourth guard sits inside <c>btnFire.OnClick</c>, so its <c>return</c> leaves
+    /// only the click handler. That is the correct behaviour — the form stays open and the
+    /// user can press FIRE again — and it is precisely why this one must SAY something and
+    /// must NOT untick: the record's lifetime belongs to the form, and
+    /// <c>frm.OnClose</c> owns the untick.
+    /// </summary>
+    [Fact]
+    public void TheClosureBusyMailboxBail_SaysSoAndLeavesTheFormAlone()
+    {
+        string enable = EnableBlock((string)InvokeShapedScripts().Last()[1]);
+
+        int click = enable.IndexOf("btnFire.OnClick = function()", StringComparison.Ordinal);
+        Assert.True(click >= 0, "the FIRE handler is gone");
+
+        int guard = enable.IndexOf("if not waitIdle() then", click, StringComparison.Ordinal);
+        Assert.True(guard > click, "the FIRE handler writes to the mailbox with no idle wait");
+
+        // Ordering again: before the params buffer is touched, not after.
+        int firstWrite = enable.IndexOf("(PD + ", click, StringComparison.Ordinal);
+        Assert.True(firstWrite > guard,
+            "the FIRE handler's idle wait comes after its first write into the params buffer");
+
+        // The bail body is everything up to the `local PD` that follows it.
+        int bailEnd = enable.IndexOf("local PD", guard, StringComparison.Ordinal);
+        string bail = enable[guard..bailEnd];
+
+        Assert.Contains("nothing was sent", bail, StringComparison.Ordinal);
+        Assert.Contains("return", bail, StringComparison.Ordinal);
+        // A cleanup timer here would untick while the form is still on screen.
+        Assert.DoesNotContain("memrec", bail, StringComparison.Ordinal);
+        Assert.DoesNotContain("createTimer", bail, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The wait BODY is the shared emitter's, verbatim. That is the whole reason it lives
+    /// in <see cref="CeLuaHygiene"/>: three separate properties of the sibling wait loop
+    /// were wrong in all seven of its hand-rolled copies, and fixing them per-file only
+    /// drifts again.
+    /// </summary>
+    [Fact]
+    public void TheIdleWaitBodyIsTheSharedEmittersVerbatim()
+    {
+        var expected = new System.Text.StringBuilder();
+        CeLuaHygiene.AppendIdleWait(expected, "mb", "return false", "    ");
+
+        foreach (var row in InvokeShapedScripts())
+            Assert.Contains(expected.ToString(), (string)row[1], StringComparison.Ordinal);
+    }
+
+    /// <summary>ONE emitted helper, not one copy per call site. Four hand-placed copies of
+    /// a rule is the failure mode this area keeps hitting — R3 itself only reached three of
+    /// the four generators that needed it.</summary>
+    [Fact]
+    public void TheIdleWaitIsEmittedOnce_NotOncePerCallSite()
+    {
+        foreach (var row in InvokeShapedScripts())
+            // Anchored on the SURVIVING emitter's text. Two branches fixed this area in
+            // parallel and shipped different locals; the one that landed is the
+            // _idle-prefixed set, because three generators emit both waits into one Lua
+            // scope and an unprefixed `waited` would collide with the status poll's.
+            Assert.Equal(1, Count((string)row[1], "local _idleT0, _idleIters = "));
+    }
+
+    // ── The FOURTH shape: a helper that RETURNS its reason ───────────────────
+    //
+    // PointerQuery factors its round-trip into `query(op)` and returns `nil, reason` so the
+    // caller can judge it — the GameEngine path is SUPPOSED to fall through from the
+    // &GEngine slot to a UEngine* snapshot when no GEngine AOB validated, so a dialog
+    // inside the wait would fire on the success path. That is MailboxTimeout.ReturnReason.
+    //
+    // Until 2026-08-07 both of its loops were hand-rolled, and the status poll carried all
+    // three defects the shared emitter exists to fix: `elapsed >= 10000` counted sleep(1)
+    // iterations against a millisecond constant (~155 s of frozen Lua Engine), the message
+    // was the "(DLL not responding?)" guess, and the two statuses were never told apart.
+
+    public static IEnumerable<object[]> HelperReturningScripts() => new List<object[]>
+    {
+        new object[] { "PointerQuery.GWorld",     PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GWorld) },
+        new object[] { "PointerQuery.GameEngine", PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GameEngine) },
+    };
+
+    /// <summary>
+    /// Both waits are the shared emitter's output verbatim. Asserted against
+    /// <see cref="CeLuaHygiene"/> ITSELF rather than against a sibling generator, which is
+    /// strictly stronger than
+    /// <see cref="AllGeneratorsEmitByteIdenticalWaitLoops_ApartFromTheirTag"/>: that one
+    /// would still pass if every generator drifted together.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(HelperReturningScripts))]
+    public void BothWaitsAreTheSharedEmittersVerbatim(string name, string script)
+    {
+        var idle = new System.Text.StringBuilder();
+        CeLuaHygiene.AppendIdleWait(idle, "mb",
+            // Must match what PointerQuery and CoordLibrary actually pass, verbatim — this
+            // theory's whole point is that the emitted text is the shared emitter's output
+            // and not a re-typed copy.
+            "return nil, 'the DLL mailbox is busy -- try again in a moment'", "  ");
+        Assert.True(script.Contains(idle.ToString(), StringComparison.Ordinal),
+            $"{name}: the idle wait is not CeLuaHygiene.AppendIdleWait's output verbatim");
+
+        // The tag is unused in ReturnReason mode (the caller prefixes its own), so any tag
+        // reproduces the same bytes — which is itself worth pinning.
+        var wait = new System.Text.StringBuilder();
+        CeLuaHygiene.AppendMailboxWait(wait, "IgnoredTag", MailboxTimeout.ReturnReason, "  ");
+        Assert.True(script.Contains(wait.ToString(), StringComparison.Ordinal),
+            $"{name}: the status poll is not CeLuaHygiene.AppendMailboxWait's output verbatim");
+    }
+
+    /// <summary>The three fixes the hand-rolled poll was missing, asserted on the emitted
+    /// text rather than on "it calls the emitter" — a caller can always stop calling.</summary>
+    [Theory]
+    [MemberData(nameof(HelperReturningScripts))]
+    public void TheReturnedReasonCarriesTheSameThreeFixes(string name, string script)
+    {
+        string enable = EnableBlock(script);
+
+        // 1. A real deadline, not an iteration count.
+        Assert.Contains("getTickCount", enable, StringComparison.Ordinal);
+        Assert.Contains($"_t0 >= {CeMailboxLayout.MailboxPollTimeoutMs}", enable, StringComparison.Ordinal);
+        Assert.False(script.Contains("elapsed >= ", StringComparison.Ordinal),
+            $"{name}: the pre-fix iteration counter survived");
+
+        // 2. The status is read, not guessed at.
+        Assert.Contains("never saw this command", enable, StringComparison.Ordinal);
+        Assert.Contains("never finished it", enable, StringComparison.Ordinal);
+        Assert.Contains($"_st == {CeMailboxLayout.StatusProcessing}", enable, StringComparison.Ordinal);
+        Assert.False(script.Contains("(DLL not responding?)", StringComparison.Ordinal),
+            $"{name}: still emits the guess that blamed a healthy DLL");
+
+        // 3. Handed back, not shown — the whole reason this mode exists. A showMessage
+        // inside `query` would fire on the GameEngine slot→snapshot fall-through, which is
+        // a SUCCESS path.
+        int helper = enable.IndexOf("local function query(op)", StringComparison.Ordinal);
+        int helperEnd = enable.IndexOf("\nend\n", enable.IndexOf("return a", helper, StringComparison.Ordinal),
+                                       StringComparison.Ordinal);
+        string body = enable[helper..helperEnd];
+        Assert.DoesNotContain("showMessage", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("memrec", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>The idle wait still has to come before the <c>cmd</c> store, same rule as
+    /// everywhere else — the ordering is the defect, not the presence of a wait.</summary>
+    [Theory]
+    [MemberData(nameof(HelperReturningScripts))]
+    public void TheIdleWaitPrecedesTheCmdStore(string name, string script)
+    {
+        string enable = EnableBlock(script);
+        int idle = enable.IndexOf("local _idleT0, _idleIters = ", StringComparison.Ordinal);
+        int cmd = enable.IndexOf($"writeInteger(mb + {CeMailboxLayout.OffCmd},", StringComparison.Ordinal);
+        Assert.True(idle >= 0, $"{name}: no idle wait at all");
+        Assert.True(cmd > idle, $"{name}: writes cmd at {cmd} before waiting for IDLE at {idle}");
+    }
+
+    /// <summary>
+    /// The contract check this generator was missing entirely. Same MUST rule as every
+    /// other mailbox script: read the DLL's published range BEFORE the first write, because
+    /// if the layout moved then a write lands on whatever now occupies those offsets.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(HelperReturningScripts))]
+    public void TheContractIsCheckedBeforeTheFirstWrite(string name, string script)
+    {
+        string enable = EnableBlock(script);
+
+        int check = enable.IndexOf(CeMailboxLayout.ContractSymbol, StringComparison.Ordinal);
+        Assert.True(check >= 0, $"{name}: never reads the contract symbol");
+
+        int w = new[] { "writeQword(", "writeInteger(", "writeBytes(", "writeByte(" }
+            .Select(fn => enable.IndexOf(fn, StringComparison.Ordinal))
+            .Where(i => i >= 0)
+            .DefaultIfEmpty(-1)
+            .Min();
+        Assert.True(w < 0 || check < w,
+            $"{name}: writes to the mailbox at offset {w} before checking the contract at {check}");
+
+        // Both directions, the stale-symbol case, and an untick on failure.
+        Assert.Contains("too old for the DLL", enable, StringComparison.Ordinal);
+        Assert.Contains("DLL is older than this script", enable, StringComparison.Ordinal);
+        Assert.Contains("stale address", enable, StringComparison.Ordinal);
+        Assert.True(enable.IndexOf("memrec.Active = false", check, StringComparison.Ordinal) > check,
+            $"{name}: a failed contract check leaves the record ticked");
+    }
+
+    /// <summary>Every ENABLE bail-out unticks — the file's original rule, now applied to
+    /// this generator too. Its <c>query</c> helper is exempt by construction: it returns
+    /// <c>nil, reason</c> (never a bare <c>return</c>) precisely so it cannot untick.</summary>
+    [Theory]
+    [MemberData(nameof(HelperReturningScripts))]
+    public void EveryEnableBailout_UnticksTheRecord_HelperReturningToo(string name, string script)
+    {
+        var lines = EnableBlock(script).Split('\n');
+        bool sawBailout = false;
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].Contains("showMessage(", StringComparison.Ordinal))
+            {
+                sawBailout = true;
+                Assert.True(Within(lines, i + 1, 8, "memrec.Active = false"),
+                    $"{name}: line {i + 1} reports a failure but no untick follows it:\n  {lines[i].Trim()}");
+            }
+
+            string t = lines[i].Trim();
+            if (t == "return" && !lines[i].Contains("syntaxcheck", StringComparison.Ordinal))
+                Assert.True(Back(lines, i - 1, 4, "memrec.Active = false"),
+                    $"{name}: the return on line {i + 1} leaves the block without unticking");
+        }
+
+        Assert.True(sawBailout, $"{name}: no ENABLE bail-out at all — the harness is not reaching the code it checks");
+    }
+
+    /// <summary>The success-close must stay unreachable from the wait's bail-out.</summary>
+    [Theory]
+    [MemberData(nameof(HelperReturningScripts))]
+    public void TheAutoCloseStaysAfterTheWait(string name, string script)
+    {
+        string enable = EnableBlock(script);
+        int loop = enable.IndexOf("while _st ~=", StringComparison.Ordinal);
+        Assert.True(loop >= 0, $"{name}: no shared wait loop — did this generator stop using CeLuaHygiene?");
+        int close = enable.IndexOf(CeLuaHygiene.CloseCall, StringComparison.Ordinal);
+        Assert.True(close > loop, $"{name}: the success-close is emitted before the wait loop");
+        Assert.DoesNotContain("then break end", enable, StringComparison.Ordinal);
     }
 }

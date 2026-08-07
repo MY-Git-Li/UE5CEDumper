@@ -111,6 +111,13 @@ public static class PointerQueryScriptGenerator
         Line(sb, "end");
         Line(sb);
 
+        // Third shared emitter this generator was missing. It has to run BEFORE the first
+        // write, and the first write is inside query(), so here — above the definition — is
+        // both correct and the same place every other mailbox generator puts it. A stateful
+        // toggle, so UntickAndReturn.
+        CeLuaHygiene.AppendContractCheck(sb, tag, MailboxTimeout.UntickAndReturn);
+        Line(sb);
+
         // One mailbox round-trip, factored into a local so the GameEngine path can run it
         // twice (slot first, snapshot second). Returns addr, or nil + a reason string —
         // a failed op is NOT necessarily fatal here, so it must not untick by itself.
@@ -165,6 +172,9 @@ public static class PointerQueryScriptGenerator
             Line(sb, "  addr, err = query(1)");
             Line(sb, "end");
             Line(sb, "if not addr then");
+            // The "enter gameplay first?" hint now lives on the two reasons it actually
+            // fits (op not resolved / address still 0). Appending it to EVERY reason told a
+            // user whose mailbox had timed out to go and play the game.
             Line(sb, $"  showMessage('[{tag}] ' .. tostring(err))");
             Line(sb, "  if memrec then memrec.Active = false end");
             Line(sb, "  return");
@@ -190,6 +200,9 @@ public static class PointerQueryScriptGenerator
         {
             Line(sb, "local addr, err = query(0)");
             Line(sb, "if not addr then");
+            // The "enter gameplay first?" hint now lives on the two reasons it actually
+            // fits (op not resolved / address still 0). Appending it to EVERY reason told a
+            // user whose mailbox had timed out to go and play the game.
             Line(sb, $"  showMessage('[{tag}] ' .. tostring(err))");
             Line(sb, "  if memrec then memrec.Active = false end");
             Line(sb, "  return");

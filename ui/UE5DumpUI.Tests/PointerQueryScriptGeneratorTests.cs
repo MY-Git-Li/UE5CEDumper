@@ -92,6 +92,11 @@ public class PointerQueryScriptGeneratorTests
         // The DLL writes status=DONE before it clears cmd, so a second back-to-back
         // query can observe the previous command for an instant. A single sample would
         // report "busy" and silently abandon the GEngine-slot -> snapshot fallback.
+        //
+        // The loop is CeLuaHygiene.AppendIdleWait's output now, not hand-rolled — hence
+        // `idleWaited`, the shared emitter's counter, where this used to say `waited`.
+        // CeMailboxBailoutTests.BothWaitsAreTheSharedEmittersVerbatim pins that it really
+        // is the emitter's bytes; this one stays a behavioural check.
         var s = PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GameEngine);
         Assert.Contains("while readInteger(mb + 0x00) ~= 0 do", s);
         Assert.Contains("_idleIters = _idleIters + 1", s);
@@ -174,6 +179,11 @@ public class PointerQueryScriptGeneratorTests
         // longer emits: the old assertion named the hand-rolled `elapsed >= N` counter,
         // so once that was replaced BOTH halves passed for the wrong reason — nothing
         // was left to escape and nothing was left to find.
+        // Assert the construct is REALLY in the body first, or the escape check below is
+        // a test of nothing: the old assertion named `elapsed >= N` from the hand-rolled
+        // poll, and folding that onto CeLuaHygiene.AppendMailboxWait deleted the string,
+        // so the DoesNotContain went vacuously green with its comment still describing it.
+        Assert.Contains("_t0 >= ", script);
         Assert.Contains($"_t0 &gt;= {CeMailboxLayout.MailboxPollTimeoutMs}", xml);
         Assert.DoesNotContain($"_t0 >= {CeMailboxLayout.MailboxPollTimeoutMs}", xml);
     }

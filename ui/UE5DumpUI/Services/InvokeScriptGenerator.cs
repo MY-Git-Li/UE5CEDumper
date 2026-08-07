@@ -111,6 +111,18 @@ public static class InvokeScriptGenerator
         Line(sb, "    bytes[#bytes+1] = 0");
         Line(sb, "    writeBytes(mb + offset, bytes)");
         Line(sb, "end");
+        // ONE emitted helper for the idle wait, called from all three round-trips,
+        // rather than four inline copies of the loop. Four hand-placed copies of a rule
+        // is the failure mode this whole area keeps hitting: R3 reached Teleport /
+        // CoordLibrary / PointerQuery and never reached here, and the wait loop's three
+        // defects reached all seven of its hand-rolled copies at once. The BODY comes
+        // from CeLuaHygiene so it stays byte-identical with the other generators; only
+        // the bail differs per call site, which is why the helper returns a boolean
+        // instead of deciding for its callers.
+        Line(sb, "local function waitIdle()");
+        CeLuaHygiene.AppendIdleWait(sb, "mb", "return false", "    ");
+        Line(sb, "    return true");
+        Line(sb, "end");
         // The shared wait. Hand-rolled until now, with all three of the defects build
         // 2743 fixed in the other seven copies: it counted sleep(1) iterations against a
         // millisecond constant (15.47 ms each, so the "10 s" bound was ~155 s of frozen
@@ -155,6 +167,7 @@ public static class InvokeScriptGenerator
     private static void AppendInstanceResolver(StringBuilder sb)
     {
         Line(sb, "-- Find a live instance via mailbox CMD_FIND_INSTANCE (2)");
+        AppendBusyBail(sb, "instance lookup");
         Line(sb, $"writeMbStr({OffClassName}, OWNER_CLASS)");
         Line(sb, $"writeInteger(mb + {OffStatus}, 0)");
         Line(sb, $"writeInteger(mb + {OffCmd}, 2)");
@@ -175,6 +188,7 @@ public static class InvokeScriptGenerator
     private static void AppendFunctionResolver(StringBuilder sb)
     {
         Line(sb, "-- Find UFunction via mailbox CMD_FIND_FUNCTION (3)");
+        AppendBusyBail(sb, "function lookup");
         Line(sb, $"writeQword(mb + {OffInstanceAddr}, instanceAddr)");
         Line(sb, $"writeMbStr({OffFuncName}, FUNC_NAME)");
         Line(sb, $"writeInteger(mb + {OffStatus}, 0)");
@@ -196,6 +210,7 @@ public static class InvokeScriptGenerator
         FunctionInfoModel func, int parmsSize)
     {
         Line(sb, "-- No parameters -- invoke directly via CMD_INVOKE (1)");
+        AppendBusyBail(sb, "invoke");
 
         // Zero out params_data (even for void functions, clear the buffer)
         if (parmsSize > 0)
@@ -319,6 +334,18 @@ public static class InvokeScriptGenerator
 
         // Fire button logic — write params to mailbox, then CMD_INVOKE
         Line(sb, "btnFire.OnClick = function()");
+        // The fourth guard, and the one whose bail shape genuinely differs: this is a
+        // CLOSURE, so `return` leaves only the click handler — which is the right
+        // behaviour here (the form stays open and the user can press FIRE again) but
+        // means it must SAY so. A silent return would look exactly like a FIRE that
+        // worked. No cleanup timer either: the record's lifetime belongs to the form,
+        // and frm.OnClose is what unticks it.
+        // 這是閉包內的 return：只離開點擊處理函式，表單仍開著可重試，因此必須出訊息。
+        Line(sb, "    if not waitIdle() then");
+        Line(sb, "        showMessage('[Invoke] the DLL mailbox is busy -- nothing was sent.\\n" +
+                 "Another CE script or a previous FIRE is still mid-command; press FIRE again in a moment.')");
+        Line(sb, "        return");
+        Line(sb, "    end");
         Line(sb, $"    local PD = mb + {OffParamsData}");
 
         // Zero-fill params buffer
@@ -389,6 +416,30 @@ public static class InvokeScriptGenerator
         CeInvokeReturn.AppendDecodeAndPrint(sb, className, funcName, ret.Name,
             ret.TypeName, ret.Size, ret.Offset, "_PDret", indent + "    ");
         Line(sb, $"{indent}end");
+    }
+
+    /// <summary>
+    /// Emit the busy-mailbox bail for a TOP-LEVEL round-trip: say why, then leave the
+    /// <c>[ENABLE]</c> block through the deferred cleanup timer so the CE row does not
+    /// stay ticked with nothing applied.
+    ///
+    /// <para>This guards the round-trip, not just the <c>cmd</c> store — the wait has to
+    /// precede the FIRST write of the trip (class name / instanceAddr / the params
+    /// zero-fill all land inside the mailbox), which is also where the sibling
+    /// generators put it.</para>
+    ///
+    /// <para><paramref name="what"/> names the step that was not attempted, so a user
+    /// who hits this knows which of the three round-trips gave up.</para>
+    /// </summary>
+    private static void AppendBusyBail(StringBuilder sb, string what)
+    {
+        Line(sb, "if not waitIdle() then");
+        Line(sb, $"    print('ERROR: mailbox busy -- {what} not attempted')");
+        Line(sb, $"    showMessage('[Invoke] the DLL mailbox is busy -- {what} not attempted.\\n" +
+                 "Another CE script or a previous invoke is still mid-command; try again in a moment.')");
+        AppendCleanupTimer(sb, 1);
+        Line(sb, "    return");
+        Line(sb, "end");
     }
 
     private static void AppendCleanupTimer(StringBuilder sb, int indent)
