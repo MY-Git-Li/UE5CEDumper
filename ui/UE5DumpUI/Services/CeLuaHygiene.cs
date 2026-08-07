@@ -330,8 +330,24 @@ public static class CeLuaHygiene
           .Append("\\n\\nUpdate the DLL, or regenerate this table against the DLL you have.')\n");
         AppendBail(sb, onFail, indent + "  ");
         sb.Append(indent).Append("end\n");
-        sb.Append(indent).Append("if readInteger(_cv + ").Append(CeMailboxLayout.OffContractMagic)
-          .Append(") ~= ").Append(CeMailboxLayout.ContractMagic).Append(" then\n");
+        // Read ONCE into a local, and separate "cannot read" from "read the wrong value".
+        // readInteger returns nil when the target is unreadable and `nil ~= MAGIC` is true, so
+        // one combined test reported "stale address" for BOTH -- a guess dressed as a
+        // diagnosis, and the one that fires FIRST, before either wait loop is reached.
+        // Seen on DumperTest 2026-08-07: the DLL was demonstrably alive (poller logging, zero
+        // `received cmd` in its log) and the script still blamed a stale symbol.
+        sb.Append(indent).Append("local _cmagic = readInteger(_cv + ")
+          .Append(CeMailboxLayout.OffContractMagic).Append(")\n");
+        sb.Append(indent).Append("if _cmagic == nil then\n");
+        sb.Append(indent).Append("  ").Append(say).Append("('[").Append(tag)
+          .Append("] the contract symbol resolved to ' .. string.format('%X', _cv) ..")
+          .Append(" ' but that memory could not be READ.")
+          .Append("\\n\\nIs Cheat Engine still attached to the game? If the process is running, ")
+          .Append("re-open it in CE, then untick and re-tick this table.')\n");
+        AppendBail(sb, onFail, indent + "  ");
+        sb.Append(indent).Append("end\n");
+        sb.Append(indent).Append("if _cmagic ~= ")
+          .Append(CeMailboxLayout.ContractMagic).Append(" then\n");
         sb.Append(indent).Append("  ").Append(say).Append("('[").Append(tag)
           .Append("] the contract symbol resolved to the wrong memory (stale address).")
           .Append("\\n\\nRe-inject UE5Dumper.dll, or untick and re-tick this table so CE re-resolves it.')\n");
@@ -341,6 +357,15 @@ public static class CeLuaHygiene
           .Append(CeMailboxLayout.OffContractCur).Append(")\n");
         sb.Append(indent).Append("local _min = readInteger(_cv + ")
           .Append(CeMailboxLayout.OffContractMin).Append(")\n");
+        // Both come off the page whose magic just verified, so nil here means the mapping
+        // vanished between reads. Guard anyway: `_want < _min` against nil raises
+        // "attempt to compare number with nil", and a Lua traceback is not a cause.
+        sb.Append(indent).Append("if _cur == nil or _min == nil then\n");
+        sb.Append(indent).Append("  ").Append(say).Append("('[").Append(tag)
+          .Append("] the contract block became unreadable while it was being checked.")
+          .Append("\\n\\nThe game most likely exited. Untick and re-tick this table.')\n");
+        AppendBail(sb, onFail, indent + "  ");
+        sb.Append(indent).Append("end\n");
         sb.Append(indent).Append("if _want < _min then\n");
         sb.Append(indent).Append("  ").Append(say).Append("('[").Append(tag)
           .Append("] this script is too old for the DLL (script contract ' .. _want ..")

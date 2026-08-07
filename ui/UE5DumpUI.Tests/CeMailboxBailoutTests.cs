@@ -141,6 +141,16 @@ public class CeMailboxBailoutTests
         Assert.Contains("if _st == nil then", enable, StringComparison.Ordinal);
         Assert.Contains("the mailbox could not be read", enable, StringComparison.Ordinal);
         Assert.Contains("local _over = _st == nil or", enable, StringComparison.Ordinal);
+
+        // The contract check sits AHEAD of both wait loops, so its own unreadable case is
+        // the first thing a user hits — and it had the same defect: `nil ~= MAGIC` is true,
+        // so it reported "stale address" for a mailbox it simply could not read. Reading
+        // once into _cmagic is what lets the two be told apart.
+        Assert.Contains("local _cmagic = readInteger(_cv + ", enable, StringComparison.Ordinal);
+        Assert.Contains("if _cmagic == nil then", enable, StringComparison.Ordinal);
+        Assert.Contains("could not be READ", enable, StringComparison.Ordinal);
+        // _want < _min against a nil raises instead of diagnosing.
+        Assert.Contains("if _cur == nil or _min == nil then", enable, StringComparison.Ordinal);
     }
 
     [Theory]
