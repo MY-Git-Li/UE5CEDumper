@@ -200,37 +200,9 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
         }
     }
 
-    /// <summary>0 until the game-thread reminder row has been sent once this session.</summary>
-    private int _reminderSent;
-
     public async Task<bool> CreateAAScriptAsync(string description, string script,
         bool autoActivate = true, string? group = null, CancellationToken ct = default)
     {
-        // Send the game-thread reminder ONCE, ahead of the first real record, from the one
-        // place every push already funnels through. It was originally attached to the DLL
-        // bootstrap push, which was wrong: users reach CE through "Push to CE", "Add action
-        // records to CE" and the CE menu's own inject item, and none of those goes near
-        // that call -- so the row never appeared. Here it cannot be missed by a new caller.
-        //
-        // Recursion terminates because the flag is already set when the inner call runs,
-        // and the description test stops the reminder from announcing itself. Before the
-        // lock, since the inner call takes it. Failure is swallowed: it is a comment, and
-        // losing it must never fail the record the user actually asked for.
-        if (!string.Equals(description, CeInjectScriptGenerator.ReminderDescription,
-                StringComparison.Ordinal)
-            && Interlocked.Exchange(ref _reminderSent, 1) == 0)
-        {
-            try
-            {
-                await CreateAAScriptAsync(
-                    CeInjectScriptGenerator.ReminderDescription,
-                    CeInjectScriptGenerator.GenerateReminder(),
-                    autoActivate: false,
-                    group: CeInjectScriptGenerator.RecordGroup, ct);
-            }
-            catch { /* advisory only */ }
-        }
-
         await _opLock.WaitAsync(ct);
         try
         {
@@ -493,16 +465,11 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
             _pipe = new NamedPipeClientStream(".", PipeName,
                 PipeDirection.InOut, PipeOptions.Asynchronous);
             await _pipe.ConnectAsync(ConnectTimeoutMs, ct);
-            // A new pipe means a new Cheat Engine, and a new CE means a table without our
-            // reminder row. Re-arm so the next push puts it back. Without this the one-shot
-            // tracks "this UI session sent it" rather than "the table CE has open contains
-            // it" -- and the UI outlives CE restarts, so the note would silently stop
-            // appearing for the rest of the day.
-            Interlocked.Exchange(ref _reminderSent, 0);
             return true;
         }
         catch
         {
+
             CleanupPipe();
             return false;
         }

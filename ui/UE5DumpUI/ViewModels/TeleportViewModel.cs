@@ -3812,6 +3812,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             }
 
             bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
+            if (available) await PushGameThreadReminderAsync();   // one per button press
             if (available && await _aobMaker!.CreateAAScriptAsync(
                     CoordLibraryScriptGenerator.RecordDescription, script,
                     autoActivate: false, group: CeGroupDll))
@@ -4317,6 +4318,34 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         StatusText = $"'{row.DisplayName}' hotkey cleared.";
     }
 
+    /// <summary>
+    /// Push the game-thread reminder row. Called once per button press, unconditionally.
+    ///
+    /// <para>No de-duplication, deliberately. Whether CE's table already holds one cannot be
+    /// known from here: we cannot read CE's table, the plugin drops the pipe after every
+    /// request so a fresh connection means nothing, and the UI outlives CE. Two attempts at
+    /// inferring it both misfired -- one silently stopped emitting the row after the first
+    /// push of the session, the other put a copy in front of EVERY record. A duplicate row
+    /// is one click to delete; a missing safety note is not something the user can notice.</para>
+    /// </summary>
+    private async Task PushGameThreadReminderAsync()
+    {
+        if (_aobMaker == null) return;
+        try
+        {
+            await _aobMaker.CreateAAScriptAsync(
+                Services.CeInjectScriptGenerator.ReminderDescription,
+                Services.CeInjectScriptGenerator.GenerateReminder(),
+                autoActivate: false,
+                group: Services.CeInjectScriptGenerator.RecordGroup);
+        }
+        catch (Exception ex)
+        {
+            // Advisory only: losing it must never fail the records the user asked for.
+            _log.Warn($"Game-thread reminder row not pushed: {ex.Message}");
+        }
+    }
+
     [RelayCommand]
     private async Task AddActionsToCeAsync()
     {
@@ -4324,6 +4353,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         {
             ClearError();
             bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
+            if (available) await PushGameThreadReminderAsync();   // one per button press
             if (!available)
             {
                 StatusText = "AOBMaker not connected — use 'Save .CT' instead " +
@@ -4738,4 +4768,5 @@ public partial class TeleportHotkeyRow : ObservableObject
 
     /// <summary>"Set" normally, "Cancel" while capturing (the Set button toggles).</summary>
     public string CaptureButtonText => IsCapturing ? "Cancel" : "Set";
+
 }
