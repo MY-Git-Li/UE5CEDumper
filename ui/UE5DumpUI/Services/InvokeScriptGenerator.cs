@@ -60,11 +60,22 @@ public static class InvokeScriptGenerator
         Line(sb, "local mb");
         Line(sb);
 
+        // Find mailbox symbol. Resolved BEFORE the helpers are defined, not after: the
+        // helpers capture `mb` as an upvalue and read it when CALLED, so the order is
+        // free -- and taking it lets the contract check below sit ahead of every write
+        // this script emits, including the writeBytes inside writeMbStr.
+        AppendMailboxDetection(sb);
+
+        // Contract check BEFORE the first write, at chunk level -- before writeMbStr /
+        // waitDone exist. Every write goes through one of them, so this is the one place
+        // that covers all of them while a mismatch can still be reported rather than
+        // written. UntickAndReturn: the deferred cleanup timer that normally unticks this
+        // record has not been created yet here, so a bare return would strand the row.
+        CeLuaHygiene.AppendContractCheck(sb, "Invoke", MailboxTimeout.UntickAndReturn);
+        Line(sb);
+
         // Mailbox helpers
         AppendMailboxHelpers(sb);
-
-        // Find mailbox symbol
-        AppendMailboxDetection(sb);
 
         // Instance resolver via CMD_FIND_INSTANCE
         AppendInstanceResolver(sb);
