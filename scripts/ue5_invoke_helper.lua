@@ -362,8 +362,16 @@ local function waitDone(mb, timeoutMs)
     sleep(1)
     iters = iters + 1
     st = readInteger(mb + OFF_STATUS)
-    local over = tick and (tick() - t0 >= limit) or (iters >= math.floor(limit / 15))
+    -- nil is not a status. readInteger returns nil once the process is gone and
+    -- `nil ~= STATUS_DONE` is true, so without this the loop burns the whole
+    -- deadline and then matches none of the branches below (status=nil).
+    local over = st == nil
+               or (tick and (tick() - t0 >= limit) or (iters >= math.floor(limit / 15)))
     if st ~= STATUS_DONE and over then
+      if st == nil then
+        return false, 'the mailbox could not be read -- the game process has ' ..
+          'most likely exited (if it is running, re-inject UE5Dumper.dll)'
+      end
       if st == STATUS_IDLE then
         return false, string.format(
           'Mailbox timeout after %dms -- the DLL never picked this up ' ..
@@ -461,7 +469,7 @@ if not invokeUFunction then
         return false, err_w
       end
 
-      local result = readInteger(mb + OFF_RESULT)
+      local result = readInteger(mb + OFF_RESULT, true)   -- signed: rc is int32
       if result ~= 0 then
         return false, string.format(
           '%s::%s -> result=%d (%s)',
@@ -581,7 +589,7 @@ if not setDebugCamera then
       writeInteger(mb + OFF_CMD, CMD_SET_DEBUG_CAMERA)  -- trigger (write LAST)
       local ok_w, err_w = waitDone(mb, DEFAULT_TIMEOUT_MS)
       if not ok_w then error(err_w) end
-      return readInteger(mb + OFF_RESULT)  -- 0x008: resulting state
+      return readInteger(mb + OFF_RESULT, true)  -- 0x008: resulting state (signed int32)
     end)
     _ue5_invoke_busy = false
     if not pok then error(tostring(res)) end

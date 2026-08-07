@@ -285,8 +285,16 @@ local function waitDone(mb, timeoutMs)
     sleep(1)
     iters = iters + 1
     st = readInteger(mb + OFF_STATUS)
-    local over = tick and (tick() - t0 >= limit) or (iters >= math.floor(limit / 15))
+    -- nil is not a status. readInteger returns nil once the process is gone and
+    -- `nil ~= STATUS_DONE` is true, so without this the loop burns the whole
+    -- deadline and then matches none of the branches below (status=nil).
+    local over = st == nil
+               or (tick and (tick() - t0 >= limit) or (iters >= math.floor(limit / 15)))
     if st ~= STATUS_DONE and over then
+      if st == nil then
+        return false, 'the mailbox could not be read -- the game process has ' ..
+          'most likely exited (if it is running, re-inject UE5Dumper.dll)'
+      end
       if st == STATUS_IDLE then
         return false, string.format(
           'mailbox timeout after %dms -- the DLL never picked this up ' ..
@@ -324,7 +332,7 @@ local function fetchInstancePage(className, pageIndex)
     local wok, werr = waitDone(mb, DEFAULT_TIMEOUT_MS)
     if not wok then return nil, 0, werr end
 
-    local result = readInteger(mb + OFF_RESULT)
+    local result = readInteger(mb + OFF_RESULT, true)   -- signed: rc is int32
     if result ~= 0 then
       local em = readString(mb + OFF_ERR, 256) or ''
       return nil, 0, string.format(

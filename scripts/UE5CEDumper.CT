@@ -650,6 +650,8 @@ function ue5_inject()
     -- the already-loaded check above reads the same field to tell "serving" from
     -- "parked", so they cannot live only down here.
     local POLL_MS      = 250
+    local tickAvailable = (type(getTickCount) == 'function')
+    local startTick     = tickAvailable and getTickCount() or 0
     local TIMEOUT_MS   = 25000           -- generous: a cold cache + big pool can
                                          -- legitimately exceed the old 15s budget
 
@@ -692,7 +694,13 @@ function ue5_inject()
             end
         end
         sleep(POLL_MS)
-        waited = waited + POLL_MS
+        -- MEASURE, do not accumulate. sleep(n) in CE is a floor, not an exact
+        -- duration -- it rounds up to the ~15.47 ms Windows tick -- so summing the
+        -- REQUESTED amount under-reports real elapsed time, and the fallback below
+        -- spends a budget it computed from that wrong number. Same class as the
+        -- iteration-counting timeout removed from every emitted script.
+        if tickAvailable then waited = getTickCount() - startTick
+        else waited = waited + POLL_MS end
     end
 
     if mb == nil then
