@@ -3031,30 +3031,6 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 sentToCe = await _aobMaker.CreateAAScriptAsync(
                     description, script, autoActivate: false,
                     group: Services.CeInjectScriptGenerator.RecordGroup);
-
-                // One inert row beside the bootstrap, carrying the thing CE cannot show:
-                // every mailbox command runs on the GAME thread, so a paused or alt-tabbed
-                // game makes all of them time out -- and a timed-out command still lands
-                // later. Put here rather than in each picker's UI because it is true of
-                // every generated script, and a row in the table is read once and stays.
-                // Failure is deliberately ignored: it is a comment, and losing it must
-                // never make the bootstrap look like it failed.
-                if (sentToCe)
-                {
-                    try
-                    {
-                        await _aobMaker.CreateAAScriptAsync(
-                            Services.CeInjectScriptGenerator.ReminderDescription,
-                            Services.CeInjectScriptGenerator.GenerateReminder(),
-                            autoActivate: false,
-                            group: Services.CeInjectScriptGenerator.RecordGroup);
-                    }
-                    catch (Exception rex)
-                    {
-                        _log.Warn(Constants.LogCatInit,
-                            $"Game-thread reminder row not pushed: {rex.Message}");
-                    }
-                }
             }
 
             if (!sentToCe)
