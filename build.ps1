@@ -358,6 +358,32 @@ if ($Target -in "All", "DLL", "ProxyWinmm")   { $cppTargets += "UE5Dumper_ProxyW
 if ($cppTargets.Count -gt 0) {
     Write-Banner "C++ DLLs  |  $CppConfig"
 
+    # Submodules, checked HERE because this is where they are consumed.
+    #
+    # `git worktree add` does NOT populate submodules, and the task/chip runner creates
+    # its worktrees with recursive submodule init DISABLED (turning it on makes the chip
+    # fail to start). So a worktree-isolated task gets vendor/minhook and vendor/zydis as
+    # EMPTY directories, and CMake then fails deep inside add_subdirectory with a message
+    # that reads like a broken toolchain rather than "you have no submodules".
+    #
+    # Self-heal instead of documenting it: a note only works if every future task
+    # remembers, and this repo already learned that a rule without a check is a rule that
+    # breaks (tools/check_derived_counts.py exists for the same reason). C#-only work is
+    # unaffected, which is precisely why this stayed invisible until a C++ task landed in
+    # a worktree.
+    foreach ($sm in @("vendor/minhook", "vendor/zydis")) {
+        $smPath = Join-Path $ROOT_DIR $sm
+        if (-not (Test-Path $smPath) -or -not (Get-ChildItem -Force $smPath -ErrorAction SilentlyContinue)) {
+            Write-Step "Submodule '$sm' is empty (worktree?) — running git submodule update --init --recursive..."
+            & git -C $ROOT_DIR submodule update --init --recursive
+            if ($LASTEXITCODE -ne 0) {
+                Write-Fail "git submodule update failed. Run it by hand in $ROOT_DIR, then rebuild."
+                exit 1
+            }
+            break   # one call restores every submodule; no need to test the rest
+        }
+    }
+
     # NOTE: no clean here. -Clean already removed $BUILD_DIR in the Clean phase;
     # otherwise we keep it for an incremental Ninja build (the whole point).
     Write-Step "Configuring CMake (Ninja + MSVC, all DLL targets)..."
