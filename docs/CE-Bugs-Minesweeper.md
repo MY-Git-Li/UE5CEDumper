@@ -316,3 +316,61 @@ Two things compound this:
 - **Fully restart Cheat Engine** (closing just the table or the Lua engine window is not always enough — a full CE restart reliably clears the cached globals).
 - **Or** make the generated script self-contained so it doesn't depend on the embedded helper at all (what we did for "Copy CE Script": inline the mailbox round-trip, no `findTableFile`). This sidesteps the cache entirely.
 - A helper could also force-reload by clearing its own globals before redefining (e.g. drop the `if not …` guard, or set the functions to `nil` first), but that defeats the multi-load guard, so the self-contained route is preferred.
+
+---
+
+## Appendix: other CE defects, and who owns them
+
+The five entries above are **bugs we hit** — each has a symptom we saw and a workaround we used.
+A 2026-08-07 re-audit of the CE 7.5-195 source turned up roughly eighteen more genuine CE-side
+defects. **None is listed here as an entry**, for two reasons: we have not hit any of them, and
+each already has an owner in a reference doc that explains it at the point of use. Duplicating
+them into a second file is how two copies of a fact start disagreeing.
+
+This index exists only so they are *findable* from the file you actually open when CE misbehaves.
+One line each; the detail stays with the owner.
+
+**CCODE / AutoAssembler** — owner: [ce-ccode-reference.md](ce-ccode-reference.md) §3, §12, §13.
+Note this repo emits `{$lua}` blocks, **not** `{$CCODE}`/`{$LUACODE}`, so none of these bites us
+today; they matter only if that changes.
+
+| Defect | Where |
+|--------|-------|
+| Comma-separated params (`{$CCODE a=RAX,b=RBX}`) are **silently dropped** — the parser splits on space only | `autoassemblercode.pas:194` |
+| A **mistyped register name** does not error: it binds to RAX and is written back to RAX on exit | `:197`, `:245`, `:285-286` |
+| `RBPF` lands on `0x228` — the stub's saved-RSP pointer → **crash**; `RSPF` lands on `0x230` → **RBP corruption** | `:808` / `:866` vs the stub stores `:313-327` |
+| `PREFIX=` written on a `{$CCODE}` line injects a **phantom `PREFIX` variable** bound to RAX | `:769-770`, `:1289-1290` |
+| With `PREFIX` set, half the **unprefixed AA labels are never created** — `symbols[i shr 1]` where `i` was meant | `:1455` |
+| An out-of-range `XMMn` does not error; it **re-emits the previous parameter's declaration** (the read loop never clears `s`) | `:801-817` |
+| **64-bit LUACODE reading `RSP` returns R9** — `+24` is inside `readPointer()` instead of after the deref | `:1003` (cf. correct C side `:806`) |
+| **32-bit LUACODE reading `ESP`** uses a `*8` stride where the slot needs `*4` | `:1023` |
+
+**Plugin exports** — owner: [ce-plugin-api-reference.md](ce-plugin-api-reference.md) and
+[ce-plugin-sdk-notes.md](ce-plugin-sdk-notes.md).
+
+| Defect | Where |
+|--------|-------|
+| `ce_assembler` **discards** `Assemble()`'s boolean and hardcodes `result:=true` — check `*returnedsize`, not the return value | `pluginexports.pas:774`, `:790` |
+| …and has **no `try..except`**, so `EAssemblerException` unwinds out of a `__stdcall` export into your frames | `Assemblerunit.pas:3647` and five more raise sites |
+| `ce_disassembler` does a **1-byte `StrCopy` overflow** when `length(s) == maxsize` — pass `sizeof(buf)-1` | `pluginexports.pas:793-809` |
+| Type 0 **leaks the record on every click** (`getmem`, never freed), and leaks `offsets` too if you return FALSE (the free sits inside the TRUE branch) | `MainUnit.pas:9724`, `:9735`, `:9771` |
+| `timer_onTimer` **silently starts the timer** (`enabled:=true`), and the SDK exports no way to stop one — only `object_destroy` | `pluginexports.pas:291` |
+| `previousOpcode` has **no failure return** — on total failure it falls back to `address-1`, so the usual `== 0` guard is dead code | `disassembler.pas:15823` |
+| `previousOpcode` also **mutates CE's shared `defaultDisassembler`** (`aggressivealignment`) while `TDisassembler`'s critical section is commented out → data race from a worker thread | `disassembler.pas:15802-15803`, `:16555` |
+| Eleven `ExportedFunctions` slots are **permanently `nil`**, driver or no driver | `plugin.pas:1872`–`:1915` |
+| `ce_messageDialog`'s **button mapping is unguarded** — an out-of-range value hands a garbage set to `MessageDlg` (the align mapping next door *does* have an `else`) | `pluginexports.pas:2218-2222` |
+| CE **loads your DLL twice**: a throwaway probe (LoadLibrary → `GetVersion` → FreeLibrary) runs before the real load, so never init global state in `GetVersion` | `plugin.pas:1497`, `:1522`, `:1525` |
+
+**Scanning** — owner: [ce-memory-scanning-internals.md](ce-memory-scanning-internals.md).
+
+| Defect | Where |
+|--------|-------|
+| `AsyncAOBScan` **silently discards its alignment arguments** (hardcoded `fsmNotAligned`), which makes the 4th/5th arguments of Lua `AOBScanUnique` / `AOBScanModuleUnique` **dead** | `simpleaobscanner.pas:120` |
+| `VirtualQueryEx_StartCache` is a **no-op stub on native Windows** — CE's own comment is `//don't use it in windows`; only the ceserver path implements it | `NewKernelHandler.pas:1515-1518`, installed `:2406` |
+| `TVirtualAllocEx` / `TVirtualProtectEx` / `TVirtualQueryEx` publish `dwSize` as **`DWORD`**, so a 64-bit size passed through the plugin table is truncated to its low 32 bits | `NewKernelHandler.pas:589`, `:590`, `:592` |
+
+> **Why the AOB row does not affect us.** Our emitted `AOBScanModuleUE` helper
+> (`Services/CeXmlExportService.cs`) drives `createMemScan()` + `ms.firstScan(...)` directly instead
+> of going through `simpleaobscanner.pas`, which happens to make it immune. Its 14 arguments were
+> re-checked against the Lua binding's parameter order (`LuaMemscan.pas:54-77`) and all land in the
+> right slots, including `'+X-C-W'` in `protectionflags` (`:70` → `parseProtectionflags` `:81`).
