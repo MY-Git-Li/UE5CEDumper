@@ -159,9 +159,15 @@ public class CheatTableBuilderTests
 
         string ct = CheatTableBuilder.Build("title", rows);
         int entryCount = CountOccurrences(ct, "<VariableType>Auto Assembler Script</VariableType>");
-        Assert.Equal(10, entryCount);
+        // 10 caller rows + the game-thread reminder Build injects into every table. It is
+        // counted explicitly rather than folded into the number, so that if it ever stops
+        // being emitted this reads as a missing REMINDER and not as a lost row.
+        Assert.Equal(10 + 1, entryCount);
+        Assert.Contains(CeInjectScriptGenerator.ReminderDescription, ct, StringComparison.Ordinal);
 
-        // One category header per category (3 of them).
+        // One category header per caller category (3 of them). The reminder's own bucket is
+        // not asserted by header text -- its presence is already proven above, and pinning
+        // the header format here would just duplicate what the header tests already cover.
         Assert.Contains("--- Combat (3 rows) ---",    ct);
         Assert.Contains("--- Inventory (2 rows) ---", ct);
         Assert.Contains("--- Stats (5 rows) ---",     ct);
@@ -196,8 +202,9 @@ public class CheatTableBuilderTests
         string ct = CheatTableBuilder.Build("title", rows);
 
         var ids = ExtractIds(ct);
-        // 1 root + 1 category + 2 rows = 4 ids
-        Assert.Equal(4, ids.Count);
+        // 1 root + 1 category + 2 rows = 4, plus the reminder's own category + entry that
+        // Build injects into every table = 6.
+        Assert.Equal(6, ids.Count);
         // Unique.
         Assert.Equal(ids.Count, new HashSet<int>(ids).Count);
         // Sequential starting at BaseId.
@@ -474,4 +481,51 @@ public class CheatTableBuilderTests
         }
         return ids;
     }
+
+    /// <summary>
+    /// A saved .CT must carry the same game-thread reminder a PUSHED table gets. It is the
+    /// only place the reader is told that mailbox commands are dispatched on the game
+    /// thread -- so a paused or alt-tabbed game times every generated script out -- and
+    /// that a timed-out command is not cancelled but lands whenever the game next ticks.
+    /// A .CT handed to someone else is exactly where that context would otherwise be lost.
+    /// </summary>
+    [Fact]
+    public void Build_AlwaysCarriesTheGameThreadReminder_Once_AndStaysWellFormed()
+    {
+        var rows = new List<CheatTableRow> { MakeFreezeRow("Stats", "C", "P1") };
+
+        string ct = CheatTableBuilder.Build("title", rows);
+
+        Assert.Equal(1, CountOccurrences(ct, CeInjectScriptGenerator.ReminderDescription));
+        // The body, not just the description -- an entry with the right label and no script
+        // would look correct in the grid and do nothing when ticked.
+        Assert.Contains("GAME THREAD", ct, StringComparison.Ordinal);
+        Assert.Contains("NOT cancelled", ct, StringComparison.Ordinal);
+
+        // CE refuses a malformed table outright, and the reminder body is the only script
+        // here that is pure prose -- the likeliest thing to carry an unescaped character.
+        var doc = System.Xml.Linq.XDocument.Parse(ct);
+        Assert.NotNull(doc.Root);
+    }
+
+    /// <summary>A caller that already supplies the reminder must not get two.</summary>
+    [Fact]
+    public void Build_DoesNotDuplicateAReminderTheCallerAlreadySupplied()
+    {
+        var rows = new List<CheatTableRow>
+        {
+            new CtScriptRow
+            {
+                Category = CeInjectScriptGenerator.RecordGroup,
+                Description = CeInjectScriptGenerator.ReminderDescription,
+                Script = CeInjectScriptGenerator.GenerateReminder(),
+            },
+            MakeFreezeRow("Stats", "C", "P1"),
+        };
+
+        string ct = CheatTableBuilder.Build("title", rows);
+
+        Assert.Equal(1, CountOccurrences(ct, CeInjectScriptGenerator.ReminderDescription));
+    }
+
 }

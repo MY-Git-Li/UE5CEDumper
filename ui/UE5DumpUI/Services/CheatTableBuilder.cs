@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Linq;
 using UE5DumpUI.Models;
 
 namespace UE5DumpUI.Services;
@@ -79,6 +80,33 @@ public static class CheatTableBuilder
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count == 0)
             throw new ArgumentException("Cannot build a CT with zero rows.", nameof(rows));
+
+        // Every saved table carries the game-thread reminder, for the same reason every
+        // PUSHED one does (AobMakerBridgeService.CreateAAScriptAsync): it is the only place
+        // the reader is told that mailbox commands are dispatched on the game thread, so a
+        // paused or alt-tabbed game times every script out -- and that a timed-out command
+        // is not cancelled, it lands whenever the game next ticks. A .CT handed to someone
+        // else is exactly the case where none of that context travels with it.
+        //
+        // Added HERE rather than at each call site so a new exporter inherits it, and
+        // skipped if a caller already supplied one so the entry cannot double up.
+        bool hasReminder = rows.Any(r =>
+            string.Equals(r.Description, CeInjectScriptGenerator.ReminderDescription,
+                StringComparison.Ordinal));
+        if (!hasReminder)
+        {
+            var withReminder = new List<CheatTableRow>(rows.Count + 1)
+            {
+                new CtScriptRow
+                {
+                    Category = CeInjectScriptGenerator.RecordGroup,
+                    Description = CeInjectScriptGenerator.ReminderDescription,
+                    Script = CeInjectScriptGenerator.GenerateReminder(),
+                },
+            };
+            withReminder.AddRange(rows);
+            rows = withReminder;
+        }
 
         // Group rows by category preserving alphabetical order. Empty
         // category gets a single "Uncategorised" bucket at the END so
