@@ -329,9 +329,17 @@ public class CoordLibraryScriptTests
     [Fact]
     public void Generate_TreatsATimeoutAsAnError()
     {
-        // A timeout must not fall through to a success path.
+        // A timeout must not fall through to a success path: `call` answers nil + a
+        // reason, and go() turns any non-nil reason into a showMessage and returns.
         var s = Gen(E("A"));
-        Assert.Contains("did not respond", s);
+        Assert.Contains("return nil, _msg", s);
+        Assert.Contains("if err ~= nil then showMessage('[Coordinate Library] ' .. err); return end", s);
+
+        // 'the DLL did not respond' was a GUESS, and the mailbox already distinguishes
+        // the two causes — which send the user to opposite places.
+        Assert.DoesNotContain("did not respond", s);
+        Assert.Contains("never saw this command", s);
+        Assert.Contains("never finished it", s);
     }
 
     [Fact]

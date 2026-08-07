@@ -63,6 +63,51 @@ public class CeLuaHygieneTests
     }
 
     /// <summary>
+    /// The idle wait had the same defect as the status wait and outlived the fix: it
+    /// counted <c>sleep(1)</c> iterations against a millisecond constant, so the "100 ms"
+    /// its constant documented was really ~1.55 s. That one erred LONG, so nothing broke
+    /// — which is exactly why it survived. Both halves are pinned here: a real clock, and
+    /// a constant that now states the duration it actually produces.
+    /// </summary>
+    [Fact]
+    public void IdleWait_measures_a_real_deadline_not_sleep_iterations()
+    {
+        var sb = new StringBuilder();
+        CeLuaHygiene.AppendIdleWait(sb, "mb", "return nil, 'busy'");
+        var s = sb.ToString();
+
+        Assert.Contains("getTickCount", s);
+        Assert.Contains($"_idleT0 >= {CeMailboxLayout.MailboxIdleWaitMs}", s);
+        Assert.Contains($"_idleIters >= {CeMailboxLayout.MailboxIdleWaitIters}", s);
+        Assert.DoesNotContain("idleWaited", s);
+        Assert.DoesNotContain("\r", s);
+
+        // The fallback count is what the deadline replaces, so the two must agree. At the
+        // measured 15.47 ms per sleep(1) they are within one tick of each other; a future
+        // edit to one alone would silently re-open the gap this test closed.
+        double fallbackMs = CeMailboxLayout.MailboxIdleWaitIters * 15.47;
+        Assert.InRange(fallbackMs, CeMailboxLayout.MailboxIdleWaitMs * 0.9,
+                                   CeMailboxLayout.MailboxIdleWaitMs * 1.1);
+    }
+
+    /// <summary>The idle wait and the status wait land in the SAME Lua scope in three
+    /// generators (Teleport, CoordLibrary, PointerQuery), so their locals must not
+    /// collide — the second declaration would shadow the first's deadline.</summary>
+    [Fact]
+    public void IdleWait_and_MailboxWait_locals_do_not_collide()
+    {
+        var idle = new StringBuilder();
+        CeLuaHygiene.AppendIdleWait(idle, "mb", "return nil, 'busy'");
+        var wait = new StringBuilder();
+        CeLuaHygiene.AppendMailboxWait(wait, "Tag", MailboxTimeout.ReturnReason);
+
+        foreach (var name in new[] { "_tick", "_t0", "_iters", "_st", "_over", "_msg" })
+            Assert.DoesNotContain($"local {name}", idle.ToString());
+        foreach (var name in new[] { "_idleTick", "_idleT0", "_idleIters", "_idleOver" })
+            Assert.DoesNotContain($"local {name}", wait.ToString());
+    }
+
+    /// <summary>
     /// R2 — there is ONE Lua escape table. Three copies existed, one of them (Invoke's)
     /// silently weaker: it handled backslash / quote / newline only, so CR, TAB and — the
     /// one that matters — a closing long bracket passed through verbatim. AOBMaker wraps

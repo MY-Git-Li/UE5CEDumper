@@ -313,6 +313,193 @@ public class CeMailboxBailoutTests
         return enable[a..(b + 5)];
     }
 
+    // ── The THIRD script shape: a helper function that answers a caller ──────
+    //
+    // PointerQuery's `query`, CoordLibrary's `call` and Invoke's `waitDone` put the wait
+    // inside a `local function`, so neither of the shapes above applies: a `return`
+    // leaves the HELPER rather than the block, and the helper must not untick (the
+    // GameEngine record calls query() speculatively and is allowed to fail over to a
+    // snapshot). These three were the only generators still hand-rolling the loop after
+    // build 2743 converted the other seven — and so they were the only ones still
+    // counting sleep(1) iterations against a millisecond constant and, in
+    // PointerQuery's case, still shipping the "(DLL not responding?)" guess.
+
+    public static IEnumerable<object[]> HelperShapedScripts() => new List<object[]>
+    {
+        new object[] { "PointerQuery.GWorld",     PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GWorld) },
+        new object[] { "PointerQuery.GameEngine", PointerQueryScriptGenerator.Generate(PointerQueryScriptGenerator.Target.GameEngine) },
+        new object[] { "CoordLibrary",            CoordLibraryScriptGenerator.Generate(OneCoord(), out _) },
+        new object[] { "Invoke.NoParams",         InvokeScriptGenerator.Generate("PlayerCharacter", "Respawn", VoidFunc()) },
+        new object[] { "Invoke.WithParams",       InvokeScriptGenerator.Generate("PlayerCharacter", "AddMoney", IntParamFunc()) },
+    };
+
+    private static UE5DumpUI.Models.CoordEntry[] OneCoord() => new[]
+    {
+        new UE5DumpUI.Models.CoordEntry { Uid = "u1", Label = "Shrine", Group = "Act 1", Map = "Level_01" },
+    };
+
+    private static UE5DumpUI.Models.FunctionInfoModel VoidFunc() =>
+        new() { Name = "Respawn", ParmsSize = 0 };
+
+    /// <summary>A function WITH an input param, so the generator emits the picker-form
+    /// path — where <c>waitDone</c> is called from inside <c>btnFire.OnClick</c> rather
+    /// than from the chunk. That second frame is the whole reason this generator raises
+    /// instead of returning.</summary>
+    private static UE5DumpUI.Models.FunctionInfoModel IntParamFunc() => new()
+    {
+        Name = "AddMoney",
+        ParmsSize = 4,
+        Params = new List<UE5DumpUI.Models.FunctionParamModel>
+        {
+            new() { Name = "Amount", TypeName = "IntProperty", Size = 4, Offset = 0 },
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(HelperShapedScripts))]
+    public void HelperShapedWaits_UseTheSharedLoop(string name, string script)
+    {
+        Assert.True(script.Contains("while _st ~= " + CeMailboxLayout.StatusDone, StringComparison.Ordinal),
+            $"{name}: not using CeLuaHygiene.AppendMailboxWait — this is the file that hand-rolled it");
+    }
+
+    [Theory]
+    [MemberData(nameof(HelperShapedScripts))]
+    public void HelperShapedWaits_MeasureARealDeadline(string name, string script)
+    {
+        Assert.True(script.Contains("getTickCount", StringComparison.Ordinal),
+            $"{name}: timeout is not measured against a real clock");
+        Assert.Contains($"_t0 >= {CeMailboxLayout.MailboxPollTimeoutMs}", script, StringComparison.Ordinal);
+
+        // The pre-fix shape, in each of the three spellings these files used. sleep(1)
+        // costs 15.47 ms, so every one of them was a ~155 s timeout wearing a 10 s label.
+        Assert.False(script.Contains("elapsed >= ", StringComparison.Ordinal),
+            $"{name}: InvokeScriptGenerator's iteration counter survived");
+        Assert.False(script.Contains("waited >= ", StringComparison.Ordinal),
+            $"{name}: CoordLibrary/PointerQuery's iteration counter survived");
+        Assert.False(script.Contains("idleWaited >= ", StringComparison.Ordinal),
+            $"{name}: the idle wait's iteration counter survived");
+    }
+
+    [Theory]
+    [MemberData(nameof(HelperShapedScripts))]
+    public void HelperShapedWaits_ReadTheStatus_InsteadOfGuessing(string name, string script)
+    {
+        Assert.True(script.Contains("never saw this command", StringComparison.Ordinal),
+            $"{name}: does not name the status-0 case (the DLL never picked it up)");
+        Assert.True(script.Contains("never finished it", StringComparison.Ordinal),
+            $"{name}: does not name the status-PROCESSING case (the DLL wedged)");
+        Assert.False(script.Contains("(DLL not responding?)", StringComparison.Ordinal),
+            $"{name}: still emits the guess that blamed a healthy DLL");
+        // Invoke's own flavour of the same mistake: on a TIMEOUT the DLL never wrote
+        // errorMsg, so that string is empty or stale from the previous command.
+        Assert.False(script.Contains("Mailbox timeout: ' .. err", StringComparison.Ordinal),
+            $"{name}: still reports a timeout from the mailbox's stale errorMsg string");
+    }
+
+    [Theory]
+    [MemberData(nameof(HelperShapedScripts))]
+    public void HelperShapedWaits_DoNotUntickFromInsideTheHelper(string name, string script)
+    {
+        // The defining property of this shape. PointerQuery's GameEngine record calls
+        // query() for the &GEngine slot and falls back to a snapshot when that fails —
+        // an untick inside the helper would kill the record on an attempt that is
+        // ALLOWED to fail, and CoordLibrary's would kill it while the picker form is
+        // still open. The callers own the untick, and they already do it.
+        string region = string.Join('\n', ExtractBailStatements(script));
+        Assert.False(region.Contains("memrec.Active = false", StringComparison.Ordinal),
+            $"{name}: the helper unticks the record itself — its caller owns that decision:\n{region}");
+    }
+
+    /// <summary>
+    /// The statements the timeout runs after building <c>_msg</c>, up to and including
+    /// the one that leaves the wait. Walked line by line rather than sliced by a
+    /// hard-coded <c>"\n  end\n"</c>: generators emit this block at three different
+    /// indents, and an indent-sensitive slice silently ran past the end of Invoke's
+    /// helper and into the NEXT bail-out's untick — reporting a violation in code the
+    /// timeout never reaches.
+    /// </summary>
+    private static List<string> ExtractBailStatements(string script)
+    {
+        var lines = script.Split('\n');
+        int i = Array.FindIndex(lines,
+            l => l.Contains("_msg = 'timed out and the DLL never saw", StringComparison.Ordinal));
+        Assert.True(i > 0, "no shared timeout reason found");
+
+        // Walk to the last arm of the reason table, then past its closing `end`.
+        while (i < lines.Length && !lines[i].Contains("tostring(_st)", StringComparison.Ordinal)) i++;
+        Assert.True(i + 2 < lines.Length, "timeout-reason block is not terminated");
+        i += 2;
+
+        var bail = new List<string>();
+        for (int j = i; j < lines.Length && bail.Count < 4; j++)
+        {
+            bail.Add(lines[j]);
+            string t = lines[j].Trim();
+            if (t is "return" or "break" || t.StartsWith("return nil", StringComparison.Ordinal)
+                || t.StartsWith("error(", StringComparison.Ordinal)) break;
+        }
+        return bail;
+    }
+
+    /// <summary>
+    /// Negative control for the test above. If <see cref="ExtractBailStatements"/> ever
+    /// stops finding the real bail — mis-anchored, or fooled by an indent change — the
+    /// "does not untick" assertion would pass over an empty or wrong region and prove
+    /// nothing. The toggles DO untick in exactly that region, so this is the sample that
+    /// makes a green "no untick" mean something.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(MailboxScripts))]
+    public void TheBailExtractorFindsTheUntickWhenThereIsOne(string name, string script)
+    {
+        string region = string.Join('\n', ExtractBailStatements(EnableBlock(script)));
+        Assert.True(region.Contains("memrec.Active = false", StringComparison.Ordinal),
+            $"{name}: the extractor missed a bail-out that DOES untick — every 'does not " +
+            $"untick' assertion built on it is therefore vacuous:\n{region}");
+    }
+
+    [Theory]
+    [MemberData(nameof(HelperShapedScripts))]
+    public void HelperShapedWaits_CarryTheDiagnosisOutToTheCaller(string name, string script)
+    {
+        // Two carriers, and they are not interchangeable — see the MailboxTimeout docs.
+        bool byValue = script.Contains("return nil, _msg", StringComparison.Ordinal);
+        bool byRaise = script.Contains("error('[Invoke] ' .. _msg)", StringComparison.Ordinal);
+        Assert.True(byValue || byRaise,
+            $"{name}: the timeout diagnosis never reaches the caller — it is computed and dropped");
+    }
+
+    /// <summary>
+    /// The reason table is ONE emitter for every shape. It used to be three inline
+    /// <c>showMessage</c> literals, which meant a by-value or by-raise mode would have
+    /// needed its own copy of "status 0 means X, 0xFF means Y" — and a second copy of
+    /// that rule is precisely how the original defect reached seven files at once.
+    /// </summary>
+    [Fact]
+    public void TheTimeoutReasonIsByteIdenticalAcrossEveryShape()
+    {
+        var all = MailboxScripts().Concat(MomentaryScripts()).Concat(HelperShapedScripts())
+            .Select(row => (Name: (string)row[0], Reason: ExtractReason((string)row[1])))
+            .ToList();
+
+        var first = all[0];
+        foreach (var other in all.Skip(1))
+            Assert.True(first.Reason == other.Reason,
+                $"{other.Name} drifted from {first.Name}:\n---{first.Name}---\n{first.Reason}\n---{other.Name}---\n{other.Reason}");
+    }
+
+    /// <summary>The <c>local _msg … end</c> block, de-indented so generators that emit it
+    /// at different nesting depths still compare equal.</summary>
+    private static string ExtractReason(string script)
+    {
+        int a = script.IndexOf("local _msg\n", StringComparison.Ordinal);
+        Assert.True(a >= 0, "no shared timeout-reason block found");
+        int b = script.IndexOf("tostring(_st)\n", a, StringComparison.Ordinal);
+        Assert.True(b >= 0, "timeout-reason block is not terminated");
+        return string.Join('\n', script[a..(b + 14)].Split('\n').Select(l => l.TrimStart()));
+    }
+
     private static int Count(string haystack, string needle)
     {
         int n = 0, i = 0;

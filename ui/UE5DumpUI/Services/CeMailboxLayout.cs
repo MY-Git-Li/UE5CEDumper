@@ -132,7 +132,8 @@ internal static class CeMailboxLayout
     public const int MailboxPollTimeoutIters = 650;
 
     /// <summary>How long an emitted script waits for the mailbox to go IDLE before
-    /// declaring it busy, in ms (sleep(1) per iteration).
+    /// declaring it busy, in REAL milliseconds — measured with <c>getTickCount()</c>,
+    /// exactly like <see cref="MailboxPollTimeoutMs"/>.
     ///
     /// <para>This is NOT the same thing as <see cref="MailboxPollTimeoutMs"/>, and it
     /// exists because of an ordering detail: <c>SetDone</c>/<c>SetError</c> publish
@@ -140,7 +141,27 @@ internal static class CeMailboxLayout
     /// A script that issues two round-trips back to back can therefore exit its
     /// status-poll and still observe the PREVIOUS command in <c>cmd</c> for an instant.
     /// Sampling <c>cmd</c> once would report "busy" and abandon the second query, so
-    /// the wait is bounded rather than a single read. 100 ms is far more than the
-    /// one-instruction window and still fails fast when CE really is mid-command.</para></summary>
-    public const int MailboxIdleWaitMs = 100;
+    /// the wait is bounded rather than a single read.</para>
+    ///
+    /// <para><b>Why 1500 and not the 100 this constant used to say.</b> The emitted loop
+    /// counted <c>sleep(1)</c> iterations against this number, and <c>sleep(1)</c> costs
+    /// 15.47 ms (see <see cref="MailboxPollTimeoutMs"/>), so the value that has actually
+    /// SHIPPED since this wait was introduced is 100 x 15.47 ms ~= 1.55 s — never the
+    /// 100 ms the comment claimed. Moving to a real deadline without moving the number
+    /// would have been a silent 15x tightening of a live timeout, so the number moves to
+    /// match the shipped behaviour instead. It is also the defensible one: the wait
+    /// covers not only the nanosecond publication gap but a previous command that is
+    /// genuinely still in flight, and mailbox commands are dispatched onto the GAME
+    /// thread — a frame at 30 fps is already 33 ms, and a loading screen or a stalled
+    /// game thread is far more. Every bail-out on this path is a soft "busy, try again",
+    /// so erring long costs a wait and erring short costs a spurious failure.</para></summary>
+    public const int MailboxIdleWaitMs = 1500;
+
+    /// <summary>
+    /// Fallback bound for the idle wait on a CE build with no <c>getTickCount</c>,
+    /// counted in <c>sleep(1)</c> iterations. 100 x 15.47 ms ~= 1.55 s, matching
+    /// <see cref="MailboxIdleWaitMs"/> — and, not by coincidence, the exact iteration
+    /// count that shipped before the deadline became real.
+    /// </summary>
+    public const int MailboxIdleWaitIters = 100;
 }

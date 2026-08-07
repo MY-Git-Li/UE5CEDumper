@@ -27,8 +27,8 @@ namespace UE5DumpUI.Services;
 /// success-close (<see cref="AppendCloseOnSuccess"/>) where its lifecycle allows.
 /// </summary>
 /// <summary>
-/// How a generated block ends when its mailbox round-trip times out. The two live
-/// modes are NOT interchangeable — they exist because the repo has two script shapes:
+/// How a generated block ends when its mailbox round-trip times out. The modes are NOT
+/// interchangeable — they exist because the repo has several script shapes:
 /// <list type="bullet">
 /// <item><b>Stateful toggle</b> (Movement / GodMode / Fly / SeeThrough / Foreground /
 /// DebugCamera): the record stays ticked for as long as the cheat is on, so a bail-out
@@ -36,6 +36,13 @@ namespace UE5DumpUI.Services;
 /// <item><b>Momentary action</b> (Teleport's rows): the record self-unticks from a
 /// deferred timer that ALSO suppresses the success-close, so the bail-out must reach
 /// that timer — it flags and leaves the loop rather than returning past it.</item>
+/// <item><b>Helper function</b> (PointerQuery's <c>query</c>, CoordLibrary's
+/// <c>call</c>, Invoke's <c>waitDone</c>): the wait sits inside a <c>local function</c>
+/// that reports failure to a CALLER, not to the user. Neither of the shapes above fits
+/// — a <c>return</c> would leave the helper, not the block, and the helper must not
+/// untick, because the caller may be trying it speculatively (PointerQuery attempts the
+/// &amp;GEngine slot and falls back to a snapshot on failure). These two modes carry
+/// the diagnosis out by value or by raise instead.</item>
 /// </list>
 /// </summary>
 public enum MailboxTimeout
@@ -45,9 +52,23 @@ public enum MailboxTimeout
     /// <summary>Momentary action: set <c>hadError</c> and break, leaving the caller's
     /// deferred untick + close-suppression to run.</summary>
     FlagAndBreak,
-    /// <summary>A <c>[DISABLE]</c> block: return quietly. There is no record to untick
-    /// (it is already going false) and a dialog over the game on an untick is noise.</summary>
+    /// <summary>A <c>[DISABLE]</c> block: <c>dbg</c> the reason and return. There is no
+    /// record to untick (it is already going false) and a dialog over the game on an
+    /// untick is noise — but a DEBUG session still gets to see WHY it gave up.</summary>
     SilentReturn,
+    /// <summary>A helper function that answers its caller by value: emits
+    /// <c>return nil, _msg</c>, matching the <c>nil, reason</c> contract
+    /// PointerQuery's <c>query</c> and CoordLibrary's <c>call</c> already have. No
+    /// dialog and no untick — the caller owns both, and unticking here would kill a
+    /// record on an attempt that is allowed to fail.</summary>
+    ReturnReason,
+    /// <summary>A helper function that answers by unwinding: emits
+    /// <c>error('[tag] ' .. _msg)</c>. Invoke's <c>waitDone</c> is called from two
+    /// different frames — the <c>[ENABLE]</c> chunk itself and the picker form's
+    /// <c>btnFire.OnClick</c> closure — and a raise is the only bail that aborts BOTH
+    /// correctly; a <c>return</c> would resume the caller as though the wait had
+    /// succeeded.</summary>
+    RaiseError,
 }
 
 public static class CeLuaHygiene
@@ -118,6 +139,13 @@ public static class CeLuaHygiene
     /// <para><paramref name="onBusy"/> is the Lua statement to run on timeout — the
     /// callers differ (a <c>return nil, msg</c> inside a helper vs. setting
     /// <c>hadError</c> in a flat block), so the emitter does not assume one. (R3)</para>
+    ///
+    /// <para>The bound is a REAL <c>getTickCount()</c> deadline, for the same reason
+    /// <see cref="AppendMailboxWait"/>'s is: this loop also counted <c>sleep(1)</c>
+    /// iterations against a millisecond constant, and <c>sleep(1)</c> costs 15.47 ms in
+    /// CE. Locals are <c>_idle</c>-prefixed because a generator emits this AND the
+    /// status wait into the same Lua scope (TeleportScriptGenerator, CoordLibrary), so
+    /// the two must not share names.</para>
     /// </summary>
     public static void AppendIdleWait(StringBuilder sb, string mbExpr, string onBusy,
                                       string indent = "")
@@ -125,10 +153,15 @@ public static class CeLuaHygiene
         Line(sb, indent, "-- Bounded wait for IDLE, not a single sample: the DLL publishes status=DONE");
         Line(sb, indent, "-- BEFORE clearing cmd, so a second back-to-back command can still see the");
         Line(sb, indent, "-- previous one for an instant and would spuriously report 'busy'.");
-        Line(sb, indent, "local idleWaited = 0");
+        Line(sb, indent, "local _idleTick = (type(getTickCount) == 'function') and getTickCount or nil");
+        Line(sb, indent, "local _idleT0, _idleIters = _idleTick and _idleTick() or 0, 0");
         Line(sb, indent, $"while readInteger({mbExpr} + {CeMailboxLayout.OffCmd}) ~= 0 do");
-        Line(sb, indent, "  sleep(1); idleWaited = idleWaited + 1");
-        Line(sb, indent, $"  if idleWaited >= {CeMailboxLayout.MailboxIdleWaitMs} then {onBusy} end");
+        Line(sb, indent, "  sleep(1); _idleIters = _idleIters + 1");
+        // Real elapsed time when getTickCount exists; iteration count only as fallback.
+        Line(sb, indent, $"  local _idleOver = _idleTick and (_idleTick() - _idleT0 >= " +
+                         $"{CeMailboxLayout.MailboxIdleWaitMs}) or (_idleIters >= " +
+                         $"{CeMailboxLayout.MailboxIdleWaitIters})");
+        Line(sb, indent, $"  if _idleOver then {onBusy} end");
         Line(sb, indent, "end");
     }
 
@@ -363,7 +396,6 @@ public static class CeLuaHygiene
         MailboxTimeout onTimeout = MailboxTimeout.UntickAndReturn,
         string indent = "")
     {
-        bool announce = onTimeout != MailboxTimeout.SilentReturn;
         string mb = "mb + " + CeMailboxLayout.OffStatus;
         sb.Append(indent).Append("local _tick = (type(getTickCount) == 'function') and getTickCount or nil\n");
         sb.Append(indent).Append("local _t0, _iters = _tick and _tick() or 0, 0\n");
@@ -377,41 +409,71 @@ public static class CeLuaHygiene
           .Append(CeMailboxLayout.MailboxPollTimeoutIters).Append(")\n");
         sb.Append(indent).Append("  if _st ~= ").Append(CeMailboxLayout.StatusDone)
           .Append(" and _over then\n");
-        if (announce)
-        {
-            sb.Append(indent).Append("    if _st == ").Append(CeMailboxLayout.StatusIdle)
-              .Append(" then\n");
-            sb.Append(indent).Append("      showMessage('[").Append(tag)
-              .Append("] timed out and the DLL never saw this command.\\n\\n")
-              .Append("Most likely a stale g_invokeMailbox address: re-inject UE5Dumper.dll, ")
-              .Append("or untick and re-tick this table so CE re-resolves the symbol.')\n");
-            sb.Append(indent).Append("    elseif _st == ").Append(CeMailboxLayout.StatusProcessing)
-              .Append(" then\n");
-            sb.Append(indent).Append("      showMessage('[").Append(tag)
-              .Append("] the DLL took this command but never finished it.\\n\\n")
-              .Append("Is the game paused, or the game thread stalled?')\n");
-            sb.Append(indent).Append("    else\n");
-            sb.Append(indent).Append("      showMessage('[").Append(tag)
-              .Append("] timed out on an unexpected mailbox status: ' .. tostring(_st))\n");
-            sb.Append(indent).Append("    end\n");
-        }
+
+        // ONE reason builder for every mode. It used to be three inline showMessage
+        // literals, which meant a mode that reports by value or by raise would have
+        // needed its own copy of the status table — and "two copies of a rule is how the
+        // timeout defect got into seven files" (CeMailboxLayout.cs).
+        AppendTimeoutReason(sb, indent + "    ");
+
         switch (onTimeout)
         {
             case MailboxTimeout.UntickAndReturn:
+                sb.Append(indent).Append("    showMessage('[").Append(tag).Append("] ' .. _msg)\n");
                 sb.Append(indent).Append("    if memrec then memrec.Active = false end\n");
                 sb.Append(indent).Append("    return\n");
                 break;
             case MailboxTimeout.FlagAndBreak:
                 // The caller's deferred timer unticks unconditionally and suppresses the
                 // success-close on hadError, so returning here would skip BOTH.
+                sb.Append(indent).Append("    showMessage('[").Append(tag).Append("] ' .. _msg)\n");
                 sb.Append(indent).Append("    hadError = true\n");
                 sb.Append(indent).Append("    break\n");
                 break;
+            case MailboxTimeout.ReturnReason:
+                // No dialog and no untick: the CALLER decides how to surface this and
+                // whether it is fatal at all. The reason is untagged so the caller's own
+                // prefix (e.g. '[Coordinate Library] ') does not double up.
+                sb.Append(indent).Append("    return nil, _msg\n");
+                break;
+            case MailboxTimeout.RaiseError:
+                sb.Append(indent).Append("    error('[").Append(tag).Append("] ' .. _msg)\n");
+                break;
             default:
+                // SilentReturn: no dialog on an untick, but DEBUG still sees the reason.
+                sb.Append(indent).Append("    dbg('[").Append(tag).Append("] ' .. _msg)\n");
                 sb.Append(indent).Append("    return\n");
                 break;
         }
         sb.Append(indent).Append("  end\n");
+        sb.Append(indent).Append("end\n");
+    }
+
+    /// <summary>
+    /// Emit the status-to-reason table into a local <c>_msg</c>. Untagged: the caller
+    /// bolts its own <c>[Tag]</c> on, and the by-value mode hands the bare reason to a
+    /// caller that already has one.
+    ///
+    /// <para>The whole point of the table is that it does not GUESS. "(DLL not
+    /// responding?)" blamed the DLL for the far more common case where the DLL never
+    /// received the command at all — measured on ES2 2026-08-06 with the DLL's poller
+    /// demonstrably alive at 1 ms — and the mailbox already answers the question:
+    /// <see cref="CeMailboxLayout.StatusIdle"/> means untouched (stale
+    /// <c>g_invokeMailbox</c> address), <see cref="CeMailboxLayout.StatusProcessing"/>
+    /// means picked up and wedged. The two send the user to opposite places.</para>
+    /// </summary>
+    private static void AppendTimeoutReason(StringBuilder sb, string indent)
+    {
+        sb.Append(indent).Append("local _msg\n");
+        sb.Append(indent).Append("if _st == ").Append(CeMailboxLayout.StatusIdle).Append(" then\n");
+        sb.Append(indent).Append("  _msg = 'timed out and the DLL never saw this command.\\n\\n")
+          .Append("Most likely a stale g_invokeMailbox address: re-inject UE5Dumper.dll, ")
+          .Append("or untick and re-tick this table so CE re-resolves the symbol.'\n");
+        sb.Append(indent).Append("elseif _st == ").Append(CeMailboxLayout.StatusProcessing).Append(" then\n");
+        sb.Append(indent).Append("  _msg = 'the DLL took this command but never finished it.\\n\\n")
+          .Append("Is the game paused, or the game thread stalled?'\n");
+        sb.Append(indent).Append("else\n");
+        sb.Append(indent).Append("  _msg = 'timed out on an unexpected mailbox status: ' .. tostring(_st)\n");
         sb.Append(indent).Append("end\n");
     }
 

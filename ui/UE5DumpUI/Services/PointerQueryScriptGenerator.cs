@@ -115,26 +115,31 @@ public static class PointerQueryScriptGenerator
         // twice (slot first, snapshot second). Returns addr, or nil + a reason string —
         // a failed op is NOT necessarily fatal here, so it must not untick by itself.
         Line(sb, "local function query(op)");
-        Line(sb, "  -- Bounded wait for IDLE, not a single sample: the DLL publishes status=DONE");
-        Line(sb, "  -- BEFORE clearing cmd, so a second back-to-back query can still see the");
-        Line(sb, "  -- previous command for an instant and would spuriously report 'busy'.");
-        Line(sb, "  local waited = 0");
-        Line(sb, $"  while readInteger(mb + {CeMailboxLayout.OffCmd}) ~= 0 do");
-        Line(sb, "    sleep(1); waited = waited + 1");
-        Line(sb, $"    if waited >= {CeMailboxLayout.MailboxIdleWaitMs} then return nil, 'mailbox busy -- try again in a moment' end");
-        Line(sb, "  end");
+        CeLuaHygiene.AppendIdleWait(sb, "mb",
+            "return nil, 'the DLL mailbox is busy -- try again in a moment'", "  ");
         Line(sb, $"  writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, op)");
         Line(sb, $"  writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)             -- clear status");
         Line(sb, $"  writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdQueryPtr})  -- CMD_QUERY_PTR (write LAST)");
-        Line(sb, "  local elapsed = 0");
-        Line(sb, $"  while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
-        Line(sb, "    sleep(1); elapsed = elapsed + 1");
-        Line(sb, $"    if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then return nil, 'mailbox timeout (DLL not responding?)' end");
-        Line(sb, "  end");
+        // The shared wait, in its by-value mode. This loop used to be hand-rolled and
+        // carried all three of the defects build 2743 fixed in the other seven copies:
+        // it counted sleep(1) iterations against a millisecond constant (so the "10 s"
+        // timeout was ~155 s of frozen Lua Engine), and it reported "(DLL not
+        // responding?)" -- a guess, when `status` already says whether the DLL never saw
+        // the command or took it and wedged.
+        //
+        // ReturnReason rather than the toggles' UntickAndReturn because this helper is
+        // called SPECULATIVELY: the GameEngine path tries the &GEngine slot and falls
+        // back to a snapshot, so a failure here is not necessarily fatal and must not
+        // untick by itself. The reason is untagged; the caller adds '[GWorld] '.
+        CeLuaHygiene.AppendMailboxWait(sb, tag, MailboxTimeout.ReturnReason, indent: "  ");
         Line(sb, $"  local code = readInteger(mb + {CeMailboxLayout.OffResult})");
-        Line(sb, "  if code ~= 0 then return nil, 'not resolved (code=' .. code .. ')' end");
+        // The two SOFT reasons carry their own "enter gameplay first?" hint, because the
+        // caller can no longer append it blindly: it is right for "the DLL answered, it
+        // just does not have this yet" and misleading on a timeout or a busy mailbox,
+        // which is what a caller-side suffix used to staple onto every failure alike.
+        Line(sb, "  if code ~= 0 then return nil, 'not resolved (code=' .. code .. ') -- enter gameplay first?' end");
         Line(sb, $"  local a = readQword(mb + {CeMailboxLayout.OffParamsData})");
-        Line(sb, "  if not a or a == 0 then return nil, 'address is 0 -- not available yet' end");
+        Line(sb, "  if not a or a == 0 then return nil, 'address is 0 -- not available yet; enter gameplay first?' end");
         Line(sb, "  return a");
         Line(sb, "end");
         Line(sb);
@@ -160,7 +165,7 @@ public static class PointerQueryScriptGenerator
             Line(sb, "  addr, err = query(1)");
             Line(sb, "end");
             Line(sb, "if not addr then");
-            Line(sb, $"  showMessage('[{tag}] ' .. tostring(err) .. ' -- enter gameplay first?')");
+            Line(sb, $"  showMessage('[{tag}] ' .. tostring(err))");
             Line(sb, "  if memrec then memrec.Active = false end");
             Line(sb, "  return");
             Line(sb, "end");
@@ -185,7 +190,7 @@ public static class PointerQueryScriptGenerator
         {
             Line(sb, "local addr, err = query(0)");
             Line(sb, "if not addr then");
-            Line(sb, $"  showMessage('[{tag}] ' .. tostring(err) .. ' -- enter gameplay first?')");
+            Line(sb, $"  showMessage('[{tag}] ' .. tostring(err))");
             Line(sb, "  if memrec then memrec.Active = false end");
             Line(sb, "  return");
             Line(sb, "end");

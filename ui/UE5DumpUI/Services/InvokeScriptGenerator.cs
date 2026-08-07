@@ -111,16 +111,23 @@ public static class InvokeScriptGenerator
         Line(sb, "    bytes[#bytes+1] = 0");
         Line(sb, "    writeBytes(mb + offset, bytes)");
         Line(sb, "end");
-        Line(sb, "local function waitDone(timeoutMs)");
-        Line(sb, "    local elapsed = 0");
-        Line(sb, $"    while readInteger(mb + {OffStatus}) ~= 1 do");
-        Line(sb, "        sleep(1)");
-        Line(sb, "        elapsed = elapsed + 1");
-        Line(sb, $"        if elapsed >= (timeoutMs or {CeMailboxLayout.MailboxPollTimeoutMs}) then");
-        Line(sb, $"            local err = readString(mb + {OffErrorMsg}, 256) or 'timeout'");
-        Line(sb, "            error('[Invoke] Mailbox timeout: ' .. err)");
-        Line(sb, "        end");
-        Line(sb, "    end");
+        // The shared wait. Hand-rolled until now, with all three of the defects build
+        // 2743 fixed in the other seven copies: it counted sleep(1) iterations against a
+        // millisecond constant (15.47 ms each, so the "10 s" bound was ~155 s of frozen
+        // Lua Engine), and it reported the mailbox's errorMsg string -- which on a
+        // TIMEOUT the DLL never wrote, so the text was either empty or stale from the
+        // previous command. `status` is what actually distinguishes "the DLL never saw
+        // it" from "it took the command and wedged".
+        //
+        // RaiseError, not the toggles' UntickAndReturn: waitDone is called from two
+        // different frames -- the [ENABLE] chunk itself and, on the param-form path,
+        // btnFire.OnClick -- so a `return` would leave only waitDone and let both
+        // callers carry on as though the round-trip had completed. A raise is the one
+        // bail that aborts both, and it is the contract these call sites already have.
+        // The `timeoutMs` parameter is gone: no emitted call site ever passed one, and
+        // the deadline now lives in the shared emitter.
+        Line(sb, "local function waitDone()");
+        CeLuaHygiene.AppendMailboxWait(sb, "Invoke", MailboxTimeout.RaiseError, indent: "    ");
         Line(sb, "end");
         Line(sb, "local function readErr()");
         Line(sb, $"    return readString(mb + {OffErrorMsg}, 256) or 'Unknown error'");
