@@ -40,6 +40,58 @@ public static class CeInjectScriptGenerator
     /// pushed bootstrap doesn't litter the user's own table root.</summary>
     public const string RecordGroup = "UE5CEDumper (DLL)";
 
+    /// <summary>Description of the inert reminder row pushed beside the bootstrap record.
+    /// Short enough to read in CE's list without widening the column; the detail lives in
+    /// the script, which shows it if the row is ticked.</summary>
+    public const string ReminderDescription =
+        "* Click back into the GAME window before ticking these -- commands run on the game thread";
+
+    /// <summary>
+    /// An inert row whose only job is to be READ. Every mailbox command in this table is
+    /// dispatched on the game thread, so while the game is paused, alt-tabbed or sitting on
+    /// a breakpoint nothing runs and the script eventually times out. That is invisible from
+    /// inside Cheat Engine, and it cost a real debugging session before it was understood.
+    ///
+    /// <para>Two things this warns about, and the second is the one that surprises people:
+    /// a timed-out command is NOT cancelled. The DLL still holds it and runs it as soon as
+    /// the game ticks again -- measured on DumperTest 2026-08-07, a teleport completed 35 s
+    /// after it was sent and 25 s after the script had given up on it. Clicking again after
+    /// a timeout therefore QUEUES a second one.</para>
+    ///
+    /// <para>It applies itself to nothing, so per the table-wide rule it unticks itself
+    /// rather than sitting ticked and claiming to be active.</para>
+    /// </summary>
+    public static string GenerateReminder()
+    {
+        var sb = new StringBuilder(1024);
+        Line(sb, "[ENABLE]");
+        Line(sb, "{$lua}");
+        Line(sb, "if syntaxcheck then return end");
+        Line(sb, $"-- {CeLuaHygiene.Attribution}");
+        // Paragraph breaks come from string.char(10), not from a "\n" escape. The escape
+        // has to survive C# source -> emitted Lua -> CE's XML-encoded <AssemblerScript>,
+        // and it is the kind of thing that silently arrives as a literal backslash-n in
+        // the dialog. string.char(10) has no escaping to lose.
+        Line(sb, "local NL = string.char(10)");
+        Line(sb, "showMessage(");
+        Line(sb, "  'Mailbox commands are dispatched on the GAME THREAD.' .. NL .. NL ..");
+        Line(sb, "  'While the game is paused, alt-tabbed or stopped on a breakpoint the game ' ..");
+        Line(sb, "  'thread does not tick, so nothing runs and the script times out. Click back ' ..");
+        Line(sb, "  'into the game window first.' .. NL .. NL ..");
+        Line(sb, "  'A timed-out command is NOT cancelled: the DLL still holds it and runs it as ' ..");
+        Line(sb, "  'soon as the game ticks again -- one teleport landed 35 seconds late. So do ' ..");
+        Line(sb, "  'NOT click again after a timeout, or you will queue a second one.' .. NL .. NL ..");
+        Line(sb, "  'Memory scans and the value list are unaffected -- they read memory directly.')");
+        // Applies nothing, so it must not leave the row ticked.
+        Line(sb, "if memrec then memrec.Active = false end");
+        Line(sb, "{$asm}");
+        Line(sb, "[DISABLE]");
+        Line(sb, "{$lua}");
+        Line(sb, "if syntaxcheck then return end");
+        Line(sb, "{$asm}");
+        return sb.ToString();
+    }
+
     /// <summary>
     /// Build the [ENABLE]/[DISABLE] memory-record script.
     /// </summary>

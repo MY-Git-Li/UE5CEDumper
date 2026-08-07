@@ -275,4 +275,46 @@ public class CeInjectScriptGeneratorTests
         Assert.DoesNotContain($"'{path}'", e);
         Assert.Contains("local DLL_PATH = '", e);
     }
+
+    /// <summary>
+    /// The inert reminder row pushed beside the bootstrap. It exists because the one thing
+    /// that breaks every mailbox script -- commands run on the GAME thread, so a paused or
+    /// alt-tabbed game times them all out -- is invisible from inside Cheat Engine.
+    /// </summary>
+    [Fact]
+    public void Reminder_row_is_inert_unticks_itself_and_states_both_hazards()
+    {
+        string s = CeInjectScriptGenerator.GenerateReminder();
+
+        Assert.Contains("[ENABLE]", s, StringComparison.Ordinal);
+        Assert.Contains("[DISABLE]", s, StringComparison.Ordinal);
+
+        // It applies nothing, so leaving the row ticked would claim a cheat is active.
+        Assert.Contains("memrec.Active = false", s, StringComparison.Ordinal);
+
+        // Inert: it must not touch the mailbox at all.
+        Assert.DoesNotContain("writeInteger(mb", s, StringComparison.Ordinal);
+        Assert.DoesNotContain("g_invokeMailbox", s, StringComparison.Ordinal);
+
+        // Both hazards, and the second is the surprising one: a timed-out command is not
+        // cancelled. Measured on DumperTest 2026-08-07 -- a teleport completed 35 s after
+        // it was sent, 25 s after the script had given up on it.
+        Assert.Contains("GAME THREAD", s, StringComparison.Ordinal);
+        Assert.Contains("NOT cancelled", s, StringComparison.Ordinal);
+
+        // Paragraph breaks use string.char(10), not a backslash escape: the escape has to
+        // survive C# -> Lua -> CE's XML-encoded script body, and arrives as a literal
+        // backslash-n when it does not. Assert the fragile form is absent, not just that
+        // the robust one is present.
+        Assert.Contains("string.char(10)", s, StringComparison.Ordinal);
+        // Built from char codes so the assertion itself cannot be mangled by escaping --
+        // which is precisely the failure mode it guards against, and which mangled an
+        // earlier attempt at this very line into a verbatim string holding a real newline.
+        string backslashN = new string(new[] { (char)92, (char)110 });
+        Assert.DoesNotContain(backslashN, s, StringComparison.Ordinal);
+
+        Assert.Contains("GAME", CeInjectScriptGenerator.ReminderDescription,
+            StringComparison.Ordinal);
+    }
+
 }
