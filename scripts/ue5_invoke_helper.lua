@@ -27,9 +27,6 @@
   or 'fstringn' (narrow, FUtf8String/FAnsiString) takes value = a Lua string; the
   helper allocates a char buffer in the target process and builds the by-value
   { Data, Num, Max } struct in place. See writeFStringInline for the lifetime note.
-  字串輸入參數：type 為 'fstring'（寬字元 FString）或 'fstringn'（窄字元
-  FUtf8String/FAnsiString）時，value 傳入 Lua 字串；helper 會在目標行程配置字元
-  buffer 並就地建立傳值的 { Data, Num, Max } 結構。生命週期說明見 writeFStringInline。
 
   Debug Camera memory-record example (one checkbox = camera on/off).
   Both blocks call the SAME DLL export, only the arg differs; the DLL
@@ -184,33 +181,23 @@ end
 
 -- ============================================================
 -- FString / FUtf8String / FAnsiString INPUT params (by value)
--- FString / FUtf8String / FAnsiString 輸入參數（傳值）
 -- ============================================================
 -- A UE string param is passed BY VALUE: the params buffer holds the whole
 -- 16-byte struct { CharT* Data; int32 ArrayNum; int32 ArrayMax } INLINE, not a
 -- pointer to it. So we allocate a Data buffer in the TARGET process, write the
 -- characters + null terminator, and stamp the three struct fields.
--- UE 字串參數是「傳值」：params buffer 內直接放整個 16-byte 結構
--- { CharT* Data; int32 ArrayNum; int32 ArrayMax }，而不是指向它的指標。因此我們
--- 在「目標行程」配置一塊 Data buffer，寫入字元 + 結尾 '\0'，再填入三個欄位。
 --
 -- LIFETIME: allocations are tracked in _ue5_invoke_str_bufs and are NOT freed
 -- automatically. Freeing is unsafe if the callee kept the pointer, and the
 -- buffer is CE-allocated (not UE's FMemory) so the game must NEVER free it.
 -- Call freeInvokeStringBuffers() manually only when every such call merely READ
 -- the string. Leaking a few small buffers is the safe default for one-shot cheats.
--- 生命週期：配置的記憶體記錄在 _ue5_invoke_str_bufs，且「不會」自動釋放。若被呼叫
--- 的函式保留了指標，釋放會造成 use-after-free；且此 buffer 由 CE 配置（非 UE 的
--- FMemory），遊戲端絕不能去 free 它。只有在確定那些呼叫都只是「讀取」字串時，才手動
--- 呼叫 freeInvokeStringBuffers()。對一次性 cheat 而言，漏掉幾個小 buffer 是安全預設。
 if _ue5_invoke_str_bufs == nil then
   _ue5_invoke_str_bufs = {}
 end
 
 -- Build a by-value UE string at (pd + off). wide=true -> UTF-16LE (FString);
 -- wide=false -> raw bytes (FUtf8String is UTF-8, FAnsiString is ANSI).
--- 於 (pd + off) 建立傳值的 UE 字串。wide=true -> UTF-16LE（FString）；
--- wide=false -> 原始位元組（FUtf8String 為 UTF-8，FAnsiString 為 ANSI）。
 local function writeFStringInline(pd, off, s, wide)
   s = tostring(s or '')
   local n = #s
@@ -219,8 +206,6 @@ local function writeFStringInline(pd, off, s, wide)
   if wide then
     -- UTF-16LE: low byte + 0 high byte. ASCII / basic Latin only; multi-byte
     -- UTF-8 input is not transcoded here.
-    -- UTF-16LE：低位元組 + 0 高位元組。僅支援 ASCII / 基本拉丁字元；此處不會轉碼
-    -- 多位元組的 UTF-8 輸入。
     for i = 1, n do
       bytes[#bytes + 1] = string.byte(s, i)
       bytes[#bytes + 1] = 0
@@ -237,7 +222,7 @@ local function writeFStringInline(pd, off, s, wide)
   end
   writeBytes(buf, bytes)
   writeQword(pd + off, buf)               -- Data
-  writeInteger(pd + off + 8,  n + 1)      -- ArrayNum (incl null / 含結尾)
+  writeInteger(pd + off + 8,  n + 1)      -- ArrayNum (incl null)
   writeInteger(pd + off + 12, n + 1)      -- ArrayMax
   _ue5_invoke_str_bufs[#_ue5_invoke_str_bufs + 1] = buf
 end
@@ -247,11 +232,6 @@ end
 -- nested 'fstruct' member table can recurse (offsets RELATIVE to the struct
 -- base) -- hence the explicit base + region size rather than assuming the
 -- mailbox layout. Does NOT zero the buffer (writeBakedParams does that once).
--- 將一組 baked 參數寫入 `base` 起始的緩衝區。每筆為
--- { name, type, offset, value, size? }。自 writeBakedParams 拆出，讓巢狀
--- 'fstruct' 成員表格能遞迴（offset 相對於結構起點），因此以明確的 base +
--- 區塊大小為參數，而非假設 mailbox 佈局。本函式不負責歸零（由 writeBakedParams
--- 一次完成）。
 local function writeParams(base, regionSize, params)
   if not params then return end
 
@@ -281,20 +261,15 @@ local function writeParams(base, regionSize, params)
       writeQword(base + off, v)
     elseif t == 'fstring' then
       -- Wide UE FString INPUT param (value = Lua string).
-      -- 寬字元 UE FString 輸入參數（value = Lua 字串）。
       writeFStringInline(base, off, v, true)
     elseif t == 'fstringn' then
       -- Narrow FUtf8String / FAnsiString INPUT param (value = Lua string).
-      -- 窄字元 FUtf8String / FAnsiString 輸入參數（value = Lua 字串）。
       writeFStringInline(base, off, v, false)
     elseif t == 'fstruct' then
       -- By-value UE struct param. Size resolution: explicit p.size wins
       -- (the generator now emits it); else infer from the next member's
       -- offset; else consume the rest of the region. value == a member
       -- table -> recurse and stamp fields; anything else -> zero-fill only.
-      -- 傳值的 UE 結構參數。大小判定：明確 p.size 優先（產生器已輸出）；否則
-      -- 以下一個成員的 offset 推算；再否則吃掉區塊剩餘空間。value 為成員表格
-      -- -> 遞迴寫入子欄位；否則僅歸零。
       local structSize = size
       if not structSize then
         if i < #params then
@@ -307,8 +282,6 @@ local function writeParams(base, regionSize, params)
       -- Zero the struct region in one write. writeBakedParams already wiped
       -- the top-level buffer, but a nested recursion runs on a sub-region
       -- the caller did not pre-zero, so keep this local wipe.
-      -- 一次寫入歸零整個結構區塊。writeBakedParams 已清過頂層緩衝區，但巢狀
-      -- 遞迴作用於 caller 未預先歸零的子區塊，故保留此區域歸零。
       if structSize > 0 then
         local zeros = {}
         for j = 1, structSize do zeros[j] = 0 end
@@ -330,8 +303,6 @@ end
 -- Zero the whole params buffer (clears stale data from the previous invoke --
 -- the mailbox is a single shared slot reused across every call) then stamp
 -- the baked params.
--- 先歸零整個 params 緩衝區（清掉前次 invoke 的殘留 -- mailbox 是所有 invoke
--- 共用的單一槽），再寫入 baked 參數。
 local function writeBakedParams(mb, parmsSize, params)
   local PD = mb + OFF_PARAMS
   for i = 0, parmsSize - 1 do
@@ -556,9 +527,6 @@ if not freeInvokeStringBuffers then
   --- UNSAFE if any invoked function retained the string pointer (use-after-
   --- free) -- only call when every such call merely READ the string. The
   --- default is to leak (safe); this is the opt-in cleanup.
-  --- 釋放先前 invokeUFunction 為字串輸入參數在目標行程配置的所有 buffer。
-  --- 若任一被呼叫的函式保留了字串指標，此操作不安全（use-after-free）-- 僅在確定
-  --- 那些呼叫都只是「讀取」字串時才呼叫。預設是「不釋放」（安全），此為選擇性清理。
   --- @return number freed  Count of buffers released.
   function freeInvokeStringBuffers()
     local freed = 0

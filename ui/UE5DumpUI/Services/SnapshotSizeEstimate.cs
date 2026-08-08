@@ -7,7 +7,7 @@ namespace UE5DumpUI.Services;
 /// <summary>
 /// Pure, dependency-free model of how many on-disk bytes a captured chunk will
 /// cost in the SQLite <c>fields</c> table — used by the "Estimate size" pre-flight
-/// (純讀資料做評估: read a sample, never write the DB) so the user can decide
+/// (read-only: read a sample, never write the DB) so the user can decide
 /// go/no-go before a multi-GB capture. The row shape mirrors
 /// <c>SnapshotStore.ChunkInserter.Insert</c> EXACTLY (same text columns per
 /// scalar / array-element row) plus the <c>ix_fields(snapshot_id, class_fqn)</c>

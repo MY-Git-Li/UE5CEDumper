@@ -280,8 +280,6 @@ public static class InvokeScriptGenerator
         // left as empty FStrings (built by the callee), so they don't need it.
         // Comments here are ASCII-only because the emitted script is transmitted
         // through CE / the AOBMaker JSON pipe.
-        // 只有存在「輸入」（非 out）字串參數時才內嵌建構函式；out 字串保持為空
-        // FString（由被呼叫端填入），不需要它。生成腳本內註解僅用 ASCII。
         if (inputParams.Any(p => IsStringType(p.TypeName) && !p.IsOut))
         {
             AppendInlineFStringBuilder(sb);
@@ -351,7 +349,6 @@ public static class InvokeScriptGenerator
         // means it must SAY so. A silent return would look exactly like a FIRE that
         // worked. No cleanup timer either: the record's lifetime belongs to the form,
         // and frm.OnClose is what unticks it.
-        // 這是閉包內的 return：只離開點擊處理函式，表單仍開著可重試，因此必須出訊息。
         Line(sb, "    if not waitIdle() then");
         Line(sb, "        showMessage('[Invoke] the DLL mailbox is busy -- nothing was sent.\\n" +
                  "Another CE script or a previous FIRE is still mid-command; press FIRE again in a moment.')");
@@ -371,8 +368,6 @@ public static class InvokeScriptGenerator
             // fills them). Building one would make the callee FMemory::Free our
             // CE-allocated Data buffer -> crash. The zero-fill above already
             // left the 16-byte slot as a valid empty FString.
-            // OUT 字串參數需保持為空 FString（由被呼叫端填入）；若建立，被呼叫端會
-            // 對我方 CE 配置的 Data buffer 做 FMemory::Free 而崩潰。
             if (IsStringType(p.TypeName) && p.IsOut)
             {
                 Line(sb, $"    -- {p.Name}: out FString left empty (callee fills it)");
@@ -476,7 +471,6 @@ public static class InvokeScriptGenerator
     /// characters + null terminator, and stamps the <c>{Data, Num, Max}</c>
     /// header. The buffer is intentionally leaked — see the emitted note.
     /// (ASCII-only body; the generated script is CE / pipe transmitted.)
-    /// 內嵌一個自足的 writeFStr：以傳值方式建立 UE 字串並刻意不釋放 buffer。
     /// </summary>
     private static void AppendInlineFStringBuilder(StringBuilder sb)
     {
@@ -510,7 +504,6 @@ public static class InvokeScriptGenerator
     private static string GetMailboxWriteStatement(string typeName, int size, int offset, string valueExpr)
     {
         // String params build an FString by value via the inlined writeFStr.
-        // 字串參數透過內嵌的 writeFStr 以傳值方式建立 FString。
         if (IsStringType(typeName))
             return $"writeFStr(PD + {offset}, {valueExpr}, {(IsWideString(typeName) ? "true" : "false")})";
 
@@ -583,7 +576,6 @@ public static class InvokeScriptGenerator
             "FloatProperty" or "DoubleProperty" => "0.0",
             "BoolProperty" => "0",
             // String types start empty so the form shows a text field, not "0".
-            // 字串型別預設為空，讓表單顯示文字欄位而非 "0"。
             "StrProperty" or "Utf8StrProperty" or "AnsiStrProperty" => "",
             "NameProperty" or "ObjectProperty" or "ClassProperty"
                 or "SoftObjectProperty" or "SoftClassProperty"
@@ -597,7 +589,6 @@ public static class InvokeScriptGenerator
     private static string GetParseExpression(string typeName, int editIndex)
     {
         // String types: pass the raw edit text straight to writeFStr (no numeric parse).
-        // 字串型別：將輸入框原始文字直接交給 writeFStr（不做數值解析）。
         if (IsStringType(typeName))
             return $"edits[{editIndex}].Text or ''";
 

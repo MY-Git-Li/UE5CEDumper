@@ -77,7 +77,7 @@ public partial class SnapshotViewModel : ViewModelBase
     /// coords; integers = counts/flags/IDs) that shrinks the DB without touching the
     /// scope. Lossy by design — re-capture to bring the other family back.</summary>
     [ObservableProperty] private string _selectedFamily = "All numeric";
-    /// <summary>Opt-in max-dataset cap ("提前止血"): when the capture's live on-disk
+    /// <summary>Opt-in max-dataset cap: when the capture's live on-disk
     /// size (db + WAL) crosses this, the paging loop stops gracefully and KEEPS the
     /// partial snapshot (first-N objects). "Off" = no cap (prior behaviour). This is
     /// the in-capture ceiling the per-game quota lacks (quota only evicts whole older
@@ -610,7 +610,7 @@ public partial class SnapshotViewModel : ViewModelBase
         int  guardGb     = SnapshotMinFreeGb;
         bool guardActive = _platform != null;
         string dbPath    = _store.DatabasePath;
-        // Max-dataset cap ("提前止血"): the consumer sets capReached=1 when the live
+        // Max-dataset cap: the consumer sets capReached=1 when the live
         // db+WAL size crosses maxBytes; the producer then stops gracefully and the
         // PARTIAL snapshot is kept + finalised (NOT deleted like a user-cancel).
         int  capReached      = 0;
@@ -1010,8 +1010,8 @@ public partial class SnapshotViewModel : ViewModelBase
     {
         _cts?.Cancel();
         _estimateCts?.Cancel();
-        // Cancelling during an auto snapshot stops the whole loop (spec: "Auto
-        // snapshot 進行時一樣可取消"), not just the in-flight capture.
+        // Cancelling during an auto snapshot stops the whole loop (spec: cancelling an
+        // auto snapshot is just as cancellable), not just the in-flight capture.
         if (_autoCts != null) StopAutoSnapshot();
     }
 
@@ -1199,7 +1199,7 @@ public partial class SnapshotViewModel : ViewModelBase
     // How the size pre-flight samples: SampleWindows windows of SampleWindowSize
     // objects each, spread evenly across the GObjects index space so the estimate
     // isn't biased by the low-index engine-class cluster (which game_only / noise
-    // skip mostly drops). Walked but NEVER written to the DB (純讀資料做評估).
+    // skip mostly drops). Walked but NEVER written to the DB.
     private const int SampleWindows = 5;
     private const int SampleWindowSize = 4096;
 

@@ -24,7 +24,7 @@ public interface ICaptureSession : IAsyncDisposable
 
     /// <summary>Approximate footprint of the capture so far (committed db + WAL file
     /// bytes + an estimate of rows written since the last commit), in bytes — the live
-    /// gauge the streaming loop polls to enforce the opt-in max-dataset cap ("提前止血").
+    /// gauge the streaming loop polls to enforce the opt-in max-dataset cap.
     /// The on-disk part is monotonic non-decreasing during a capture (passive
     /// autocheckpoints recycle WAL frames in place without shrinking the -wal file; only
     /// the post-capture TRUNCATE checkpoint shrinks it, never overlapping a capture), and

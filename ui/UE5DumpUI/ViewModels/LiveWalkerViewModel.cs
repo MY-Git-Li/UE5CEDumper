@@ -5862,7 +5862,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
         // Inline structs are not UObjects — they don't have OuterPrivate or FName at
         // the UObject::Name offset. The DLL reads garbage when walking a struct address
-        // as if it were a UObject, producing corrupted name strings (亂碼).
+        // as if it were a UObject, producing corrupted name strings.
         // Override CurrentObjectName with the breadcrumb label (set from field metadata
         // during navigation) and disable the Parent button / clear Outer info.
         if (Breadcrumbs.Count > 0 && !Breadcrumbs[^1].IsPointerDeref

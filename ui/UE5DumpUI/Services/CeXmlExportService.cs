@@ -293,7 +293,7 @@ public static class CeXmlExportService
     /// pointer (Object/Class/Weak/Soft/Lazy/Interface) resolves to a target with EXACTLY ONE
     /// terminal-leaf field (a scalar / FName / FString), collapse the group + lone child into ONE
     /// CE record at the pointer field with a deref chain instead of a folder. The original
-    /// "指標指到 string" case: a pointer whose only payload is a single string is two CE nodes for
+    /// "pointer-to-string" case: a pointer whose only payload is a single string is two CE nodes for
     /// one value. Encodings (<see cref="EmitOneDerefLeaf"/>): scalar/name child → Address=+ptrOff,
     /// Offsets=[childOff] (1 deref); FString child → Address=+ptrOff, Offsets=[0, childOff]
     /// (2 derefs: the pointer, then the FString.Data buffer). A multi-field pointee keeps its group
@@ -2537,7 +2537,7 @@ public static class CeXmlExportService
 
     /// <summary>
     /// Collapse a drilled pointer whose target is a SINGLE terminal leaf into ONE CE record at the
-    /// pointer field (Feature B — the "指標指到 string" case). The pointer is dereferenced through the
+    /// pointer field (Feature B — the "pointer-to-string" case). The pointer is dereferenced through the
     /// leaf's Offsets, so the watched address is the SAME value CE would reach through the old
     /// group + child; only the tree is flatter. Description = "{ptr} ▸ {child}" (per-segment +Offset;
     /// the pointer class type appended once via +Type). CE pointer model (CeXmlExportService.cs
