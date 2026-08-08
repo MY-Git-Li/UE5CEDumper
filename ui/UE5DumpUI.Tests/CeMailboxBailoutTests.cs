@@ -152,6 +152,18 @@ public class CeMailboxBailoutTests
         // _want < _min against a nil raises instead of diagnosing.
         Assert.Contains("if _cur == nil or _min == nil then", enable, StringComparison.Ordinal);
 
+        // Both waits must keep Cheat Engine's window alive. CE's Lua sleep is a bare Win32
+        // Sleep, so a 10 s timeout froze CE for 10 s -- reported from a live session. The
+        // pump is FEATURE-TESTED, not version-gated: processMessagesPaintOnly is absent from
+        // the whole 7.5 source tree yet present in the 7.7 binary, so the introducing
+        // version is unknown, and CE's own docs prefer it because it ignores mouse and
+        // keyboard and therefore cannot re-enter the script through a second click.
+        Assert.Contains("type(processMessagesPaintOnly) == 'function'", enable,
+            StringComparison.Ordinal);
+        // Only _pump here: the idle wait is emitted by the helper-shaped generators and by
+        // Teleport, not by the flat toggles this theory covers.
+        Assert.Contains("_pump()", enable, StringComparison.Ordinal);
+
         // The symbol-lookup branch sits above all of those and had the same defect in its
         // strongest form: getAddressSafe returns nil for EVERY reason a symbol can fail to
         // resolve, and the message asserted the rarest one. Verified 2026-08-07 against a

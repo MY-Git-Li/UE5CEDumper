@@ -70,7 +70,8 @@ end
 -- funcName / paramsData fields concurrently the in-flight call
 -- gets corrupted -- both callers may observe status=DONE while
 -- the DLL only executed one (Frankenstein) request. CE's Lua
--- `sleep(1)` pumps Windows messages, so timer / synchronize
+-- `sleep(1)` does NOT pump Windows messages (CE's lua_sleep is a bare Sleep) --
+-- the pump() next to it is what keeps timer / synchronize
 -- callbacks CAN fire reentrantly inside waitDone's poll loop.
 --
 -- This flag serializes invokes within a single Lua engine. The
@@ -356,10 +357,21 @@ end
 local function waitDone(mb, timeoutMs)
   local limit = timeoutMs or DEFAULT_TIMEOUT_MS
   local tick  = (type(getTickCount) == 'function') and getTickCount or nil
+  -- Keep CE's window alive: its Lua sleep is a bare Sleep and pumps nothing. Prefer
+  -- processMessagesPaintOnly -- CE's own docs call processMessages "not recommended"
+  -- and paint-only ignores mouse/keyboard, so it cannot re-enter us. Feature-tested
+  -- rather than version-gated: it is absent from the 7.5 source and present in the
+  -- 7.7 binary, so the introducing version is unknown, and an undefined global is
+  -- nil in Lua rather than an error.
+  local pump  = (type(processMessagesPaintOnly) == 'function')
+                and processMessagesPaintOnly or processMessages
   local t0, iters = tick and tick() or 0, 0
   local st = readInteger(mb + OFF_STATUS)
   while st ~= STATUS_DONE do
-    sleep(1)
+    -- processMessages keeps CE's window alive while we block. CE's Lua sleep is a
+    -- bare Win32 Sleep and does NOT pump messages, so without this the whole
+    -- timeout is a frozen Cheat Engine.
+    sleep(1); pump()
     iters = iters + 1
     st = readInteger(mb + OFF_STATUS)
     -- nil is not a status. readInteger returns nil once the process is gone and

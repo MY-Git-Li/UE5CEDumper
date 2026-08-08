@@ -575,7 +575,17 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "  -- Confirm-before-teleport: plain Teleport refuses a cross-map jump. The");
         Line(sb, "  -- tool cannot LOAD another map -- only the game can -- so this is a guard,");
         Line(sb, "  -- not an inconvenience.");
+        // Re-entrancy guard. The mailbox wait now pumps messages so CE's window
+        // stays alive while it blocks -- which also means this button is still clickable
+        // during a round-trip. Without the latch a second click starts a fresh pair of
+        // commands on top of a pending one, and a timed-out command is not cancelled: it
+        // still lands when the game next ticks, so the user would get two teleports.
+        Line(sb, "  local busy = false");
         Line(sb, "  local function go(force)");
+        Line(sb, "    if busy then return end");
+        Line(sb, "    busy = true");
+        // pcall so an error inside cannot strand the latch and wedge the button forever.
+        Line(sb, "    local ok, err_ = pcall(function()");
         Line(sb, "    local e = selected()");
         Line(sb, "    if e == nil then lblCount.Caption = 'Select an entry first.'; return end");
         Line(sb, "    -- Re-read the map HERE. It was previously captured once when the window");
@@ -606,6 +616,12 @@ public static class CoordLibraryScriptGenerator
         Line(sb, "      lblCount.Caption = 'Teleported to ' .. e.label");
         Line(sb, "      dbg('[Coordinate Library] -> ' .. e.label)");
         Line(sb, "    end");
+        Line(sb, "    end)   -- pcall");
+        // Release the latch UNCONDITIONALLY, then re-raise. A latch stranded by an error
+        // would disable the button for the rest of the session with no way back except
+        // closing the picker.
+        Line(sb, "    busy = false");
+        Line(sb, "    if not ok then error(err_) end");
         Line(sb, "  end");
         Line(sb);
         Line(sb, "  edtFilter.OnChange = rebuild");

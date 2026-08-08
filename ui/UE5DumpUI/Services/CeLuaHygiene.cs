@@ -165,6 +165,14 @@ public static class CeLuaHygiene
         Line(sb, indent, "-- Bounded wait for IDLE, not a single sample: the DLL publishes status=DONE");
         Line(sb, indent, "-- BEFORE clearing cmd, so a second back-to-back command can still see the");
         Line(sb, indent, "-- previous one for an instant and would spuriously report 'busy'.");
+        // Feature test, NOT a getCEVersion() gate. A version threshold is a proxy for the
+        // thing we actually need, and it would have to be guessed: this is absent from the
+        // whole 7.5 source tree and present in the 7.7 binary, so the introducing version
+        // is unknown, and a fork or a backport would defeat it either way. Referencing an
+        // undefined global in Lua yields nil rather than raising, so this is also what
+        // keeps an older CE from erroring.
+        Line(sb, indent, "local _idlePump = (type(processMessagesPaintOnly) == 'function') "
+                         + "and processMessagesPaintOnly or processMessages");
         Line(sb, indent, "local _idleTick = (type(getTickCount) == 'function') and getTickCount or nil");
         Line(sb, indent, "local _idleT0, _idleIters = _idleTick and _idleTick() or 0, 0");
         Line(sb, indent, $"local _idleCmd = readInteger({mbExpr} + {CeMailboxLayout.OffCmd})");
@@ -176,7 +184,9 @@ public static class CeLuaHygiene
         // Observed on Elliot 2026-08-07: closing the game produced "the DLL mailbox is
         // busy -- try again in a moment", twice, 1.5 s each.
         Line(sb, indent, $"  if _idleCmd == nil then {onUnreadable ?? onBusy} end");
-        Line(sb, indent, "  sleep(1); _idleIters = _idleIters + 1");
+        // See AppendMailboxWait: CE's sleep does not pump messages, so without this the
+        // whole idle deadline is a frozen Cheat Engine window.
+        Line(sb, indent, "  sleep(1); _idlePump(); _idleIters = _idleIters + 1");
         Line(sb, indent, $"  _idleCmd = readInteger({mbExpr} + {CeMailboxLayout.OffCmd})");
         // Real elapsed time when getTickCount exists; iteration count only as fallback.
         Line(sb, indent, $"  local _idleOver = _idleTick and (_idleTick() - _idleT0 >= " +
@@ -476,11 +486,23 @@ public static class CeLuaHygiene
         string indent = "")
     {
         string mb = "mb + " + CeMailboxLayout.OffStatus;
+        // Keep Cheat Engine's window alive while we block. CE's Lua `sleep` is a bare Win32
+        // Sleep (LuaHandler.pas lua_sleep) and does NOT pump messages -- despite a comment
+        // in this repo that claimed it did -- so a 10 s wait froze CE for the full 10 s.
+        //
+        // Prefer processMessagesPaintOnly. CE's own celua.txt calls processMessages "not
+        // recommended" (timers and other scripts run during it and can modify locals), and
+        // paint-only "does not handle mouse or keyboard events" -- so it cannot re-enter us
+        // through a second button click. It is absent from the 7.5 SOURCE tree but present
+        // in the 7.7 binary, which is why this feature-tests instead of calling it directly.
+        sb.Append(indent).Append(
+            "local _pump = (type(processMessagesPaintOnly) == 'function') and " +
+            "processMessagesPaintOnly or processMessages\n");
+        sb.Append(indent).Append("  sleep(1); _pump(); _iters = _iters + 1\n");
         sb.Append(indent).Append("local _tick = (type(getTickCount) == 'function') and getTickCount or nil\n");
         sb.Append(indent).Append("local _t0, _iters = _tick and _tick() or 0, 0\n");
         sb.Append(indent).Append("local _st = readInteger(").Append(mb).Append(")\n");
         sb.Append(indent).Append("while _st ~= ").Append(CeMailboxLayout.StatusDone).Append(" do\n");
-        sb.Append(indent).Append("  sleep(1); _iters = _iters + 1\n");
         sb.Append(indent).Append("  _st = readInteger(").Append(mb).Append(")\n");
         // Real elapsed time when getTickCount exists; iteration count only as fallback.
         // `_st == nil` short-circuits the deadline: readInteger returns nil once the target

@@ -694,6 +694,11 @@ function ue5_inject()
             end
         end
         sleep(POLL_MS)
+        -- Same reason as every other wait here: CE's Lua sleep pumps nothing, so this
+        -- loop would freeze Cheat Engine for its whole budget. Paint-only preferred;
+        -- feature-tested because it is 7.7-era and an undefined global is just nil.
+        if type(processMessagesPaintOnly) == 'function' then processMessagesPaintOnly()
+        elseif type(processMessages) == 'function' then processMessages() end
         -- MEASURE, do not accumulate. sleep(n) in CE is a floor, not an exact
         -- duration -- it rounds up to the ~15.47 ms Windows tick -- so summing the
         -- REQUESTED amount under-reports real elapsed time, and the fallback below
