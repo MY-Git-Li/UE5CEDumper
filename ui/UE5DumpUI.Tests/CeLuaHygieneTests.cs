@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
@@ -106,6 +108,185 @@ public class CeLuaHygieneTests
         foreach (var name in new[] { "_idleTick", "_idleT0", "_idleIters", "_idleOver" })
             Assert.DoesNotContain($"local {name}", wait.ToString());
     }
+
+    // ==================================================================
+    // The wait loops, checked STRUCTURALLY
+    // ==================================================================
+    //
+    // Build 2769 shipped an AppendMailboxWait whose `sleep(1); _pump(); _iters = _iters + 1`
+    // had been MOVED to above the `while`, and above the `local _t0, _iters` it increments.
+    // Both halves were broken and neither was catchable by the assertions that existed:
+    //
+    //   * `_iters` bound to a nil GLOBAL, so `_iters + 1` raised on the FIRST execution —
+    //     after the command had already been written to the mailbox, so the DLL ran it and
+    //     every statement after the wait (result read, state<0 diagnosis, untick,
+    //     auto-close) was skipped, in all 11 generators that call this.
+    //   * the loop body was then left with no sleep and no pump at all: a 100% CPU spin
+    //     that froze Cheat Engine for the whole deadline, i.e. the exact symptom the commit
+    //     was fixing.
+    //
+    // Every assertion covering that line was `Assert.Contains("_pump()", …)`, and a
+    // substring is true no matter WHERE the line landed. These two read position instead:
+    // one says nothing may be used before it is declared, the other says the sleep and the
+    // pump belong to the loop BODY. Together they reject both halves of the defect.
+
+    public static IEnumerable<object[]> WaitEmitters() => new List<object[]>
+    {
+        new object[] { "idle",   "_idlePump" },
+        new object[] { "untick", "_pump" },
+        new object[] { "flag",   "_pump" },
+        new object[] { "reason", "_pump" },
+        new object[] { "raise",  "_pump" },
+        new object[] { "silent", "_pump" },
+    };
+
+    /// <summary>
+    /// Lua has no declaration hoisting: a name read above its <c>local</c> is a different
+    /// variable — the global — and globals are nil until assigned. Arithmetic on one raises.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(WaitEmitters))]
+    public void Wait_loops_never_use_a_local_before_its_declaration(string key, string _)
+    {
+        var lines = CodeLines(WaitText(key));
+
+        foreach (var name in lines.SelectMany(DeclaredOn).Distinct())
+        {
+            int declared = Array.FindIndex(lines, l => DeclaredOn(l).Contains(name));
+            int used     = Array.FindIndex(lines, l => UsesIdentifier(l, name));
+
+            Assert.True(used >= declared,
+                $"{key}: '{name}' is read on line {used + 1} but only declared on line " +
+                $"{declared + 1}. In Lua that read hits the nil GLOBAL of the same name, so " +
+                $"`{name} = {name} + 1` raises immediately.\n\n{Numbered(lines)}");
+        }
+    }
+
+    /// <summary>
+    /// The sleep and the pump must be the loop's own statements. Above the loop they run
+    /// once and leave a spin; nested deeper (inside the timeout <c>if</c>, say) they run
+    /// only on the branch that is already giving up, which is the same spin on the path
+    /// that matters.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(WaitEmitters))]
+    public void Wait_loops_sleep_and_pump_inside_the_loop_body(string key, string pump)
+    {
+        var lines = CodeLines(WaitText(key));
+
+        int whileAt = Array.FindIndex(lines,
+            l => l.TrimStart().StartsWith("while ", StringComparison.Ordinal));
+        int endAt = Array.FindLastIndex(lines, l => l.Trim() == "end");
+        Assert.True(whileAt >= 0 && endAt > whileAt,
+            $"{key}: no `while … do` … `end` to check.\n\n{Numbered(lines)}");
+
+        var sleeps = Enumerable.Range(0, lines.Length)
+            .Where(i => lines[i].Contains("sleep(", StringComparison.Ordinal))
+            .ToArray();
+
+        // A wait loop with no sleep is a busy-spin, whatever else it gets right.
+        Assert.True(sleeps.Length > 0,
+            $"{key}: the wait loop never sleeps — it will burn a core until its deadline." +
+            $"\n\n{Numbered(lines)}");
+
+        foreach (int i in sleeps)
+        {
+            Assert.True(i > whileAt && i < endAt,
+                $"{key}: the sleep on line {i + 1} is OUTSIDE the loop (`while` on line " +
+                $"{whileAt + 1}, `end` on line {endAt + 1}), so the body spins.\n\n{Numbered(lines)}");
+
+            // The emitters are called here with indent "", so the body's own level is
+            // exactly two spaces. Deeper means it sits inside a nested block.
+            Assert.True(Indent(lines[i]) == "  ",
+                $"{key}: the sleep on line {i + 1} is indented \"{Indent(lines[i])}\", not the " +
+                $"loop body's \"  \" — it is nested inside a branch.\n\n{Numbered(lines)}");
+
+            Assert.True(UsesIdentifier(lines[i], pump),
+                $"{key}: the sleep on line {i + 1} does not call {pump}(). CE's Lua sleep is a " +
+                $"bare Win32 Sleep and pumps nothing, so the wait freezes Cheat Engine." +
+                $"\n\n{Numbered(lines)}");
+        }
+    }
+
+    private static string WaitText(string key)
+    {
+        var sb = new StringBuilder();
+        switch (key)
+        {
+            case "idle":   CeLuaHygiene.AppendIdleWait(sb, "mb", "return nil, 'busy'"); break;
+            case "untick": CeLuaHygiene.AppendMailboxWait(sb, "Tag", MailboxTimeout.UntickAndReturn); break;
+            case "flag":   CeLuaHygiene.AppendMailboxWait(sb, "Tag", MailboxTimeout.FlagAndBreak); break;
+            case "reason": CeLuaHygiene.AppendMailboxWait(sb, "Tag", MailboxTimeout.ReturnReason); break;
+            case "raise":  CeLuaHygiene.AppendMailboxWait(sb, "Tag", MailboxTimeout.RaiseError); break;
+            default:       CeLuaHygiene.AppendMailboxWait(sb, "Tag", MailboxTimeout.SilentReturn); break;
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Statement lines only. A whole-line <c>--</c> is dropped; a trailing one is NOT
+    /// looked for, because stripping from the first <c>--</c> anywhere would also eat code
+    /// after a <c>--</c> that happens to sit inside a Lua string. Neither wait emitter
+    /// produces trailing comments, so the narrow rule is the safe one.
+    /// </summary>
+    private static string[] CodeLines(string lua) =>
+        lua.Replace("\r", "").Split('\n')
+           .Where(l => l.Trim().Length > 0
+                       && !l.TrimStart().StartsWith("--", StringComparison.Ordinal))
+           .ToArray();
+
+    /// <summary>Names bound by a <c>local a, b = …</c> on this line; empty if it is not one.</summary>
+    private static List<string> DeclaredOn(string line)
+    {
+        var names = new List<string>();
+        var t = line.TrimStart();
+        if (!t.StartsWith("local ", StringComparison.Ordinal)) return names;
+
+        var decl = t.Substring("local ".Length);
+        // The first '=' is always the assignment: no Lua `local` line can carry '==' ahead
+        // of it, since there is nothing to compare yet.
+        int eq = decl.IndexOf('=');
+        if (eq >= 0) decl = decl.Substring(0, eq);
+
+        foreach (var raw in decl.Split(','))
+        {
+            var n = raw.Trim();
+            // Skips `local function …` and anything else that is not a bare binding.
+            if (n.Length > 0 && IsIdentifier(n)) names.Add(n);
+        }
+        return names;
+    }
+
+    /// <summary>Whole-token match, so <c>_t0</c> does not hit inside <c>_t0x</c>.</summary>
+    private static bool UsesIdentifier(string line, string name)
+    {
+        int i = 0;
+        while ((i = line.IndexOf(name, i, StringComparison.Ordinal)) >= 0)
+        {
+            int after = i + name.Length;
+            bool left  = i == 0 || !IsIdentChar(line[i - 1]);
+            bool right = after >= line.Length || !IsIdentChar(line[after]);
+            if (left && right) return true;
+            i = after;
+        }
+        return false;
+    }
+
+    private static bool IsIdentChar(char c) => c == '_' || char.IsLetterOrDigit(c);
+
+    private static bool IsIdentifier(string s)
+    {
+        if (s.Length == 0 || char.IsDigit(s[0])) return false;
+        foreach (var c in s) if (!IsIdentChar(c)) return false;
+        return true;
+    }
+
+    private static string Indent(string line) =>
+        line.Substring(0, line.Length - line.TrimStart(' ').Length);
+
+    /// <summary>The emitted Lua, numbered, so a failure shows WHERE rather than just what.</summary>
+    private static string Numbered(string[] lines) =>
+        string.Join("\n", lines.Select((l, i) => $"{i + 1,3}: {l}"));
 
     /// <summary>
     /// R2 — there is ONE Lua escape table. Three copies existed, one of them (Invoke's)

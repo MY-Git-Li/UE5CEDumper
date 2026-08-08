@@ -498,11 +498,23 @@ public static class CeLuaHygiene
         sb.Append(indent).Append(
             "local _pump = (type(processMessagesPaintOnly) == 'function') and " +
             "processMessagesPaintOnly or processMessages\n");
-        sb.Append(indent).Append("  sleep(1); _pump(); _iters = _iters + 1\n");
         sb.Append(indent).Append("local _tick = (type(getTickCount) == 'function') and getTickCount or nil\n");
         sb.Append(indent).Append("local _t0, _iters = _tick and _tick() or 0, 0\n");
         sb.Append(indent).Append("local _st = readInteger(").Append(mb).Append(")\n");
         sb.Append(indent).Append("while _st ~= ").Append(CeMailboxLayout.StatusDone).Append(" do\n");
+        // FIRST statement of the body, before the re-read — the position AppendIdleWait and
+        // ue5_invoke_helper.lua both use. Two reasons it cannot move:
+        //   * `_iters` is declared THREE lines up. Emitted above that declaration it binds to
+        //     a nil GLOBAL and `_iters + 1` raises on the spot, after the command has already
+        //     been written to the mailbox — so the DLL runs it and everything downstream of
+        //     this loop (result read, state<0 diagnosis, untick, auto-close) is skipped.
+        //   * Emitted after the re-read it would still terminate, but `_st` is sampled ONCE
+        //     before the loop, so a round-trip that completes pays one extra sleep — 15.47 ms
+        //     on every success — to leave a loop it already knows is done.
+        // Build 2769 shipped it above both. Pinned by
+        // CeLuaHygieneTests.Wait_loops_never_use_a_local_before_its_declaration and
+        // ..._sleep_and_pump_inside_the_loop_body, which read POSITION, not substrings.
+        sb.Append(indent).Append("  sleep(1); _pump(); _iters = _iters + 1\n");
         sb.Append(indent).Append("  _st = readInteger(").Append(mb).Append(")\n");
         // Real elapsed time when getTickCount exists; iteration count only as fallback.
         // `_st == nil` short-circuits the deadline: readInteger returns nil once the target
