@@ -237,6 +237,11 @@ public partial class ProxyDeployViewModel : ViewModelBase
         }
     }
 
+    /// <summary>A set of <c>DetectedGame.BinariesDir</c> keys for the games an operation
+    /// failed on, handed to the refresh that follows it so the failure reason survives.
+    /// Case-insensitive because it is compared against a Windows path.</summary>
+    private static HashSet<string> NewBinariesDirSet() => new(StringComparer.OrdinalIgnoreCase);
+
     private async Task RefreshAfterTypeChangeAsync()
     {
         try
@@ -348,7 +353,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
             if (Games.Count > 0 && File.Exists(SourceDllPath))
             {
                 StatusText = "Checking deploy status...";
-                await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
+                await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct: ct);
             }
 
             // Per-game proxy suggestion (import table + remembered pick), once per scan.
@@ -436,7 +441,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
             if (Games.Count > 0 && File.Exists(SourceDllPath))
             {
                 StatusText = "Checking deploy status...";
-                await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
+                await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct: ct);
             }
 
             // Per-game proxy suggestion (import table + remembered pick), once per scan.
@@ -1073,7 +1078,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
                 ? _deploy.GetDllVersion(SourceDllPath)
                 : null;
 
-            await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
+            await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct: ct);
             await ApplyProxySuggestionsAsync(ct);
             StatusText = $"{Games.Count} game(s) — status refreshed";
         }
@@ -1108,6 +1113,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         ClearError();
         int ok = 0, fail = 0;
         bool pickChanged = false;
+        var failedDirs = NewBinariesDirSet();
 
         foreach (var game in selected)
         {
@@ -1129,11 +1135,14 @@ public partial class ProxyDeployViewModel : ViewModelBase
                     }
                 }
             }
-            else fail++;
+            else { fail++; failedDirs.Add(game.BinariesDir); }
         }
 
-        // Refresh status from disk to ensure DataGrid reflects actual state
-        await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
+        // Refresh status from disk to ensure DataGrid reflects actual state — EXCEPT for the
+        // games this run failed on, whose Status/ErrorMessage DeployAsync just wrote. Their
+        // disk state is "file absent", which refreshes to NotDeployed with a blank Error and
+        // would leave the reason visible only in the log.
+        await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, failedDirs, ct);
         // Reflect the just-recorded pick in the Suggested column immediately.
         await ApplyProxySuggestionsAsync(ct);
         if (pickChanged) RequestOptionSave?.Invoke();
@@ -1157,6 +1166,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
 
         ClearError();
         int ok = 0, fail = 0;
+        var failedDirs = NewBinariesDirSet();
 
         foreach (var game in selected)
         {
@@ -1167,11 +1177,14 @@ public partial class ProxyDeployViewModel : ViewModelBase
             // just SelectedProxyType (that radio governs deploying).
             bool success = await _deploy.UndeployAsync(game, ct);
             if (success) ok++;
-            else fail++;
+            else { fail++; failedDirs.Add(game.BinariesDir); }
         }
 
-        // Refresh status from disk to ensure DataGrid reflects actual state
-        await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
+        // Refresh status from disk to ensure DataGrid reflects actual state — but not for the
+        // games this run failed on (a locked file, a foreign DLL we refused to touch): their
+        // proxy IS still on disk, so the refresh would report a healthy DeployedCurrent and
+        // erase the very reason the removal did not happen.
+        await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, failedDirs, ct);
 
         SetOperationResult($"Removed: {ok} success, {fail} failed", fail);
     }
@@ -1207,6 +1220,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
 
         ClearError();
         int updated = 0, fail = 0, upToDate = 0;
+        var failedDirs = NewBinariesDirSet();
 
         foreach (var game in Games)
         {
@@ -1232,12 +1246,13 @@ public partial class ProxyDeployViewModel : ViewModelBase
                 StatusText = $"Updating {game.Name} ({type.GetDisplayName()})...";
                 bool success = await _deploy.DeployAsync(srcPath, game, type, force: true, ct: ct);
                 if (success) updated++;
-                else fail++;
+                else { fail++; failedDirs.Add(game.BinariesDir); }
             }
         }
 
-        // Refresh status from disk for the currently-selected type's view.
-        await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
+        // Refresh status from disk for the currently-selected type's view, keeping the reason
+        // on any game this run failed to update (see DeploySelectedAsync).
+        await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, failedDirs, ct);
 
         if (updated == 0 && fail == 0)
         {
