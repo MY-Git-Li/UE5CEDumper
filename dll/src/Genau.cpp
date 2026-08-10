@@ -182,9 +182,18 @@ static bool ValidateCyclicClassChain(uintptr_t chunk0) {
     return false;
 }
 
-// Loose upper bound on MaxElements for the relaxed (Tier 2) fallback. 8x the strict
-// tier's 0x800000 cap so an aggressively preallocating title still passes, but far below
-// the values produced when the slot actually holds half of a pointer (MindsEye: 233M).
+// Upper bound on MaxElements for the strict (Tier 1) presets. MaxElements is
+// MaxChunks * 64K, so it tracks the title's gc.MaxObjectsInGame, NOT its live object
+// count -- a game that preallocates generously is normal, not corrupt. The old cap was
+// 0x800000 (8,388,608) and DragonSword Awakening (UE 5.3) rejected the CORRECT preset on
+// it: MaxChunks=161 -> MaxElements = 161 * 65536 = 10,551,296. Tier 1 then fell through to
+// the relaxed tier, which picked a row that reads NumElements out of the frozen
+// ObjLastNonGCIndex -- so only the startup CDOs were ever enumerated (37,099 of 317,810
+// objects) and every runtime object was invisible to every scan. Raised to 33.5M: still
+// an order of magnitude below the values produced when the slot actually holds half of a
+// pointer (MindsEye: 233M), which is what this bound exists to reject.
+static constexpr uint32_t kStrictMaxCeiling  = 0x2000000;  // 33,554,432
+// Looser bound for the relaxed (Tier 2) fallback, deliberately weaker than Tier 1's.
 static constexpr uint32_t kRelaxedMaxCeiling = 0x4000000;  // 67,108,864
 
 static bool ValidateGObjects(uintptr_t addr) {
@@ -238,7 +247,7 @@ static bool ValidateGObjects(uintptr_t addr) {
         if (!Macht::ReadSafe(addr + P.numOff, num)) continue;
         if (!Macht::ReadSafe(addr + P.maxOff, max)) continue;
         if (num < 0x1000 || num > 0x400000) continue;
-        if (max < num || max > 0x800000) continue;
+        if (max < num || static_cast<uint32_t>(max) > kStrictMaxCeiling) continue;
 
         // Chunk consistency (if chunk offset fields are valid)
         if (P.maxCOff >= 0 && P.numCOff >= 0) {
@@ -284,63 +293,90 @@ static bool ValidateGObjects(uintptr_t addr) {
     // --- Tier 2: Relaxed fallback (prevents regression) ---
     // Only check NumElements range + Objects pointer validity.
     // isFlat: objPtr is FUObjectItem[] directly (no chunk indirection).
-    // maxOff mirrors the corresponding Tier 1 preset above (A/C<-Default, B<-Back4Blood,
-    // D<-UE4-Extended, E<-UE5-Extended, F<-UE5.8, Flat<-Flat). It feeds an upper-bound
-    // sanity check only — see kRelaxedMaxCeiling below.
-    struct { int numOff; int maxOff; int objOff; bool isFlat; const char* name; } relaxed[] = {
-        { 0x14, 0x10, 0x00, false, "A/C" },
-        { 0x04, 0x00, 0x10, false, "B"   },
-        { 0x1C, 0x18, 0x10, true,  "D-Flat" },  // flat twin of D — see "Flat-Base" above
-        { 0x1C, 0x18, 0x10, false, "D"   },
-        { 0x24, 0x20, 0x10, false, "E"   },    // UE5-Extended: GC prefix + PreAllocatedObjects
-        { 0x08, 0x0C, 0x00, false, "F"   },    // UE5.8: cache-locality reorder
-        { 0x0C, 0x08, 0x00, true,  "Flat" },   // FFixedUObjectArray: no chunks (OT / early UE4)
+    // maxOff/maxCOff/numCOff mirror the corresponding Tier 1 preset above (A/C<-Default,
+    // B<-Back4Blood, D<-UE4-Extended, E<-UE5-Extended, F<-UE5.8, Flat<-Flat). maxOff feeds
+    // an upper-bound sanity check only — see kRelaxedMaxCeiling below.
+    struct { int numOff; int maxOff; int objOff; int maxCOff; int numCOff; bool isFlat; const char* name; } relaxed[] = {
+        { 0x14, 0x10, 0x00, 0x18, 0x1C, false, "A/C" },
+        { 0x04, 0x00, 0x10, 0x08, 0x0C, false, "B"   },
+        { 0x1C, 0x18, 0x10,   -1,   -1, true,  "D-Flat" },  // flat twin of D — see "Flat-Base" above
+        { 0x1C, 0x18, 0x10, 0x20, 0x24, false, "D"   },
+        { 0x24, 0x20, 0x10, 0x28, 0x2C, false, "E"   },    // UE5-Extended: GC prefix + PreAllocatedObjects
+        { 0x08, 0x0C, 0x00, 0x14, 0x10, false, "F"   },    // UE5.8: cache-locality reorder
+        { 0x0C, 0x08, 0x00,   -1,   -1, true,  "Flat" },   // FFixedUObjectArray: no chunks (OT / early UE4)
     };
 
-    for (auto& L : relaxed) {
-        int32_t numElements = 0;
-        if (!Macht::ReadSafe(addr + L.numOff, numElements)) continue;
-        if (numElements < 0x1000 || numElements > 0x400000) continue;
+    // TWO relaxed passes, and the order between them is the point. Several rows read their
+    // Objects pointer from the SAME offset (B, D and E all use +0x10), so the pointer +
+    // cyclic-class-chain checks below cannot tell them apart — whichever row is listed first
+    // and has a plausible-looking count slot wins. On a UE5-Extended layout that is B, whose
+    // numOff (+0x04) lands on ObjLastNonGCIndex: a real, in-range, but FROZEN count of the
+    // startup disregard-for-GC set. The array is then enumerated only up to the CDOs and
+    // every runtime object is silently missing (DragonSword Awakening: 37,099 of 317,810).
+    //
+    // Pass 1 requires the row's CHUNK fields to be self-consistent — the same numC/maxC check
+    // Tier 1 applies, which is exactly what makes B reject on such a layout (its numCOff
+    // +0x0C is OpenForDisregardForGC, a bool that reads 0). Pass 2 is byte-identical to the
+    // historical behaviour, so nothing that resolves today can stop resolving: this only
+    // decides WHICH row wins when more than one would have.
+    for (int pass = 0; pass < 2; ++pass) {
+        const bool requireChunks = (pass == 0);
+        for (auto& L : relaxed) {
+            int32_t numElements = 0;
+            if (!Macht::ReadSafe(addr + L.numOff, numElements)) continue;
+            if (numElements < 0x1000 || numElements > 0x400000) continue;
 
-        // Upper-bound sanity check on the MaxElements slot. A heap blob whose "num" slot
-        // happens to fall in range is still betrayed by its "max" slot: MindsEye's
-        // ICU-like locale blob read max = 0x0DE62600 (233M) because that dword is really
-        // the low half of a module pointer. Deliberately WEAKER than Tier 1 (which uses
-        // `max < num || max > 0x800000`): we apply a loose ceiling only, and skip the
-        // check entirely if the read fails. A title that raises gc.MaxObjectsInGame past
-        // our strict cap — or whose max field is not where this row assumes — therefore
-        // still reaches the relaxed accept path exactly as it did before.
-        int32_t maxElements = 0;
-        if (Macht::ReadSafe(addr + L.maxOff, maxElements) &&
-            static_cast<uint32_t>(maxElements) > kRelaxedMaxCeiling) continue;
+            // Upper-bound sanity check on the MaxElements slot. A heap blob whose "num" slot
+            // happens to fall in range is still betrayed by its "max" slot: MindsEye's
+            // ICU-like locale blob read max = 0x0DE62600 (233M) because that dword is really
+            // the low half of a module pointer. Deliberately WEAKER than Tier 1 (which also
+            // rejects `max < num`): we apply a loose ceiling only, and skip the check entirely
+            // if the read fails. A title that raises gc.MaxObjectsInGame past our strict cap —
+            // or whose max field is not where this row assumes — therefore still reaches the
+            // relaxed accept path exactly as it did before.
+            int32_t maxElements = 0;
+            if (Macht::ReadSafe(addr + L.maxOff, maxElements) &&
+                static_cast<uint32_t>(maxElements) > kRelaxedMaxCeiling) continue;
 
-        uintptr_t objPtr = 0;
-        if (!Macht::ReadSafe(addr + L.objOff, objPtr)) continue;
-        objPtr = Aura::DecryptObjectPtr(objPtr);
-
-        if (L.isFlat) {
-            // Flat array: objPtr is FUObjectItem[] directly
-            if (!LooksLikeDataPtr(objPtr)) continue;
-            if (!ValidateCyclicClassChain(objPtr)) continue;
-        } else {
-            uintptr_t chunk0 = 0;
-            if (!Macht::ReadSafe(objPtr, chunk0)) continue;
-
-            if (chunk0 == 0) {
-                if (!LooksLikeDataPtr(objPtr)) continue;
-            } else {
-                if (!LooksLikeDataPtr(chunk0)) continue;
+            // Pass 1 only: chunk consistency, mirroring Tier 1. A row whose chunk slots are
+            // unreadable or structurally impossible (no chunks, or more live than allocated)
+            // is not describing this candidate's layout.
+            if (requireChunks && L.maxCOff >= 0 && L.numCOff >= 0) {
+                int32_t numC = 0, maxC = 0;
+                if (!Macht::ReadSafe(addr + L.numCOff, numC)) continue;
+                if (!Macht::ReadSafe(addr + L.maxCOff, maxC)) continue;
+                if (numC < 1 || maxC < 1 || numC > maxC) continue;
             }
 
-            // Cyclic class chain validation (GAP #10): verify actual UObject instances
-            uintptr_t validateBase = chunk0 ? chunk0 : objPtr;
-            if (!ValidateCyclicClassChain(validateBase)) continue;
-        }
+            uintptr_t objPtr = 0;
+            if (!Macht::ReadSafe(addr + L.objOff, objPtr)) continue;
+            objPtr = Aura::DecryptObjectPtr(objPtr);
 
-        Sein::Info("SCAN:GObj", "ValidateGObjects: Valid at 0x%llX (relaxed %s, Num=%d, Objects=0x%llX%s)",
-                 static_cast<unsigned long long>(addr), L.name, numElements,
-                 static_cast<unsigned long long>(objPtr), L.isFlat ? " [flat]" : "");
-        return true;
+            if (L.isFlat) {
+                // Flat array: objPtr is FUObjectItem[] directly
+                if (!LooksLikeDataPtr(objPtr)) continue;
+                if (!ValidateCyclicClassChain(objPtr)) continue;
+            } else {
+                uintptr_t chunk0 = 0;
+                if (!Macht::ReadSafe(objPtr, chunk0)) continue;
+
+                if (chunk0 == 0) {
+                    if (!LooksLikeDataPtr(objPtr)) continue;
+                } else {
+                    if (!LooksLikeDataPtr(chunk0)) continue;
+                }
+
+                // Cyclic class chain validation (GAP #10): verify actual UObject instances
+                uintptr_t validateBase = chunk0 ? chunk0 : objPtr;
+                if (!ValidateCyclicClassChain(validateBase)) continue;
+            }
+
+            Sein::Info("SCAN:GObj", "ValidateGObjects: Valid at 0x%llX (relaxed %s%s, Num=%d, Objects=0x%llX%s)",
+                     static_cast<unsigned long long>(addr), L.name,
+                     requireChunks ? "" : " no-chunk-check", numElements,
+                     static_cast<unsigned long long>(objPtr), L.isFlat ? " [flat]" : "");
+            return true;
+        }
     }
 
     // Log failure with diagnostic info (throttled — data scan can produce 20K+ failures)

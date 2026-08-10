@@ -282,6 +282,19 @@ struct LayoutPreset {
     ItemHint    itemHint;   // {0, 0} = none
 };
 
+// Upper bound on MaxElements. MaxElements is MaxChunks * elements-per-chunk, so it tracks
+// the title's gc.MaxObjectsInGame ceiling, NOT its live object count — generous
+// preallocation is normal, not corruption. This was 0x800000 (8,388,608) and DragonSword
+// Awakening (UE 5.3) rejected the CORRECT preset on it: MaxChunks=161, elements-per-chunk
+// 65536 -> MaxElements = 10,551,296. Every strict preset then failed and the relaxed tier
+// latched Layout B, whose numElementsOffset 0x04 is ObjLastNonGCIndex — a FROZEN count of
+// the startup disregard-for-GC set (37,099) instead of the live NumElements (317,810 and
+// climbing). GetCount() then reported 37,099 forever, so every GObjects walk — Value
+// Search, Instances, Property Search, snapshots — saw only startup CDOs and not one
+// runtime object. Raised to 33.5M: still far below the values seen when this slot actually
+// holds half of a pointer (MindsEye: 233M), which is what the bound exists to reject.
+static constexpr int32_t kMaxElementsCeiling = 0x2000000;  // 33,554,432
+
 // All known chunked layouts. Order: default first, then game-specific.
 static const LayoutPreset s_chunkedPresets[] = {
     { "Default",     { 0x00, 0x10, 0x14, 0x18, 0x1C } },  // UE4.21+ and UE5 standard
@@ -388,7 +401,7 @@ static bool ValidateChunkedLayout(uintptr_t addr, const ArrayLayout& layout) {
 
     // --- Range checks ---
     if (numElements < 0x1000 || numElements > 0x400000) return false;
-    if (maxElements < numElements || maxElements > 0x800000) return false;
+    if (maxElements < numElements || maxElements > kMaxElementsCeiling) return false;
 
     // Objects pointer must be a valid heap pointer
     if (!LooksLikeHeapPtr(objPtr)) return false;
@@ -516,10 +529,26 @@ static bool DetectLayout(uintptr_t addr) {
     }
 
     // Layout B (flat/alt): Objects@+0x10, Num@+0x04
+    //
+    // GUARDED, because B and E read their Objects pointer from the SAME offset (+0x10) and
+    // B is tried first: the heap-pointer check below cannot tell them apart, so on a
+    // UE5-Extended array B wins and reads NumElements out of +0x04 — which there is
+    // ObjLastNonGCIndex, a real but FROZEN count of the startup disregard-for-GC set. The
+    // array is then enumerated only up to the CDOs (DragonSword Awakening: 37,099 of
+    // 317,810 objects) and no runtime object is ever visible to any scan.
+    //
+    // The discriminator is B's own chunk counts (Tier 1 "Back4Blood": MaxChunks@+0x08,
+    // NumChunks@+0x0C). On a genuine B layout those are live chunk counts; on a
+    // UE5-Extended layout +0x0C is OpenForDisregardForGC, a bool that reads 0 once startup
+    // is done, so `numChunks >= 1` rejects the row. Deliberately NOT a reorder: putting E
+    // first would let E's +0x20/+0x24 reads steal a real B layout instead.
     {
-        int32_t num = 0;
+        int32_t num = 0, maxChunks = 0, numChunks = 0;
         Macht::ReadSafe(addr + 0x04, num);
-        if (num > 0 && num <= 0x800000) {
+        Macht::ReadSafe(addr + 0x08, maxChunks);
+        Macht::ReadSafe(addr + 0x0C, numChunks);
+        const bool chunksPlausible = (numChunks >= 1 && maxChunks >= 1 && numChunks <= maxChunks);
+        if (num > 0 && num <= 0x800000 && chunksPlausible) {
             uintptr_t objPtr = 0;
             Macht::ReadSafe(addr + 0x10, objPtr);
             objPtr = DecryptObjectPtr(objPtr);
@@ -537,7 +566,7 @@ static bool DetectLayout(uintptr_t addr) {
         int32_t num = 0, max = 0;
         Macht::ReadSafe(addr + 0x1C, num);
         Macht::ReadSafe(addr + 0x18, max);
-        if (num > 0 && num <= max && max <= 0x800000) {
+        if (num > 0 && num <= max && max <= kMaxElementsCeiling) {
             uintptr_t objPtr = 0;
             Macht::ReadSafe(addr + 0x10, objPtr);
             objPtr = DecryptObjectPtr(objPtr);
@@ -556,7 +585,7 @@ static bool DetectLayout(uintptr_t addr) {
         int32_t num = 0, max = 0;
         Macht::ReadSafe(addr + 0x24, num);
         Macht::ReadSafe(addr + 0x20, max);
-        if (num > 0 && num <= max && max <= 0x800000) {
+        if (num > 0 && num <= max && max <= kMaxElementsCeiling) {
             uintptr_t objPtr = 0;
             Macht::ReadSafe(addr + 0x10, objPtr);
             objPtr = DecryptObjectPtr(objPtr);

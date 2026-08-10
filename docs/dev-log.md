@@ -22,6 +22,65 @@ builds ≤696 in
 
 -----
 
+## 2026-08-10 - A generous `gc.MaxObjectsInGame` made us enumerate 11.7% of GObjects and call it a full scan (build 2782)
+
+Reported as "Value Search can't find a Native-C value": a live `DsClientLocalPlayer` field at
+`+0xAC0` = 9338 was visible in Live Walker's Guess-What but no scan would return it. Native-C was
+not at fault, and neither was any scan — **the object was never enumerated**, and neither was any
+other runtime object in the process.
+
+`find_by_address` settled it in one call: the live object resolved `index: -1, match_kind:
+"backward"` (recovered by walking back to a UObject header) while its CDO resolved `index: 36968,
+match_kind: "exact"`. Every instance any tool could find was a `Default__*`. `get_object_count`
+returned **37,099** — the same 37,099 it returned 78 minutes and one map earlier. A live
+`FUObjectArray` never holds still; that number was not a count of anything current.
+
+Reading the array header confirmed it. `NumElements` (+0x24) was **317,810** and climbing (260,799
+at scan time, `NumChunks` 4 → 5); 37,099 is **`ObjLastNonGCIndex`** (+0x04) — the frozen high-water
+mark of the startup disregard-for-GC set, which is precisely why everything enumerated was a CDO or
+a startup asset.
+
+**Two defects, stacked, either one alone sufficient to cause it.**
+
+1. **The MaxElements sanity cap was a live-object-count intuition applied to a capacity field.**
+   `maxElements > 0x800000` (8,388,608) rejected the *correct* preset, because MaxElements is
+   `MaxChunks * 64K` and tracks the title's `gc.MaxObjectsInGame` ceiling, not its population:
+   161 chunks → **10,551,296**. Every strict preset then failed and both validators fell to their
+   relaxed tier. Raised to 33.5M (`kMaxElementsCeiling` / `kStrictMaxCeiling`), still an order of
+   magnitude under the 233M that MindsEye's pointer-half produced — which is what the bound is for.
+2. **In the relaxed tier, row B and row E are indistinguishable on the only structural check.**
+   Both read Objects from **+0x10**, so the pointer + cyclic-class-chain checks cannot separate
+   them, and B is listed first. On a UE5-Extended array B's `numOff` (+0x04) lands on
+   `ObjLastNonGCIndex` — in range, plausible, and wrong forever. The discriminator is B's own chunk
+   counts (`MaxChunks@+0x08` / `NumChunks@+0x0C`): real on a genuine B layout, but on UE5-Extended
+   +0x0C is `OpenForDisregardForGC`, a bool reading 0 once startup finishes. `Genau` now runs the
+   relaxed table in two passes (chunk-consistent first, then the historical pass verbatim);
+   `Aura`'s hand-written B block gained the same guard.
+
+Both fixes are strictly **widening or re-ordering** — nothing that resolves today stops resolving.
+Deliberately *not* a reorder of B and E: putting E first would let E's +0x20/+0x24 reads steal a
+real Back4Blood layout, trading one silent misread for another.
+
+**The shape worth remembering:** a validator that rejects the right answer does not fail loudly —
+it falls through to a wrong answer that looks healthy. `relaxed B, Num=37099` was logged as a
+success and copied into [test-games.md](test-games.md) as a normal result. The tell was never in
+the validation log; it was that a live counter never moved.
+
+**Verified in-game the same day (build 2786).** `ValidateGObjects: Valid at 0x7FF62529F8C0 (preset
+Default, Num=266614, Max=10551296, …)` + `Layout 'Default' detected (strict, preset 1/5)` — the
+**strict** tier accepting `Max=10551296` is impossible under the old 8.4M cap, so that line alone
+proves the ceiling fix. Live count **266,614 at init → 274,900** later in the session, and the
+original repro returns `DsClientLocalPlayer.<raw@0xAC0>` = 9338.
+
+One honest gap, recorded in [todo.md](todo.md): that run resolved the **`ObjObjects`** anchor
+(`GOBJ_V13` → `…F8C0`), not the `FUObjectArray` **base** (`GOBJ_ES53_1` → `…F8B0`) the broken run
+used — and at the ObjObjects anchor even the old relaxed `A/C` row reads the right `NumElements`.
+So defect 1 is proven and defect 2 is verified only by construction. That the same binary, at the
+same module base, resolves a different pattern and a different anchor between two runs is itself
+worth knowing: which preset row has to be correct is not a fixed property of a title.
+
+-----
+
 ## 2026-08-10 - Proxy deploy stopped refusing the proxy it recommends, and stopped hiding why it failed (build 2779)
 
 A newly-installed game (DragonSword Awakening) reported `Deployed: 0 success, 1 failed` with a row

@@ -1340,6 +1340,27 @@ deliberately NOT fixed in it: each needs a product decision, not a mechanical ch
 
 ## Pending live-game verification (verify only — no code)
 
+### 🟡 PARTIAL 2026-08-10 — GObjects layout fix (build 2782), DragonSword Awakening
+
+**Verified in-game on build 2786, same day** — see [test-games.md](test-games.md) for the log lines
+and numbers. Strict tier accepted `preset Default` with `Max=10551296` (impossible under the old
+8.4 M cap, so the ceiling fix is directly proven); live `NumElements` **266 614 → 274 900** within
+one session; the original repro (`DsClientLocalPlayer.<raw@0xAC0>` = 9338, Native-C) now returns.
+
+**What is still unverified**, and why it is not just pedantry: that run resolved the `ObjObjects`
+anchor (`GOBJ_V13` → `0x7FF62529F8C0`), where even the OLD relaxed `A/C` row reads the correct
+`NumElements`. The second half of the fix — **relaxed row B stealing a row-E layout at the
+`FUObjectArray` base anchor** — was therefore never exercised. The winning pattern/anchor is not
+stable across runs on this title (build 2780 got the base via `GOBJ_ES53_1`), so a later session
+can still land there.
+
+- ⬜ On any future DragonSword session that logs GObjects at a base anchor (address ending `…F8B0`
+  rather than `…F8C0`), confirm the preset line reads **`UE5-Extended`**, not `relaxed B`.
+- ⬜ Regression watch across the other tested titles, since the relaxed tier gained a
+  chunk-consistent first pass: confirm nothing that resolved before now logs
+  `Could not detect layout, using default`. Relaxed pass 2 is byte-identical to the old
+  behaviour, so this should be a formality.
+
 ### 🔴 NEW 2026-08-05 — two defects the DumperTest sample found on its first real use
 
 **D3 — `FUObjectItem` stride detected as HALF its real size on a Development build.** Effort **M** ·
