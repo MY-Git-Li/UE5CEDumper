@@ -39,8 +39,6 @@ public sealed class InvokeFunctionResult
 /// game's) allocates the char buffer, patches the struct at <see cref="Offset"/>,
 /// runs ProcessEvent, then frees it. The UI leaves those 16 bytes zeroed in
 /// <c>params_hex</c> and sends this descriptor instead.
-/// 字串輸入參數：FString 以傳值傳遞（16-byte 結構），其 Data 指標必須是「遊戲行程」
-/// 內的有效位址，UI 無法自行配置；故改由 DLL 端建立。UI 只送此描述子。
 /// </summary>
 /// <param name="Offset">Byte offset of the FString slot within the params buffer.</param>
 /// <param name="Wide">True for UTF-16 <c>FString</c>; false for byte

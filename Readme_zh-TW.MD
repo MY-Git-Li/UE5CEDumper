@@ -57,11 +57,15 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 | **4.21 – 4.24** | ✅ | ✅ | ✅ | 《STAR WARS 絕地：組織殞落™》, 勇者鬥惡龍 XI S, 偶像大師 星耀季節, 八方旅人, 勇者鬥惡龍 I&II / III HD-2D 重製版 |
 | **4.25 – 4.27** | ✅ | ✅ | ✅ | Final Fantasy VII Rebirth, 劍星 (Stellar Blade), Tower of Mask, 霍格華茲的傳承, 復活邪神 2 七英雄的復仇, Ghostwire: Tokyo, TimeSplitters Rewind, The Artisan of Glimmith, Barn Finders, 機動戰士 GUNDAM SEED 激鬥命運 復刻版, 女神異聞錄３ Reload (Persona 3 Reload) |
 | **5.0 – 5.2** | ✅ | ✅ | ✅ | Squirrel With A Gun, Caravan Sandwitch, Meltopia, Retro Rewind Demo |
-| **5.3 – 5.4** | ✅ | ✅ | ✅ | Satisfactory (v1.1.3.1 滿意工廠), Colossal, Avowed, 艾恩葛朗特 迴盪新聲 Demo (Echoes of Aincrad), 冒險家艾略特的千年奇譚 (The Adventures of Elliot), MindsEye |
+| **5.3 – 5.4** | ✅ | ✅ | ✅ | Satisfactory (v1.1.3.1 滿意工廠), Colossal, Avowed, 艾恩葛朗特 迴盪新聲 Demo (Echoes of Aincrad), 冒險家艾略特的千年奇譚 (The Adventures of Elliot), MindsEye, DragonSword Awakening‡ |
 | **5.5 – 5.7** | ✅ | ✅* | ✅** | 泰坦任務 2, EverSpace 2, Lushfoil Photography Sim, 莊園領主 (Manor Lords), Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT: CARRIER QUALIFICATION Demo, Solarpunk (太陽龐克), Pionero Capital Demo, Satisfactory (滿意工廠 v1.2.3.1), Star Trek Voyager – Across the Unknown |
 
 *\*GNames 在 5.5+ 版本使用 .data 指標掃描回退機制。*
 *\**DynOff 支援 **CasePreservingName (FName = 16 bytes)** 佈局。
+*‡ 需使用 **`dxgi.dll`** proxy，預設的 `version.dll` 不行 —— 該遊戲的 .exe 從未以名稱請求 `version.dll`，
+所以那個 proxy 根本不會被載入，且**完全不產生 log**。若遊戲已啟動卻沒有在
+`%LOCALAPPDATA%\UE5CEDumper\Logs\` 下產生對應資料夾，就是這個症狀：換一種 proxy 類型即可。
+詳見 [docs/test-games.md](docs/test-games.md)。*
 *†4.23 以前沒有 `FNamePool`，GNames 是 `FName::GetNames` 延遲配置的 `TNameEntryArray`；sparse delegate 也完全
 不存在（4.23 才引入）。**UE 4.11 是支援下限**：4.10 以下沒有 `FUObjectItem`，且採用掃描器無法表達的 inline chunk
 table，因此會直接顯示為不支援，而不是讓它以難以理解的方式失敗。*

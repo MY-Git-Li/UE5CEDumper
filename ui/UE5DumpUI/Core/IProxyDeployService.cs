@@ -67,6 +67,13 @@ public interface IProxyDeployService
     /// selected type, flags a redundancy warning via ErrorMessage only when
     /// 2+ of our proxy DLLs actually coexist in the same folder (only one
     /// activates at runtime).
+    ///
+    /// <para><paramref name="preserveBinariesDirs"/> names games whose current
+    /// Status/ErrorMessage the CALLER owns and this refresh must not touch. Pass the
+    /// games an operation just failed on when the refresh is that operation's own tail:
+    /// the disk state of a failed deploy is "file absent", which this method honestly
+    /// reports as <c>NotDeployed</c> with no message — erasing the failure and its reason.
+    /// Leave it null for a standalone Refresh, where recomputing everything is correct.</para>
     /// </summary>
     /// <remarks>
     /// THREADING: every method on this interface that writes a <see cref="DetectedGame"/>
@@ -79,6 +86,7 @@ public interface IProxyDeployService
     /// </remarks>
     Task RefreshDeployStatusAsync(
         IList<DetectedGame> games, string sourceDllPath, ProxyType proxyType,
+        IReadOnlySet<string>? preserveBinariesDirs = null,
         CancellationToken ct = default);
 
     /// <summary>

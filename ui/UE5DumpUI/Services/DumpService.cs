@@ -2869,7 +2869,7 @@ public sealed class DumpService : IDumpService
         // String INPUT params: sent as descriptors so the DLL builds each
         // by-value FString in the game process (its Data pointer must be a
         // valid game-process address; the 16-byte slots stay zeroed in
-        // params_hex). 字串輸入參數改由 DLL 端在遊戲行程建立傳值 FString。
+        // params_hex).
         if (stringParams is { Count: > 0 })
         {
             var arr = new JsonArray();

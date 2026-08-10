@@ -590,7 +590,7 @@ public sealed class InvokeParamDialog : Window
             // Build param hex from input fields (struct-aware). String params are
             // NOT written here — an FString's Data pointer must live in the game
             // process, so the DLL builds them from these descriptors and patches
-            // the (zeroed) 16-byte slots. 字串參數改由 DLL 端建立傳值 FString。
+            // the (zeroed) 16-byte slots.
             string? paramsHex = null;
             var stringParams = new List<InvokeStringParam>();
             if (_inputParams.Count > 0 && _parmsSize > 0)
@@ -616,8 +616,6 @@ public sealed class InvokeParamDialog : Window
                         // else the callee's reassignment would free our non-FMemory
                         // Data buffer and crash. Leaving the 16-byte slot zeroed is
                         // the correct empty FString for an out param.
-                        // 只建立「輸入」字串；OUT FString 需保持為空結構，否則被呼叫端
-                        // 重新指派時會 free 我方非 FMemory 的 buffer 而崩潰。
                         if (!param.IsOut)
                         {
                             stringParams.Add(new InvokeStringParam(
@@ -958,7 +956,7 @@ public sealed class InvokeParamDialog : Window
                 // OUT string params must stay a zeroed/empty FString (the callee
                 // fills them). Baking one would make the helper build an FString
                 // the callee then FMemory::Free's -> crash. Skip so the slot
-                // stays zeroed. OUT 字串參數需保持為空 FString，跳過以免崩潰。
+                // stays zeroed. An OUT FString must stay an empty struct.
                 if (ParamBufferBuilder.IsStringType(p.TypeName) && p.IsOut)
                     continue;
 

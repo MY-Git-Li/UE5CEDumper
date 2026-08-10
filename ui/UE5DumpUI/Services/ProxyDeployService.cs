@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using Microsoft.Win32;
@@ -788,8 +788,23 @@ public sealed class ProxyDeployService : IProxyDeployService
         if (u.SetErrorMessage)     u.Game.ErrorMessage     = u.ErrorMessage;
     }
 
+    /// <summary>
+    /// Should this game's freshly-computed disk state be applied, or does the caller own its
+    /// current Status/ErrorMessage? Pure so the rule is unit-testable without file IO.
+    ///
+    /// <para>Exists because a refresh run as the TAIL OF AN OPERATION would otherwise erase
+    /// that operation's own result. The disk state of a failed deploy is "file absent", which
+    /// <see cref="ClassifyAbsentSelected"/> honestly reports as <c>(NotDeployed, null)</c> —
+    /// overwriting both the failure status and the reason, and leaving the user a row that
+    /// says NotDeployed with a blank Error next to a banner reading "1 failed". The reason
+    /// then existed only in the log.</para>
+    /// </summary>
+    internal static bool ShouldApplyRefresh(string binariesDir, IReadOnlySet<string>? preserve)
+        => preserve == null || !preserve.Contains(binariesDir);
+
     public async Task RefreshDeployStatusAsync(
         IList<DetectedGame> games, string sourceDllPath, ProxyType proxyType,
+        IReadOnlySet<string>? preserveBinariesDirs = null,
         CancellationToken ct = default)
     {
         // Snapshot so the worker never enumerates a collection the UI thread can mutate.
@@ -877,8 +892,11 @@ public sealed class ProxyDeployService : IProxyDeployService
             return results;
         }, ct);
 
-        // Back on the caller's thread — see the threading contract above.
-        foreach (var u in updates) ApplyStatus(u);
+        // Back on the caller's thread — see the threading contract above. Games the caller
+        // reserved keep the status/message its own operation just wrote.
+        foreach (var u in updates)
+            if (ShouldApplyRefresh(u.Game.BinariesDir, preserveBinariesDirs))
+                ApplyStatus(u);
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -893,33 +911,6 @@ public sealed class ProxyDeployService : IProxyDeployService
             try
             {
                 string targetDll = Path.Combine(game.BinariesDir, proxyType.GetDllName());
-
-                // A proxy can only load if something in the process actually NAMES that DLL.
-                // Drop one into a folder whose binaries never import it and the deploy "succeeds",
-                // the file sits there forever, and the DLL never runs — leaving ZERO log, which
-                // reads exactly like "nothing happened". Octopath Traveler is the worked example:
-                // its exe imports winmm.dll and dxgi.dll but NOT version.dll, and a version.dll
-                // proxy there cost a debugging round before anyone thought to check the import
-                // table.
-                //
-                // Refused rather than warned, because the failure is silent and total. `force`
-                // overrides it — the import scan can legitimately come up empty (a modular build's
-                // stub exe, an unreadable file), and ReadProxyImports already folds the sibling
-                // *-Win64-Shipping.dll modules in for exactly that case. A null result means
-                // "could not tell", never "not imported", so it must not block.
-                if (!force)
-                {
-                    var imports = ReadProxyImports(game.ExePath);
-                    if (imports is ProxyImportAnalyzer.ProxyImportInfo info
-                        && !info.ImportsNone && !info.Imports(proxyType))
-                    {
-                        string msg = $"{proxyType.GetDllName()} is not imported by this game — "
-                                   + "it would never load. Try the Suggested column.";
-                        _log.Warn("ProxyDeploy", $"Refused {proxyType.GetDllName()} for {game.Name}: not in its import table");
-                        return (false, new GameStatusUpdate(game, ProxyDeployStatus.ErrorOther,
-                            ErrorMessage: msg, SetInstalledVersion: false));
-                    }
-                }
 
                 // Refuse to overwrite another program's proxy DLL
                 if (File.Exists(targetDll) && !IsOurProxyDll(targetDll) && !force)
@@ -942,10 +933,32 @@ public sealed class ProxyDeployService : IProxyDeployService
                     }
                 }
 
+                // A proxy can only load if something in the process actually NAMES that DLL —
+                // but "names it" includes a RUN-TIME LoadLibrary, not just the import table.
+                // This is therefore an ADVISORY and never a refusal; the measurement that
+                // settled it is in ProxyImportAnalyzer.LoadsDynamically (11 of 21 local games
+                // run a working version.dll proxy with no static import, DQ7R self-confirmed).
+                //
+                // A refusal used to live here and cost real deploys: it rejected version.dll —
+                // the broadest-compatible flavour and the one the Suggested column recommends —
+                // on every game that loads it dynamically, which is most of them.
+                //
+                // What survives is the reason the check was written: when a proxy genuinely
+                // cannot load it fails SILENTLY and TOTALLY (zero log, reads exactly like
+                // "nothing happened"). So the risk rides along with the successful deploy as a
+                // note instead of being turned into a wall. A null parse result means "could
+                // not tell" and yields no note. Computed HERE, past the early returns, so the
+                // paths that deploy nothing do not pay a PE parse.
+                string? riskNote = ProxyImportAnalyzer.DescribeLoadRisk(
+                    ReadProxyImports(game.ExePath), proxyType);
+
                 File.Copy(sourceDllPath, targetDll, overwrite: true);
                 _log.Info("ProxyDeploy", $"Deployed {proxyType.GetDisplayName()} to {game.Name}: {targetDll}");
+                if (riskNote != null)
+                    _log.Warn("ProxyDeploy",
+                        $"{proxyType.GetDllName()} for {game.Name} is not in its import table — may not load");
                 return (true, new GameStatusUpdate(game, ProxyDeployStatus.DeployedCurrent,
-                    InstalledVersion: GetDllVersion(targetDll)));
+                    InstalledVersion: GetDllVersion(targetDll), ErrorMessage: riskNote));
             }
             catch (IOException ex) when (ex.HResult == unchecked((int)0x80070020) /* SHARING_VIOLATION */
                                       || ex.Message.Contains("being used", StringComparison.OrdinalIgnoreCase))

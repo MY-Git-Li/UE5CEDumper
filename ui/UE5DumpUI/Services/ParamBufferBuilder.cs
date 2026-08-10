@@ -46,8 +46,6 @@ public static class ParamBufferBuilder
             "BoolProperty" => "0",
             // String types start empty (a text value, not a number). Used by the
             // baked-script path via the dialog; the CE Lua builds the FString.
-            // 字串型別預設為空（文字而非數字）。透過對話框走 baked-script 路徑時使用，
-            // 由 CE Lua 建立 FString。
             "StrProperty" or "Utf8StrProperty" or "AnsiStrProperty" => "",
             "NameProperty" or "ObjectProperty" or "ClassProperty"
                 or "SoftObjectProperty" or "SoftClassProperty"
@@ -80,7 +78,6 @@ public static class ParamBufferBuilder
     /// True for UE string property types (FString / FUtf8String / FAnsiString).
     /// These can't be written as scalars into the params hex — the DLL builds
     /// the by-value FString (see <see cref="Models.InvokeStringParam"/>).
-    /// UE 字串型別；無法以純量寫入 params hex，改由 DLL 建立傳值 FString。
     /// </summary>
     public static bool IsStringType(string typeName) =>
         typeName is "StrProperty" or "Utf8StrProperty" or "AnsiStrProperty";

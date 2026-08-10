@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.IO;
 using UE5DumpUI.Models;
 
@@ -9,18 +9,20 @@ namespace UE5DumpUI.Services;
 /// which of our proxy DLLs can actually be loaded by that process, and to build
 /// a per-game proxy suggestion for the Proxy Deploy panel.
 ///
-/// WHY imports, not history: which proxy WORKS is largely gated by which system
-/// DLL the .exe pulls in. <c>dxgi.dll</c> and <c>dinput8.dll</c> are STATIC
-/// imports — an .exe that never imports <c>dinput8.dll</c> will never load a
-/// <c>dinput8.dll</c> proxy, so suggesting it is pointless. <c>version.dll</c> is
-/// the deliberate exception: it is loaded DYNAMICALLY by virtually every process
-/// (GetFileVersionInfo / COM / manifest parsing) and so is almost never a static
-/// import — therefore its absence from the import table says NOTHING about
-/// whether the version.dll proxy works, and it stays the safe universal default.
-/// We deliberately do NOT auto-escalate to dxgi merely because version isn't a
-/// static import (that pattern matches nearly every D3D game and would push dxgi
-/// into games where it destabilises them, e.g. Octopath). Import parsing here
-/// only reports VIABILITY (dxgi/dinput8 importable) as advisory context.
+/// WHAT AN IMPORT PROVES, AND WHAT IT DOES NOT. A name in the import table proves
+/// the proxy WILL load: the loader resolves it from the .exe directory at process
+/// start. Its ABSENCE proves nothing, because a run-time <c>LoadLibrary</c> searches
+/// that same directory — and for <c>version.dll</c> that is the normal case, not the
+/// exception (GetFileVersionInfo / COM / manifest parsing pull it in later). So
+/// <c>version.dll</c> stays the safe universal default no matter what the table says;
+/// <see cref="LoadsDynamically"/> holds the measurement that settles it.
+///
+/// We deliberately do NOT auto-escalate to dxgi merely because version isn't a static
+/// import: that pattern matches nearly every D3D game (21 of 21 measured), and dxgi is
+/// imported early enough that some games call it before the CRT is initialised —
+/// Octopath Traveler instant-exits under the dxgi proxy. Escalating on that signal
+/// would trade a working default for a crash. Import parsing here only reports
+/// VIABILITY (dxgi/dinput8 importable) as advisory context.
 ///
 /// The parser is pure (operates on a seekable <see cref="Stream"/>) so it is unit
 /// testable against a synthetic PE with no live file. All OS file access lives in
@@ -39,10 +41,20 @@ internal static class ProxyImportAnalyzer
         /// a game no proxy can reach. See <see cref="Merge"/>.</summary>
         public bool ImportsNone => !ImportsVersion && !ImportsDinput8 && !ImportsDxgi && !ImportsWinmm;
 
-        /// <summary>Does this PE import the DLL a given proxy flavour hijacks? A proxy dropped
-        /// into a folder whose binaries never name it can NEVER load, and leaves no log at all —
-        /// indistinguishable from "nothing happened". Octopath Traveler is the worked example:
-        /// it imports winmm and dxgi but NOT version.dll.</summary>
+        /// <summary>Does this PE STATICALLY (or delay-) import the DLL a given proxy flavour
+        /// hijacks? True means the proxy is GUARANTEED to load — the loader resolves the name
+        /// from the .exe directory at process start.
+        ///
+        /// <para>False does NOT mean the opposite: a run-time <c>LoadLibrary</c> reaches the
+        /// same directory. Do not turn a false here into a refusal — see
+        /// <see cref="LoadsDynamically"/> for the measurement, and
+        /// <see cref="DescribeLoadRisk"/> for the only case still worth reporting.</para>
+        ///
+        /// <para>The example that used to sit here — "Octopath Traveler imports winmm and dxgi
+        /// but NOT version.dll" — is FALSE and was load-bearing for a bug. Its .exe import
+        /// directory names WINMM.dll, dxgi.dll <b>and VERSION.dll</b>. Octopath's real quirk is
+        /// unrelated: it instant-exits under the <i>dxgi</i> proxy, because dxgi is imported so
+        /// early that the game calls it before the CRT is initialised.</para></summary>
         public bool Imports(ProxyType type) => type switch
         {
             ProxyType.Version => ImportsVersion,
@@ -244,6 +256,95 @@ internal static class ProxyImportAnalyzer
         var parts = new List<string>(2);
         if (i.ImportsDxgi) parts.Add("dxgi");
         if (i.ImportsDinput8) parts.Add("dinput8");
+        return string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// Is this proxy flavour loaded DYNAMICALLY often enough that its ABSENCE from the
+    /// import table proves nothing about whether the proxy works?
+    ///
+    /// <para>MEASURED, not assumed — 21 Steam UE games on the maintainer's machine,
+    /// 2026-08-10: <b>11 of them run a working <c>version.dll</c> proxy whose .exe names
+    /// version.dll in NEITHER the import nor the delay-import directory</b> (DQ7R, P3R,
+    /// Stray, Palworld, Manor Lords, Ghostwire Tokyo, both DQ HD-2D remakes, Lushfoil,
+    /// Arms of God, The Artisan of Glimmith). DQ7R is the strongest case: the DLL itself
+    /// reported the proxy load, which is what drives the "confirmed working" suggestion.</para>
+    ///
+    /// <para>The mechanism: <c>version.dll</c> and <c>dinput8.dll</c> are pulled in at RUN
+    /// TIME (GetFileVersionInfo / COM / manifest parsing; DirectInput device enumeration),
+    /// and <c>LoadLibrary</c>'s default search order reaches the .exe directory before
+    /// System32. None of our four names is a KnownDLL — verified against
+    /// <c>HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs</c>, which is the
+    /// one thing that WOULD make exe-directory proxying impossible — so the exe-directory
+    /// copy wins the search.</para>
+    ///
+    /// <para><b>Evidence is asymmetric, and the code should not pretend otherwise.</b> The 11
+    /// games above all concern <c>version.dll</c>; <c>dinput8.dll</c> is grouped with it on the
+    /// MECHANISM (middleware reaches DirectInput through a run-time
+    /// <c>LoadLibrary("dinput8.dll")</c> + <c>GetProcAddress</c>, which is why mod loaders ship
+    /// that name) and has no local measurement — only 1 of the 21 games imports it and none has
+    /// a dinput8 proxy deployed. The grouping is safe because being in this set only suppresses
+    /// a WARNING; nothing here can block a deploy either way.</para>
+    ///
+    /// <para><c>dxgi.dll</c> / <c>winmm.dll</c> are the other shape: pure static-import hijacks
+    /// a game that never names them genuinely cannot load. That is worth SAYING, never worth
+    /// blocking on — see <see cref="DescribeLoadRisk"/>.</para>
+    /// </summary>
+    public static bool LoadsDynamically(ProxyType type)
+        => type is ProxyType.Version or ProxyType.Dinput8;
+
+    /// <summary>
+    /// Advisory note for deploying <paramref name="type"/> into a game with the given parsed
+    /// <paramref name="imports"/>, or <c>null</c> when there is nothing honest to say.
+    ///
+    /// <para><b>This never blocks a deploy, and that is a deliberate reversal.</b> A hard
+    /// refusal used to live in <c>ProxyDeployService.DeployAsync</c> on the premise that a
+    /// proxy absent from the import table "would never load". It was built on a misreading —
+    /// its worked example, Octopath Traveler, DOES import VERSION.dll (verified in its PE
+    /// import directory alongside WINMM.dll and dxgi.dll) — and it is falsified by the 11
+    /// games cited in <see cref="LoadsDynamically"/>. Its effect was to turn the most
+    /// broadly-compatible proxy into a hard failure on exactly the games that need it.</para>
+    ///
+    /// <para>What survives is the real lesson: when a proxy genuinely cannot load, it fails
+    /// SILENTLY and TOTALLY — no log at all, indistinguishable from "nothing happened". So
+    /// the case is still surfaced, as a note the user can act on rather than a wall.</para>
+    /// </summary>
+    public static string? DescribeLoadRisk(ProxyImportInfo? imports, ProxyType type)
+    {
+        // Unparseable PE → no claim to make.
+        if (imports is not ProxyImportInfo info) return null;
+
+        // A stub .exe naming none of the four is a MODULAR build whose real modules were
+        // already folded in by Merge. "Names nothing" there means "cannot tell", not "no".
+        if (info.ImportsNone) return null;
+
+        // Statically imported → the loader resolves it from the .exe directory at process
+        // start. Guaranteed; nothing to say.
+        if (info.Imports(type)) return null;
+
+        // Loaded dynamically by virtually every process — the normal, working case for
+        // 11 of 21 measured games. Warning here would cry wolf on the default pick.
+        if (LoadsDynamically(type)) return null;
+
+        string alt = DescribeAlternatives(info, type);
+        string tail = alt.Length > 0 ? $" Try {alt} instead." : "";
+        return $"{type.GetDllName()} is not in this game's import table — it may never load "
+             + $"(the symptom is no log at all).{tail}";
+    }
+
+    /// <summary>The flavours OTHER than <paramref name="exclude"/> worth suggesting: the ones
+    /// this .exe actually names (guaranteed to load), plus <c>version</c>, which loads
+    /// dynamically nearly everywhere and is the broadest-compatible fallback. Extension
+    /// trimmed to match <see cref="DescribeImportable"/>.</summary>
+    private static string DescribeAlternatives(ProxyImportInfo imports, ProxyType exclude)
+    {
+        var parts = new List<string>(4);
+        foreach (var t in new[] { ProxyType.Version, ProxyType.Dinput8, ProxyType.Dxgi, ProxyType.Winmm })
+        {
+            if (t == exclude) continue;
+            if (imports.Imports(t) || t == ProxyType.Version)
+                parts.Add(t.GetDllName().Replace(".dll", "", StringComparison.OrdinalIgnoreCase));
+        }
         return string.Join(", ", parts);
     }
 

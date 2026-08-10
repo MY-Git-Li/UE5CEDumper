@@ -22,6 +22,69 @@ builds ≤696 in
 
 -----
 
+## 2026-08-10 - Proxy deploy stopped refusing the proxy it recommends, and stopped hiding why it failed (build 2779)
+
+A newly-installed game (DragonSword Awakening) reported `Deployed: 0 success, 1 failed` with a row
+reading **NotDeployed and a blank Error**. Nothing in the panel said why. Two independent defects,
+one of which had been silently wrong since it was written.
+
+**1. The import-table refusal was built on a false premise, and it was wrong.**
+`DeployAsync` hard-refused any proxy flavour absent from the .exe import table, on the reasoning that
+it "would never load". The refusal's own worked example was Octopath Traveler, described in the code
+as importing winmm and dxgi *but not version.dll*. **Octopath's import directory names VERSION.dll**
+— the premise was a misreading. (Octopath's real quirk is unrelated and already documented elsewhere
+in the tree: it instant-exits under the *dxgi* proxy, because dxgi is imported early enough that the
+game calls it before the CRT is initialised.)
+
+Measured before changing anything — 21 Steam UE games on the maintainer's machine:
+
+| | |
+|---|---|
+| games running a **working `version.dll` proxy with NO static import** | **11 of 21** |
+| among them | DQ7R, P3R, Stray, Palworld, Manor Lords, Ghostwire Tokyo, both DQ HD-2D remakes, Lushfoil, Arms of God, The Artisan of Glimmith |
+| strongest single case | **DQ7R** — the DLL itself reported the proxy load (the "confirmed working" suggestion) |
+| games importing dxgi | 21 of 21 — which is why escalating to dxgi on "version not imported" is not a fix |
+| our four names in `KnownDLLs` | **none** — the one condition that would make exe-directory proxying impossible |
+
+The mechanism the refusal missed: `version.dll` / `dinput8.dll` arrive via a **run-time
+`LoadLibrary`**, and the default search order reaches the .exe directory before System32. An import
+proves a proxy WILL load; its absence proves nothing. The refusal therefore rejected `version.dll` —
+the broadest-compatible flavour, and the one the Suggested column recommends — on most games,
+telling the user to "try the Suggested column" that pointed straight back at it.
+
+Now advisory-only (`ProxyImportAnalyzer.DescribeLoadRisk`). Nothing blocks a deploy. The real lesson
+survives: a proxy that genuinely cannot load fails **silently and totally** (zero log, reads exactly
+like "nothing happened"), so the one case still worth reporting — a static-import-only flavour
+(dxgi/winmm) the game never names — rides along with the successful deploy as a note that names the
+alternatives. `Recommend()` was deliberately **not** changed: with 21/21 importing dxgi, escalating
+on that signal would trade a working default for Octopath's crash.
+
+**2. A post-operation refresh erased the operation's own result.**
+`DeploySelectedAsync` / `UndeploySelectedAsync` / `UpdateAllAsync` each ended with
+`RefreshDeployStatusAsync`, which recomputes purely from disk. For a game the deploy just failed on,
+disk says "file absent" → `ClassifyAbsentSelected` honestly returns `(NotDeployed, null)`, overwriting
+both the failure status and its reason. That is the blank Error column: the reason existed only in
+the log. This hid **every** deploy failure mode, not just this one. `RefreshDeployStatusAsync` now
+takes a `preserveBinariesDirs` set (`ShouldApplyRefresh`, pure + tested, case-insensitive because it
+compares Windows paths); a standalone Refresh still passes null and recomputes everything.
+
+11 new tests (3519 C# green). All 11 were negative-controlled: reverting each fix fails exactly the
+tests that cover it, and no others.
+
+**In-game outcome, same day — and it cuts both ways.** On DragonSword Awakening itself the
+`version.dll` proxy **does not load**: zero log folder, the silent-total-failure signature. `dxgi.dll`
+works, and the game then runs perfectly (UE 5.4, GObjects/GNames/GWorld/Sparse/**&GEngine slot** all
+resolved, ProcessEvent hook validated at 9 540 fires/1500 ms, no errors — see
+[test-games.md](test-games.md)). So the old refusal's *verdict* on this one game was right, while its
+*rule* was still wrong: applied consistently that rule also rejects the 11 games where version.dll is
+the only thing that works, and it cannot tell the two groups apart, because the import table does not
+distinguish them. Both groups import dxgi+winmm and not version. What separates them is whether
+anything in the process ever calls `LoadLibrary("version.dll")` by bare name — invisible to static
+analysis. Hence advisory, not refusal: the user tries, and **"no log folder appeared" is the
+diagnostic**. That symptom is now documented in both READMEs.
+
+-----
+
 ## 2026-08-06 - The CE Lua scripts and the DLL now agree on a contract, and CI keeps them honest (build 2747)
 
 A generated `.CT` and the DLL had **no version relationship at all**. A table saved months ago

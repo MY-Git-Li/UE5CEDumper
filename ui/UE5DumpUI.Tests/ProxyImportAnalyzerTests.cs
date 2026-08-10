@@ -362,6 +362,85 @@ public class ProxyImportAnalyzerTests
         Assert.False(ProxyImportAnalyzer.HasExportQuorum(fs));
     }
 
+    // ── Load-risk advisory (pure) ──
+    //
+    // These pin the REVERSAL of a rule that used to hard-refuse a deploy: "not in the import
+    // table" meant "would never load". It was false. 21 Steam UE games were measured on
+    // 2026-08-10 and 11 of them run a WORKING version.dll proxy whose .exe names version.dll
+    // in neither the import nor the delay-import directory (DQ7R self-confirmed the load).
+    // Every assertion below is "returns null" = "do not block, do not even warn".
+
+    [Fact]
+    public void LoadsDynamically_VersionAndDinput8_Only()
+    {
+        // version/dinput8 arrive via a run-time LoadLibrary; dxgi/winmm are static-import
+        // hijacks. Only the former two may be deployed with no import-table evidence.
+        Assert.True(ProxyImportAnalyzer.LoadsDynamically(ProxyType.Version));
+        Assert.True(ProxyImportAnalyzer.LoadsDynamically(ProxyType.Dinput8));
+        Assert.False(ProxyImportAnalyzer.LoadsDynamically(ProxyType.Dxgi));
+        Assert.False(ProxyImportAnalyzer.LoadsDynamically(ProxyType.Winmm));
+    }
+
+    [Fact]
+    public void DescribeLoadRisk_VersionNotImported_IsSilent()
+    {
+        // THE REGRESSION TEST. This exact shape — imports dxgi + winmm, not version — is
+        // DragonSword Awakening, DQ7R, P3R, Stray, Palworld and 6 more. The old rule refused
+        // the deploy outright; the row then read "NotDeployed" with a blank Error.
+        var imports = new ProxyImportAnalyzer.ProxyImportInfo(
+            ImportsVersion: false, ImportsDinput8: false, ImportsDxgi: true, ImportsWinmm: true);
+        Assert.Null(ProxyImportAnalyzer.DescribeLoadRisk(imports, ProxyType.Version));
+    }
+
+    [Fact]
+    public void DescribeLoadRisk_Dinput8NotImported_IsSilent()
+    {
+        var imports = new ProxyImportAnalyzer.ProxyImportInfo(false, false, true, true);
+        Assert.Null(ProxyImportAnalyzer.DescribeLoadRisk(imports, ProxyType.Dinput8));
+    }
+
+    [Fact]
+    public void DescribeLoadRisk_ImportedFlavour_IsSilent()
+    {
+        // Statically imported → the loader resolves it from the .exe directory. Guaranteed.
+        var imports = new ProxyImportAnalyzer.ProxyImportInfo(false, false, true, true);
+        Assert.Null(ProxyImportAnalyzer.DescribeLoadRisk(imports, ProxyType.Dxgi));
+        Assert.Null(ProxyImportAnalyzer.DescribeLoadRisk(imports, ProxyType.Winmm));
+    }
+
+    [Fact]
+    public void DescribeLoadRisk_StaticOnlyFlavourNotImported_Warns_ButNamesAWayOut()
+    {
+        // dxgi into a game that never names it genuinely cannot load, and fails with NO log —
+        // the one case still worth saying out loud. It must stay a note, not a refusal.
+        var imports = new ProxyImportAnalyzer.ProxyImportInfo(
+            ImportsVersion: false, ImportsDinput8: false, ImportsDxgi: false, ImportsWinmm: true);
+        string? note = ProxyImportAnalyzer.DescribeLoadRisk(imports, ProxyType.Dxgi);
+        Assert.NotNull(note);
+        Assert.Contains("dxgi.dll", note);
+        // Must offer the alternatives rather than dead-end: winmm IS imported here, and
+        // version is always worth trying.
+        Assert.Contains("version", note);
+        Assert.Contains("winmm", note);
+    }
+
+    [Fact]
+    public void DescribeLoadRisk_UnparseablePe_IsSilent()
+    {
+        // "Could not tell" must never become "will not work".
+        Assert.Null(ProxyImportAnalyzer.DescribeLoadRisk(null, ProxyType.Dxgi));
+    }
+
+    [Fact]
+    public void DescribeLoadRisk_ModularStubImportingNothing_IsSilent()
+    {
+        // A stub .exe naming none of the four is a modular build whose real modules were
+        // already folded in by Merge. Warning on it would fire on every modular game.
+        var none = new ProxyImportAnalyzer.ProxyImportInfo(false, false, false, false);
+        Assert.True(none.ImportsNone);
+        Assert.Null(ProxyImportAnalyzer.DescribeLoadRisk(none, ProxyType.Dxgi));
+    }
+
     /// <summary>Locate dist/proxy/version.dll by walking up from the test assembly.</summary>
     private static string? FindBuiltProxy()
     {

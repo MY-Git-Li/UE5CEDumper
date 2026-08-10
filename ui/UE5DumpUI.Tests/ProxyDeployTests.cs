@@ -981,4 +981,53 @@ public class ProxyDeployTests
         Assert.True(ProxyDeployViewModel.PostInjectRetryDelay > TimeSpan.Zero,
             "a zero delay would spin the connect attempt as fast as the CPU allows");
     }
+
+    // ── Post-operation refresh must not erase the operation's own result ──
+    //
+    // A refresh run as the TAIL of a deploy/undeploy recomputes status purely from disk.
+    // For a game the deploy just FAILED on, the disk says "file absent", which classifies
+    // honestly as (NotDeployed, null) — overwriting the failure status AND its reason, so
+    // the row read "NotDeployed" with a blank Error beside a banner saying "1 failed".
+    // The reason survived only in the log. These pin the preserve-set that fixes it.
+
+    [Fact]
+    public void ShouldApplyRefresh_NoPreserveSet_AppliesEverything()
+    {
+        // A standalone Refresh owns nothing and must recompute every row.
+        Assert.True(ProxyDeployService.ShouldApplyRefresh(@"D:\Games\Foo\Binaries\Win64", null));
+    }
+
+    [Fact]
+    public void ShouldApplyRefresh_PreservedGame_IsSkipped()
+    {
+        var preserve = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            @"D:\Games\Foo\Binaries\Win64",
+        };
+        Assert.False(ProxyDeployService.ShouldApplyRefresh(@"D:\Games\Foo\Binaries\Win64", preserve));
+    }
+
+    [Fact]
+    public void ShouldApplyRefresh_OtherGames_StillRefreshed()
+    {
+        // Preserving the failed game must not freeze the rest of the grid.
+        var preserve = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            @"D:\Games\Foo\Binaries\Win64",
+        };
+        Assert.True(ProxyDeployService.ShouldApplyRefresh(@"D:\Games\Bar\Binaries\Win64", preserve));
+    }
+
+    [Fact]
+    public void ShouldApplyRefresh_PathComparison_IsCaseInsensitive()
+    {
+        // BinariesDir is a Windows path: it can differ in case between the scan that filled
+        // the grid and the set built during the operation. A case-sensitive compare would
+        // silently stop preserving and put the erasure bug straight back.
+        var preserve = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            @"D:\Games\Foo\Binaries\Win64",
+        };
+        Assert.False(ProxyDeployService.ShouldApplyRefresh(@"d:\games\foo\binaries\win64", preserve));
+    }
 }

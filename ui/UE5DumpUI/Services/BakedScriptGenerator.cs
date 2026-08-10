@@ -151,17 +151,12 @@ public static class BakedScriptGenerator
         {
             // Input path uses MapInputType so string params keep their wide/
             // narrow distinction ('fstring' vs 'fstringn') the helper needs.
-            // 輸入路徑使用 MapInputType，讓字串參數保留寬/窄之分（'fstring' vs
-            // 'fstringn'），這是 helper 建立字元 buffer 所需。
             var helperType = MapInputType(v.UeTypeName);
             var literal = RenderLiteral(v.UeTypeName, v.LiteralText);
             // By-value struct ('fstruct'): emit the exact byte size so the
             // helper zeroes the right region instead of falling back to its
             // fragile next-offset-difference heuristic (the params list is in
             // declaration order, not sorted by offset).
-            // 傳值 struct（'fstruct'）：輸出精確位元組大小，讓 helper 歸零正確
-            // 區塊，而非退回脆弱的「下一個 offset 相減」推算（參數依宣告順序而
-            // 非 offset 排序）。
             var sizeField = helperType == "fstruct" ? $"size={v.Size}, " : "";
             // Each row: { name='...', type='...', offset=N, [size=N,] value=LITERAL },  -- shortType
             Line(sb,
@@ -427,8 +422,6 @@ public static class BakedScriptGenerator
     /// path keeps calling <see cref="MapToHelperType"/> (which collapses all
     /// three to <c>'fstring'</c>) so its complex-type classification is
     /// unaffected.
-    /// 對照「寫入輸入參數」時使用的 helper 型別；與 <see cref="MapToHelperType"/>
-    /// 相同，但字串型別保留寬/窄之分（helper 需要它來建立正確的字元 buffer）。
     /// </summary>
     public static string MapInputType(string ueTypeName) => ueTypeName switch
     {
@@ -461,8 +454,6 @@ public static class BakedScriptGenerator
         // String types render as a quoted Lua string literal (helper reads
         // p.value as the text and builds the FString). An empty value is a
         // valid empty string, not the numeric 0 fallback.
-        // 字串型別輸出為「帶引號的 Lua 字串常值」（helper 讀 p.value 當文字並建立
-        // FString）。空值代表合法的空字串，而非數字 0 的回退。
         if (ueTypeName is "StrProperty" or "Utf8StrProperty" or "AnsiStrProperty")
             return "'" + EscapeLua(text ?? "") + "'";
 
