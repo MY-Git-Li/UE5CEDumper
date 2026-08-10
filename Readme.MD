@@ -59,11 +59,15 @@ Games grouped by UE version range. Per-game detail — layout quirks, proxy note
 | **4.21 – 4.24** | ✅ | ✅ | ✅ | Star Wars Jedi, DQ XI S, IDOLM@STER STARLIT SEASON, Octopath Traveler, DQ I&II / III HD-2D Remaster |
 | **4.25 – 4.27** | ✅ | ✅ | ✅ | FF7 Rebirth, Stellar Blade (劍星), Tower of Mask, Hogwarts Legacy, Romancing SaGa 2 RotS, Ghostwire: Tokyo, TimeSplitters Rewind, The Artisan of Glimmith, Barn Finders, MOBILE SUIT GUNDAM SEED Battle Destiny Remastered, Persona 3 Reload |
 | **5.0 – 5.2** | ✅ | ✅ | ✅ | Squirrel With A Gun, Caravan Sandwitch, Meltopia, Retro Rewind Demo |
-| **5.3 – 5.4** | ✅ | ✅ | ✅ | Satisfactory (v1.1.3.1), Colossal, Avowed, Echoes of Aincrad Demo, The Adventures of Elliot, MindsEye |
+| **5.3 – 5.4** | ✅ | ✅ | ✅ | Satisfactory (v1.1.3.1), Colossal, Avowed, Echoes of Aincrad Demo, The Adventures of Elliot, MindsEye, DragonSword Awakening‡ |
 | **5.5 – 5.7** | ✅ | ✅* | ✅** | Titan Quest II, EverSpace 2, Lushfoil Photography Sim, Manor Lords, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT: CARRIER QUALIFICATION Demo, Solarpunk, Pionero Capital Demo, Satisfactory (v1.2.3.1), Star Trek Voyager – Across the Unknown |
 
 *\*GNames uses .data pointer-scan fallback for 5.5+.*
 *\**DynOff supports **CasePreservingName (FName = 16 bytes)** layout.*
+*‡Needs the **`dxgi.dll`** proxy, not the default `version.dll` — its .exe never asks for `version.dll`
+by name, so that proxy loads in no way at all and leaves **zero log**. If a game connects but produces
+no log folder under `%LOCALAPPDATA%\UE5CEDumper\Logs\`, that is the symptom: switch proxy flavour.
+See [docs/test-games.md](docs/test-games.md).*
 *†Pre-4.23 has no `FNamePool` — GNames is the `TNameEntryArray` that `FName::GetNames` lazily allocates, and
 sparse delegates do not exist at all (they arrived in 4.23). **UE 4.11 is the supported floor**: 4.10 and below
 have no `FUObjectItem` and use an inline chunk table the scanner cannot express, so they are reported as
