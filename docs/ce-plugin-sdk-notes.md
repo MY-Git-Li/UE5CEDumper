@@ -900,9 +900,123 @@ lua_settop(L, top);             // belt and braces: restore regardless
 | Random crashes calling `luaL_dostring()` from a background thread | `GetLuaState()` returns **that thread's own** `lua_State`, and they share one global state; CE has no Lua lock | Use `MainThreadCall` (= `pluginsync`) to run the whole Lua block on the main thread |
 | `previousOpcode()` walks back into the middle of an instruction | It **has no failure return value** — when every attempt fails it returns `address-1`, never 0 and always < address | Validate it yourself: `nextOpcode(prevAddr)` must land exactly on the original address |
 | `writeInteger(addr, val)` does not write to plugin memory | `writeInteger` writes to the target process's memory | Use `writeIntegerLocal`, or switch to the `GetLuaState` approach |
+| `executeCodeEx(1, nil, fn, ...)` hangs CE permanently, with no way to recover | A `nil` timeout is **not a default — it is INFINITE**, and the wait pumps no messages at all | Always pass a finite millisecond value (see §13) |
+| `executeCodeEx` returns `nil` and you cannot tell why | CE's **second return value** is the reason string; checking only `~= nil` throws it away | `local r, why = executeCodeEx(...)` (see §13 for the five reasons) |
+| Target-process memory keeps growing after repeated timeouts | `WAIT_TIMEOUT` also sets `dontfree`, so the stub / result / string allocations are never reclaimed | Deliberate by design; shorten the timeout, and use `freeExecuteCodeExStub` if you must reclaim (see §13) |
 
 > **Addendum (about that `-1` from `AutoAssemble`):** the `-1` observed in early testing **does not
 > mean failure**.
 > `BOOL` in Delphi/FPC is `LongBool`, and the bit pattern for TRUE is compiler-determined (it may be
 > 1, or all bits set = -1) — CE's source cannot settle it, so that `-1` is very likely "success".
 > Either way, it must not be used to judge whether an AA script ran successfully.
+
+---
+
+## 13. `executeCodeEx` / `executeMethod` — the synchronous wait, timeout semantics, and leaks
+
+> **Verification coordinate for this section:** everything below comes from CE source tag
+> **`7.5-195`** (`git describe` = `7.5-195-g4178e037`). **The 7.7 binary was NOT probed.**
+> Per this document's standing position — the public source lags the shipping release — the one
+> item marked *suspected* below must not be used as a conclusion.
+>
+> This section is load-bearing for what this repo emits: every `callDLL` helper in
+> `scripts/ue5_dissect.lua` and `Services/CeLuaHygiene.cs` goes through this path. The
+> suspected handle leak is tracked in [docs/CE-Bugs-Minesweeper.md](CE-Bugs-Minesweeper.md).
+
+### 13.1 The call chain
+
+| Function | Location | Notes |
+|----------|----------|-------|
+| `executeCodeEx(callmethod, timeout, address, ...)` | LuaHandler.pas:11922 | **Just a shim.** Fewer than 3 parameters returns `nil, 'Not enough parameters. Minimum: callmethod, timeout, address'` (:11931-11935); otherwise it inserts `instance=nil` and tail-calls `executeMethod` |
+| `executeMethod(callmethod, timeout, address, instance, ...)` | LuaHandler.pas:11417 | The real implementation — the wait lives here |
+| `executeCode(address, parameter)` | LuaHandler.pas:11943 | **A separate implementation** carrying its own duplicate wait (:12056) — fixing one does not fix the other |
+| `freeExecuteCodeExStub` | LuaHandler.pas:11412 | The companion reclaim API (see 13.4). Its preconditions are **not verified** here |
+
+### 13.2 The wait is synchronous and pumps nothing ⚠
+
+```pascal
+thread := CreateRemoteThread(processhandle, nil, 0, pointer(stubaddress), nil, 0, y);  // :11847
+...
+wr := WaitForSingleObject(thread, timeout);                                            // :11861
+```
+
+**It blocks synchronously on the calling thread, and nothing anywhere on that path pumps messages.**
+
+When called from an AA `{$lua}` block, the calling thread **is CE's GUI thread**, so:
+
+- **The timeout value is the ceiling on GUI freeze time.** Pass 5000 and you have authorised a 5 s freeze.
+- **A Lua-side `processMessagesPaintOnly()` cannot help.** It only gets to run once
+  `executeCodeEx` returns; during the freeze it never executes. This is **structurally different**
+  from a `sleep()` loop, which *can* pump itself.
+
+### 13.3 Timeout semantics — `nil` is INFINITE, not "a default"
+
+The source's header comment (:11425-11428) and its implementation (:11504-11507) agree:
+
+| Value passed | Meaning |
+|--------------|---------|
+| `0` | Do not wait (no return value), **and deliberately do not reclaim memory** (see 13.4) |
+| `nil` or `-1` | **INFINITE** — `if lua_isnil(L,2) then timeout:=INFINITE` |
+| anything else | Milliseconds |
+
+> **Trap:** `nil` reads like "unspecified, use the default"; it actually means **wait forever**.
+> If the target process is suspended, the stub faults, or the remote thread never starts, CE's GUI
+> is frozen permanently with no way to recover from the UI — the process has to be killed.
+> **No script that reaches a user should ever pass `nil`.**
+
+### 13.4 Reclaim: `dontfree` — a timeout does not reclaim either
+
+The `finally` block (:11907) uses `if (dontfree=false)` to decide whether to `VirtualFreeEx` the stub
+address, the result address, and every string allocation (**all of them in the target process**).
+Two places set `dontfree`:
+
+| Location | Condition | Consequence |
+|----------|-----------|-------------|
+| :11851 | `dontfree := timeout=0` | This is the **source-level mechanism** behind celua.txt's "timeout 0 leaks" claim |
+| :11880 | the `WAIT_TIMEOUT` branch sets it unconditionally | **A timeout does not reclaim either** |
+
+The second one is the easy miss: **every timeout leaves a permanent allocation in the target
+process**, and repeated timeouts accumulate.
+
+> This is **deliberate design, not a CE bug**: a timeout means the remote thread may still be
+> running, and freeing the stub out from under it would crash the target outright.
+> To reclaim, go through `freeExecuteCodeExStub` (:11412) — but you must establish for yourself
+> that the thread has finished.
+
+### 13.5 CE returns `nil, reason` on failure — do not throw the reason away
+
+Every failure path in `executeMethod` is `lua_pushnil` + `lua_pushstring(<reason>)` + `exit(2)`, so
+the Lua side receives **two** return values. The reasons point at completely different problems:
+
+| Reason string | Location | Means |
+|---------------|----------|-------|
+| `'Not enough parameters. Minimum: callmethod, timeout, address'` | :11934 | Wrong argument count (caught by `executeCodeEx` itself) |
+| `'Not enough parameters. Minimum: callmethod, timeout, address, instance'` | :11487 | Same, but `executeMethod` was called directly |
+| `'Failure launching thread'` | :11898 | `CreateRemoteThread` failed |
+| `'Execution timeout'` | :11882 | The stub ran but did not finish in time |
+| `'Wait failure'` | :11888 | `WaitForSingleObject` itself errored |
+| `'Failure reading the result address'` | :11868 | Execution completed, but the result could not be read back |
+
+> **Trap:** checking only `result ~= nil` discards a diagnosis CE already computed, and substitutes
+> a guessed message. These six reasons send you to six different places. The correct shape is
+> `local r, why = executeCodeEx(...)`, surfacing `why` on failure.
+
+### 13.6 Suspected: thread handle leak (**UNCONFIRMED**)
+
+`closehandle(thread)` sits at :11893, but all four branches ahead of it (`WAIT_OBJECT_0` success /
+result-read failure / `WAIT_TIMEOUT` / `Wait failure`) **`exit()` first**, and the `finally`
+(:11901-11917) does not close it either. Read literally, **every call leaks one thread handle inside
+cheatengine.exe**.
+
+> ⚠ **Marked suspected — do not treat it as a conclusion.** This document already has the
+> precedent: a defect present in the source had already been fixed in the 7.7 binary. This item
+> **read only the 7.5-195 source and did not verify 7.7's behaviour.**
+>
+> Verifying takes a minute — attach to a target, then sample the handle count before and after N calls:
+>
+> ```powershell
+> (Get-Process cheatengine).HandleCount
+> ```
+>
+> A delta of ≈ N confirms the leak; ≈ 0 means 7.7 already fixed it, and this section should be
+> rewritten as "present in 7.5, fixed in 7.7".

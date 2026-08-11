@@ -197,10 +197,31 @@ public static class CeLuaHygiene
     }
 
     /// <summary>
-    /// Timeout in ms for a synchronous <c>executeCodeEx</c> DLL call. Finite on
-    /// purpose: <c>nil</c>/<c>-1</c> means wait forever, which hangs CE's whole UI
-    /// if the game thread is stalled, and <c>0</c> means "don't wait" AND leaks the
-    /// call memory (CE's own <c>celua.txt</c> flags it).
+    /// Timeout in ms for a synchronous <c>executeCodeEx</c> DLL call.
+    ///
+    /// <para><b>This is a ceiling on GUI freeze time, not just a timeout.</b> Read
+    /// against CE source 7.5-195: <c>executeCodeEx</c> is a shim over
+    /// <c>executeMethod</c> (LuaHandler.pas:11922 → :11417), whose wait is
+    /// <c>CreateRemoteThread</c> (:11847) then <c>WaitForSingleObject(thread,
+    /// timeout)</c> (:11861) — <b>on the calling thread, with nothing anywhere on that
+    /// path pumping messages</b>. From an AA <c>{$lua}</c> block the calling thread IS
+    /// CE's GUI thread, so this value is the longest CE can sit frozen. Unlike the
+    /// <see cref="AppendMailboxWait"/> loop, a Lua-side
+    /// <c>processMessagesPaintOnly()</c> cannot help here: it only runs once
+    /// <c>executeCodeEx</c> has already returned.</para>
+    ///
+    /// <para>Finite on purpose, and the two sentinels are worse than they look:
+    /// <c>nil</c>/<c>-1</c> means <b>INFINITE</b> (:11504-11505) — not "use a default" —
+    /// so a stub that never completes freezes CE with no UI-level recovery; and
+    /// <c>0</c> means "don't wait" AND skips the reclaim (<c>dontfree := timeout=0</c>
+    /// at :11851), which is the source-level mechanism behind celua.txt's leak note.</para>
+    ///
+    /// <para><b>A timeout is not free either.</b> The <c>WAIT_TIMEOUT</c> branch also
+    /// sets <c>dontfree</c> (:11880), so the stub, the result address and every string
+    /// allocation stay allocated <i>in the target process</i> permanently. That is
+    /// deliberate on CE's side — the remote thread may still be running — but it means
+    /// repeated timeouts accumulate, so shortening this value is not a free win. Full
+    /// detail: docs/ce-plugin-sdk-notes.md §13.</para>
     /// </summary>
     public const int DllCallTimeoutMs = 5000;
 
@@ -222,6 +243,15 @@ public static class CeLuaHygiene
     /// raise", never "did the function run". <c>executeCodeEx</c> returns the callee's
     /// RAX on success and <c>nil</c> on failure/timeout, so <c>nil</c> is the only
     /// honest failure signal.</para>
+    ///
+    /// <para><b>And the reason is read, not guessed.</b> CE returns <c>nil</c> plus a
+    /// reason string, with six distinct values — <c>'Execution timeout'</c>,
+    /// <c>'Failure launching thread'</c>, <c>'Wait failure'</c>,
+    /// <c>'Failure reading the result address'</c> and two arity messages
+    /// (docs/ce-plugin-sdk-notes.md §13.5). They send you to six different places, so
+    /// the emitted helper reports CE's own answer. Discarding it and printing a
+    /// guessed message is the same defect the build-2743 sweep fixed for the mailbox
+    /// timeout (see <see cref="AppendTimeoutReason"/>) — one call site later.</para>
     /// </summary>
     public static void AppendCallDllHelper(StringBuilder sb, string indent = "")
     {
@@ -235,9 +265,19 @@ public static class CeLuaHygiene
         Line(sb, indent, "    dbg('[UE5CEDumper] export not found: ' .. name)");
         Line(sb, indent, "    return false");
         Line(sb, indent, "  end");
-        Line(sb, indent, $"  local okCall, ret = pcall(executeCodeEx, 0, {DllCallTimeoutMs}, fn)");
-        Line(sb, indent, "  if not okCall or ret == nil then");
-        Line(sb, indent, "    dbg('[UE5CEDumper] call did not run: ' .. name)");
+        Line(sb, indent, "  -- Three returns, and they mean different things depending on okCall:");
+        Line(sb, indent, "  --   raised -> okCall=false, ret=the Lua error message, why=nil");
+        Line(sb, indent, "  --   ran    -> okCall=true,  ret=the callee's RAX (nil on failure), why=CE's reason");
+        Line(sb, indent, "  -- CE names WHICH failure it was -- 'Execution timeout', 'Failure launching");
+        Line(sb, indent, "  -- thread', 'Failure reading the result address', ... -- six reasons that send");
+        Line(sb, indent, "  -- you to six different places. Surface it rather than guess one.");
+        Line(sb, indent, $"  local okCall, ret, why = pcall(executeCodeEx, 0, {DllCallTimeoutMs}, fn)");
+        Line(sb, indent, "  if not okCall then");
+        Line(sb, indent, "    dbg('[UE5CEDumper] call raised: ' .. name .. ' -- ' .. tostring(ret))");
+        Line(sb, indent, "    return false");
+        Line(sb, indent, "  end");
+        Line(sb, indent, "  if ret == nil then");
+        Line(sb, indent, "    dbg('[UE5CEDumper] call did not run: ' .. name .. ' -- ' .. tostring(why))");
         Line(sb, indent, "    return false");
         Line(sb, indent, "  end");
         Line(sb, indent, "  return true");

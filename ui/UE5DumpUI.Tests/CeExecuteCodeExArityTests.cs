@@ -52,9 +52,46 @@ public class CeExecuteCodeExArityTests
 
         Assert.Contains(ValidPrefix + " fn)", lua, StringComparison.Ordinal);
         // The result, not pcall's status, decides success — a wrong-arity call
-        // returns nil without raising, so the status would say "fine".
-        Assert.Contains("if not okCall or ret == nil then", lua, StringComparison.Ordinal);
+        // returns nil without raising, so the status would say "fine". The two are
+        // separate branches because they carry different payloads: on a raise
+        // pcall's second return is the Lua error, on a clean run it is the RAX.
+        Assert.Contains("if not okCall then", lua, StringComparison.Ordinal);
+        Assert.Contains("if ret == nil then", lua, StringComparison.Ordinal);
         Assert.DoesNotContain("return (pcall(executeCodeEx", lua, StringComparison.Ordinal);
+
+        // CE hands back a reason string as its SECOND return value, and the six
+        // possible reasons point at six different problems. Printing a guessed
+        // message instead is the defect the build-2743 sweep fixed for the mailbox
+        // timeout; this pins that it does not come back here.
+        Assert.Contains("local okCall, ret, why = pcall(executeCodeEx", lua, StringComparison.Ordinal);
+        Assert.Contains("tostring(why)", lua, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Shipped_dissect_script_uses_a_finite_timeout_and_reports_CEs_reason()
+    {
+        // ue5_dissect.lua was the one executeCodeEx call site with no coverage here,
+        // and it was the one still passing `nil`. A nil timeout is INFINITE, not
+        // "use a default" (LuaHandler.pas:11504-11505), and the wait pumps nothing —
+        // so a suspended target froze CE with no UI-level recovery, once per FIELD of
+        // a class walk. See docs/ce-plugin-sdk-notes.md §13.2-13.3.
+        var lua = FindRepoFile(Path.Combine("scripts", "ue5_dissect.lua"));
+        Assert.NotNull(lua);   // shipped artifact — not finding it is a real failure
+        var text = File.ReadAllText(lua!);
+
+        var calls = CodeLines(text)
+            .Where(l => l.Contains("executeCodeEx(", StringComparison.Ordinal))
+            .ToList();
+        Assert.NotEmpty(calls);
+
+        foreach (var line in calls)
+        {
+            Assert.Contains("executeCodeEx(1, DLL_CALL_TIMEOUT_MS, fn", line, StringComparison.Ordinal);
+            Assert.DoesNotContain(", nil,", line, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("local DLL_CALL_TIMEOUT_MS = ", text, StringComparison.Ordinal);
+        Assert.Contains("local ret, why = executeCodeEx(", text, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -92,6 +129,15 @@ public class CeExecuteCodeExArityTests
         // The comment that caused the bug: callmethod is a calling convention, and
         // reading it as a return type is what put the address in the timeout slot.
         Assert.DoesNotContain("executeCodeEx: retType", text, StringComparison.Ordinal);
+
+        // CE's second return value names the failure. The old message guessed at a
+        // dead process, and four of the six reasons occur with a perfectly healthy
+        // one. Checked over CODE lines only: the comment above the fix quotes the old
+        // string deliberately, to say why it went — and a whole-text DoesNotContain
+        // matches that explanation and fails on the very fix it is guarding.
+        Assert.Contains("local result, why = executeCodeEx(", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("process alive?", string.Join("\n", CodeLines(text)),
+            StringComparison.Ordinal);
     }
 
     [Fact]

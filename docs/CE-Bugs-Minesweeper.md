@@ -387,3 +387,17 @@ today; they matter only if that changes.
 > of going through `simpleaobscanner.pas`, which happens to make it immune. Its 14 arguments were
 > re-checked against the Lua binding's parameter order (`LuaMemscan.pas:54-77`) and all land in the
 > right slots, including `'+X-C-W'` in `protectionflags` (`:70` → `parseProtectionflags` `:81`).
+
+**CE Lua `executeCodeEx`** — owner: [ce-plugin-sdk-notes.md](ce-plugin-sdk-notes.md) §13.
+Unlike the groups above, this one **does** run on every path we emit: `scripts/ue5_dissect.lua`'s
+`callDLL` and `Services/CeLuaHygiene.cs`'s `AppendCallDllHelper` both go through it.
+
+| Defect | Where |
+|--------|-------|
+| **SUSPECTED, NOT VERIFIED —** `closehandle(thread)` looks **unreachable**: all four branches `exit()` before it and the `finally` does not close it either, so every call would leak one thread handle in cheatengine.exe. Read only in the 7.5 source; **the 7.7 binary was not probed** — §4 above is the standing reminder that those are different facts. Probe: `(Get-Process cheatengine).HandleCount` before/after N calls | `LuaHandler.pas:11893`, `finally` at `:11901-11917` |
+| `WAIT_TIMEOUT` sets `dontfree := true`, so the `finally` skips `VirtualFreeEx` on the stub, the result address, **and every string allocation** — a timeout permanently leaks *target-process* memory, and repeats accumulate. Deliberate (the remote thread may still be running), but documented nowhere; `freeExecuteCodeExStub` is the reclaim path | `LuaHandler.pas:11880` vs `:11907`, `:11412` |
+
+> **Not a CE defect, but the trap next door:** a `nil` timeout means **INFINITE**, not "use a
+> default" (`:11504-11505`), and the wait pumps no messages — so `executeCodeEx(1, nil, fn, ...)`
+> can freeze CE's GUI permanently with no UI-level recovery. That one is ours to fix at the call
+> site, not CE's; see ce-plugin-sdk-notes.md §13.3 and [todo.md](todo.md).

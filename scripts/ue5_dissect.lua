@@ -38,10 +38,29 @@ local function warn(fmt, ...) print(string.format("[UE5Dissect WARN] " .. fmt, .
 -- ----------------------------------------------------------------
 -- DLL call helper
 -- ----------------------------------------------------------------
+-- executeCodeEx blocks the CALLING thread in a WaitForSingleObject with nothing on
+-- that path pumping messages (CE 7.5-195, LuaHandler.pas:11861), and the calling
+-- thread here is CE's GUI thread -- so this timeout is the ceiling on how long CE
+-- can sit frozen, and a Lua-side processMessagesPaintOnly() cannot reach it.
+--
+-- This used to be nil. A nil timeout is INFINITE, not "use a default"
+-- (LuaHandler.pas:11504-11505), so a suspended target or a faulting stub froze CE
+-- permanently with no UI-level recovery -- and a class walk calls this once per
+-- FIELD, so the exposure multiplied. See docs/ce-plugin-sdk-notes.md 13.2-13.3.
+local DLL_CALL_TIMEOUT_MS = 5000   -- keep in step with CeLuaHygiene.DllCallTimeoutMs
+
 local function callDLL(name, ...)
     local fn = getAddress(name)
     if fn == nil or fn == 0 then error("[UE5Dissect] DLL function not found: " .. name) end
-    return executeCodeEx(1, nil, fn, ...)
+    -- On failure CE returns nil PLUS a reason string, and the six reasons point at
+    -- six different problems ('Execution timeout', 'Failure launching thread',
+    -- 'Failure reading the result address', ...). Report what CE already worked out
+    -- instead of guessing -- docs/ce-plugin-sdk-notes.md 13.5.
+    local ret, why = executeCodeEx(1, DLL_CALL_TIMEOUT_MS, fn, ...)
+    if ret == nil then
+        warn("%s failed: %s", name, tostring(why))
+    end
+    return ret
 end
 
 -- ----------------------------------------------------------------

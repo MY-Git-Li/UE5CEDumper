@@ -1338,7 +1338,55 @@ deliberately NOT fixed in it: each needs a product decision, not a mechanical ch
 
 -----
 
+## CE Lua — `executeCodeEx` follow-up (CE source audit 2026-08-11)
+
+The two defects this section opened — `ue5_dissect.lua`'s infinite timeout and every call site
+discarding CE's reason string — **shipped**; see [dev-log.md](dev-log.md). CE-side detail lives in
+[ce-plugin-sdk-notes.md](ce-plugin-sdk-notes.md) §13. One judgement call is left:
+
+- **Decide whether 5 s is the right freeze ceiling.** Effort **S** · Risk low — INFO, not a bug.
+  `DllCallTimeoutMs = 5000` is not merely a timeout: because the wait cannot be pumped, it is a
+  **hard ceiling on how long CE's GUI can be frozen**, and its XML doc previously implied only the
+  infinite case hangs the UI. The doc comment is now corrected; the *value* is still unexamined.
+  Nothing measured says 5 s is wrong — this is a "we now know what the number means" item.
+
+-----
+
 ## Pending live-game verification (verify only — no code)
+
+### 🔴 NEW 2026-08-11 — `executeCodeEx` finite timeout + reason capture (build 2792)
+
+Shipped in [dev-log.md](dev-log.md) build 2792, **never run against a game**. Three call sites
+changed: `scripts/ue5_dissect.lua`'s `callDLL` (was an INFINITE timeout, now 5000 ms),
+`CeLuaHygiene.AppendCallDllHelper`, and `UE5CEDumper.CT`'s `ue5_callDLL`. CE-side model:
+[ce-plugin-sdk-notes.md](ce-plugin-sdk-notes.md) §13.
+
+**Free from any ordinary session** (no special setup — just use the tool once):
+
+- ⬜ **Dissect still builds a structure.** Run `ue5_dissect.lua` against any class with a decent
+  field count and confirm the CE structure comes out the same as before. The happy path should be
+  untouched — `executeCodeEx` returns the RAX either way — but this is the one shipped script whose
+  call helper changed, and a class walk runs it **once per field**, so a mistake here is not subtle.
+- ⬜ **No stray warnings on a healthy run.** A clean dissect must print **zero**
+  `[UE5Dissect WARN] <name> failed: …` lines. `warn()` is ungated, so any appearing means a call is
+  failing that previously failed *silently* — new information, not a new bug.
+- ⬜ **`.CT` disable still tears down.** Untick the inject record and confirm `UE5_Shutdown` runs
+  (`ue5_callDLL` is the changed path). A regression here reports a clean teardown that never
+  happened — the audit #4 B1 symptom.
+
+**Needs deliberate action:**
+
+- ⬜ **Is 5000 ms enough for the slowest real call?** The candidate is `UE5_FindObject`, which scans
+  GObjects — dissect a class on a **large-pool** title (Elliot / DragonSword, 250 K+ objects) and
+  confirm no `Execution timeout`. If it does time out, the fix is **not** simply a bigger number:
+  every timeout permanently leaks the stub + result + string allocations in the *target* process
+  (§13.4), so a value that fires regularly has its own cost. Reconsider the call, not the constant.
+- ⬜ **Negative control — does `why` actually surface?** The reason capture is the whole point of
+  the change and a healthy session never exercises it. Cheapest induction: attach CE, suspend the
+  game process, then trigger one dissect call. Expect
+  `[UE5Dissect WARN] <name> failed: Execution timeout` — **not** a bare `nil`, and not the old
+  guessed wording. Before build 2792 this froze CE permanently instead, so this check doubles as the
+  proof that the infinite-timeout fix took.
 
 ### 🟡 PARTIAL 2026-08-10 — GObjects layout fix (build 2782), DragonSword Awakening
 
