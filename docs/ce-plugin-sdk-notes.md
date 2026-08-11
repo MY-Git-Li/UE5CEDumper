@@ -995,7 +995,7 @@ the Lua side receives **two** return values. The reasons point at completely dif
 | `'Failure launching thread'` | :11898 | `CreateRemoteThread` failed |
 | `'Execution timeout'` | :11882 | The stub ran but did not finish in time |
 | `'Wait failure'` | :11888 | `WaitForSingleObject` itself errored |
-| `'Failure reading the result address'` | :11868 | Execution completed, but the result could not be read back |
+| `'Failure reading the result address'` | :11873 | Execution completed, but the result could not be read back |
 
 > **Trap:** checking only `result ~= nil` discards a diagnosis CE already computed, and substitutes
 > a guessed message. These six reasons send you to six different places. The correct shape is
