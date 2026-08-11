@@ -457,12 +457,16 @@ function ue5_callDLL(funcName, retType, ...)
 
     -- retType is ours, not CE's: it selects how we interpret the returned RAX.
     -- CE's own first argument is the CALLING CONVENTION and x64 has only one.
-    local result = executeCodeEx(0, UE5_CALL_TIMEOUT_MS, fn, ...)
+    local result, why = executeCodeEx(0, UE5_CALL_TIMEOUT_MS, fn, ...)
 
-    -- Propagate nil: executeCodeEx returns nil when the remote call fails
-    -- (process gone, crash, timeout). Treat nil as failure for all types.
+    -- Propagate nil: executeCodeEx returns nil when the remote call fails, and its
+    -- SECOND return value names which failure -- 'Execution timeout', 'Failure
+    -- launching thread', 'Wait failure', 'Failure reading the result address'.
+    -- "process alive?" used to be printed here, which is a GUESS: four of those
+    -- reasons happen with a perfectly healthy process and send you somewhere else
+    -- entirely. Report what CE already knows. docs/ce-plugin-sdk-notes.md 13.5.
     if result == nil then
-        ue5_logError("executeCodeEx returned nil for %s — process alive?", funcName)
+        ue5_logError("executeCodeEx failed for %s: %s", funcName, tostring(why))
         return nil
     end
 

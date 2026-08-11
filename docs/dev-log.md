@@ -22,6 +22,64 @@ builds ≤696 in
 
 -----
 
+## 2026-08-11 - `executeCodeEx`'s wait cannot be pumped, and one call site asked it to wait forever (build 2792)
+
+Started as a forum question about the mailbox `sleep()` loop — *"why not wrap the sleep in a
+`createThread()` or use `createTimer()`, that would prevent CE's GUI from becoming unresponsive?"*
+The answer for **that** loop is no change: it already pumps with `processMessagesPaintOnly` (~0.00 ms,
+and deliberately re-entrancy-proof because it dispatches no mouse or keyboard), and it has to stay
+synchronous because the AA script needs the return value before it can decide whether to untick the
+record — going async would re-open the exact "the checkbox lied" defect the build-2743 sweep closed.
+
+But reading CE `7.5-195` to answer it found that **`executeCodeEx` is a different animal**, and one
+of our call sites was standing in the worst possible spot.
+
+**The CE facts** (now owned by [ce-plugin-sdk-notes.md](ce-plugin-sdk-notes.md) §13):
+
+- `executeCodeEx` (LuaHandler.pas:11922) is a shim over `executeMethod` (:11417), whose wait is
+  `CreateRemoteThread` (:11847) then `WaitForSingleObject(thread, timeout)` (:11861) — **on the
+  calling thread, with nothing on that path pumping messages.** From an AA `{$lua}` block the
+  calling thread *is* CE's GUI thread, so the timeout is a ceiling on GUI-freeze time and a
+  Lua-side pump structurally cannot reach it (it only runs after the call returns). `executeCode`
+  (:11943) carries a duplicate wait at :12056.
+- **A `nil` timeout means `INFINITE`** (:11504-11505), not "use a default".
+- Failure returns **`nil` plus a reason string**, six distinct ones (`'Execution timeout'`,
+  `'Failure launching thread'`, `'Wait failure'`, `'Failure reading the result address'`, two arity
+  messages) that point at six different problems.
+- A **timeout does not reclaim**: `dontfree := true` on the `WAIT_TIMEOUT` branch (:11880) makes the
+  `finally` (:11907) skip `VirtualFreeEx` on the stub, the result address and every string
+  allocation — permanently, in the *target* process. Deliberate (the remote thread may still be
+  running), but it means "just shorten the timeout" is not a free move. The same flag on
+  `timeout=0` (:11851) is the source-level mechanism behind celua.txt's leak note.
+
+**What was wrong here.** [`scripts/ue5_dissect.lua`](../scripts/ue5_dissect.lua) passed
+`executeCodeEx(1, nil, fn, ...)` — infinite, unpumped, **once per field** of a class walk. A
+suspended target or a faulting stub froze CE with no UI-level recovery short of killing the
+process. It was also the one `executeCodeEx` call site with no coverage in
+`CeExecuteCodeExArityTests`, which is why it survived the audit #4 B1 sweep that fixed the others.
+
+**And a defect we had already fixed once, at a new address.** All three call sites — the dissect
+helper, `CeLuaHygiene.AppendCallDllHelper`, and `UE5CEDumper.CT`'s `ue5_callDLL` — checked only
+`result ~= nil` and then printed a message they had guessed. The `.CT`'s was
+`"executeCodeEx returned nil for %s — process alive?"`, and **four of the six reasons occur with a
+perfectly healthy process**. This is the same shape as the mailbox-timeout defect build 2743 fixed
+("the message blamed the wrong thing, and the mailbox already held the answer") — the diagnosis was
+sitting in a return value nobody read.
+
+**Shipped:** finite `DLL_CALL_TIMEOUT_MS = 5000` in the dissect helper; `local ret, why = …` at all
+three sites with CE's reason surfaced; `AppendCallDllHelper` split into two branches because
+`pcall`'s second return is the Lua error on a raise and the callee's RAX on a clean run — one
+`if not okCall or ret == nil` could not tell them apart. `CeExecuteCodeExArityTests` gained a
+dissect test (finite timeout + reason capture) and reason-capture assertions for the other two.
+3520 C# tests green.
+
+> **A note on the test that caught itself.** The new `.CT` assertion
+> `DoesNotContain("process alive?")` failed on first run — against the *comment* explaining why that
+> string was removed. It now checks code lines only. Worth remembering when pinning the absence of a
+> string that the fix's own documentation will quote.
+
+-----
+
 ## 2026-08-10 - A generous `gc.MaxObjectsInGame` made us enumerate 11.7% of GObjects and call it a full scan (build 2782)
 
 Reported as "Value Search can't find a Native-C value": a live `DsClientLocalPlayer` field at
