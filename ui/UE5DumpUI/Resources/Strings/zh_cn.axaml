@@ -1209,117 +1209,141 @@
 	<sys:String x:Key="str.Tip.TP.SaveCt">离线备份：导出包含17组瞬移记录+3项移动开关的CE .CT修改表，适配当前滑块参数；未连接AOBMaker时使用，CE通过文件-打开载入</sys:String>
 
 	<!-- Teleport: Debug Camera (free-look) -->
-	<sys:String x:Key="str.TP.DcHeader">Debug Camera (free-look)</sys:String>
-	<sys:String x:Key="str.TP.DcHint">Detach the view into a free-fly debug camera (UCheatManager::ToggleDebugCamera). Turning it back OFF is handled even on Shipping builds that stripped the disable path — the DLL switches the local player's controller back. Needs a live PlayerController, so enter gameplay first. Available only on games that kept ToggleDebugCamera.</sys:String>
-	<sys:String x:Key="str.TP.DcState">State:</sys:String>
-	<sys:String x:Key="str.TP.DcOn">Force ON</sys:String>
-	<sys:String x:Key="str.TP.DcOff">Force OFF</sys:String>
-	<sys:String x:Key="str.TP.DcRefresh">↻</sys:String>
-	<sys:String x:Key="str.Tip.TP.DcOn">Deterministically enable the debug camera (reads state first, only toggles if needed). Idempotent — pressing again when it's already ON does nothing.</sys:String>
-	<sys:String x:Key="str.Tip.TP.DcOff">Deterministically disable the debug camera and return control to the player. On builds that stripped the disable path, the DLL swaps the local player's controller back to the original PlayerController.</sys:String>
-	<sys:String x:Key="str.Tip.TP.DcRefresh">Re-read the live debug-camera state (1=ON / 0=OFF / unknown if no live CheatManager).</sys:String>
-
+	<sys:String x:Key="str.TP.DcHeader">调试自由视角相机</sys:String>
+	<sys:String x:Key="str.TP.DcHint">
+		调用UCheatManager::ToggleDebugCamera脱离角色视角自由飞行；即便正式版打包删除关闭逻辑，DLL也会强制切回玩家控制器；
+		需要生成玩家控制器实例，先进入游戏游玩界面；仅保留ToggleDebugCamera指令的游戏可用
+	</sys:String>
+	<sys:String x:Key="str.TP.DcState">当前状态：</sys:String>
+	<sys:String x:Key="str.TP.DcOn">强制开启</sys:String>
+	<sys:String x:Key="str.TP.DcOff">强制关闭</sys:String>
+	<sys:String x:Key="str.TP.DcRefresh">↻ 刷新状态</sys:String>
+	<sys:String x:Key="str.Tip.TP.DcOn">确定性开启：先读取状态，关闭才执行切换；幂等重复点击无效果</sys:String>
+	<sys:String x:Key="str.Tip.TP.DcOff">确定性关闭并归还视角控制权；正式版阉割关闭逻辑时，DLL直接替换本地玩家控制器恢复视角</sys:String>
+	<sys:String x:Key="str.Tip.TP.DcRefresh">重新读取相机状态：1开启 / 0关闭 / 无CheatManager实例则未知</sys:String>
+	
 	<!-- God Mode (Solitar — force AActor.bCanBeDamaged) -->
-	<sys:String x:Key="str.TP.GmHeader">God Mode</sys:String>
-	<sys:String x:Key="str.TP.GmHint">Forces the player pawn's AActor.bCanBeDamaged to FALSE, so damage routed through the standard engine pipeline (ApplyDamage) is dropped. Re-asserted on a timer while ON, so it survives respawns. Needs a live pawn — enter gameplay first. Games with custom health systems may bypass it: then freeze the health value in Value Search, or find the game's own immortal flag in Property Search. Single-player only — online games replicate this flag server-side.</sys:String>
-	<sys:String x:Key="str.TP.GmState">State:</sys:String>
-	<sys:String x:Key="str.TP.GmOn">Force ON</sys:String>
-	<sys:String x:Key="str.TP.GmOff">Force OFF</sys:String>
-	<sys:String x:Key="str.TP.GmRefresh">↻</sys:String>
-	<sys:String x:Key="str.TP.GmCopyScript">Add to CE</sys:String>
-	<sys:String x:Key="str.Tip.TP.GmOn">Turn God Mode ON (clear bCanBeDamaged). Idempotent; the DLL re-asserts the bit every ~300 ms so it survives respawns.</sys:String>
-	<sys:String x:Key="str.Tip.TP.GmOff">Turn God Mode OFF (restore bCanBeDamaged) and stop the re-assert worker.</sys:String>
-	<sys:String x:Key="str.Tip.TP.GmRefresh">Re-read the live God Mode state (1=immune / 0=can be damaged / unknown if no pawn).</sys:String>
-	<sys:String x:Key="str.Tip.TP.GmCopyScript">Add a self-contained Cheat Engine AA record (tick = ON, untick = OFF) that drives God Mode via the DLL mailbox. Pushed straight into CE via AOBMaker, or copied as paste-able CE memory-record XML if AOBMaker isn't connected (right-click the address list → Paste). Works offline — no pipe / UI connection needed.</sys:String>
-
+	<sys:String x:Key="str.TP.GmHeader">无敌模式</sys:String>
+	<sys:String x:Key="str.TP.GmHint">
+		强制将玩家Actor受伤害标识bCanBeDamaged设为false，引擎标准ApplyDamage伤害流程会直接丢弃伤害；
+		开启后定时器定时刷新标识，复活后依旧保持无敌；需进入游戏生成角色；
+		自研血条伤害系统会绕过该标识，需改用数值搜索冻结血量或属性检索查找游戏专属无敌开关；仅单机可用，联机该标识由服务器同步校验
+	</sys:String>
+	<sys:String x:Key="str.TP.GmState">当前状态：</sys:String>
+	<sys:String x:Key="str.TP.GmOn">强制开启</sys:String>
+	<sys:String x:Key="str.TP.GmOff">强制关闭</sys:String>
+	<sys:String x:Key="str.TP.GmRefresh">↻ 刷新状态</sys:String>
+	<sys:String x:Key="str.TP.GmCopyScript">添加至CE脚本</sys:String>
+	<sys:String x:Key="str.Tip.TP.GmOn">开启无敌，清除可受伤害标记；DLL每300毫秒刷新一次，角色复活不会失效</sys:String>
+	<sys:String x:Key="str.Tip.TP.GmOff">关闭无敌，恢复受伤害标识，停止后台定时刷新</sys:String>
+	<sys:String x:Key="str.Tip.TP.GmRefresh">读取角色无敌状态：1免疫伤害 / 0可受伤 / 无角色实例则未知</sys:String>
+	<sys:String x:Key="str.Tip.TP.GmCopyScript">
+		生成独立CE汇编脚本，勾选开启无敌、取消关闭；经由DLL消息队列运行；
+		接入AOBMaker直接推送CE，未连接则复制XML剪贴板粘贴使用；无需UI在线连接即可运行
+	</sys:String>
+	
 	<!-- Player Stealth meter (Solide — auto-find + hold a stealth/visibility float at 0) -->
-	<sys:String x:Key="str.TP.StHeader">Stealth Meter</sys:String>
-	<sys:String x:Key="str.TP.StState">State:</sys:String>
-	<sys:String x:Key="str.TP.StHint">Auto-finds a numeric "visibility / noise / detection / awareness" meter on the player pawn (and its owned components) and holds it at 0 so detection that reads that meter never fills. There is NO universal detection flag in Unreal — this only works when the game exposes a reflected stealth/visibility field. Click Detect, verify the field it locked onto, then Hold @0. If nothing is found, search Property Search (e.g. 'visib', 'detect', 'noise') and Force a numeric field to 0. Single-player only.</sys:String>
-	<sys:String x:Key="str.TP.StDetect">Detect meter</sys:String>
-	<sys:String x:Key="str.TP.StHold">Hold @0</sys:String>
-	<sys:String x:Key="str.TP.StReset">Reset</sys:String>
-	<sys:String x:Key="str.Tip.TP.StDetect">Resolve the player pawn + its owned components and keyword-score reflected numeric fields for a stealth/visibility/detection meter. Read-only — loads the top candidate into the readout for you to verify before holding it.</sys:String>
-	<sys:String x:Key="str.Tip.TP.StHold">Force the detected meter to 0 on every live instance of its class and hold it there (re-asserted on a timer). "N held" shows how many instances are held.</sys:String>
-	<sys:String x:Key="str.Tip.TP.StReset">Release the hold — restore the captured base value and stop holding the meter.</sys:String>
-	<sys:String x:Key="str.TP.FgHeader">Keep Foreground</sys:String>
-	<sys:String x:Key="str.TP.FgState">State:</sys:String>
-	<sys:String x:Key="str.TP.FgHint">Force the game to always behave as the foreground app so it doesn't idle/pause its game thread when unfocused (t.IdleWhenNotForeground). Needed for POV / UFunction invokes on games that halt when backgrounded — e.g. Persona 3 Reload. Off by default.</sys:String>
-	<sys:String x:Key="str.TP.FgOn">Force ON</sys:String>
-	<sys:String x:Key="str.TP.FgOff">Force OFF</sys:String>
+	<sys:String x:Key="str.TP.StHeader">潜行警戒条</sys:String>
+	<sys:String x:Key="str.TP.StState">状态：</sys:String>
+	<sys:String x:Key="str.TP.StHint">自动检索玩家角色及其附属组件上代表可见度、噪音、探测值、警觉度的数值变量，并强制锁定为0，让游戏侦测进度永远不会上涨。
+	虚幻引擎不存在统一通用的潜行侦测总开关，仅游戏开放了可反射的潜行/可视字段时才可生效。
+	使用步骤：点击检测 → 核对识别到的目标字段 → 开启永久归零锁定。
+	检索无果时，可前往属性检索面板搜索关键词（visib、detect、noise），手动将浮点数值强制置0。仅限单机游戏使用。</sys:String>
+	<sys:String x:Key="str.TP.StDetect">检测警戒数值</sys:String>
+	<sys:String x:Key="str.TP.StHold">锁定数值为0</sys:String>
+	<sys:String x:Key="str.TP.StReset">重置解除锁定</sys:String>
+	<sys:String x:Key="str.Tip.TP.StDetect">解析玩家角色及全部挂载组件，通过关键词权重打分筛选匹配潜行、可视、侦测相关的可反射数字字段；仅读取预览，不会修改内存，将最优候选值展示出来供你确认。</sys:String>
+	<sys:String x:Key="str.Tip.TP.StHold">遍历该字段所属类的所有运行实例，统一强制赋值0，并依靠定时器循环覆写持续锁定；面板会显示当前已锁定的实例总数量。</sys:String>
+	<sys:String x:Key="str.Tip.TP.StReset">解除数值锁定，恢复最初记录的原始数值，停止后台定时覆写。</sys:String>
+
+	<sys:String x:Key="str.TP.FgHeader">保持前台运行</sys:String>
+	<sys:String x:Key="str.TP.FgState">状态：</sys:String>
+	<sys:String x:Key="str.TP.FgHint">强制游戏始终判定自身处于前台激活窗口，切后台后游戏主线程不会休眠暂停（屏蔽IdleWhenNotForeground逻辑）。
+	部分切后台就暂停的游戏（例如女神异闻录3 Reload），需要开启此项才能正常预览视角、调用引擎函数；默认关闭。</sys:String>
+	<sys:String x:Key="str.TP.FgOn">强制开启</sys:String>
+	<sys:String x:Key="str.TP.FgOff">强制关闭</sys:String>
 	<sys:String x:Key="str.TP.FgRefresh">↻</sys:String>
-	<sys:String x:Key="str.Tip.TP.FgOn">Turn the foreground lock ON — the DLL hooks GetForegroundWindow so the game always thinks it is focused. Keeps the game thread ticking (invokes / POV) while this tool or Cheat Engine holds the foreground.</sys:String>
-	<sys:String x:Key="str.Tip.TP.FgOff">Turn the foreground lock OFF — restore normal focus behaviour (the game may idle/pause when unfocused).</sys:String>
-	<sys:String x:Key="str.Tip.TP.FgRefresh">Re-read the live foreground-lock state (ON / OFF).</sys:String>
-	<sys:String x:Key="str.TP.FgCopyScript">Add to CE</sys:String>
-	<sys:String x:Key="str.Tip.TP.FgCopyScript">Add a self-contained Cheat Engine AA record (tick = ON, untick = OFF) that drives Keep Foreground via the DLL mailbox. Pushed straight into CE via AOBMaker, or copied as paste-able CE memory-record XML if AOBMaker isn't connected (right-click the address list → Paste). Works offline — no pipe / UI connection needed.</sys:String>
+	<sys:String x:Key="str.Tip.TP.FgOn">开启前台锁定：DLL挂钩系统API GetForegroundWindow，欺骗游戏窗口永久处于激活状态。即便你切到本工具、Cheat Engine界面，游戏依旧持续帧刷新，可正常调用函数、查看游戏视角。</sys:String>
+	<sys:String x:Key="str.Tip.TP.FgOff">关闭前台锁定，恢复系统原生窗口焦点逻辑，切出后台游戏会正常暂停休眠。</sys:String>
+	<sys:String x:Key="str.Tip.TP.FgRefresh">重新读取前台锁定当前运行状态（开启/关闭）。</sys:String>
+	<sys:String x:Key="str.TP.FgCopyScript">添加至CE</sys:String>
+	<sys:String x:Key="str.Tip.TP.FgCopyScript">生成独立Cheat Engine汇编条目（勾选开启锁定、取消勾选关闭），经由DLL消息队列控制前台常驻功能。
+	已连接AOBMaker则直接推送至CE地址列表；未连接会生成可粘贴的CE内存条目XML，右键CE地址列表选择粘贴即可；离线可独立运行，无需和工具保持连接。</sys:String>
 
 	<!-- Standalone trainer export (no-DLL CE Lua .CT via AOBMaker) -->
-	<sys:String x:Key="str.TP.TrainerHeader">Standalone Trainer (no DLL)</sys:String>
-	<sys:String x:Key="str.TP.TrainerExport">Export to CE (this game/version)</sys:String>
-	<sys:String x:Key="str.Tip.TP.TrainerExport">Bake this game's GWorld chain + offsets into a self-contained CE Lua trainer (Move Speed / Gravity / Super Jump / GodMode / coordinate TP) and push it straight into Cheat Engine via the AOBMaker plugin. Runs WITHOUT the DLL afterwards. Valid only for this exact game build — regenerate after a patch. Requires the AOBMaker plugin.</sys:String>
-
+	<sys:String x:Key="str.TP.TrainerHeader">独立离线修改器（无需注入DLL）</sys:String>
+	<sys:String x:Key="str.TP.TrainerExport">导出至CE（适配当前游戏版本）</sys:String>
+	<sys:String x:Key="str.Tip.TP.TrainerExport">
+		将当前游戏GWorld指针链路与内存偏移封装为完整独立的CE Lua修改脚本，包含移速、重力、超级跳跃、无敌模式、坐标瞬移功能，经由AOBMaker插件直接推送进Cheat Engine。
+		导出完成后无需注入DLL即可运行；仅适配当前游戏程序版本，游戏更新补丁后需要重新生成；必须依赖AOBMaker插件。
+	</sys:String>
+	
 	<!-- Move Speed multiplier (Laufen — force UCharacterMovementComponent.MaxWalkSpeed) -->
-	<sys:String x:Key="str.TP.MsHeader">Move Speed</sys:String>
-	<sys:String x:Key="str.TP.MsState">State:</sys:String>
-	<sys:String x:Key="str.TP.MsHint">Scales the player pawn's UCharacterMovementComponent.MaxWalkSpeed by the slider multiplier (10%–1000%, log scale, 100% = base). The DLL captures the original value on first Apply and re-asserts the target every ~250 ms so it survives respawns and per-tick recomputation. Only normal walk speed is engine-standard — sprint / dash are game-specific (find them in Property Search). Needs a live pawn with a CharacterMovement (not vehicles / custom movement). Single-player only — online games replicate movement server-side.</sys:String>
-	<sys:String x:Key="str.TP.MsApply">Apply</sys:String>
-	<sys:String x:Key="str.TP.MsReset">Reset</sys:String>
+	<sys:String x:Key="str.TP.MsHeader">移动速度</sys:String>
+	<sys:String x:Key="str.TP.MsState">状态：</sys:String>
+	<sys:String x:Key="str.TP.MsHint">通过滑块倍率缩放角色行走最大速度（区间10%~1000%，对数刻度，100%为原版默认速度）。首次启用时DLL记录原始数值，每250毫秒循环覆写锁定，角色复活、游戏逐帧重置均不会失效。引擎仅统一规范普通步行速度，冲刺、疾跑属于游戏自定义逻辑，可前往属性检索面板自行查找；需要角色正常生成并挂载角色移动组件，载具、自定义移动框架不支持；仅限单机游玩，联机游戏移动数据由服务器同步校验。</sys:String>
+	<sys:String x:Key="str.TP.MsApply">应用倍率</sys:String>
+	<sys:String x:Key="str.TP.MsReset">重置恢复默认</sys:String>
 	<sys:String x:Key="str.TP.MsRefresh">↻</sys:String>
-	<sys:String x:Key="str.TP.MsLocate">🌍 Locate</sys:String>
-	<sys:String x:Key="str.Tip.TP.MsApply">Force MaxWalkSpeed to base × the slider multiplier and hold it (re-asserted on a timer so a sprint/ability system can't revert it).</sys:String>
-	<sys:String x:Key="str.Tip.TP.MsReset">Restore MaxWalkSpeed to its captured base value and stop holding it. Resets the slider to 100%.</sys:String>
-	<sys:String x:Key="str.Tip.TP.MsRefresh">Re-read the live MaxWalkSpeed and override state from the current pawn's CharacterMovement.</sys:String>
-	<sys:String x:Key="str.Tip.TP.MsLocate">Find the MaxWalkSpeed float in GWorld and select it in the Live Walker — to freeze or inspect it directly.</sys:String>
+	<sys:String x:Key="str.TP.MsLocate">🌍 内存定位</sys:String>
+	<sys:String x:Key="str.Tip.TP.MsApply">将最大行走速度强制设定为 原始数值 × 滑块倍率，定时器持续锁定，冲刺系统、技能效果无法覆盖改写。</sys:String>
+	<sys:String x:Key="str.Tip.TP.MsReset">恢复预先保存的原生行走速度，终止定时锁定，滑块同步复位至100%。</sys:String>
+	<sys:String x:Key="str.Tip.TP.MsRefresh">重新读取当前角色移动组件实时最大行走速度与锁定状态。</sys:String>
+	<sys:String x:Key="str.Tip.TP.MsLocate">在GWorld内存链路中找到MaxWalkSpeed浮点字段，跳转至实时内存浏览器选中，可直接冻结、查看内存详情。</sys:String>
 
 	<!-- Time dilation (Hemmung) — global slow-mo / freeze / speed-up -->
-	<sys:String x:Key="str.TP.TdHeader">Time Dilation</sys:String>
-	<sys:String x:Key="str.TP.TdSubtitle">slow-mo / bullet time / freeze / fast-forward</sys:String>
-	<sys:String x:Key="str.TP.TdState">State:</sys:String>
-	<sys:String x:Key="str.TP.TdHint">Slows, freezes, or speeds up game time by forcing a reflected dilation float. The two levers are independent and held together: "Whole world" writes AWorldSettings.TimeDilation (everything — enemies, projectiles, physics); "Player pawn" writes the pawn's AActor.CustomTimeDilation. The pawn's effective rate is world × pawn, so World 0.5× + Player 2× = the player at normal speed in a half-speed world (bullet time). The DLL captures each natural value on first Apply and re-asserts it every ~250 ms, so a slow-mo ability or Sequencer time-track can't revert it. 1× = normal, 0.5× = half speed, 0 = frozen (a literal 0 can destabilise physics on some games — use a small value like 0.05×). A paused world can't be stepped this way. Single-player only.</sys:String>
-	<sys:String x:Key="str.TP.TdWorldHeader">Whole world (AWorldSettings.TimeDilation)</sys:String>
-	<sys:String x:Key="str.TP.TdPawnHeader">Player pawn (AActor.CustomTimeDilation)</sys:String>
-	<sys:String x:Key="str.TP.TdApply">Apply</sys:String>
-	<sys:String x:Key="str.TP.TdReset">Reset</sys:String>
-	<sys:String x:Key="str.TP.TdRefreshBoth">↻ Refresh both</sys:String>
-	<sys:String x:Key="str.TP.TdFreeze">Freeze</sys:String>
-	<sys:String x:Key="str.TP.TdQuarter">¼×</sys:String>
-	<sys:String x:Key="str.TP.TdHalf">½×</sys:String>
-	<sys:String x:Key="str.TP.TdNormal">1×</sys:String>
-	<sys:String x:Key="str.TP.TdDouble">2×</sys:String>
-	<sys:String x:Key="str.Tip.TP.TdApply">Hold this lever at the slider's absolute dilation and re-assert it on a timer so the game can't revert it. World and player are independent — applying one doesn't disturb the other.</sys:String>
-	<sys:String x:Key="str.Tip.TP.TdReset">Restore this lever to its captured natural value and stop holding it. Resets its slider to 1×; the other lever is untouched.</sys:String>
-	<sys:String x:Key="str.Tip.TP.TdRefresh">Re-read both levers' live dilation values and override state.</sys:String>
-	<sys:String x:Key="str.Tip.TP.TdEffective">The player's real speed is world × pawn — UE multiplies the global world dilation into the pawn's CustomTimeDilation, so "Whole world" slows the player too. For a slow world but a normal-speed player (bullet time), set Player = 1 ÷ World (e.g. World 0.5× → Player 2×).</sys:String>
+	<sys:String x:Key="str.TP.TdHeader">时间缩放</sys:String>
+	<sys:String x:Key="str.TP.TdSubtitle">慢动作 / 子弹时间 / 时间静止 / 倍速</sys:String>
+	<sys:String x:Key="str.TP.TdState">状态：</sys:String>
+	<sys:String x:Key="str.TP.TdHint">修改可反射时间浮点数值，实现减速、冻结、加速游戏全局时间；两组参数相互独立、同步生效：
+	「全局世界时间」修改AWorldSettings.TimeDilation：影响全体敌人、弹道、物理系统；
+	「玩家个体时间」修改角色AActor.CustomTimeDilation：仅改变自身时间流速。
+	玩家最终时间倍率 = 全局倍率 × 个体倍率；示例：全局0.5倍速 + 玩家2倍速 = 世界慢速、自身正常（子弹时间效果）。
+	首次开启会记录原始数值，每250ms定时覆写锁定，游戏自带慢动作技能、动画序列无法将其重置。
+	1倍为正常速度，0.5倍慢速，直接填0容易造成部分游戏物理系统崩溃，推荐使用0.05近似静止；游戏暂停状态下无法微调时间流速；仅限单机使用。</sys:String>
+	<sys:String x:Key="str.TP.TdWorldHeader">全局世界时间（AWorldSettings.TimeDilation）</sys:String>
+	<sys:String x:Key="str.TP.TdPawnHeader">玩家独立时间（AActor.CustomTimeDilation）</sys:String>
+	<sys:String x:Key="str.TP.TdApply">应用设置</sys:String>
+	<sys:String x:Key="str.TP.TdReset">重置</sys:String>
+	<sys:String x:Key="str.TP.TdRefreshBoth">↻ 刷新两项数值</sys:String>
+	<sys:String x:Key="str.TP.TdFreeze">时间静止</sys:String>
+	<sys:String x:Key="str.TP.TdQuarter">0.25倍速</sys:String>
+	<sys:String x:Key="str.TP.TdHalf">0.5倍速</sys:String>
+	<sys:String x:Key="str.TP.TdNormal">1倍正常</sys:String>
+	<sys:String x:Key="str.TP.TdDouble">2倍速</sys:String>
+	<sys:String x:Key="str.Tip.TP.TdApply">锁定当前滑块设定的时间倍率，后台定时持续覆写，游戏无法自动还原；全局与玩家参数互不干扰，修改其一不会影响另一项。</sys:String>
+	<sys:String x:Key="str.Tip.TP.TdReset">恢复本组时间倍率至初始原生数值，关闭锁定，滑块归位1倍；另一组时间参数保持不变。</sys:String>
+	<sys:String x:Key="str.Tip.TP.TdRefresh">同时读取全局、玩家两组实时时间缩放数值与运行状态。</sys:String>
+	<sys:String x:Key="str.Tip.TP.TdEffective">玩家实际时间流速=全局倍率×个体倍率；全局减速会连带玩家一同变慢。想要子弹时间效果：全局调0.5倍、玩家设2倍相互抵消。</sys:String>
 
 	<!-- Gravity multiplier (Laufen — force UCharacterMovementComponent.GravityScale) -->
-	<sys:String x:Key="str.TP.GrHeader">Gravity</sys:String>
-	<sys:String x:Key="str.TP.GrState">State:</sys:String>
-	<sys:String x:Key="str.TP.GrHint">Scales the player pawn's UCharacterMovementComponent.GravityScale by the slider (10%–1000%, log scale, 100% = base). Below 100% = floaty / moon-jump; above = heavy. Held against per-tick overwrites by the re-assert worker. Per-pawn only — it does not change world gravity for other actors. Extreme values can clip you through floors or break fall damage. Arbitrary gravity direction (UE5.4+) is not yet exposed. Needs a live pawn with a CharacterMovement. Single-player only.</sys:String>
-	<sys:String x:Key="str.TP.GrApply">Apply</sys:String>
-	<sys:String x:Key="str.TP.GrReset">Reset</sys:String>
+	<sys:String x:Key="str.TP.GrHeader">重力系数</sys:String>
+	<sys:String x:Key="str.TP.GrState">状态：</sys:String>
+	<sys:String x:Key="str.TP.GrHint">滑块缩放角色重力系数（10%~1000%对数刻度，100%原版默认）。低于100%下落缓慢、浮空轻盈、跳跃更高；高于100%下坠沉重快速。后台定时循环锁定数值，抵御游戏逐帧覆盖改写。仅作用于玩家单人，不会修改场景全局重力；极值过大容易出现穿地板、坠落伤害异常问题。暂未支持UE5.4及以上新版本的自定义重力方向功能；需要角色挂载角色移动组件；仅限单机。</sys:String>
+	<sys:String x:Key="str.TP.GrApply">应用重力倍率</sys:String>
+	<sys:String x:Key="str.TP.GrReset">重置默认重力</sys:String>
 	<sys:String x:Key="str.TP.GrRefresh">↻</sys:String>
-	<sys:String x:Key="str.TP.GrLocate">🌍 Locate</sys:String>
-	<sys:String x:Key="str.Tip.TP.GrApply">Force GravityScale to base × the slider multiplier and hold it (re-asserted on a timer).</sys:String>
-	<sys:String x:Key="str.Tip.TP.GrReset">Restore GravityScale to its captured base value. Resets the slider to 100%.</sys:String>
-	<sys:String x:Key="str.Tip.TP.GrRefresh">Re-read the live GravityScale and override state from the current pawn's CharacterMovement.</sys:String>
-	<sys:String x:Key="str.Tip.TP.GrLocate">Find the GravityScale float in GWorld and select it in the Live Walker.</sys:String>
+	<sys:String x:Key="str.TP.GrLocate">🌍 内存定位</sys:String>
+	<sys:String x:Key="str.Tip.TP.GrApply">重力系数 = 原始值 × 滑块倍率，定时器持续锁定生效。</sys:String>
+	<sys:String x:Key="str.Tip.TP.GrReset">重力恢复初始默认数值，滑块复位100%，停止锁定。</sys:String>
+	<sys:String x:Key="str.Tip.TP.GrRefresh">读取当前角色移动组件重力系数与锁定状态。</sys:String>
+	<sys:String x:Key="str.Tip.TP.GrLocate">在GWorld内存中找到GravityScale重力浮点变量，跳转实时内存浏览器选中查看。</sys:String>
 
 	<!-- Super Jump toggle (Laufen — force UCharacterMovementComponent.JumpZVelocity) -->
-	<sys:String x:Key="str.TP.SjHeader">Super Jump</sys:String>
-	<sys:String x:Key="str.TP.SjState">State:</sys:String>
-	<sys:String x:Key="str.TP.SjHint">Persistent high-jump toggle: forces UCharacterMovementComponent.JumpZVelocity and re-asserts it. The slider is jump HEIGHT (10%–3000%, 100% = base); apex height grows with the square of launch velocity, so the applied velocity multiplier is √(height) — e.g. 400% height = ×2 velocity. Force ON holds it; Force OFF restores the base, Reset also snaps the slider to 100%. There is no engine "jump height" property, so this works by scaling the launch impulse. Needs a live pawn with a CharacterMovement. Single-player only.</sys:String>
-	<sys:String x:Key="str.TP.SjOn">Force ON</sys:String>
-	<sys:String x:Key="str.TP.SjOff">Force OFF</sys:String>
-	<sys:String x:Key="str.TP.SjReset">Reset</sys:String>
+	<sys:String x:Key="str.TP.SjHeader">超级跳跃</sys:String>
+	<sys:String x:Key="str.TP.SjState">状态：</sys:String>
+	<sys:String x:Key="str.TP.SjHint">常驻高跳跃开关：强制修改角色起跳竖直初速度JumpZVelocity并持续锁定。滑块代表跳跃高度百分比（10%~3000%，100%原版）；跳跃最高点高度与起跳速度呈平方关系，因此速度倍率 = √(高度倍率)；例：400%高度 = 起跳速度翻倍。虚幻引擎没有直接的跳跃高度参数，依靠修改起跳冲量实现效果。开启后永久锁定；关闭恢复原始数值；重置会同步将滑块切回默认。需要角色搭载角色移动组件；仅限单机。</sys:String>
+	<sys:String x:Key="str.TP.SjOn">强制开启</sys:String>
+	<sys:String x:Key="str.TP.SjOff">强制关闭</sys:String>
+	<sys:String x:Key="str.TP.SjReset">重置</sys:String>
 	<sys:String x:Key="str.TP.SjRefresh">↻</sys:String>
-	<sys:String x:Key="str.TP.SjLocate">🌍 Locate</sys:String>
-	<sys:String x:Key="str.TP.SjHotkeyHint">Bind a global hotkey to "Super Jump toggle" in the Marker Hotkeys section above to toggle it in-game.</sys:String>
-	<sys:String x:Key="str.Tip.TP.SjOn">Turn Super Jump ON — set JumpZVelocity to base × √(slider height %) and hold it (survives respawns).</sys:String>
-	<sys:String x:Key="str.Tip.TP.SjOff">Turn Super Jump OFF — restore JumpZVelocity to its captured base.</sys:String>
-	<sys:String x:Key="str.Tip.TP.SjReset">Turn Super Jump OFF and snap the height slider back to 100%.</sys:String>
-	<sys:String x:Key="str.Tip.TP.SjRefresh">Re-read the live JumpZVelocity and override state from the current pawn's CharacterMovement.</sys:String>
-	<sys:String x:Key="str.Tip.TP.SjLocate">Find the JumpZVelocity float in GWorld and select it in the Live Walker.</sys:String>
+	<sys:String x:Key="str.TP.SjLocate">🌍 内存定位</sys:String>
+	<sys:String x:Key="str.TP.SjHotkeyHint">可在上方标记快捷键区域绑定全局热键，游戏内一键切换超级跳跃开关。</sys:String>
+	<sys:String x:Key="str.Tip.TP.SjOn">开启超级跳跃：起跳速度=原始值 × √(高度百分比)，定时器持续锁定，角色复活依旧生效。</sys:String>
+	<sys:String x:Key="str.Tip.TP.SjOff">关闭超级跳跃，起跳速度恢复原版默认数值。</sys:String>
+	<sys:String x:Key="str.Tip.TP.SjReset">关闭超级跳跃，高度滑块复位至100%初始状态。</sys:String>
+	<sys:String x:Key="str.Tip.TP.SjRefresh">读取当前起跳竖直速度数值与开关运行状态。</sys:String>
+	<sys:String x:Key="str.Tip.TP.SjLocate">在GWorld内存链路找到JumpZVelocity起跳速度浮点字段，跳转实时内存浏览器选中。</sys:String>
 
 	<!-- Fly (Dunste — no-gravity keyboard-driven 3D flight) -->
 	<sys:String x:Key="str.TP.FlyHeader">Fly (no-gravity 3D flight)</sys:String>
