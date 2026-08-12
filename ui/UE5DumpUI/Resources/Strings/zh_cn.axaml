@@ -423,826 +423,1122 @@
 
 
 
-	<!-- 深度扫描状态文本 -->
-	<sys:String x:Key="str.Pointers.Scan.Starting">开始扫描...</sys:String>
-	<sys:String x:Key="str.Pointers.Scan.NothingToScan">无需扫描，全部指针已识别</sys:String>
-	<sys:String x:Key="str.Pointers.Scan.Applying">加载扫描结果...</sys:String>
-	<sys:String x:Key="str.Pointers.Scan.Applied">扫描完成，结果已加载</sys:String>
-	<sys:String x:Key="str.Pointers.Scan.NoResults">未识别额外指针</sys:String>
-	<sys:String x:Key="str.Pointers.Scan.CompleteNoResults">扫描结束，无新增指针</sys:String>
-	<sys:String x:Key="str.Pointers.Scan.Error">扫描出错：{0}</sys:String>
-	<!-- 测试扫描文本 -->
-	<sys:String x:Key="str.Pointers.TestScan.Starting">启动模拟扫描...</sys:String>
-	<sys:String x:Key="str.Pointers.TestScan.GObjects">扫描GObjects数据段...</sys:String>
-	<sys:String x:Key="str.Pointers.TestScan.GWorld">检索GWorld实例...</sys:String>
-	<sys:String x:Key="str.Pointers.TestScan.Complete">模拟扫描完成</sys:String>
-	<sys:String x:Key="str.Pointers.TestScan.Result">模拟扫描结束，无真实内存检索</sys:String>
-	<sys:String x:Key="str.Pointers.TestScan.Error">模拟扫描异常：{0}</sys:String>
-	<!-- 缓存操作文本 -->
-	<sys:String x:Key="str.Pointers.Cache.GameCleared">当前游戏缓存已清空，下次启动全量扫描</sys:String>
-	<sys:String x:Key="str.Pointers.Cache.GameNotFound">未找到该游戏缓存记录</sys:String>
-	<sys:String x:Key="str.Pointers.Cache.AllReset">全部缓存已重置，自动备份原文件</sys:String>
-	<sys:String x:Key="str.Pointers.Cache.ResetFailed">缓存重置失败，请查看日志</sys:String>
-	<sys:String x:Key="str.Pointers.Cache.Error">缓存操作错误：{0}</sys:String>
-	<!-- 系统诊断面板 -->
+ <!-- Pointer Panel: Extra Scan status messages (code-behind via Res.Get) -->
+    <sys:String x:Key="str.Pointers.Scan.Starting">开始扫描...</sys:String>
+    <sys:String x:Key="str.Pointers.Scan.NothingToScan">无需扫描，所有全局指针已识别完毕。</sys:String>
+    <sys:String x:Key="str.Pointers.Scan.Applying">加载扫描结果中...</sys:String>
+    <sys:String x:Key="str.Pointers.Scan.Applied">扫描完成，结果已加载。</sys:String>
+    <sys:String x:Key="str.Pointers.Scan.NoResults">未识别到额外全局指针。</sys:String>
+    <sys:String x:Key="str.Pointers.Scan.CompleteNoResults">扫描结束，无匹配指针。</sys:String>
+    <sys:String x:Key="str.Pointers.Scan.Error">扫描出错：{0}</sys:String>
+
+
+    <!-- Pointer Panel: Test Extra Scan status messages (code-behind via Res.Get) -->
+    <sys:String x:Key="str.Pointers.TestScan.Starting">开始模拟扫描...</sys:String>
+    <sys:String x:Key="str.Pointers.TestScan.GObjects">正在扫描GObjects数据段特征...</sys:String>
+    <sys:String x:Key="str.Pointers.TestScan.GWorld">检索GWorld实例...</sys:String>
+    <sys:String x:Key="str.Pointers.TestScan.Complete">模拟扫描完成。</sys:String>
+    <sys:String x:Key="str.Pointers.TestScan.Result">模拟扫描已结束，不会实际重读内存，所有指针已识别完成。</sys:String>
+    <sys:String x:Key="str.Pointers.TestScan.Error">模拟扫描异常：{0}</sys:String>
+
+
+    <!-- Pointer Panel: Cache management status messages (code-behind via Res.Get) -->
+    <sys:String x:Key="str.Pointers.Cache.GameCleared">已清空当前游戏缓存，下次扫描将执行完整检索。</sys:String>
+    <sys:String x:Key="str.Pointers.Cache.GameNotFound">未找到该游戏的缓存记录。</sys:String>
+    <sys:String x:Key="str.Pointers.Cache.AllReset">全部缓存已重置，旧缓存备份为.001文件。</sys:String>
+    <sys:String x:Key="str.Pointers.Cache.ResetFailed">缓存重置失败，请查看日志。</sys:String>
+    <sys:String x:Key="str.Pointers.Cache.Error">缓存操作错误：{0}</sys:String>
+
+
+    <!-- System tab: Diagnostics (build version + AOBMaker status + Self-Test) -->
 	<sys:String x:Key="str.System.Header">诊断信息</sys:String>
-	<sys:String x:Key="str.System.UiBuild">UI编译版本</sys:String>
-	<sys:String x:Key="str.System.Dll">注入DLL版本</sys:String>
-	<sys:String x:Key="str.System.BuildMatch">✓ 版本匹配</sys:String>
-	<sys:String x:Key="str.System.BuildMismatch">⚠ DLL版本过旧，请关闭游戏后重新部署代理DLL</sys:String>
-	<sys:String x:Key="str.System.BuildUnknown">⚠ DLL无版本标记，判定为旧版</sys:String>
-	<sys:String x:Key="str.System.AobMakerStatus">AOBMaker插件状态</sys:String>
-	<sys:String x:Key="str.System.AobMakerConnected">● 已连接</sys:String>
-	<sys:String x:Key="str.System.AobMakerOffline">○ 未检测到，请检查CE插件安装</sys:String>
-	<!-- 顶部工具栏AOBMaker状态 -->
+    <sys:String x:Key="str.System.UiBuild">UI编译版本</sys:String>
+    <sys:String x:Key="str.System.DllBuild">注入DLL版本</sys:String>
+    <sys:String x:Key="str.System.BuildMatch">✓ 版本匹配</sys:String>
+    <sys:String x:Key="str.System.BuildMismatch">⚠ DLL版本过旧，请关闭游戏后前往代理部署页面重新部署</sys:String>
+    <sys:String x:Key="str.System.BuildUnknown">⚠ 无法读取DLL版本号，判定为旧版</sys:String>
+    <sys:String x:Key="str.System.AobMakerStatus">AOBMaker插件状态</sys:String>
+    <sys:String x:Key="str.System.AobMakerConnected">● 已连接</sys:String>
+    <sys:String x:Key="str.System.AobMakerOffline">○ 未检测到，请检查CE插件安装</sys:String>
+    
+	<!-- Always-visible top-toolbar mirror of the System-tab AOBMaker indicator -->
 	<sys:String x:Key="str.Toolbar.AobMakerLabel">AOBMaker插件</sys:String>
-	<sys:String x:Key="str.Toolbar.AobMakerConnected">已连接</sys:String>
-	<sys:String x:Key="str.Toolbar.AobMakerOffline">离线</sys:String>
-	<sys:String x:Key="str.Toolbar.AobMakerRefresh">⟳ 刷新状态</sys:String>
-	<sys:String x:Key="str.Tip.Toolbar.AobMakerRefresh">重新检测Cheat Engine是否加载AOBMaker插件，按钮与功能使用时会自动刷新。</sys:String>
-	<!-- 自检功能 -->
-	<sys:String x:Key="str.System.SelfTest.Button">运行自检</sys:String>
-	<sys:String x:Key="str.System.SelfTest.Hint">调用蓝图数学库静态函数验证钩子是否挂载正确虚表槽位</sys:String>
-	<sys:String x:Key="str.System.SelfTest.Running">检测蓝图辅助函数...</sys:String>
-	<sys:String x:Key="str.System.SelfTest.NoCandidate">未找到可测试蓝图函数库</sys:String>
-	<sys:String x:Key="str.System.SelfTest.Error">自检失败：{0}</sys:String>
-	<!-- 管道日志 -->
-	<sys:String x:Key="str.System.PipeLog.Header">UI-DLL通信日志</sys:String>
-	<sys:String x:Key="str.System.PipeLog.Hint">实时通信记录，最新置顶；列：时间/通道/收发/指令/ID，交互通道优先响应。</sys:String>
-	<sys:String x:Key="str.System.PipeLog.Pause">暂停日志</sys:String>
-	<sys:String x:Key="str.System.PipeLog.Clear">清空日志</sys:String>
-	<sys:String x:Key="str.System.PipeLog.Empty">暂无通信记录，请连接游戏后操作功能</sys:String>
-	<!-- 维护面板 -->
-	<sys:String x:Key="str.System.Maintenance.Header">维护工具</sys:String>
-	<!-- 性能诊断 -->
-	<sys:String x:Key="str.System.Diag.Header">调度性能诊断</sys:String>
-	<sys:String x:Key="str.System.Diag.Refresh">刷新</sys:String>
-	<sys:String x:Key="str.System.Diag.Reset">重置统计</sys:String>
-	<sys:String x:Key="str.System.Diag.Auto">自动刷新(5秒)</sys:String>
-	<sys:String x:Key="str.System.Diag.AutoTip">每5秒读取一次性能，自动切换面板时暂停，避免干扰数据。</sys:String>
-	<sys:String x:Key="str.System.Diag.RefreshTip">手动读取DLL调度耗时、内存、线程等进程信息，游戏进程数据。</sys:String>
-	<sys:String x:Key="str.System.Diag.ResetTip">清空统计时长与调度计数，重新开始统计。</sys:String>
-	<sys:String x:Key="str.System.Diag.Summary">共{0}次调度，总时长{1}秒，调度占用{2}%，GObjects总数{0:N0}</sys:String>
-	<sys:String x:Key="str.System.Diag.Process">游戏进程：工作集{0} / 私有内存{1} / CPU占用{2}% / {3}线程 / {4}句柄</sys:String>
-	<sys:String x:Key="str.System.Diag.GameThread">游戏线程钩子：{0} · {1} · {2} · {3:N0}次触发</sys:String>
-	<sys:String x:Key="str.System.Diag.LastFire">上次触发距今 {0:N0} 毫秒</sys:String>
-	<sys:String x:Key="str.System.Diag.NeverFired">从未触发</sys:String>
-	<sys:String x:Key="str.System.Diag.Responsive">响应正常</sys:String>
-	<sys:String x:Key="str.System.Diag.Stalled">线程阻塞</sys:String>
-	<sys:String x:Key="str.System.Diag.NotConnected">诊断需要已连接游戏DLL</sys:String>
-	<sys:String x:Key="str.System.Diag.Reset.Done">统计数据已重置</sys:String>
-	<sys:String x:Key="str.System.Diag.Error">读取诊断失败：{0}</sys:String>
-	<!-- 日志工具 -->
-	<sys:String x:Key="str.System.OpenLogFolder">打开日志文件夹</sys:String>
-	<sys:String x:Key="str.System.OpenLogFolderTip">打开程序本地日志目录 %LOCALAPPDATA%\UE5CEDumper\Logs</sys:String>
-	<sys:String x:Key="str.System.OpenLogFolder.Error">无法打开目录：{0}</sys:String>
-	<sys:String x:Key="str.System.CompressLogs">压缩日志文件</sys:String>
-	<sys:String x:Key="str.System.CompressLogsTip">NTFS LZX无损压缩日志，压缩比极高，不影响文本编辑器打开，跳过近期、小文件。</sys:String>
-	<sys:String x:Key="str.System.CompressLogs.Running">正在压缩日志...</sys:String>
-	<sys:String x:Key="str.System.CompressLogs.Result">已压缩{0}个文件，{1}MB → {2}MB，节省{3}MB，{4}个文件失败</sys:String>
-	<sys:String x:Key="str.System.CompressLogs.NothingToDo">无需压缩：{0}个已压缩，{1}个跳过</sys:String>
-	<sys:String x:Key="str.System.CompressLogs.Unsupported">当前磁盘非NTFS，不支持压缩</sys:String>
-	<sys:String x:Key="str.System.CompressLogs.Error">日志压缩失败：{0}</sys:String>
-	<sys:String x:Key="str.System.AutoCompressLogs">启动自动压缩7天前日志</sys:String>
-	<sys:String x:Key="str.System.AutoCompressLogsTip">程序启动后台自动压缩旧日志，不删除文件。</sys:String>
-	<sys:String x:Key="str.System.RemoveAllSnapshots">删除全部快照数据</sys:String>
-	<sys:String x:Key="str.System.RemoveAllSnapshotsTip">彻底删除所有游戏快照数据库文件，不可逆操作，使用中数据库跳过。</sys:String>
-	<sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmTitle">确认删除所有快照</sys:String>
-	<sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmMessage">确定永久删除全部游戏快照数据库文件？操作无法撤销。</sys:String>
-	<sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmYes">删除文件</sys:String>
-	<sys:String x:Key="str.System.RemoveAllSnapshots.None">未找到快照数据库</sys:String>
-	<sys:String x:Key="str.System.RemoveAllSnapshots.Result">已删除{0}个快照文件</sys:String>
-	<sys:String x:Key="str.System.RemoveAllSnapshots.ResultPartial">删除{0}个，{1}个正在使用无法删除</sys:String>
-	<!-- 底部版权 -->
-	<sys:String x:Key="str.Credit.AuthorPrefix">作者：bbfox @ </sys:String>
-	<sys:String x:Key="str.Credit.AuthorUrl">https://opencheattables.com</sys:String>
-	<sys:String x:Key="str.Credit.RepoPrefix">项目仓库：</sys:String>
-	<sys:String x:Key="str.Credit.RepoUrl">https://github.com/bbfox0703/UE5CEDumper</sys:String>
-	<sys:String x:Key="str.Credit.OpenInBrowserTip">使用默认浏览器打开链接</sys:String>
-	<!-- 实验性功能开关 -->
-	<sys:String x:Key="str.Experimental.EnableHint">启用高级实验功能</sys:String>
-	<!-- 快照面板 -->
-	<sys:String x:Key="str.Snapshot.Into">捕获所有数字UPROPERTY快照，原生C选项可抓取无反射原生血量等数值。</sys:String>
-	<sys:String x:Key="str.Snapshot.NativeC">原生C原始内存</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.NativeC">捕获对象无反射原生内存，生成 虚拟字段，可用于快照对比，捕获体积更大速度更慢。</sys:String>
-	<sys:String x:Key="str.Snapshot.CaptureHeader">捕获快照</sys:String>
-	<sys:String x:Key="str.Snapshot.CompareHeader">快照对比</sys:String>
-	<sys:String x:Key="str.Snapshot.NotConnected">连接游戏后方可捕获快照</sys:String>
-	<sys:String x:Key="str.Snapshot.Scope">捕获范围：</sys:String>
-	<sys:String x:Key="str.Snapshot.Family">数值类型：</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.Family">仅捕获整数 / 仅捕获浮点 / 全部数字，缩小快照体积。</sys:String>
-	<sys:String x:Key="str.Snapshot.MaxDataset">快照最大体积上限：</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.MaxDataset">到达上限自动停止捕获，防止巨型快照占用磁盘。</sys:String>
-	<sys:String x:Key="str.Snapshot.Estimate">预估快照大小</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.Estimate">抽样估算快照占用空间，无需完整捕获。</sys:String>
-	<sys:String x:Key="str.Snapshot.GameOnly">仅游戏类对象</sys:String>
-	<sys:String x:Key="str.Snapshot.AutoSkipNoise">自动过滤引擎冗余对象</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.AutoSkipNoise">捕获时直接跳过UI、贴图等引擎类，快照更小更快，角色相关类强制保留。</sys:String>
-	<sys:String x:Key="str.Snapshot.Label">快照标签：</sys:String>
-	<sys:String x:Key="str.Snapshot.LabelWatermark">留空默认时间戳</sys:String>
-	<sys:String x:Key="str.Snapshot.Capture">开始捕获</sys:String>
-	<sys:String x:Key="str.Snapshot.Cancel">取消捕获</sys:String>
-	<sys:String x:Key="str.Snapshot.Refresh">刷新快照列表</sys:String>
-	<sys:String x:Key="str.Snapshot.Delete">删除选中快照</sys:String>
-	<sys:String x:Key="str.Snapshot.DeleteAll">删除全部快照</sys:String>
-	<sys:String x:Key="str.Snapshot.DeleteAllTip">清空当前游戏所有快照数据库，不可恢复</sys:String>
-	<sys:String x:Key="str.Snapshot.OpenDbFolder">打开快照存储目录</sys:String>
-	<sys:String x:Key="str.Snapshot.OpenDbFolderTip">打开当前游戏快照数据库文件夹</sys:String>
-	<sys:String x:Key="str.Snapshot.Quota">单游戏存储配额：</sys:String>
-	<sys:String x:Key="str.Snapshot.QuotaHint">快照超出配额自动删除最早文件</sys:String>
-	<sys:String x:Key="str.Snapshot.Usage">已占用：</sys:String>
-	<sys:String x:Key="str.Snapshot.MinFreeDisk">磁盘最小剩余空间：</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.MinFreeDisk">捕获前校验磁盘剩余空间，不足禁止捕获。</sys:String>
-	<!-- 自动快照 -->
-	<sys:String x:Key="str.Snapshot.Auto.Header">自动快照</sys:String>
-	<sys:String x:Key="str.Snapshot.Auto.On">开启</sys:String>
-	<sys:String x:Key="str.Snapshot.Auto.Off">关闭</sys:String>
-	<sys:String x:Key="str.Snapshot.Auto.Interval">间隔(秒)：</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.Auto.Interval">两次捕获起始间隔最低60秒，长捕获会自动顺延。</sys:String>
-	<sys:String x:Key="str.Snapshot.Auto.Retention">保留规则：</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.Auto.Retention">KeepRecent保留最新；FixedCount固定条数后停止。</sys:String>
-	<sys:String x:Key="str.Snapshot.Auto.Count">保留条数：</sys:String>
-	<sys:String x:Key="str.Snapshot.Auto.AdjustQuota">自动扩容配额</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.Auto.AdjustQuota">配额不足自动上调上限。</sys:String>
-	<sys:String x:Key="str.Snapshot.Auto.Hint">后台定时捕获，需手动启停，重启不恢复。</sys:String>
-	<sys:String x:Key="str.Snapshot.Saved">已保存快照列表</sys:String>
-	<sys:String x:Key="str.Snapshot.Col.Size">预估大小</sys:String>
-	<sys:String x:Key="str.Snapshot.Col.Label">标签</sys:String>
-	<sys:String x:Key="str.Snapshot.Col.Captured">捕获时间(UTC)</sys:String>
-	<sys:String x:Key="str.Snapshot.Col.Objects">对象数量</sys:String>
-	<sys:String x:Key="str.Snapshot.Col.Fields">字段总数</sys:String>
-	<sys:String x:Key="str.Snapshot.Col.Scope">捕获范围</sys:String>
-	<sys:String x:Key="str.Snapshot.Col.Ue">引擎版本</sys:String>
-	<!-- 快照对比 -->
-	<sys:String x:Key="str.Snapshot.Diff.Old">旧快照：</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.New">新快照：</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.Run">执行对比</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.DeepNote">对比默认深度遍历容器</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.Diff.DeepNote">快照对比自动遍历数组嵌套元素，无需额外开关。</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.ClassFilter">类筛选：</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.PropFilter">属性筛选：</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.Dir">变化类型：</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.CopyAddr">复制地址</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.OpenWalker">实时查看</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.LocateGWorld">🌍</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.Diff.LocateGWorld">从GWorld定位至变化字段，仅本次游戏会话有效</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.LocateGameEngine">⚙</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.Diff.LocateGameEngine">从GameEngine根定位变化字段</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.ObjectFilter">对象筛选：</sys:String>
-	<sys:String x:Key="str.Snapshot.Global">全局筛选：</sys:String>
-	<sys:String x:Key="str.Snapshot.GlobalHint">匹配所有列...</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.OldRange">旧值区间：</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.NewRange">新值区间：</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.ApplyRange">应用区间</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.ResetRange">重置区间</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.Hint">快照对比依靠对象唯一标识匹配，建议同一次游戏会话快照对比</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.Col.Change">变化Δ</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.Col.Class">类</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.Col.Object">对象</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.Col.Field">字段</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.Col.Old">旧值</sys:String>
-	<sys:String x:Key="str.Snapshot.Diff.Col.New">新值</sys:String>
-	<!-- 快照多条件分组 -->
-	<sys:String x:Key="str.Snapshot.Group.ModeLabel">模式：</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.ModeDiff">快照对比</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.ModeGroup">多条件分组</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.Snapshot">快照：</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.Find">检索匹配对象</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.Clear">清空条件</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.AddRow">+添加数值条件</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.RemoveRow">−删除数值条件</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.Deep">深层嵌套容器匹配</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.Group.Deep">匹配数组、结构体内部数值，关闭仅匹配直接字段</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.ValueHint">数值</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.Value2Hint">上限数值</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.CompareWith">对比快照：</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.Group.CompareWith">选择旧快照可筛选数值增减变化</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.CompareClear">✕ 清除对比快照</sys:String>
-	<sys:String x:Key="str.Tip.Snapshot.Group.CompareClear">取消跨快照变化筛选</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.Hint">查找同时包含所有数值的对象，可单快照绝对值/双快照变化筛选</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.Col.Class">类</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.Col.Object">对象</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.Col.Matched">匹配数值</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.OpenWalker">实时查看</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.CopyAddr">复制地址</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.LocateGWorld">🌍</sys:String>
-	<sys:String x:Key="str.Snapshot.Group.LocateGameEngine">⚙</sys:String>
-	<!-- SPC序列查询 -->
-	<sys:String x:Key="str.Spc.Intro">按数值变化序列筛选字段，无需固定数值，支持跨游戏重启快照</sys:String>
-	<sys:String x:Key="str.Spc.Join">匹配规则：</sys:String>
-	<sys:String x:Key="str.Spc.JoinHint">严格（类+偏移精准匹配）/宽松（类+路径兼容重启）/仅同一会话</sys:String>
-	<sys:String x:Key="str.Spc.ClassFilter">类筛选：</sys:String>
-	<sys:String x:Key="str.Spc.PropFilter">属性筛选：</sys:String>
-	<sys:String x:Key="str.Spc.ResClass">结果类</sys:String>
-	<sys:String x:Key="str.Spc.ResField">结果字段</sys:String>
-	<sys:String x:Key="str.Spc.ResObject">对象</sys:String>
-	<sys:String x:Key="str.Spc.ResGlobal">全局筛选：</sys:String>
-	<sys:String x:Key="str.Spc.ResGlobalHint">筛选所有列（类/字段/对象名），空格为多条件与</sys:String>
-	<sys:String x:Key="str.Spc.SeqFirst">最早快照</sys:String>
-	<sys:String x:Key="str.Spc.SeqLast">最新快照</sys:String>
-	<sys:String x:Key="str.Spc.Run">执行查询</sys:String>
-	<sys:String x:Key="str.Spc.Refresh">刷新快照列表</sys:String>
-	<sys:String x:Key="str.Spc.OpenWalker">实时查看</sys:String>
+    <sys:String x:Key="str.Toolbar.AobMakerConnected">已连接</sys:String>
+    <sys:String x:Key="str.Toolbar.AobMakerOffline">离线</sys:String>
+    <sys:String x:Key="str.Toolbar.AobMakerRefresh">⟳</sys:String>
+    <sys:String x:Key="str.Tip.Toolbar.AobMakerRefresh">重新检测Cheat Engine是否加载AOBMaker插件，各类功能按钮使用时也会自动检测，此按钮仅用于快速查看状态。</sys:String>
+    <sys:String x:Key="str.System.SelfTest.Button">运行自检</sys:String>
+    <sys:String x:Key="str.System.SelfTest.Hint">自动选取蓝图数学库静态原生函数快速调用，校验返回值，确认ProcessEvent钩子挂载至正确虚表槽位。</sys:String>
+    <sys:String x:Key="str.System.SelfTest.Running">正在检索蓝图数学库测试函数...</sys:String>
+    <sys:String x:Key="str.System.SelfTest.NoCandidate">当前游戏未找到可用于自检的蓝图工具函数库</sys:String>
+    <sys:String x:Key="str.System.SelfTest.Error">自检失败：{0}</sys:String>
+
+    <!-- System tab: Pipe Activity (live tail of UI<->DLL pipe traffic) -->
+    <sys:String x:Key="str.System.PipeLog.Header">管道通信日志</sys:String>
+    <sys:String x:Key="str.System.PipeLog.Hint">实时查看UI与DLL之间的管道通信记录，最新消息置顶。列信息：时间 · 通道(I交互通道 / B批量通道) · 流向(→发送，←带往返耗时的返回，⚡推送事件) · 指令 · 标识。相当于管道日志文件的实时视图，可观察大量扫描在批量通道执行时，交互指令仍保持响应。</sys:String>
+    <sys:String x:Key="str.System.PipeLog.Pause">暂停</sys:String>
+    <sys:String x:Key="str.System.PipeLog.Clear">清空</sys:String>
+    <sys:String x:Key="str.System.PipeLog.Empty">暂无管道通信记录，请连接游戏并操作功能面板。</sys:String>
+
+
+    <!-- System tab: Maintenance (open log folder + remove all snapshot databases) -->
+    <sys:String x:Key="str.System.Maintenance.Header">维护工具</sys:String>
+
+    <!-- Diagnostics (Sense) — what the pipe traffic costs -->
+    <sys:String x:Key="str.System.Diag.Header">性能诊断 — DLL调度耗时</sys:String>
+    <sys:String x:Key="str.System.Diag.Refresh">刷新</sys:String>
+    <sys:String x:Key="str.System.Diag.Reset">重置统计计数</sys:String>
+    <sys:String x:Key="str.System.Diag.Auto">自动刷新(5秒)</sys:String>
+    <sys:String x:Key="str.System.Diag.AutoTip">每5秒自动读取一次性能数据。刷新间隔刻意设长，因为每次读取本身也会产生调度开销，高频刷新会拉高占用统计值。切换面板时自动暂停，切回后恢复刷新。</sys:String>
+    <sys:String x:Key="str.System.Diag.RefreshTip">手动获取最新性能快照，查看各管道指令占用DLL调度时长、内存、CPU、线程、游戏线程运行状态。读取操作无风险，可频繁点击。CPU占用需要两次采样计算差值，首次读取显示横线。注意：内存、CPU、线程统计是整个游戏进程的数据，无法单独拆分本注入DLL；仅上方调度表格为工具自身开销。</sys:String>
+    <sys:String x:Key="str.System.Diag.ResetTip">清空所有统计并重置计时，方便单独统计单次操作性能。断开所有连接客户端时计数也会自动重置。</sys:String>
+    <sys:String x:Key="str.System.Diag.Summary">共{0}次调度，总时长{1}秒，调度占用{2}% · GObjects总数{3:N0}</sys:String>
+    <sys:String x:Key="str.System.Diag.Process">游戏进程：工作集{0} · 私有内存{1} · CPU占用{2}% · {3}线程 · {4}句柄</sys:String>
+    <sys:String x:Key="str.System.Diag.GameThread">游戏线程钩子：{0} · {1} · {2} · 触发{3:N0}次</sys:String>
+    <sys:String x:Key="str.System.Diag.LastFire">上次触发距今 {0:N0} 毫秒</sys:String>
+    <sys:String x:Key="str.System.Diag.NeverFired">从未触发（首次调用函数才会安装钩子）</sys:String>
+    <sys:String x:Key="str.System.Diag.Responsable">线程响应正常</sys:String>
+    <sys:String x:Key="str.System.Diag.Stalled">线程阻塞卡死</sys:String>
+    <sys:String x:Key="str.System.Diag.NotConnected">查看诊断需要已连接游戏DLL</sys:String>
+    <sys:String x:Key="str.System.Diag.Reset.Done">统计计数已重置</sys:String>
+    <sys:String x:Key="str.System.Diag.Error">读取诊断数据失败：{0}</sys:String>
+    <sys:String x:Key="str.System.OpenLogFolder">打开日志文件夹</sys:String>
+    <sys:String x:Key="str.System.OpenLogFolderTip">在资源管理器打开程序日志目录 %LOCALAPPDATA%\UE5CEDumper\Logs</sys:String>
+    <sys:String x:Key="str.System.OpenLogFolder.Error">无法打开日志目录：{0}</sys:String>
+    <sys:String x:Key="str.System.CompressLogs">压缩日志文件</sys:String>
+    <sys:String x:Key="str.System.CompressLogsTip">使用NTFS LZX无损压缩本地归档日志，实测压缩比可达12.8:1。压缩后文件名称、后缀不变，可直接用文本编辑器打开。跳过规则：当前会话日志、小于4KB文件、一小时内新文件、已压缩文件、闲置未满7天的最新快照日志。游戏运行时也可执行，采用空闲低优先级。</sys:String>
+    <sys:String x:Key="str.System.CompressLogs.Running">正在压缩日志...</sys:String>
+    <sys:String x:Key="str.System.CompressLogs.Result">已压缩{0}个日志文件：{1}MB → {2}MB，节省{3}MB，{4}个文件压缩失败</sys:String>
+    <sys:String x:Key="str.System.CompressLogs.NothingToDo">无需压缩：{0}个已压缩，{1}个因大小/时间/占用跳过</sys:String>
+    <sys:String x:Key="str.System.CompressLogs.Unsupported">磁盘分区非NTFS，不支持日志压缩功能</sys:String>
+    <sys:String x:Key="str.System.CompressLogs.Error">日志压缩操作失败：{0}</sys:String>
+    <sys:String x:Key="str.System.AutoCompressLogs">程序启动自动压缩7天前旧日志</sys:String>
+    <sys:String x:Key="str.System.AutoCompressLogsTip">默认关闭。开启后每次启动后台低优先级压缩7天未改动日志，不修改文件时间戳，21天自动清理规则不受影响。</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots">删除全部快照数据</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshotsTip">永久删除所有游戏的快照数据库文件（snapshots.*.db及附属文件），直接删除磁盘文件而非清空表。正在捕获快照的占用文件会跳过，书签数据不受影响。该操作不可逆，属于实验性功能。</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmTitle">确认删除所有快照</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmMessage">确定永久删除全部游戏快照数据库文件？此操作无法撤销。</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmYes">删除文件</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.None">未找到快照数据库文件</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.Result">已删除{0}个快照数据库文件</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.ResultPartial">成功删除{0}个，{1}个文件正在占用，请停止捕获后重试</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.Error">删除快照出错：{0}</sys:String>
+
+
+    <!-- Credit footer (System tab + Live Walker empty state) -->
+    <sys:String x:Key="str.Credit.AuthorPrefix">bbfox @ </sys:String>
+    <sys:String x:Key="str.Credit.AuthorUrl">https://opencheattables.com</sys:String>
+    <sys:String x:Key="str.Credit.RepoPrefix">Repository: </sys:String>
+    <sys:String x:Key="str.Credit.RepoUrl">https://github.com/bbfox0703/UE5CEDumper</sys:String>
+    <sys:String x:Key="str.Credit.OpenInBrowserTip">Open in default browser</sys:String>
+
+    <!-- Experimental features gate (System-tab credit checkbox) -->
+    <sys:String x:Key="str.Experimental.EnableHint">Enable advanced experimental features</sys:String>
+
+    <!-- Snapshot tab (experimental — Phase A) -->
+    <sys:String x:Key="str.Snapshot.Intro">捕获指定范围内所有对象的数字UPROPERTY字段并持久化保存为快照。快照可用于序列查询、类数据透视功能。开启原生C选项可一并捕获无反射原生内存数值。</sys:String>
+    <sys:String x:Key="str.Snapshot.NativeC">原生C原始内存</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.NativeC">可选功能，默认关闭。除反射属性外，将对象无托管原始内存区块生成虚拟字段，通过数据猜测算法解析为标准数字类型，指针/填充字节会过滤掉。开启后序列查询、数据透视可识别血量这类无反射原生数值。捕获速度变慢、快照体积更大；原始字段依靠偏移匹配快照，极少情况下字段类型识别变化会导致跨快照匹配失败。</sys:String>
+    <sys:String x:Key="str.Snapshot.CaptureHeader">捕获快照</sys:String>
+    <sys:String x:Key="str.Snapshot.CompareHeader">快照对比</sys:String>
+    <sys:String x:Key="str.Snapshot.NotConnected">请先连接游戏进程再捕获快照</sys:String>
+    <sys:String x:Key="str.Snapshot.Scope">捕获范围：</sys:String>
+    <sys:String x:Key="str.Snapshot.Family">数值类型：</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Family">在捕获范围基础上进一步筛选数值。全部数字：捕获所有数字类型；仅整数：只保留各类整型，剔除浮点；仅浮点：只保留单/双精度浮点。属于源头过滤，可大幅缩小快照体积；仅查坐标/血量选浮点，计数/ID选整数。该筛选会丢失另一类数据，如需切换需重新捕获。</sys:String>
+    <sys:String x:Key="str.Snapshot.MaxDataset">快照最大容量：</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.MaxDataset">捕获过程上限开关，到达上限会停止并保留不完整快照。关闭则无限制。与单游戏配额区分：配额是捕获完成后自动删除旧快照，无法限制单次超大捕获；大型游戏建议开启上限并先预估体积。</sys:String>
+    <sys:String x:Key="str.Snapshot.Estimate">预估占用</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Estimate">预检测功能，抽样遍历部分对象，按当前配置推算完整快照磁盘占用，不会写入数据库。超大游戏捕获前可先预估，避免生成数GB文件。</sys:String>
+    <sys:String x:Key="str.Snapshot.GameOnly">仅游戏自定义对象</sys:String>
+    <sys:String x:Key="str.Snapshot.AutoSkipNoise">自动过滤引擎冗余对象</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.AutoSkipNoise">默认开启，捕获源头直接过滤UI、贴图、粒子、动画等引擎内置类，快照更小、捕获更快。过滤不可逆，关闭后重新捕获才能找回引擎类数据。角色、组件、控制器等游戏实体强制保留，坐标、GAS血量不会被过滤。数值搜索、实例查找共用这套过滤逻辑。</sys:String>
+    <sys:String x:Key="str.Snapshot.Label">标签：</sys:String>
+    <sys:String x:Key="str.Snapshot.LabelWatermark">选填，留空默认时间戳</sys:String>
+    <sys:String x:Key="str.Snapshot.Capture">开始捕获</sys:String>
+    <sys:String x:Key="str.Snapshot.Cancel">取消</sys:String>
+    <sys:String x:Key="str.Snapshot.Refresh">刷新快照列表</sys:String>
+    <sys:String x:Key="str.Snapshot.Delete">删除选中快照</sys:String>
+    <sys:String x:Key="str.Snapshot.DeleteAll">删除全部快照</sys:String>
+    <sys:String x:Key="str.Snapshot.DeleteAllTip">清空当前游戏所有快照数据库并回收磁盘空间，操作不可逆。</sys:String>
+    <sys:String x:Key="str.Snapshot.OpenDbFolder">打开数据库目录</sys:String>
+    <sys:String x:Key="str.Snapshot.OpenDbFolderTip">打开当前游戏快照数据库文件夹，21天未连接的游戏会在程序启动时自动删除对应库文件。</sys:String>
+    <sys:String x:Key="str.Snapshot.Quota">单游戏存储配额：</sys:String>
+    <sys:String x:Key="str.Snapshot.QuotaHint">捕获后若超出配额，自动删除该游戏最早的快照释放空间。</sys:String>
+    <sys:String x:Key="str.Snapshot.Usage">已占用：</sys:String>
+	
+    <!-- Free-disk-space guard (blocks ALL captures) -->
+    <sys:String x:Key="str.Snapshot.MinFreeDisk">磁盘最低剩余空间：</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.MinFreeDisk">磁盘空间安全阈值。所有快照捕获（手动/自动）执行前，都会校验快照所在磁盘剩余空间，不足则直接终止捕获。
+系统会取两项规则里数值更小的一项作为判定标准：磁盘总容量百分比 或是 固定GB下限。
+示例：1TB硬盘设置10%+50GB → 最低预留50GB；200GB硬盘设置10%+50GB → 最低预留20GB。
+将百分比设为0，即可仅使用固定GB数值作为唯一判定依据。</sys:String>
+
+	
+    <!-- Auto snapshot (periodic capture) -->
+    <sys:String x:Key="str.Snapshot.Auto.Header">自动快照</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.On">开启</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.Off">关闭</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.Interval">间隔(秒)：</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Auto.Interval">两次自动快照**起始时刻**的目标间隔（默认900秒=15分钟，最小60秒）。若单次捕获耗时超过设定间隔，系统会自动顺延；两次快照结束与开始之间至少预留60秒空闲缓冲，给游戏留出运行余量。自动快照不会压低扫描线程优先级，避免游戏繁忙时捕获进程被抢占停滞。</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.Retention">留存规则：</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Auto.Retention">
+保留最新：持续循环捕获，仅留存最新N份快照，旧快照自动清理；
+固定次数：本次会话仅捕获N次后停止，全部快照都会保留，同时仍受单游戏存储配额限制。
+</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.Count">数量(N)：</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.AdjustQuota">自动扩容配额</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Auto.AdjustQuota">默认关闭：总占用严格遵循单游戏配额；若配额仅够存放一份快照、无法满足你设定的留存数量，自动快照将会暂停。
+开启后：当现有配额不足以容纳所需快照数量时，会逐级上调预设配额上限（最高无限制）；磁盘剩余空间限制始终为硬性最高门槛。</sys:String>
+    <sys:String x:Key="str.Snapshot.Auto.Hint">无人值守定时抓取快照。此开关需要手动开启，连接游戏、重启软件均不会自动启动；仅配置参数会被保存。正在执行的自动快照可点击取消终止。</sys:String>
+    <sys:String x:Key="str.Snapshot.Saved">已保存快照列表</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Size">预估大小</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Label">标签</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Captured">捕获时间(世界标准时间)</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Objects">对象总数</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Fields">字段总数</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Scope">捕获范围</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Ue">引擎版本</sys:String>
+	
+    <!-- Snapshot diff -->
+    <sys:String x:Key="str.Snapshot.Diff.Old">旧快照：</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.New">新快照：</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Run">开始对比</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.DeepNote">对比默认开启深层遍历</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Diff.DeepNote">快照差异对比会自动检测嵌套数组、结构体数组内部元素变动（例如 SupportActionGauge[3]，展示格式为 Array[N]），无需额外开启深度选项。深度开关仅存在于分组模式中，用于将数组成员纳入分组匹配范围。</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.ClassFilter">类筛选：</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.PropFilter">字段筛选：</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Dir">变动类型：</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.CopyAddr">复制地址</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.OpenWalker">实时查看</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.LocateGWorld">🌍</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Diff.LocateGWorld">GWorld定位：检索从GWorld到当前归属对象的最短指针链路，在实时浏览器打开并跳转至变动字段；仅支持本次游戏会话内的快照对比</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.LocateGameEngine">⚙</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Diff.LocateGameEngine">GameEngine定位：检索从运行中的UGameEngine到归属对象的最短指针路径，跳转至变动字段；可定位GWorld无法触及的引擎层级对象，绝大多数场景实体推荐使用GWorld定位</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.ObjectFilter">对象筛选：</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Global">全局检索：</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.GlobalHint">匹配任意列内容...</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.OldRange">旧值区间：</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.NewRange">新值区间：</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.ApplyRange">应用区间</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.ResetRange">重置</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Hint">快照对比依靠对象唯一标识匹配数据，仅限同一次游戏进程启动内的两份快照进行比对。</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Change">变动</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Class">所属类</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Object">对象</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Field">字段</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Old">原值</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.New">新值</sys:String>
+
+
+    <!-- Snapshot Group Match (Multiple Values over a captured snapshot) -->
+    <sys:String x:Key="str.Snapshot.Group.ModeLabel">模式：</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.ModeDiff">差异对比</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.ModeGroup">多值联合检索</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Snapshot">快照：</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Find">开始检索</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Clear">清空列表</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.AddRow">+ 添加数值</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.RemoveRow">− 移除数值</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Deep">深度检索（嵌套容器）</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Group.Deep">可匹配嵌套结构体、数组内部数值（例如深层嵌套 SaveSlotList[1]…Tunes[2]），归属至外层父对象。血量、属性存放在数组/容器内时需要开启；关闭仅检索一级直属字段，速度更快、冗余数据更少。</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.ValueHint">数值</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Value2Hint">至</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.CompareWith">参照快照：</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Group.CompareWith">选择一份较早快照作为对比基准，即可启用相对判定条件：数值变动/未变动、上升、下降。例：查找当前血量下降、最大血量保持不变的玩家对象。留空则仅在单快照内进行固定数值匹配。</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.CompareClear">✕</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Group.CompareClear">清空参照快照，切换回单快照固定数值检索模式。</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Hint">检索同时包含2~4组指定数值、且存储在不同内存偏移的游戏对象。参照快照留空：单快照绝对值匹配；选定旧快照：跨时间状态比对，支持血量下降、上限不变这类组合条件。</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Col.Class">所属类</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Col.Object">对象实例</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Col.Matched">匹配数值</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.OpenWalker">实时查看</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.CopyAddr">复制地址</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.LocateGWorld">🌍</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.LocateGameEngine">⚙</sys:String>
+
+	<!-- SPC Query (experimental) -->
+	<sys:String x:Key="str.Spc.Intro">Find fields whose value SEQUENCE across snapshots matches a direction chain — no type, no value. Pick two or more snapshots (they may span game sessions), set how each should compare to the previous one (Increased / Decreased / Unchanged / Changed), and run. This is CE's "Unknown Initial Value + Increased/Decreased" generalised across persisted snapshots and restarts.</sys:String>
+	<sys:String x:Key="str.Spc.Join">Join:</sys:String>
+	<sys:String x:Key="str.Spc.JoinHint">Strict = same class + normalised path + offset (fewest false positives). Loose = class + outer chain + name (recovers some spawned objects across sessions). In-session = same game launch only (exact).</sys:String>
+	<sys:String x:Key="str.Spc.ClassFilter">Class:</sys:String>
+	<sys:String x:Key="str.Spc.PropFilter">Field:</sys:String>
+	<sys:String x:Key="str.Spc.ResClass">Class:</sys:String>
+	<sys:String x:Key="str.Spc.ResField">Field:</sys:String>
+	<sys:String x:Key="str.Spc.ResObject">Object:</sys:String>
+	<sys:String x:Key="str.Spc.ResGlobal">Filter all:</sys:String>
+	<sys:String x:Key="str.Spc.ResGlobalHint">match any column…</sys:String>
+	<sys:String x:Key="str.Spc.SeqFirst">First:</sys:String>
+	<sys:String x:Key="str.Spc.SeqLast">Last:</sys:String>
+	<sys:String x:Key="str.Spc.ApplyRange">Apply range</sys:String>
+	<sys:String x:Key="str.Spc.ResetRange">Reset</sys:String>
+	<sys:String x:Key="str.Spc.Run">Run SPC</sys:String>
+	<sys:String x:Key="str.Spc.Refresh">Refresh</sys:String>
+	<sys:String x:Key="str.Spc.OpenWalker">Live</sys:String>
 	<sys:String x:Key="str.Spc.LocateGWorld">🌍</sys:String>
-	<sys:String x:Key="str.Tip.Spc.LocateGWorld">在GWorld中定位该字段所属对象，跳转至实时查看器并自动选中此字段</sys:String>
+	<sys:String x:Key="str.Tip.Spc.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this row's owning object and show it in Live Walker, scrolled to the changed field</sys:String>
 	<sys:String x:Key="str.Spc.LocateGameEngine">⚙</sys:String>
-	<sys:String x:Key="str.Tip.Spc.LocateGameEngine">从GameEngine根路径定位，适合引擎、游戏实例类对象，世界实体请使用GWorld定位</sys:String>
-	<sys:String x:Key="str.Spc.CopyAddr">复制地址</sys:String>
-	<sys:String x:Key="str.Spc.PickerHeader">快照序列选择器</sys:String>
-	<sys:String x:Key="str.Spc.BaselineHint">最左侧勾选快照为基准帧，仅后续快照设置对比规则生效</sys:String>
-	<sys:String x:Key="str.Spc.Col.Use">启用</sys:String>
-	<sys:String x:Key="str.Spc.Col.Label">快照标签</sys:String>
-	<sys:String x:Key="str.Spc.Col.Captured">捕获时间</sys:String>
-	<sys:String x:Key="str.Spc.Col.Session">游戏会话</sys:String>
-	<sys:String x:Key="str.Spc.Col.Predicate">对比规则</sys:String>
-	<sys:String x:Key="str.Spc.Col.ValueFilter">数值筛选</sys:String>
-	<sys:String x:Key="str.Spc.Col.Preview">匹配预览</sys:String>
-	<sys:String x:Key="str.Spc.ResClass">类</sys:String>
-	<sys:String x:Key="str.Spc.ResField">字段</sys:String>
-	<sys:String x:Key="str.Spc.ResObject">对象</sys:String>
-	<sys:String x:Key="str.Spc.ResGlobal">全局筛选</sys:String>
-	<sys:String x:Key="str.Spc.ResGlobalHint">匹配任意列关键词</sys:String>
-	<sys:String x:Key="str.Spc.SeqFirst">首帧快照</sys:String>
-	<sys:String x:Key="str.Spc.SeqLast">末帧快照</sys:String>
-	<sys:String x:Key="str.Spc.Run">运行查询</sys:String>
-	<sys:String x:Key="str.Spc.Refresh">刷新</sys:String>
-	<sys:String x:Key="str.Spc.OpenWalker">实时查看</sys:String>
-	<sys:String x:Key="str.Spc.LocateGWorld">🌍</sys:String>
-	<sys:String x:Key="str.Tip.Spc.LocateGWorld">从GWorld查找最短指针路径并定位字段</sys:String>
-	<sys:String x:Key="str.Spc.LocateGameEngine">⚙</sys:String>
-	<sys:String x:Key="str.Tip.Spc.LocateGameEngine">GameEngine根路径定位，仅引擎对象适用</sys:String>
-	<sys:String x:Key="str.Spc.CopyAddr">复制地址</sys:String>
-	<!-- SPC多值分组 -->
-	<sys:String x:Key="str.Spc.Group.ModeLabel">模式：</sys:String>
-	<sys:String x:Key="str.Spc.Group.ModeSingle">单字段序列</sys:String>
-	<sys:String x:Key="str.Spc.Group.ModeGroup">多值分组序列</sys:String>
-	<sys:String x:Key="str.Spc.Intro">同时匹配多个字段各自的数值变化曲线（血量+金币同时下降等场景），每条字段独立设置快照对比规则</sys:String>
-	<sys:String x:Key="str.Spc.Group.Snapshot">基准快照</sys:String>
-	<sys:String x:Key="str.Spc.Group.Find">检索匹配对象</sys:String>
-	<sys:String x:Key="str.Spc.Group.Clear">清空条件</sys:String>
-	<sys:String x:Key="str.Spc.Group.AddRow">+ 添加字段条件</sys:String>
-	<sys:String x:Key="str.Spc.Group.RemoveRow">− 删除字段条件</sys:String>
-	<sys:String x:Key="str.Spc.Group.Deep">嵌套容器深度匹配</sys:String>
-	<sys:String x:Key="str.Tip.Spc.Group.Deep">开启后匹配数组/结构体内部字段；关闭仅匹配对象一级直属字段</sys:String>
-	<sys:String x:Key="str.Spc.Group.ValueHint">目标数值</sys:String>
-	<sys:String x:Key="str.Spc.Group.Value2Hint">数值上限</sys:String>
-	<sys:String x:Key="str.Spc.Group.CompareWith">对比快照基准：</sys:String>
-	<sys:String x:Key="str.Tip.Spc.Group.CompareWith">选择更早快照作为基准，可筛选增减变化；留空仅单快照绝对值匹配</sys:String>
-	<sys:String x:Key="str.Spc.Group.CompareClear">✕ 清除基准快照</sys:String>
-	<sys:String x:Key="str.Tip.Spc.Group.CompareClear">取消跨快照变化对比，仅单快照匹配</sys:String>
-	<sys:String x:Key="str.Spc.Group.Hint">查找同时满足所有字段变化规则的游戏实体，每条字段可独立配置数值区间、快照变化逻辑</sys:String>
-	<sys:String x:Key="str.Spc.Group.Col.Class">所属类</sys:String>
-	<sys:String x:Key="str.Spc.Group.Col.Object">对象实例</sys:String>
-	<sys:String x:Key="str.Spc.Group.Col.Matched">匹配字段集合</sys:String>
-	<sys:String x:Key="str.Spc.Group.OpenWalker">实时查看</sys:String>
-	<sys:String x:Key="str.Spc.Group.CopyAddr">复制地址</sys:String>
-	<sys:String x:Key="str.Spc.Group.LocateGWorld">🌍</sys:String>
-	<sys:String x:Key="str.Spc.Group.LocateGameEngine">⚙</sys:String>
-	<!-- 噪声过滤面板 -->
-	<sys:String x:Key="str.Noise.PanelHeader">噪声类过滤</sys:String>
-	<sys:String x:Key="str.Noise.PanelHint">勾选需要隐藏的UI/动画冗余类，应用后结果列表自动过滤，仅当前游戏生效</sys:String>
-	<sys:String x:Key="str.Noise.Col.Pick">隐藏</sys:String>
-	<sys:String x:Key="str.Noise.Col.Class">类名</sys:String>
-	<sys:String x:Key="str.Noise.Col.Hits">匹配条数</sys:String>
-	<sys:String x:Key="str.Noise.Col.SampleProps">示例字段</sys:String>
-	<sys:String x:Key="str.Noise.Apply">应用过滤</sys:String>
-	<sys:String x:Key="str.Noise.ActiveHeader">当前屏蔽类列表：</sys:String>
-	<sys:String x:Key="str.Noise.ClearAll">清空全部过滤</sys:String>
-	<sys:String x:Key="str.Noise.Reset">取消勾选重置</sys:String>
-	<sys:String x:Key="str.Noise.RemoveTip">右键单行可移除单个屏蔽类</sys:String>
-	<!-- 全局类过滤 -->
-	<sys:String x:Key="str.ClassFilter.Button">类过滤器</sys:String>
-	<sys:String x:Key="str.Tip.ClassFilter">将UI、粒子、动画等噪声类隐藏，仅显示游戏逻辑类，仅界面隐藏不删除数据</sys:String>
-	<sys:String x:Key="str.ClassFilter.Hint">勾选类即可隐藏该行，取消勾选恢复显示</sys:String>
-	<sys:String x:Key="str.ClassFilter.Partial">⚠ 条数为截断后的部分数据，非完整统计</sys:String>
-	<sys:String x:Key="str.ClassFilter.Clear">清空过滤（显示全部）</sys:String>
-	<sys:String x:Key="str.ClassFilter.AutoDetect">自动勾选引擎噪声类</sys:String>
-	<sys:String x:Key="str.Tip.ClassFilter.AutoDetect">一键勾选UI、贴图、粒子等引擎内置类，玩家角色、组件类不会被选中</sys:String>
-	<!-- 类透视面板右键菜单 -->
-	<sys:String x:Key="str.Pivot.HideClass">隐藏此类结果</sys:String>
-	<sys:String x:Key="str.Pivot.HiddenHeader">已隐藏类：</sys:String>
-	<!-- 类透视主面板 -->
-	<sys:String x:Key="str.Pivot.Intro">按指定字段分组对象，支持实例/快照/数据表三种数据源，自动推荐分组关键字段，区分固定ID与动态实体</sys:String>
-	<sys:String x:Key="str.Pivot.SourceHeader">透视数据源</sys:String>
-	<sys:String x:Key="str.Pivot.Source">数据源：</sys:String>
-	<sys:String x:Key="str.Pivot.Snapshot">快照</sys:String>
-	<sys:String x:Key="str.Pivot.DataTable">数据表</sys:String>
-	<sys:String x:Key="str.Pivot.ArrayField">数组字段：</sys:String>
-	<sys:String x:Key="str.Pivot.RefreshDataTables">🔄 刷新数据表列表</sys:String>
-	<sys:String x:Key="str.Pivot.KeyRowName">行名作为分组键（数据表专用，无需配置）</sys:String>
-	<sys:String x:Key="str.Pivot.KeyInnerKey">内部ID作为分组键（数组专用，游戏重启稳定）</sys:String>
-	<sys:String x:Key="str.Pivot.ThisProperty">以此字段分组…</sys:String>
-	<sys:String x:Key="str.Pivot.ClassFilter">类筛选：</sys:String>
-	<sys:String x:Key="str.Pivot.ClassFilterHint">输入类名模糊筛选</sys:String>
-	<sys:String x:Key="str.Pivot.Run">执行透视</sys:String>
-	<sys:String x:Key="str.Pivot.OpenWalker">实时查看</sys:String>
-	<sys:String x:Key="str.Pivot.CopyAddr">复制地址</sys:String>
+	<sys:String x:Key="str.Tip.Spc.LocateGameEngine">Locate in GameEngine: shortest pointer path from the live UGameEngine down to this row's owning object, shown in Live Walker scrolled to the changed field. Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
+	<sys:String x:Key="str.Spc.CopyAddr">Addr</sys:String>
+	<sys:String x:Key="str.Spc.PickerHeader">Snapshot sequence</sys:String>
+	<sys:String x:Key="str.Spc.BaselineHint">The oldest ticked snapshot is the baseline (its predicate is ignored). Each later snapshot's predicate compares it to the previous ticked one. Hit → Copy Address / Open in Live Walker hands the newest snapshot's live address to CE.</sys:String>
+	<sys:String x:Key="str.Spc.Col.Use">Use</sys:String>
+	<sys:String x:Key="str.Spc.Col.Label">Label</sys:String>
+	<sys:String x:Key="str.Spc.Col.Captured">Captured (UTC)</sys:String>
+	<sys:String x:Key="str.Spc.Col.Session">Session</sys:String>
+	<sys:String x:Key="str.Spc.Col.Predicate">Compare</sys:String>
+	<sys:String x:Key="str.Spc.Col.ValueFilter">Value filter</sys:String>
+	<sys:String x:Key="str.Spc.Col.Preview">Matches</sys:String>
+	<sys:String x:Key="str.Spc.Res.Class">Class</sys:String>
+	<sys:String x:Key="str.Spc.Res.Object">Object</sys:String>
+	<sys:String x:Key="str.Spc.Res.Field">Field</sys:String>
+	<sys:String x:Key="str.Spc.Res.Type">Type</sys:String>
+	<sys:String x:Key="str.Spc.Res.Sequence">Value sequence</sys:String>
+
+	<!-- SPC GROUP (multiple values) — Single/Group toggle + matrix editor -->
+	<sys:String x:Key="str.Spc.Group.ModeLabel">Mode:</sys:String>
+	<sys:String x:Key="str.Spc.Group.ModeSingle">Single field</sys:String>
+	<sys:String x:Key="str.Spc.Group.ModeGroup">Group (Multiple Values)</sys:String>
+	<sys:String x:Key="str.Spc.Group.Intro">Find OBJECTS holding ALL of 2–4 fields at distinct offsets, where EACH field follows its own direction chain across the snapshots (e.g. Current HP: ·→↓→↑ while Max HP: ·→=→= over [full, damaged, healed]). Tick the snapshots above, pick a value with the selector, then set that value's Compare + Value filter down the snapshot rows. Repeat per value. Run finds objects where every value's chain holds at the same time.</sys:String>
+	<sys:String x:Key="str.Spc.Group.Run">Find group</sys:String>
+	<sys:String x:Key="str.Spc.Group.Clear">Clear</sys:String>
+	<sys:String x:Key="str.Spc.Group.AddSlot">+ value</sys:String>
+	<sys:String x:Key="str.Spc.Group.RemoveSlot">− value</sys:String>
+	<sys:String x:Key="str.Spc.Group.Editing">Editing:</sys:String>
+	<sys:String x:Key="str.Spc.Group.EditingHint">Pick which value's chain the snapshot grid below edits. Each value also has its own width scope.</sys:String>
+	<sys:String x:Key="str.Spc.Group.SlotsHeader">Values (width scope per value):</sys:String>
+	<sys:String x:Key="str.Spc.Group.Col.Class">Class</sys:String>
+	<sys:String x:Key="str.Spc.Group.Col.Object">Object</sys:String>
+	<sys:String x:Key="str.Spc.Group.Col.Matched">Matched values</sys:String>
+	<sys:String x:Key="str.Spc.Group.Detail.Pattern">Pattern</sys:String>
+
+	<!-- N1: per-game class denylist (noise picker) — shared by SPC + Diff -->
+	<sys:String x:Key="str.Noise.PanelHeader">Noise picker — top classes in this result</sys:String>
+	<sys:String x:Key="str.Noise.PanelHint">Tick classes whose hits you consider noise (UI widgets, animation, tick state). Apply adds them to this game's denylist and re-runs the query. The denylist also filters Snapshot Diff and the Class Pivot picker.</sys:String>
+	<sys:String x:Key="str.Noise.Col.Pick">Hide</sys:String>
+	<sys:String x:Key="str.Noise.Col.Class">Class</sys:String>
+	<sys:String x:Key="str.Noise.Col.Hits">Hits</sys:String>
+	<sys:String x:Key="str.Noise.Col.SampleProps">Sample fields</sys:String>
+	<sys:String x:Key="str.Noise.Apply">Apply &amp; re-run</sys:String>
+	<sys:String x:Key="str.Noise.ActiveHeader">Active denylist for this game:</sys:String>
+	<sys:String x:Key="str.Noise.Clear">Clear all</sys:String>
+	<sys:String x:Key="str.Noise.Reset">Reset ticks</sys:String>
+	<sys:String x:Key="str.Noise.RemoveTip">Remove from denylist</sys:String>
+
+	<!-- Client-side class-noise filter (Instance / Interesting Funcs+Props / Property Search) -->
+	<sys:String x:Key="str.ClassFilter.Button">Class filter</sys:String>
+	<sys:String x:Key="str.Tip.ClassFilter">Group these results by class and hide noise classes (UI widgets, sound, system components) from the list. Hiding is display-only — untick or Clear to restore.</sys:String>
+	<sys:String x:Key="str.ClassFilter.Hint">Tick a class to hide its rows from the results below (e.g. UI widgets, sound, system components). This only hides them from view — the underlying data is unchanged. Untick or Clear to restore.</sys:String>
+	<sys:String x:Key="str.ClassFilter.Partial">⚠ Counts are partial — the result list was capped, so these are a lower bound.</sys:String>
+	<sys:String x:Key="str.ClassFilter.Clear">Clear (show all)</sys:String>
+	<sys:String x:Key="str.ClassFilter.AutoDetect">Auto-detect</sys:String>
+	<sys:String x:Key="str.Tip.ClassFilter.AutoDetect">Pre-tick classes that are provably engine/system noise — UI widgets, sound, textures, materials, particles, anim instances, or classes in an engine package. Safe by construction (never your gameplay classes); the picks are reversible — untick any you want to keep.</sys:String>
+
+	<!-- Class Pivot: right-click hide + hidden-class chips -->
+	<sys:String x:Key="str.Pivot.HideClass">Hide selected class from picker</sys:String>
+	<sys:String x:Key="str.Pivot.HiddenHeader">Hidden classes (Pivot only):</sys:String>
+
+	<!-- Class Pivot (experimental) -->
+	<sys:String x:Key="str.Pivot.Intro">Group one class's instances by a key field's value (e.g. inventory by ItemID) or by object identity, and project the value fields per group. The best key field is auto-suggested (type + name + cardinality). Differing values inside a group render as a collision ⟨N: v1,v2,+M⟩. Snapshot capture is all-numeric, so keys are int/enum IDs. Tip: for transient inventory objects (whose object path is identical, e.g. //Engine/Transient/Item) use a Field key like ItemID — Identity mode would merge them into one group. Switch Source to Snapshot Array to pivot a captured struct array (e.g. Cargo) by its inner-key value (e.g. ItemID) — reorder- and session-immune. Or DataTable for a zero-config pivot of a live DataTable (RowName is the key — no discovery needed).</sys:String>
+	<sys:String x:Key="str.Pivot.SourceHeader">⚙ Pivot target — Source · Snapshot · Class</sys:String>
+	<sys:String x:Key="str.Pivot.Source">Source:</sys:String>
+	<sys:String x:Key="str.Pivot.Snapshot">Snapshot:</sys:String>
+	<sys:String x:Key="str.Pivot.DataTable">DataTable:</sys:String>
+	<sys:String x:Key="str.Pivot.ArrayField">Array field:</sys:String>
+	<sys:String x:Key="str.Pivot.RefreshDataTables">🔄 Find DataTables</sys:String>
+	<sys:String x:Key="str.Pivot.KeyRowName">Key = RowName (zero-config)</sys:String>
+	<sys:String x:Key="str.Pivot.KeyInnerKey">Key = inner-key value (reorder-immune)</sys:String>
+	<sys:String x:Key="str.Pivot.ThisProperty">Pivot this property…</sys:String>
+	<sys:String x:Key="str.Pivot.ClassFilter">Class:</sys:String>
+	<sys:String x:Key="str.Pivot.ClassFilterHint">type to filter, then pick…</sys:String>
+	<sys:String x:Key="str.Pivot.Run">Run Pivot</sys:String>
+	<sys:String x:Key="str.Pivot.OpenWalker">Open in Live Walker</sys:String>
+	<sys:String x:Key="str.Pivot.CopyAddr">Copy Address</sys:String>
 	<sys:String x:Key="str.Pivot.LocateGWorld">🌍</sys:String>
-	<sys:String x:Key="str.Tip.Pivot.LocateGWorld">定位该分组下任意实例至GWorld路径</sys:String>
+	<sys:String x:Key="str.Tip.Pivot.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to the selected group's representative object and show it in Live Walker</sys:String>
 	<sys:String x:Key="str.Pivot.LocateGameEngine">⚙</sys:String>
-	<sys:String x:Key="str.Tip.Pivot.LocateGameEngine">GameEngine根路径定位分组实体</sys:String>
-	<sys:String x:Key="str.Pivot.ResultFilterHint">筛选分组关键字段…</sys:String>
-	<sys:String x:Key="str.Pivot.GroupBy">分组依据：</sys:String>
-	<sys:String x:Key="str.Pivot.KeyField">关键字段</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Key">分组键值</sys:String>
-	<sys:String x:Key="str.Pivot.Col.KeyTip">复合分组可多选字段，组合为唯一分组标识</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Project">投影字段</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Field">字段名</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Type">字段类型</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Distinct">唯一值数量</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Insts">实例总数</sys:String>
-	<sys:String x:Key="str.Pivot.Col.KeyScore">匹配评分</sys:String>
-	<sys:String x:Key="str.Pivot.Res.Count">实例数量</sys:String>
-	<sys:String x:Key="str.Pivot.Res.Key">分组键</sys:String>
-	<sys:String x:Key="str.Pivot.Res.Values">投影字段数值</sys:String>
-	<!-- 自动探测目标面板 -->
-	<sys:String x:Key="str.Pivot.Discover.Header">🔍 自动探测变化目标</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Intro">捕获操作前后快照，程序自动识别发生数值变动的血量/金币等属性，按匹配分数排序推荐透视分组</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Pick">勾选快照（旧→新）：</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Run">执行探测</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Use">选用该分组</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Limits">
-		使用说明：
-		• 至少捕获2张快照（操作前/操作后）
-		• 间隔过短仅少量变化会无法区分噪音
-		• 仅数字属性参与探测，字符串/向量不纳入
-		• 游戏重启后的对象无法跨会话匹配
-	</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Change">数值变化量</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Dir">增减方向</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Cat">分类</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Shape">变化特征</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Seq">变化序列示例</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Score">匹配分数</sys:String>
-	<!-- 关键属性查找 -->
-	<sys:String x:Key="str.IP.Load">加载属性列表</sys:String>
-	<sys:String x:Key="str.IP.GameOnly">仅游戏自定义类</sys:String>
-	<sys:String x:Key="str.IP.FilterHint">按类/属性名筛选</sys:String>
-	<sys:String x:Key="str.IP.UnusualOnly">仅非常规对象</sys:String>
-	<sys:String x:Key="str.IP.ShowAll">显示低匹配项</sys:String>
-	<sys:String x:Key="str.IP.ClearFilters">清空筛选</sys:String>
-	<sys:String x:Key="str.IP.OpenInst">实例查找</sys:String>
-	<sys:String x:Key="str.IP.OpenLive">实时查看</sys:String>
-	<sys:String x:Key="str.IP.LocateGWorld">🌍</sys:String>
-	<sys:String x:Key="str.IP.LocateGameEngine">⚙</sys:String>
-	<sys:String x:Key="str.IP.CopyName">复制名称</sys:String>
-	<sys:String x:Key="str.Tip.IP.Load">遍历所有UFunction与UProperty，按关键词打分筛选血量、金币等常用属性</sys:String>
-	<sys:String x:Key="str.Tip.IP.GameOnly">过滤引擎内置类，仅展示游戏业务类</sys:String>
-	<sys:String x:Key="str.Tip.IP.Filter">名称模糊检索，大小写无关</sys:String>
-	<sys:String x:Key="str.Tip.IP.UnusualOnly">仅显示HUD、本地玩家等非常规存储属性，过滤角色身上普通字段</sys:String>
-	<sys:String x:Key="str.Tip.IP.ShowAll">关闭则隐藏分数过低的无关字段</sys:String>
-	<sys:String x:Key="str.Tip.IP.ClearFilters">重置所有筛选条件</sys:String>
-	<sys:String x:Key="str.Tip.IP.OpenInst">跳转实例查找器，自动填充当前类名检索</sys:String>
-	<sys:String x:Key="str.Tip.IP.OpenLive">打开该类任意实时实例至实时查看器</sys:String>
-	<sys:String x:Key="str.Tip.IP.LocateGWorld">GWorld路径定位</sys:String>
-	<sys:String x:Key="str.Tip.IP.LocateGameEngine">GameEngine路径定位</sys:String>
-	<sys:String x:Key="str.Tip.IP.CopyName">复制属性/类名到剪贴板</sys:String>
-	<sys:String x:Key="str.IP.GenerateCT">📦 生成CE表</sys:String>
-	<sys:String x:Key="str.Tip.IP.GenerateCT">多选属性批量生成Cheat Engine内存记录CT文件</sys:String>
-	<sys:String x:Key="str.IP.BatchProps">⤋ 批量读取字段</sys:String>
-	<sys:String x:Key="str.Tip.IP.BatchProps">批量读取选中函数读写的所有字段，耗时较长</sys:String>
-	<sys:String x:Key="str.Common.BatchFuncs">⤋ 批量查找函数</sys:String>
-	<sys:String x:Key="str.Tip.Common.BatchFindFunc">批量检索使用该类/属性的所有UFunction</sys:String>
-	<sys:String x:Key="str.Common.FuncsCol">关联函数数量</sys:String>
-	<sys:String x:Key="str.Tip.Common.BatchFuncs">扫描所有函数引用，适合查找功能入口</sys:String>
-	<!-- 关键函数面板 -->
-	<sys:String x:Key="str.IF.Load">加载函数列表</sys:String>
-	<sys:String x:Key="str.IF.GameOnly">仅游戏类函数</sys:String>
-	<sys:String x:Key="str.IF.FilterHint">按函数/类名检索</sys:String>
-	<sys:String x:Key="str.IF.GameplayActions">交互动作筛选</sys:String>
-	<sys:String x:Key="str.IF.CallableOnly">仅蓝图可执行函数</sys:String>
-	<sys:String x:Key="str.IF.ClearFilters">清空筛选</sys:String>
-	<sys:String x:Key="str.IF.OpenInst">实例</sys:String>
-	<sys:String x:Key="str.IF.Props">关联属性</sys:String>
-	<sys:String x:Key="str.IF.OpenLive">实时查看</sys:String>
-	<sys:String x:Key="str.IF.LocateGWorld">🌍</sys:String>
-	<sys:String x:Key="str.IF.LocateGameEngine">⚙</sys:String>
-	<sys:String x:Key="str.IF.CopyName">复制名称</sys:String>
-	<sys:String x:Key="str.Tip.IF.Load">扫描全部UFunction，按交互关键词打分排序</sys:String>
-	<sys:String x:Key="str.Tip.IF.GameOnly">排除引擎内置函数，仅游戏业务函数</sys:String>
-	<sys:String x:Key="str.Tip.IF.Filter">模糊检索函数/类名，大小写不敏感</sys:String>
-	<sys:String x:Key="str.Tip.IF.GameplayActions">开启后增加冲刺、交互、购买等动作关键词打分</sys:String>
-	<sys:String x:Key="str.Tip.IF.CallableOnly">仅显示BlueprintCallable/Exec可调用函数，过滤原生内部函数</sys:String>
-	<sys:String x:Key="str.Tip.IF.ClearFilters">重置所有筛选条件</sys:String>
-	<sys:String x:Key="str.Tip.IF.OpenInst">跳转实例查找器检索此类实例</sys:String>
-	<sys:String x:Key="str.Tip.IF.Props">读取该函数读写的全部属性字段</sys:String>
-	<sys:String x:Key="str.Tip.IF.OpenLive">打开此类实时对象查看</sys:String>
-	<sys:String x:Key="str.Tip.IF.LocateGWorld">GWorld路径定位实例</sys:String>
-	<sys:String x:Key="str.Tip.IF.LocateGameEngine">GameEngine路径定位</sys:String>
-	<sys:String x:Key="str.Tip.IF.CopyName">复制函数名到剪贴板</sys:String>
-	<sys:String x:Key="str.IF.GenerateCT">📦 生成CE表</sys:String>
-	<sys:String x:Key="str.Tip.IF.GenerateCT">批量生成可调用CE脚本记录</sys:String>
-	<sys:String x:Key="str.IF.BatchProps">⤋ 批量字段检索</sys:String>
-	<!-- 实时函数追踪 -->
-	<sys:String x:Key="str.LF.Start">● 开始录制</sys:String>
-	<sys:String x:Key="str.LF.Stop">■ 停止录制</sys:String>
-	<sys:String x:Key="str.LF.Refresh">刷新列表</sys:String>
-	<sys:String x:Key="str.LF.Clear">清空记录</sys:String>
-	<sys:String x:Key="str.LF.FilterHint">函数/类名筛选</sys:String>
-	<sys:String x:Key="str.LF.OpenLive">实时查看</sys:String>
-	<sys:String x:Key="str.LF.CopyName">复制名称</sys:String>
-	<sys:String x:Key="str.LF.SetBaseline">⚑ 设置基准</sys:String>
-	<sys:String x:Key="str.LF.Diff">对比基准</sys:String>
-	<sys:String x:Key="str.LF.NewOnly">仅新增调用</sys:String>
-	<sys:String x:Key="str.LF.ClearBaseline">清除基准</sys:String>
-	<sys:String x:Key="str.LF.HideWidgets">隐藏UI函数</sys:String>
-	<sys:String x:Key="str.LF.HideEvents">隐藏委托事件</sys:String>
-	<sys:String x:Key="str.LF.PeriodicOnly">仅周期函数</sys:String>
-	<sys:String x:Key="str.LF.EarliestFirst">按调用先后排序</sys:String>
-	<sys:String x:Key="str.Tip.LF.Start">挂载游戏线程钩子，记录所有执行的UFunction调用</sys:String>
-	<sys:String x:Key="str.LF.Stop">停止录制并展示调用统计</sys:String>
-	<sys:String x:Key="str.LF.Refresh">手动刷新当前调用列表</sys:String>
-	<sys:String x:Key="str.LF.Clear">清空全部调用记录</sys:String>
-	<sys:String x:Key="str.LF.FilterHint">关键词模糊筛选函数/类</sys:String>
-	<sys:String x:Key="str.LF.OpenLive">打开函数所属类实例</sys:String>
-	<sys:String x:Key="str.LF.CopyName">复制函数名</sys:String>
-	<sys:String x:Key="str.LF.SetBaseline">保存当前记录为基准，区分前后动作</sys:String>
-	<sys:String x:Key="str.LF.Diff">只展示与基准有差异的调用</sys:String>
-	<sys:String x:Key="str.LF.NewOnly">仅显示基准后新增函数调用</sys:String>
-	<sys:String x:Key="str.LF.ClearBaseline">删除保存的基准记录</sys:String>
-	<sys:String x:Key="str.LF.HideWidgets">过滤UI组件相关函数</sys:String>
-	<sys:String x:Key="str.LF.HideEvents">过滤委托、事件回调函数</sys:String>
-	<sys:String x:Key="str.LF.Periodic">仅保留Tick、定时器等周期执行函数</sys:String>
-	<sys:String x:Key="str.LF.EarliestFirst">按首次调用时间升序排列</sys:String>
-	<!-- 控制台指令面板 -->
-	<sys:String x:Key="str.Con.Load">加载控制台指令</sys:String>
-	<sys:String x:Key="str.Con.GameOnly">仅游戏指令</sys:String>
-	<sys:String x:Key="str.Con.FilterHint">指令名筛选</sys:String>
-	<sys:String x:Key="str.Con.ClearFilter">清空筛选</sys:String>
-	<sys:String x:Key="str.Con.CommandHint">输入指令执行（无需斜杠）</sys:String>
-	<sys:String x:Key="str.Con.Run">执行</sys:String>
-	<sys:String x:Key="str.Con.RunSelected">执行选中指令</sys:String>
-	<sys:String x:Key="str.Con.RunRow">执行此行</sys:String>
-	<sys:String x:Key="str.Con.OpenLive">实时查看</sys:String>
-	<sys:String x:Key="str.Con.CopyAaScript">复制AA脚本</sys:String>
-	<sys:String x:Key="str.Con.HistoryHeader">执行历史</sys:String>
-	<sys:String x:Key="str.Tip.Con.Load">扫描所有Exec可执行蓝图/原生函数，列出控制台指令</sys:String>
-	<sys:String x:Key="str.Tip.Con.GameOnly">关闭会显示引擎内置指令，开启仅游戏自定义指令</sys:String>
-	<sys:String x:Key="str.Tip.Con.Filter">模糊检索指令名称</sys:String>
-	<sys:String x:Key="str.Tip.Con.ClearFilter">清空搜索关键词</sys:String>
-	<sys:String x:Key="str.Tip.Con.CommandHint">直接输入指令，自动忽略开头/</sys:String>
-	<sys:String x:Key="str.Tip.Con.Run">执行输入框内指令</sys:String>
-	<sys:String x:Key="str.Tip.Con.RunSelected">执行列表选中指令</sys:String>
-	<sys:String x:Key="str.Tip.Con.RunRow">右键/按钮执行当前行指令</sys:String>
-	<sys:String x:Key="str.Tip.Con.OpenLive">打开指令所属类实例</sys:String>
-	<sys:String x:Key="str.Tip.Con.CopyAaScript">生成可在CE使用的自动汇编调用脚本</sys:String>
-	<!-- 调试相机子面板 -->
-	<sys:String x:Key="str.Con.DbgCam.Label">调试相机</sys:String>
-	<sys:String x:Key="str.Con.Dbg.ForceOn">强制开启</sys:String>
-	<sys:String x:Key="str.Con.Dbg.ForceOff">强制关闭</sys:String>
-	<sys:String x:Key="str.Con.Dbg.Refresh">↻ 刷新状态</sys:String>
-	<sys:String x:Key="str.Con.Dbg.CopyCe">复制CE脚本</sys:String>
-	<sys:String x:Key="str.Tip.Con.DbgCam.State">读取当前调试相机开启状态</sys:String>
-	<sys:String x:Key="str.Tip.Con.Dbg.ForceOn">稳定开启自由飞行调试相机</sys:String>
-	<sys:String x:Key="str.Tip.Con.Dbg.ForceOff">关闭并切回玩家视角</sys:String>
-	<sys:String x:Key="str.Tip.Con.Dbg.Refresh">重新读取相机状态</sys:String>
-	<sys:String x:Key="str.Tip.Con.Dbg.CopyCe">生成一键开关CE内存脚本</sys:String>
-	<!-- 传送面板 -->
-	<sys:String x:Key="str.TP.PoseHeader">当前坐标姿态</sys:String>
-	<sys:String x:Key="str.TP.Refresh">刷新姿态</sys:String>
-	<sys:String x:Key="str.TP.Auto">自动刷新(0.5秒)</sys:String>
-	<sys:String x:Key="str.TP.Loc">坐标 X/Y/Z：</sys:String>
-	<sys:String x:Key="str.TP.Rot">旋转 俯仰/偏航/翻滚：</sys:String>
-	<sys:String x:Key="str.TP.Map">当前地图：</sys:String>
-	<sys:String x:Key="str.TP.Pawn">操控角色：</sys:String>
-	<sys:String x:Key="str.TP.Locate">🌍 定位角色</sys:String>
-	<sys:String x:Key="str.TP.LocateGameEngine">⚙ 引擎定位</sys:String>
-	<sys:String x:Key="str.TP.LocatePos">🌍 定位坐标</sys:String>
-	<sys:String x:Key="str.TP.LocateVel">🌍 定位速度</sys:String>
-	<sys:String x:Key="str.TP.LocateAccel">🌍 定位加速度</sys:String>
-	<sys:String x:Key="str.TP.LocateSpeed">🌍 移动速度</sys:String>
-	<sys:String x:Key="str.TP.LocateCamLoc">🌍 相机坐标</sys:String>
-	<sys:String x:Key="str.TP.LocateCamFov">🌍 相机视野</sys:String>
-	<sys:String x:Key="str.TP.LocateRot">🌍 角色旋转</sys:String>
-	<sys:String x:Key="str.TP.LocateCamRot">🌍 相机旋转</sys:String>
-	<sys:String x:Key="str.TP.Velocity">移动速度 X/Y/Z：</sys:String>
-	<sys:String x:Key="str.TP.Speed">速率：</sys:String>
-	<sys:String x:Key="str.TP.Accel">加速度 X/Y/Z：</sys:String>
-	<sys:String x:Key="str.TP.MarkersHeader">传送标记点</sys:String>
-	<sys:String x:Key="str.TP.Save">保存标记</sys:String>
-	<sys:String x:Key="str.TP.Recall">传送到标记</sys:String>
-	<sys:String x:Key="str.TP.Force">强制跨图传送</sys:String>
-	<sys:String x:Key="str.TP.Clear">清空标记</sys:String>
-	<sys:String x:Key="str.TP.CursorHeader">鼠标光标传送(2.5D俯视角)</sys:String>
-	<sys:String x:Key="str.TP.ToCursor">传送到鼠标位置</sys:String>
-	<sys:String x:Key="str.TP.ZOffset">高度偏移：</sys:String>
-	<sys:String x:Key="str.TP.Channel">碰撞通道：</sys:String>
-	<sys:String x:Key="str.TP.FallbackCenter">无光标时使用屏幕中心</sys:String>
-	<sys:String x:Key="str.TP.CursorHotkey">全局光标传送快捷键</sys:String>
-	<sys:String x:Key="str.TP.BugItGoHeader">BugIt坐标互操作</sys:String>
-	<sys:String x:Key="str.TP.CopyBugItGo">复制BugItGo指令</sys:String>
-	<sys:String x:Key="str.TP.RunBugItGo">执行坐标指令</sys:String>
-	<sys:String x:Key="str.TP.BugHint">粘贴格式：X Y Z 或 BugItGo X,Y,Z</sys:String>
-	<sys:String x:Key="str.TP.LastHeader">上一次传送位置</sys:String>
-	<sys:String x:Key="str.TP.LastHint">自动记录传送前坐标，可一键撤销</sys:String>
-	<sys:String x:Key="str.TP.RecallLast">撤销上次传送</sys:String>
-	<sys:String x:Key="str.TP.HkHeader">快捷键设置</sys:String>
-	<sys:String x:Key="str.TP.HkHint">设置标记、传送、相机全局热键，游戏聚焦时生效</sys:String>
-	<sys:String x:Key="str.TP.HkClear">清除快捷键</sys:String>
-	<!-- 快照库坐标功能 -->
-	<sys:String x:Key="str.TP.LibHint">按游戏独立存储坐标标签，重启游戏不丢失</sys:String>
-	<sys:String x:Key="str.TP.LibSaveCurrent">＋保存当前坐标</sys:String>
-	<sys:String x:Key="str.TP.LibAddFields">＋从输入框新增</sys:String>
-	<sys:String x:Key="str.TP.LibDuplicate">复制条目</sys:String>
-	<sys:String x:Key="str.TP.LibDelete">删除</sys:String>
-	<sys:String x:Key="str.TP.LibClearAll">清空全部库</sys:String>
-	<sys:String x:Key="str.TP.LibFilter">筛选标签/地图：</sys:String>
-	<sys:String x:Key="str.TP.LibGroup">分组：</sys:String>
-	<sys:String x:Key="str.TP.LibCurrentMapOnly">仅当前地图条目</sys:String>
-	<sys:String x:Key="str.TP.LibGo">传送到此坐标</sys:String>
-	<sys:String x:Key="str.TP.LibForceGo">强制跨图传送</sys:String>
-	<sys:String x:Key="str.TP.LibToFields">填入坐标框</sys:String>
-	<sys:String x:Key="str.TP.LibEditLabel">标签名：</sys:String>
-	<sys:String x:Key="str.TP.LibEditGroup">分组名：</sys:String>
-	<sys:String x:Key="str.TP.LibApplyEdit">保存修改</sys:String>
-	<sys:String x:Key="str.TP.LibUpdateCoords">更新为当前坐标</sys:String>
-	<sys:String x:Key="str.TP.LibExportCsv">导出CSV坐标表</sys:String>
-	<sys:String x:Key="str.TP.LibExportTemplate">导出模板CSV</sys:String>
-	<sys:String x:Key="str.TP.LibImportCsv">导入CSV</sys:String>
-	<sys:String x:Key="str.TP.LibImportReplace">覆盖现有条目</sys:String>
-	<sys:String x:Key="str.TP.LibImportApply">执行导入</sys:String>
-	<sys:String x:Key="str.TP.LibExportLua">导出CE Lua脚本</sys:String>
-	<sys:String x:Key="str.TP.LibSaveLua">保存Lua文件</sys:String>
-	<sys:String x:Key="str.TP.LibImportLua">粘贴Lua脚本导入</sys:String>
-	<sys:String x:Key="str.TP.LibImportLuaFile">从Lua文件导入</sys:String>
-	<sys:String x:Key="str.TP.LibZTol">Z轴安全偏移：</sys:String>
-	<!-- 调试飞行相机 -->
-	<sys:String x:Key="str.TP.DcHeader">自由飞行相机</sys:String>
-	<sys:String x:Key="str.TP.DcState">状态：</sys:String>
-	<sys:String x:Key="str.TP.DcOn">开启自由视角</sys:String>
-	<sys:String x:Key="str.TP.DcOff">关闭，切回玩家视角</sys:String>
-	<sys:String x:Key="str.TP.DcRefresh">↻ 刷新状态</sys:String>
-	<sys:String x:Key="str.TP.DcCopyCe">复制CE开关脚本</sys:String>
-	<!-- 无敌模式 -->
-	<sys:String x:Key="str.TP.GmHeader">无敌模式</sys:String>
-	<sys:String x:Key="str.TP.GmState">状态：</sys:String>
-	<sys:String x:Key="str.TP.GmOn">开启无敌</sys:String>
-	<sys:String x:Key="str.TP.GmOff">关闭无敌</sys:String>
-	<sys:String x:Key="str.TP.GmRefresh">刷新状态</sys:String>
-	<sys:String x:Key="str.TP.GmCopyScript">复制CE脚本</sys:String>
-	<!-- 隐身/探测屏蔽 -->
-	<sys:String x:Key="str.TP.StHeader">隐蔽值锁定</sys:String>
-	<sys:String x:Key="str.TP.StState">状态：</sys:String>
-	<sys:String x:Key="str.TP.StDetect">自动探测隐蔽字段</sys:String>
-	<sys:String x:Key="str.TP.StHold">锁定隐蔽值为0</sys:String>
-	<sys:String x:Key="str.TP.StReset">解除锁定</sys:String>
-	<!-- 前台锁定 -->
-	<sys:String x:Key="str.TP.FgHeader">游戏前台锁定</sys:String>
-	<sys:String x:Key="str.TP.FgState">状态：</sys:String>
-	<sys:String x:Key="str.TP.FgOn">后台不暂停游戏</sys:String>
-	<sys:String x:Key="str.TP.FgOff">切后台自动暂停</sys:String>
-	<sys:String x:Key="str.TP.FgRefresh">刷新状态</sys:String>
-	<sys:String x:Key="str.TP.FgCopyScript">复制CE开关脚本</sys:String>
-	<!-- 移动速度 -->
-	<sys:String x:Key="str.TP.MsHeader">移动速度倍率</sys:String>
-	<sys:String x:Key="str.TP.MsState">状态：</sys:String>
-	<sys:String x:Key="str.TP.MsApply">应用倍率</sys:String>
-	<sys:String x:Key="str.TP.MsReset">恢复默认速度</sys:String>
-	<sys:String x:Key="str.TP.MsRefresh">刷新当前速度</sys:String>
-	<sys:String x:Key="str.TP.MsLocate">定位移动组件</sys:String>
-	<!-- 重力设置 -->
-	<sys:String x:Key="str.TP.GdHeader">重力方向与倍率</sys:String>
-	<sys:String x:Key="str.TP.GdState">状态：</sys:String>
-	<sys:String x:Key="str.TP.GdApply">应用重力参数</sys:String>
-	<sys:String x:Key="str.TP.GdReset">恢复默认重力</sys:String>
-	<sys:String x:Key="str.TP.GdRefresh">刷新重力参数</sys:String>
-	<sys:String x:Key="str.TP.GdLocate">定位重力字段</sys:String>
-	<!-- 超级跳跃 -->
-	<sys:String x:Key="str.TP.SjHeader">超级跳跃倍率</sys:String>
-	<sys:String x:Key="str.TP.SjState">状态：</sys:String>
-	<sys:String x:Key="str.TP.SjOn">开启高跳</sys:String>
-	<sys:String x:Key="str.TP.SjOff">关闭，恢复原跳跃高度</sys:String>
-	<sys:String x:Key="str.TP.SjReset">重置倍率至100%</sys:String>
-	<sys:String x:Key="str.TP.SjRefresh">刷新跳跃参数</sys:String>
-	<sys:String x:Key="str.TP.SjLocate">定位跳跃高度字段</sys:String>
-	<sys:String x:Key="str.TP.SjHotkeyHint">设置全局超级跳跃快捷键</sys:String>
-	<!-- 飞行模式 -->
-	<sys:String x:Key="str.TP.FlyHeader">无重力飞行</sys:String>
-	<sys:String x:Key="str.TP.FlyState">状态：</sys:String>
-	<sys:String x:Key="str.TP.FlyPreset">按键预设：</sys:String>
-	<sys:String x:Key="str.TP.FlyNoclip">穿墙模式</sys:String>
-	<sys:String x:Key="str.TP.FlyOn">开启飞行</sys:String>
-	<sys:String x:Key="str.TP.FlyOff">关闭飞行</sys:String>
-	<sys:String x:Key="str.TP.FlyRefresh">刷新状态</sys:String>
-	<sys:String x:Key="str.TP.FlyHotkeyHint">设置飞行切换全局热键</sys:String>
-	<!-- 透视物体 -->
-	<sys:String x:Key="str.TP.SeeThroughHeader">穿墙透视</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughState">状态：</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughOn">开启透视</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughOff">关闭透视</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughRefresh">刷新</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughPierce">透视层数：</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughAddCe">添加CE开关记录</sys:String>
-	<!-- 独立CE训练器导出 -->
-	<sys:String x:Key="str.TP.TrainerHeader">独立无DLL训练器导出</sys:String>
-	<sys:String x:Key="str.TP.TrainerExport">导出独立CT训练器</sys:String>
-	<sys:String x:Key="str.Tip.TrainerExport">生成无需注入DLL的纯CE脚本训练器，包含传送、无敌等功能</sys:String>
-	<!-- 代理部署面板 -->
-	<sys:String x:Key="str.ProxyDeploy.ProxyType">代理DLL文件名：</sys:String>
+	<sys:String x:Key="str.Tip.Pivot.LocateGameEngine">Locate in GameEngine: shortest pointer path from the live UGameEngine down to the selected group's representative object. Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
+	<sys:String x:Key="str.Pivot.ResultFilterHint">filter results…</sys:String>
+	<sys:String x:Key="str.Pivot.GroupBy">Group by:</sys:String>
+	<sys:String x:Key="str.Pivot.KeyField">Key field:</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Key">Key</sys:String>
+	<sys:String x:Key="str.Pivot.Col.KeyTip">Add this field to the group key (Field mode). The key becomes the tuple of the Key field above + every ticked field, so e.g. (Team · Slot) groups by the combination. A single key = a plain group key.</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Project">Value</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Field">Field</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Type">Type</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Distinct">Distinct</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Insts">Instances</sys:String>
+	<sys:String x:Key="str.Pivot.Col.KeyScore">Key score</sys:String>
+	<sys:String x:Key="str.Pivot.ResultsHint">Tick the value fields above to project them; tick Key to build a composite key (e.g. Team · Slot) — Field mode only. Identity mode groups spawn-normalised siblings (BP_Enemy_C_0/_1/…) together. Select a group → Open in Live Walker / Copy Address hands its representative instance to CE.</sys:String>
+	<sys:String x:Key="str.Pivot.Res.Count">Count</sys:String>
+	<sys:String x:Key="str.Pivot.Res.Key">Key</sys:String>
+	<sys:String x:Key="str.Pivot.Res.Values">Projected values</sys:String>
+
+	<!-- Class Pivot: change-driven discovery (the automatic front-door) -->
+	<sys:String x:Key="str.Pivot.Discover.Header">🔍 Suggest targets — find what changed</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Intro">Don't know which class to pivot? Capture 2-4 snapshots around an in-game action (e.g. spend gold, take damage), tick them below, and Discover ranks the (class, property) targets that MOVED — by how much each looks like game state (named fields, specific changes, low noise). Pick one and Use → to pivot it. No class/key guessing.</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Pick">Snapshots (tick 2-4, oldest → newest = Before … After):</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Run">🔍 Discover</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Use">Use → (pivot this)</sys:String>
+	<!-- Usage limits, shown on the tab so expectations are clear up front. -->
+	<sys:String x:Key="str.Pivot.Discover.Limits">How it works &amp; limits:&#10;• Capture 2-4 snapshots around the action you want to isolate (Before … After).&#10;• Use 3-4 to separate a one-time change from constant per-frame noise (rotation, timers, positions); with only 2, both just look "changed".&#10;• Only fields that MOVED appear — a value that never changed between your captures will not show.&#10;• Across a game restart, only objects that re-appear with a stable identity (GameInstance / PlayerState / Pawn / components / GAS) re-join reliably; randomly-spawned actors may not.&#10;• The scan covers the numeric fields captured in the snapshot and runs server-side; on a large capture it can take several seconds (cancellable).</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Class">Class</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Prop">Property</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Changed">Changed</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Dir">Δ</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Cat">Category</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Shape">Shape</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Seq">Sample (oldest → newest)</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Score">Score</sys:String>
+
+	<!-- Proxy Deploy -->
+	<sys:String x:Key="str.ProxyDeploy.ProxyType">Proxy DLL:</sys:String>
 	<sys:String x:Key="str.ProxyDeploy.Type.Version">version.dll</sys:String>
 	<sys:String x:Key="str.ProxyDeploy.Type.Dinput8">dinput8.dll</sys:String>
 	<sys:String x:Key="str.ProxyDeploy.Type.Dxgi">dxgi.dll</sys:String>
 	<sys:String x:Key="str.ProxyDeploy.Type.Winmm">winmm.dll</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Scan">扫描Steam游戏</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.RouteOrder">
-		部署方案说明：
-		①部署代理DLL（最优，游戏自动加载）
-		②注入运行中游戏（临时，重启失效）
-		③Cheat Engine内置辅助脚本
-		④独立CT表
+	<sys:String x:Key="str.ProxyDeploy.Scan">Scan Steam</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.RouteOrder">How the DLL gets into the game — best route first:  ① Deploy a proxy DLL (below) — loads with the game, survives restarts, no Cheat Engine involved.  ② Inject into a running game (button above) — nothing to install, but repeat every launch.  ③ Working in Cheat Engine? Tools ▸ Install CE autorun Helper gives every table an ue5_inject(), permanently; Tools ▸ Add "Inject DLL" Record pushes a one-off record into the table you have open.  ④ dist\UE5CEDumper.CT — a standalone table; developer fallback.</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Inject">Inject into running game…</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Refresh">Refresh</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Deploy">Deploy</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Undeploy">Undeploy</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.UpdateAll">Update All</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Force">Force Overwrite</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.SelectAll">All</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.UnselectAll">None</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.InvertSel">Invert</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.SourceDll">Source DLL:</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColName">Game</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColPath">Binaries Path</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColStatus">Status</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColSuggested">Suggested proxy</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColVersion">Version</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColError">Error</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.SuggestToggle">Suggest proxy</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Source">Source:</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Source.Steam">Steam</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Source.Drives">Scan Drives</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.DriveHint">Select drive(s):</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ScanDrives">Scan Drives</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.RefreshDrives">Refresh Drives</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.CancelScan">Cancel</sys:String>
+
+	<!-- Leftover ("orphan") proxy cleanup. Uninstalling a game leaves its folder behind BECAUSE our
+         proxy DLL is a file Steam does not own, so an empty shell survives with our DLL inside it. -->
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Header">Leftover proxy DLLs</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Intro">Uninstalling a game leaves its folder behind when our proxy DLL is still in it — Steam will not delete a file it does not own. This finds those leftovers. Nothing is removed until you check a row and confirm.</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Scan">Find leftovers</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ScanTip">Scans your Steam libraries for folders that hold only our proxy DLL, plus any location our own logs show a proxy was deployed to. Reports only — it never deletes.</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Report">Report…</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ReportTip">Writes a dry-run text file listing exactly what would be removed and what would be left alone, then opens it. Changes nothing on disk.</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Delete">Delete checked ({0})</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.DeleteTip">Moves the checked DLLs to the Recycle Bin, then removes the folders they leave empty. You will see the exact paths first.</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.OpenFolder">Open folder</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.NoneFound">No leftover proxy DLLs found.</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.FileOnlyNote">Only the DLL is removed — no folders are touched for this row. (See the note below for why.)</sys:String>
+
+	<!-- Confirmation window -->
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmTitle">Remove leftover proxy DLLs?</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmLead">Our DLLs below are moved to the Recycle Bin, so this can be undone from there. Folders are then removed one level at a time and only while each is left completely empty — the moment a folder still holds anything, that folder and everything above it are kept.</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmFilesHeader">Files moved to the Recycle Bin</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmDirsHeader">Folders tried, in this order — each only if it is left empty</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmWhyHeader">Why this is judged a leftover</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmKeptNote">Not touched: {0}</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmYes">Move to Recycle Bin</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmNo">Cancel</sys:String>
+
+	<!-- Export -->
+	<sys:String x:Key="str.Toolbar.Options">⚙ Options</sys:String>
+	<sys:String x:Key="str.Toolbar.Export">Export</sys:String>
+	<sys:String x:Key="str.Export.SymbolsX64dbg">Symbols (x64dbg .dd64)</sys:String>
+	<sys:String x:Key="str.Export.SymbolsGhidra">Symbols (Ghidra .txt)</sys:String>
+	<sys:String x:Key="str.Export.SymbolsIda">Symbols (IDA .idc)</sys:String>
+	<sys:String x:Key="str.Export.SdkHeader">SDK Header (.h)</sys:String>
+	<sys:String x:Key="str.Export.Usmap">USMAP (.usmap)</sys:String>
+	<sys:String x:Key="str.Export.DumpAll">Dump All Metadata (.jsonl)</sys:String>
+	<sys:String x:Key="str.Tip.Export.DumpAll">Stream every class + property + function (including BPGCs) to a JSON Lines file. Used by scripts/analysis/analyze_dumps.py to derive keyword tables / class bonuses / threshold calibration from real-game data. ~30-60s per game; output is 50-500 MB depending on game size.</sys:String>
+	<sys:String x:Key="str.LiveWalker.ExportHeader">Export .h</sys:String>
+
+	<!-- Tools (always-available menu; doesn't depend on a DLL connection) -->
+	<sys:String x:Key="str.Toolbar.Tools">Tools</sys:String>
+	<sys:String x:Key="str.Tools.InjectCeBootstrap">Add "Inject DLL" Record to Current CE Table</sys:String>
+	<sys:String x:Key="str.Tools.InstallCeAutorun">Install CE autorun Helper (every table, permanent)…</sys:String>
+	<sys:String x:Key="str.Tools.InjectCeHelperLua">Inject Helper into Current CE Table</sys:String>
+	<sys:String x:Key="str.Tools.ExportCeHelperLua">Export CE Helper Lua File...</sys:String>
+	<sys:String x:Key="str.Tools.InjectFreezeHelperLua">Inject Freeze Helper into Current CE Table</sys:String>
+	<sys:String x:Key="str.Tools.ExportFreezeHelperLua">Export Freeze Helper Lua File...</sys:String>
+
+	<!-- Property Search -->
+	<sys:String x:Key="str.PropertySearch.QueryHint">Property name (e.g. Health, Mana, Gold)</sys:String>
+	<sys:String x:Key="str.PropertySearch.TypeHint">Type filter (start typing — e.g. opt, weak)</sys:String>
+	<sys:String x:Key="str.PropertySearch.ResultFilterLabel">Filter results:</sys:String>
+	<sys:String x:Key="str.PropertySearch.ResultFilterHint">Refine current results (no re-query)</sys:String>
+	<sys:String x:Key="str.PropertySearch.Search">Search</sys:String>
+	<sys:String x:Key="str.PropertySearch.GameOnly">Game classes only</sys:String>
+	<sys:String x:Key="str.PropertySearch.Deep">Deep (structs/containers)</sys:String>
+	<sys:String x:Key="str.PropertySearch.FindInstances">finder</sys:String>
+	<sys:String x:Key="str.PropertySearch.CopyOffset">Copy Offset</sys:String>
+	<sys:String x:Key="str.PropertySearch.Freeze">Freeze</sys:String>
+	<!-- Force field (Solide) — hold a discovered field across live instances -->
+	<sys:String x:Key="str.PropertySearch.ForceMenu">Force field (hold across instances)</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForceOn">Force ON</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForceOff">Force OFF</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForceNull">Force → null</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForceValue">Force value…</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForcedHeader">Forced fields:</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForcedClearAll">Clear all</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.ForcedClearAll">Release every forced-field hold (best-effort restore each field's captured base).</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.ForcedRemove">Release this hold (restore the captured base) and stop re-asserting it.</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForcedCapped">⚠ capped</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.ForcedCapped">The instance pool hit the DLL's cap, so the held count is a FLOOR — more live instances of this class exist and are NOT being held. The pool is walked in ascending GObjects order, so the ones dropped are the most recently spawned.</sys:String>
+
+	<!-- Game Class Filter -->
+	<sys:String x:Key="str.GameClassFilter.Load">Load</sys:String>
+	<sys:String x:Key="str.GameClassFilter.GameOnly">Game classes only</sys:String>
+	<sys:String x:Key="str.GameClassFilter.FilterHint">Filter by name...</sys:String>
+	<sys:String x:Key="str.GameClassFilter.FindInstances">inst</sys:String>
+	<sys:String x:Key="str.GameClassFilter.WalkClass">Walk Class</sys:String>
+	<sys:String x:Key="str.GameClassFilter.FindFunc">Find Func</sys:String>
+	<sys:String x:Key="str.GameClassFilter.SuperLabel">Super:</sys:String>
+	<sys:String x:Key="str.GameClassFilter.SuperHint">(All)</sys:String>
+	<sys:String x:Key="str.GameClassFilter.PackageLabel">Package:</sys:String>
+	<sys:String x:Key="str.GameClassFilter.PackageHint">(All)</sys:String>
+	<sys:String x:Key="str.GameClassFilter.Clear">Clear</sys:String>
+
+	<!-- Interesting Functions Finder -->
+	<sys:String x:Key="str.IF.Load">Load</sys:String>
+	<sys:String x:Key="str.IF.GameOnly">Game Only</sys:String>
+	<sys:String x:Key="str.IF.FilterHint">Filter by name (function or class)...</sys:String>
+	<sys:String x:Key="str.IF.ShowAll">Show All (incl. low-score)</sys:String>
+	<sys:String x:Key="str.IF.GameplayActions">Gameplay Actions</sys:String>
+	<sys:String x:Key="str.IF.CallableOnly">BP/Exec only</sys:String>
+	<sys:String x:Key="str.IF.ClearFilters">Clear</sys:String>
+	<sys:String x:Key="str.IF.OpenInst">inst</sys:String>
+	<sys:String x:Key="str.IF.Props">Props</sys:String>
+	<sys:String x:Key="str.IF.OpenLive">Live</sys:String>
+	<sys:String x:Key="str.IF.LocateGWorld">🌍</sys:String>
+	<sys:String x:Key="str.IF.LocateGameEngine">⚙</sys:String>
+	<sys:String x:Key="str.IF.CopyAaScript">AA(B)</sys:String>
+	<sys:String x:Key="str.IF.CopyName">Name</sys:String>
+	<sys:String x:Key="str.Tip.IF.Load">Scan all UFunctions across all loaded UClasses. Takes 2-10s on large games (1M+ objects). Score is computed client-side from name keywords + class bonus + flag bonus.</sys:String>
+	<sys:String x:Key="str.Tip.IF.GameOnly">Skip /Script/Engine, /Script/CoreUObject, etc. Typically reduces the result set ~5x for shipping games. Recheck + re-Load to refresh.</sys:String>
+	<sys:String x:Key="str.Tip.IF.Filter">Substring match against function name OR class name (case-insensitive). e.g. "Money" or "PlayerCharacter".</sys:String>
+	<sys:String x:Key="str.Tip.IF.ClearFilters">Clear the name filter, category, and Show-all toggle (reset to defaults).</sys:String>
+	<sys:String x:Key="str.Tip.IF.OpenInst">Open this row's class in the Instance Finder tab — pre-fills the class name and runs the search to list its live instances.</sys:String>
+	<sys:String x:Key="str.Tip.IF.Category">Filter by category. Categories are picked from the strongest-scoring keyword bucket per function (Stats &gt; Inventory &gt; Movement &gt; Combat &gt; Utility tied with same score).</sys:String>
+	<sys:String x:Key="str.Tip.IF.ShowAll">When off, hide rows with score below the InterestingThreshold (currently 5). When on, show every UFunction regardless of score.</sys:String>
+	<sys:String x:Key="str.Tip.IF.GameplayActions">Opt-in (default off). Fold an extra keyword pack into scoring for character-control + world-interaction + shop verbs the default buckets skip — Dash / Dodge / Roll / Slide / Climb / Interact / Use / Open / Buy / Sell / Shop / Vendor / Merchant / Trade / Purchase. Lets a plain OpenShop() / Dash() / Interact() clear the threshold and show up (tip: combine with a name filter like "shop" or "buy"). Re-scores the loaded set in place — no reload needed. Noisier by design; turn off to return to the cheat-value default.</sys:String>
+	<sys:String x:Key="str.Tip.IF.CallableOnly">Filter (default off): show only functions flagged BlueprintCallable or Exec. Gameplay/control/shop entry points are almost always one of these two, and both flags survive cooking — so this hides native getters/setters/engine plumbing noise. Pairs well with "Gameplay Actions" + "Show All" to browse callable action functions. Pure display filter — doesn't change scores.</sys:String>
+	<sys:String x:Key="str.Tip.IF.Props">List the properties this function reads/writes (static Blueprint-bytecode scan). Native functions have no bytecode and show nothing.</sys:String>
+	<sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Struct tab. Auto-expands the Functions section and selects the target row.</sys:String>
+	<sys:String x:Key="str.Tip.IF.LocateGWorld">Locate in GWorld: find a live instance of this function's class, then show the shortest pointer path from GWorld down to it in Live Walker (stops at the parent that points to it)</sys:String>
+	<sys:String x:Key="str.Tip.IF.LocateGameEngine">Locate in GameEngine: find a live instance of this function's class, then show the shortest pointer path from the live UGameEngine down to it in Live Walker (stops at the parent that points to it). Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
+	<sys:String x:Key="str.Tip.IF.CopyAaScript">Open the Copy AA Script (Baked) dialog for this function. Output requires ue5_invoke_helper.lua embedded in your CE table (Tools -&gt; Export CE Helper Lua File...).</sys:String>
+	<sys:String x:Key="str.Tip.IF.CopyName">Copy this function's name to the clipboard. Useful when pasting into a CE script or another tool.</sys:String>
+	<sys:String x:Key="str.IF.GenerateCT">📦 Generate CT</sys:String>
+	<sys:String x:Key="str.Tip.IF.GenerateCT">Generate one .CT file containing baked-invoke entries for every selected row. Use Ctrl/Shift+click in the grid to multi-select first. Functions with parameters: the helper zero-fills PARAMS; edit the baked PARAMS table in the generated entry before activating.</sys:String>
+	<sys:String x:Key="str.IF.BatchProps">⤋ Props</sys:String>
+	<sys:String x:Key="str.Tip.IF.BatchProps">Fill the "Uses" column for the selected rows at once (or all rows if none selected), so you see which class fields each function reads/writes without opening the per-row popup. Fast — each call reads only that one function's bytecode. Most rows show 0 (native funcs / no field access).</sys:String>
+	<sys:String x:Key="str.IF.UsesCol">Uses</sys:String>
+	<sys:String x:Key="str.Common.CancelBatch">✕ Cancel</sys:String>
+	<sys:String x:Key="str.Common.BatchFuncs">⤋ Funcs</sys:String>
+	<sys:String x:Key="str.Common.BatchFindFunc">⤋ Find Func</sys:String>
+	<sys:String x:Key="str.Tip.Common.BatchFindFunc">Fill the "Funcs" column for the selected rows (or all currently-filtered rows if none selected): which UFunctions take each class as a parameter or return value (reflection scan — includes native functions). Each call is a full game-wide sweep, so narrow the filter or select rows first. Already-scanned rows are skipped (cached).</sys:String>
+	<sys:String x:Key="str.Common.FuncsCol">Funcs</sys:String>
+	<sys:String x:Key="str.Tip.Common.BatchFuncs">Fill the "Funcs" column for the selected rows (or all rows if none selected): which UFunctions reference each property (Blueprint bytecode xref). Each call is a full game scan, so this is slower than the function-side batch — select rows first (Ctrl/Shift+click) to scope it. Most rows show 0 (native-only access / unreferenced).</sys:String>
+
+	<!-- Live Funcs (Live ProcessEvent Call Profiler) -->
+	<sys:String x:Key="str.LF.Start">● Start</sys:String>
+	<sys:String x:Key="str.LF.Stop">■ Stop</sys:String>
+	<sys:String x:Key="str.LF.Refresh">Refresh</sys:String>
+	<sys:String x:Key="str.LF.Clear">Clear</sys:String>
+	<sys:String x:Key="str.LF.FilterHint">Filter by name (function or class)...</sys:String>
+	<sys:String x:Key="str.LF.OpenLive">Live</sys:String>
+	<sys:String x:Key="str.LF.CopyName">Name</sys:String>
+	<sys:String x:Key="str.LF.SetBaseline">⚑ Set Baseline</sys:String>
+	<sys:String x:Key="str.LF.Diff">Diff vs baseline</sys:String>
+	<sys:String x:Key="str.LF.NewOnly">New/changed only</sys:String>
+	<sys:String x:Key="str.LF.ClearBaseline">Clear baseline</sys:String>
+	<sys:String x:Key="str.LF.HideWidgets">Hide UI widgets</sys:String>
+	<sys:String x:Key="str.LF.HideEvents">Hide events/delegates</sys:String>
+	<sys:String x:Key="str.LF.PeriodicOnly">Periodic only</sys:String>
+	<sys:String x:Key="str.LF.EarliestFirst">Earliest first</sys:String>
+	<sys:String x:Key="str.Tip.LF.Start">Start recording which UFunctions the game dispatches through ProcessEvent. Forces the game-thread PE hook to install. After clicking, ALT-TAB to the game and perform ONE action (open the shop, dash, attack), then click Stop — behaviour-based discovery finds the exact function even when its name is unguessable.</sys:String>
+	<sys:String x:Key="str.Tip.LF.Stop">Stop recording and show the UFunctions that fired, ranked by call count. The action-specific function is usually near the top with a low count (a handful of calls), while per-frame Tick/Update functions have huge counts.</sys:String>
+	<sys:String x:Key="str.Tip.LF.Refresh">Re-fetch the current fire-count table without stopping — a live peek while recording, or a re-pull after Stop.</sys:String>
+	<sys:String x:Key="str.Tip.LF.Filter">Substring match against function name OR class name (space = AND, case-insensitive). e.g. "shop" or "open".</sys:String>
+	<sys:String x:Key="str.Tip.LF.OpenLive">Open this function in Live Walker on a live instance of its class (falls back to Class Struct if the class has no live instance). From there you can invoke it.</sys:String>
+	<sys:String x:Key="str.Tip.LF.CopyName">Copy this function's name to the clipboard.</sys:String>
+	<sys:String x:Key="str.Tip.LF.SetBaseline">Capture the CURRENT results as a baseline (an idle reference). Do this: Start → stand still a few seconds → Stop → Set Baseline. Then record the ACTION (open shop) and the list flips to a diff — functions that DIDN'T fire while idle ("NEW") rank to the top, so the action's function stops drowning under per-frame Tick/Update noise.</sys:String>
+	<sys:String x:Key="str.Tip.LF.Diff">Show the "Δ vs base" column and rank new/increased functions first (needs a baseline). Turn off to rank by raw call count again.</sys:String>
+	<sys:String x:Key="str.Tip.LF.NewOnly">Show ONLY functions that are new or fired more than the baseline — the action-specific set. The shop/dash function is almost always in here.</sys:String>
+	<sys:String x:Key="str.Tip.LF.HideWidgets">Hide functions whose owning class is a UI widget (UUserWidget-derived, tagged "UI"). When a shop/menu opens, the widget is CREATED, so all its own methods fire at once and flood the diff — but the widget is the RESULT, not the entry point. Hiding them leaves the persistent opener (on a PlayerController / UI-manager subsystem / interaction component) — the function you can actually call in the open world.</sys:String>
+	<sys:String x:Key="str.Tip.LF.HideEvents">Hide event handlers and delegate signatures (tagged "Event"/"Deleg" in the Type column — On*/callbacks). These are reactions the engine fires AT the game when something happens, not functions you can call to MAKE it happen. Hiding them leaves imperative callables ("Call"). Note: if this empties the list, the action's real entry point wasn't captured (it opened via a native C++ call the ProcessEvent hook can't see, or the panel hadn't appeared yet — record through until it's fully on screen).</sys:String>
+	<sys:String x:Key="str.Tip.LF.PeriodicOnly">Show ONLY functions firing at a regular timer-like cadence (tagged "Timer" in the Kind column) — a steady period, low variation, not the per-frame Tick band. The behaviour-based way to find the callback that drives a cooldown / respawn / damage-over-tick: record while standing IDLE for ~15-20 s (the inverse of the action-diff flow), then enable this to leave just the periodic callbacks. The "Period" column shows the measured interval. Caveat: native C++/lambda timers (SetTimer(this, &amp;UClass::Method)) bypass ProcessEvent entirely and never appear here — only UFUNCTION-bound (BP timer event / SetTimerByFunctionName) timers are visible.</sys:String>
+	<sys:String x:Key="str.Tip.LF.EarliestFirst">Sort by call order — the function that fired FIRST during the recording goes to the top (see the "Order" column). An action's entry point runs BEFORE the reactions it triggers (widget creation, On* notifications), so combined with "New/changed only" this floats the true opener to the top instead of ranking by raw call count. Causal, name-independent.</sys:String>
+
+	<!-- Console (UFUNCTION(exec) discovery + invoke) -->
+	<sys:String x:Key="str.Con.Load">Load</sys:String>
+	<sys:String x:Key="str.Con.GameOnly">Game Only</sys:String>
+	<sys:String x:Key="str.Con.FilterHint">Filter exec commands by name...</sys:String>
+	<sys:String x:Key="str.Con.ClearFilter">Clear</sys:String>
+	<sys:String x:Key="str.Con.CommandHint">type command (e.g. fly, ghost, god)</sys:String>
+	<sys:String x:Key="str.Con.Run">Run</sys:String>
+	<sys:String x:Key="str.Con.RunSelected">Run Selected</sys:String>
+	<sys:String x:Key="str.Con.RunRow">Run</sys:String>
+	<sys:String x:Key="str.Con.OpenLive">Live</sys:String>
+	<sys:String x:Key="str.Con.CopyAaScript">AA(B)</sys:String>
+	<sys:String x:Key="str.Con.HistoryHeader">Recent invocations</sys:String>
+	<sys:String x:Key="str.Tip.Con.Load">Scan every UFunction and surface those marked with UFUNCTION(exec) (FUNC_Exec=0x200). Many games leave these intact in cooked Shipping — they're the cheat surface the developer already curated.</sys:String>
+	<sys:String x:Key="str.Tip.Con.GameOnly">When OFF (default), engine-side UCheatManager exec commands are included — usually what you want. Flip ON to see only game-specific exec commands.</sys:String>
+	<sys:String x:Key="str.Tip.Con.ClearFilter">Clear the command-name filter and show the full list again.</sys:String>
+	<sys:String x:Key="str.Tip.Con.Filter">Substring match against command name OR class name (case-insensitive). Empty = show all.</sys:String>
+	<sys:String x:Key="str.Tip.Con.CommandInput">Type an exec command name and press Run. No-arg commands invoke directly; commands with parameters open the InvokeParamDialog. Leading slash is stripped (/fly == fly).</sys:String>
+	<sys:String x:Key="str.Tip.Con.RunCommand">Resolve the typed command against the loaded list and invoke. Match is case-insensitive exact funcName; first match wins if multiple classes implement the same name.</sys:String>
+	<sys:String x:Key="str.Tip.Con.RunSelected">Invoke the currently selected row. Same code path as Run on a row.</sys:String>
+	<sys:String x:Key="str.Tip.Con.RunRow">Invoke this exec command. No-arg commands run directly via pipe; commands with parameters open the InvokeParamDialog.</sys:String>
+	<sys:String x:Key="str.Tip.Con.OpenLive">Try to open the implementing class in Live Walker. Falls back to Class Struct on CDO-only classes (UCheatManager subclasses often have no live instance until a PlayerController spawns).</sys:String>
+	<sys:String x:Key="str.Tip.Con.CopyAaScript">Open the Copy AA Script (Baked) dialog for this exec command — useful when you want to bake the invoke into a CE Auto Assembler script for table sharing.</sys:String>
+	<sys:String x:Key="str.Tip.Con.Replay">Re-run this command. Requires the discovery list to still be loaded (re-launch wipes the cache).</sys:String>
+
+	<!-- Console: Debug Camera state-aware helper (visible only when the
+         loaded exec list contains ToggleDebugCamera). ToggleDebugCamera is
+         a stateful toggle; these controls read the CheatManager's
+         DebugCameraControllerRef to show ON/OFF and drive deterministic
+         Force On / Force Off instead of blind toggling. -->
+	<sys:String x:Key="str.Con.DbgCam.Label">Debug Camera</sys:String>
+	<sys:String x:Key="str.Con.DbgCam.ForceOn">Force On</sys:String>
+	<sys:String x:Key="str.Con.DbgCam.ForceOff">Force Off</sys:String>
+	<sys:String x:Key="str.Con.DbgCam.Refresh">↻</sys:String>
+	<sys:String x:Key="str.Con.DbgCam.CopyCe">Copy CE Script</sys:String>
+	<sys:String x:Key="str.Tip.Con.DbgCam.State">Live Debug Camera state, read from the CheatManager's DebugCameraControllerRef member — the exact field ToggleDebugCamera branches on. ON = a DebugCameraController is active (next plain toggle would turn it OFF). Press ↻ to re-read.</sys:String>
+	<sys:String x:Key="str.Tip.Con.DbgCam.Refresh">Re-read the live Debug Camera state from the CheatManager instance.</sys:String>
+	<sys:String x:Key="str.Tip.Con.DbgCam.ForceOn">Ensure Debug Camera is ON: read current state, and fire ToggleDebugCamera only if it is currently OFF. Idempotent — does nothing if already ON.</sys:String>
+	<sys:String x:Key="str.Tip.Con.DbgCam.ForceOff">Ensure Debug Camera is OFF: read current state, and fire ToggleDebugCamera only if it is currently ON. This is the reliable "turn it off" — plain Run just flips whatever state it's in.</sys:String>
+	<sys:String x:Key="str.Tip.Con.DbgCam.CopyCe">Generate a stateful CE memory-record AA Script (tick = camera ON, untick = camera OFF) — the same robust DLL path as Force On/Off. Self-contained: talks to the DLL mailbox directly, so NO ue5_invoke_helper.lua embed is needed (just UE5Dumper.dll injected). Ships to AOBMaker if connected, else the clipboard.</sys:String>
+
+	<!-- Teleport panel (BugIt-style: marker save/recall + cursor teleport) -->
+	<sys:String x:Key="str.TP.PoseHeader">Current Pose</sys:String>
+	<sys:String x:Key="str.TP.Refresh">Refresh</sys:String>
+	<sys:String x:Key="str.TP.Auto">Auto (0.5s)</sys:String>
+	<sys:String x:Key="str.TP.Loc">Location (X / Y / Z):</sys:String>
+	<sys:String x:Key="str.TP.Rot">Rotation (Pitch / Yaw / Roll):</sys:String>
+	<sys:String x:Key="str.TP.Map">Map:</sys:String>
+	<sys:String x:Key="str.TP.Pawn">Pawn:</sys:String>
+	<sys:String x:Key="str.TP.Locate">🌍 Locate</sys:String>
+	<sys:String x:Key="str.TP.LocateGameEngine">⚙ Locate</sys:String>
+	<sys:String x:Key="str.TP.LocatePos">🌍 Locate</sys:String>
+	<sys:String x:Key="str.TP.LocateVel">🌍 Locate</sys:String>
+	<sys:String x:Key="str.TP.LocateAccel">🌍 Locate</sys:String>
+	<sys:String x:Key="str.TP.LocateSpeed">🌍 Locate</sys:String>
+	<sys:String x:Key="str.TP.LocateCamLoc">🌍 Locate</sys:String>
+	<sys:String x:Key="str.TP.LocateCamFov">🌍 Locate</sys:String>
+	<sys:String x:Key="str.TP.LocateRot">🌍 Locate</sys:String>
+	<sys:String x:Key="str.TP.LocateCamRot">🌍 Locate</sys:String>
+	<sys:String x:Key="str.TP.Velocity">Velocity (X / Y / Z):</sys:String>
+	<sys:String x:Key="str.TP.Speed">Speed:</sys:String>
+	<sys:String x:Key="str.TP.Accel">Acceleration (X / Y / Z):</sys:String>
+	<sys:String x:Key="str.TP.MarkersHeader">Markers</sys:String>
+	<sys:String x:Key="str.TP.Save">Save</sys:String>
+	<sys:String x:Key="str.TP.Recall">Recall</sys:String>
+	<sys:String x:Key="str.TP.Force">Force</sys:String>
+	<sys:String x:Key="str.TP.Clear">Clear</sys:String>
+	<sys:String x:Key="str.TP.CursorHeader">Cursor Teleport (2.5D / 45° games)</sys:String>
+	<sys:String x:Key="str.TP.ToCursor">Teleport to cursor</sys:String>
+	<sys:String x:Key="str.TP.ZOffset">Z offset:</sys:String>
+	<sys:String x:Key="str.TP.Channel">Channel:</sys:String>
+	<sys:String x:Key="str.TP.FallbackCenter">Fall back to screen center</sys:String>
+	<sys:String x:Key="str.TP.CursorHotkey">Global cursor hotkey (keep game focused)</sys:String>
+	<sys:String x:Key="str.TP.BugHeader">BugItGo Interop</sys:String>
+	<sys:String x:Key="str.TP.CopyBugItGo">Copy as BugItGo</sys:String>
+	<sys:String x:Key="str.TP.RunBugItGo">Run</sys:String>
+	<sys:String x:Key="str.TP.BugHint">Paste 'BugItGo X Y Z', 'X Y Z', or a ?BugLoc=(...)?BugRot=(...) string</sys:String>
+	<sys:String x:Key="str.TP.LastHeader">Last Position (auto-saved)</sys:String>
+	<sys:String x:Key="str.TP.LastHint">The dumper records where you were just before every Recall / Force / BugItGo / cursor teleport, so you can undo a jump that went wrong. This slot is managed by the system — you can't save into it, only recall it.</sys:String>
+	<sys:String x:Key="str.TP.RecallLast">Recall last</sys:String>
+	<sys:String x:Key="str.TP.HkHeader">Hotkey Settings</sys:String>
+	<sys:String x:Key="str.TP.HkHint">Global hotkeys for markers (Save / Recall / Recall-last), BugItGo, Debug camera, and the God Mode / Super Jump / Move Speed / Gravity toggles + teleport / cursor actions (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Click Cancel or press Esc to abort. Keyboard only for now (mouse extra-buttons / gamepad not yet supported). Saved automatically. A combo marked ⚠ is held by another app — free it and reconnect, or bind a different one.</sys:String>
+	<sys:String x:Key="str.TP.ExpHkHeader">Experimental Hotkeys</sys:String>
+	<sys:String x:Key="str.TP.ExpHkHint">Global hotkeys for the experimental features (Keep Foreground ON/OFF, Fly toggle). These are only active while Experimental features is enabled — turning it off unbinds them (and the emergency Keep-Foreground-OFF key). Bind them the same way: click Set, then press the combo.</sys:String>
+	<sys:String x:Key="str.TP.HkClear">Clear</sys:String>
+	<sys:String x:Key="str.TP.CeHeader">CE Export</sys:String>
+	<sys:String x:Key="str.TP.AddActions">Add action records to CE</sys:String>
+	<sys:String x:Key="str.TP.SaveCt">Save .CT…</sys:String>
+	<!-- Global pointers (CE) — DLL-invoke GWorld / GameEngine as CE symbols -->
+	<sys:String x:Key="str.TP.PtrHeader">Global Pointers → Cheat Engine symbols</sys:String>
+	<sys:String x:Key="str.TP.PtrHint">Add a CE record that asks the injected UE5Dumper.dll for a live global pointer and publishes it as a registered CE symbol you can reference directly. ENABLE the record → it registers the symbol (UE_GWorld / UE_GameEngine); DISABLE → it unregisters (and frees any buffer). Use the symbol as a pointer base: [UE_GWorld]+offset / [UE_GameEngine]+offset, freeze it, or read it in any record. GWorld is bound to the stable &amp;GWorld slot (auto-follows level changes); GameEngine is a snapshot of the UEngine* (re-tick to refresh). Pushed into Cheat Engine via the AOBMaker plugin; if AOBMaker isn't connected, the CE memory-record XML is copied to the clipboard instead — paste it into CE's address list (right-click → Paste). Needs the DLL injected and a running game.</sys:String>
+	<sys:String x:Key="str.TP.PtrGWorld">Get GWorld</sys:String>
+	<sys:String x:Key="str.TP.PtrGameEngine">Get GameEngine</sys:String>
+	<sys:String x:Key="str.Tip.TP.PtrGWorld">Add a CE record that resolves the stable &amp;GWorld pointer slot via the DLL and registers it directly as the symbol UE_GWorld, so [UE_GWorld]+offset dereferences the slot to the CURRENT UWorld and chains into it — it auto-follows level transitions (no snapshot). Enable = register, disable = unregister (nothing to free — the slot is a game address). Pushed via AOBMaker, or copied as paste-able CE memory-record XML if AOBMaker isn't connected. Uses the mailbox (CMD_QUERY_PTR), so it works where executeCodeEx can't read export returns.</sys:String>
+	<sys:String x:Key="str.Tip.TP.PtrGameEngine">Add a CE record that resolves the live UEngine* (GameEngine instance) via the DLL and registers it as the symbol UE_GameEngine, so [UE_GameEngine]+offset chains straight into the engine. Resolved by walking GObjects — no static GEngine slot needed. Enable = register, disable = unregister + free. Pushed via AOBMaker, or copied as paste-able CE memory-record XML if AOBMaker isn't connected. Uses the mailbox (CMD_QUERY_PTR).</sys:String>
+	<sys:String x:Key="str.TP.Warning">⚠ Single-player only. Online games will rubber-band or may flag teleports.</sys:String>
+	<sys:String x:Key="str.TP.BestEffort">ℹ Best-effort, per the design spec (docs/teleport-spec.md): the pawn is resolved by reflection and moved via the engine's own functions where available, with memory-write fallbacks. Works on most games, but some drive the character or the camera from separate internal systems — so on certain titles the character may not move, or it teleports but the camera (POV) doesn't follow.</sys:String>
+	<sys:String x:Key="str.Tip.TP.Refresh">Read the current pawn's world location and control rotation (DLL resolves the local PlayerController → Pawn → RootComponent via reflection).</sys:String>
+	<sys:String x:Key="str.Tip.TP.Auto">Re-read the pose every 0.5s, and the camera POV too (POV is skipped silently on games where it isn't available). Off by default; stops automatically on disconnect.</sys:String>
+	<sys:String x:Key="str.Tip.TP.Locate">Find this pawn (the object whose Current Pose is shown) in the Live Walker and select it — switches to Live Walker, walks the GWorld → … → pawn path, and lands on it. Reads a fresh pose first to get the live pawn address. World-Partition / streaming pawns resolve via the level back-reference (Live Walker shows 'via level'); a just-spawned, unreferenced pawn may be unreachable.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateGameEngine">Locate in GameEngine: find this pawn via the live UGameEngine graph instead of GWorld. NOTE: a pawn is a world actor and usually lives BELOW GWorld, so this is typically unreachable — use the 🌍 Locate in GWorld button for pawns. Provided only for parity.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocatePos">Locate the position vector in GWorld: walk the GWorld → … → RootComponent path and land directly on the RelativeLocation FVector field (X/Y/Z), so you can build a pointer chain straight to the coordinates. Reads a fresh pose first. (On attached pawns the stored RelativeLocation is parent-relative.)</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateVel">Locate the velocity vector in GWorld: walk the GWorld → … → CharacterMovement path and land directly on the Velocity FVector field, for a pointer chain straight to the movement vector. Reads a fresh pose first. Unavailable on pawns with no CharacterMovement (vehicles / custom movement frameworks).</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateAccel">Locate the acceleration vector in GWorld: land directly on CharacterMovement.Acceleration (the input acceleration the movement uses). Reads a fresh pose first. Unavailable on pawns with no CharacterMovement.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateSpeed">Speed has no own field — it is the magnitude of Velocity. This lands on the Velocity FVector it is computed from (freeze/inspect the components there). Reads a fresh pose first.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateCamLoc">Locate the camera's cached POV Location in GWorld: land on APlayerCameraManager.CameraCachePrivate.POV.Location. Reads a fresh POV first. Unavailable when the cached-POV layout isn't reflected.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateCamFov">Locate the camera's cached POV FOV float in GWorld: land on APlayerCameraManager.CameraCachePrivate.POV.FOV. Reads a fresh POV first. Unavailable when the cached-POV layout isn't reflected.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateRot">Locate the rotation in GWorld: land directly on Controller.ControlRotation (the FRotator Pitch/Yaw/Roll that drives the view/aim). Reads a fresh pose first.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateCamRot">Locate the camera's cached POV Rotation in GWorld: land on APlayerCameraManager.CameraCachePrivate.POV.Rotation. Reads a fresh POV first. Unavailable when the cached-POV layout isn't reflected.</sys:String>
+	<sys:String x:Key="str.Tip.TP.Velocity">Live velocity (cm/s) and acceleration (cm/s²) read straight from the pawn's CharacterMovement (no invoke). Enable Auto to watch them change while moving. Shown as — with a note on pawns that have no CharacterMovement (vehicles / custom movement frameworks).</sys:String>
+	<sys:String x:Key="str.Tip.TP.Save">Save the current pose into this marker slot. Markers live in the DLL — they survive a UI restart as long as the game process lives.</sys:String>
+	<sys:String x:Key="str.Tip.TP.Recall">Teleport back to this marker (invokes K2_SetActorLocation with bTeleport=true, then restores rotation and zeroes velocity). Refused if you've changed maps — use Force.</sys:String>
+	<sys:String x:Key="str.Tip.TP.Force">Recall even if the marker was saved on a different map. May land you in an unloaded area — use with care.</sys:String>
+	<sys:String x:Key="str.Tip.TP.Clear">Forget this marker.</sys:String>
+	<sys:String x:Key="str.Tip.TP.HkClear">Clear this row's hotkey binding.</sys:String>
+	<sys:String x:Key="str.Tip.TP.ToCursor">Teleport the pawn to the world position under the mouse cursor (or screen center if no cursor). Uses K2_TeleportTo so the pawn lands beside geometry, not inside it.</sys:String>
+	<sys:String x:Key="str.Tip.TP.ZOffset">Height added above the hit point so the capsule doesn't spawn intersecting the ground (default 100).</sys:String>
+	<sys:String x:Key="str.Tip.TP.Channel">ETraceTypeQuery byte. 0 = Visibility (default engine mapping). Games can remap channels — change this if cursor hits land on the wrong surface.</sys:String>
+	<sys:String x:Key="str.Tip.TP.FallbackCenter">When the game has no cursor (HD-2D-style), trace from the screen center instead.</sys:String>
+	<sys:String x:Key="str.Tip.TP.CursorHotkey">Bind a system-wide hotkey for cursor teleport so you can keep the game focused (the cursor stays in the game). Auto-picks the first free combo: Ctrl+F8→F5, then Alt+F8→F5. The chosen combo shows beside this box.</sys:String>
+	<sys:String x:Key="str.Tip.TP.CopyBugItGo">Read the current pose, copy a 'BugItGo X Y Z' string to the clipboard, and paste it into the Run field so you can fire BugItGo immediately. (BugIt itself can't return data to the dumper — it writes to the game's own log/clipboard — so this reads the pose directly.)</sys:String>
+	<sys:String x:Key="str.Tip.TP.RunBugItGo">Parse the pasted string and teleport there. Works without any CheatManager — feeds X/Y/Z into the same recall path as markers.</sys:String>
+	<sys:String x:Key="str.Tip.TP.RecallLast">Undo the most recent teleport: jump back to the pose auto-saved just before your last Recall / Force / BugItGo / cursor teleport. One-way — recalling it doesn't change the saved spot, so you can press it repeatedly. The system writes this slot; you can't save into it.</sys:String>
+	<sys:String x:Key="str.Tip.TP.HkSet">Click, then press the key combo you want for this action. Hold modifiers (Ctrl/Alt/Shift) then a key, or press a single key. Esc cancels. The combo is registered system-wide so it works while the game is focused.</sys:String>
+	<sys:String x:Key="str.Tip.TP.AddActions">Ship the 17 momentary teleport records (Save 1-3, Recall 1-3, Recall last, BugIt, BugItGo, Cursor, Get POV, Get current coords, TP facing direction, TP to coordinates, Cursor ON, Cursor OFF, Clear all) PLUS 3 movement on/off toggles (Move Speed, Gravity, Super Jump — baked at the current slider %, tick = apply, untick = OFF) into the open Cheat Engine table via AOBMaker. Teleport records fire once and auto-untick; movement records stay on while ticked (the DLL holds the value). The directional/coordinate/movement records bake the current field values. Requires the AOBMaker plugin connected.</sys:String>
+	<sys:String x:Key="str.Tip.TP.SaveCt">Backup: save a Cheat Engine .CT file with the 17 teleport records + 3 movement on/off toggles (Move Speed / Gravity / Super Jump baked at the current slider %), for when AOBMaker isn't connected. Import via CE File → Open.</sys:String>
+	<!-- Teleport: Debug Camera (free-look) -->
+	<sys:String x:Key="str.TP.DcHeader">Debug Camera (free-look)</sys:String>
+	<sys:String x:Key="str.TP.DcHint">Detach the view into a free-fly debug camera (UCheatManager::ToggleDebugCamera). Turning it back OFF is handled even on Shipping builds that stripped the disable path — the DLL switches the local player's controller back. Needs a live PlayerController, so enter gameplay first. Available only on games that kept ToggleDebugCamera.</sys:String>
+	<sys:String x:Key="str.TP.DcState">State:</sys:String>
+	<sys:String x:Key="str.TP.DcOn">Force ON</sys:String>
+	<sys:String x:Key="str.TP.DcOff">Force OFF</sys:String>
+	<sys:String x:Key="str.TP.DcRefresh">↻</sys:String>
+	<sys:String x:Key="str.Tip.TP.DcOn">Deterministically enable the debug camera (reads state first, only toggles if needed). Idempotent — pressing again when it's already ON does nothing.</sys:String>
+	<sys:String x:Key="str.Tip.TP.DcOff">Deterministically disable the debug camera and return control to the player. On builds that stripped the disable path, the DLL swaps the local player's controller back to the original PlayerController.</sys:String>
+	<sys:String x:Key="str.Tip.TP.DcRefresh">Re-read the live debug-camera state (1=ON / 0=OFF / unknown if no live CheatManager).</sys:String>
+
+	<!-- God Mode (Solitar — force AActor.bCanBeDamaged) -->
+	<sys:String x:Key="str.TP.GmHeader">God Mode</sys:String>
+	<sys:String x:Key="str.TP.GmHint">Forces the player pawn's AActor.bCanBeDamaged to FALSE, so damage routed through the standard engine pipeline (ApplyDamage) is dropped. Re-asserted on a timer while ON, so it survives respawns. Needs a live pawn — enter gameplay first. Games with custom health systems may bypass it: then freeze the health value in Value Search, or find the game's own immortal flag in Property Search. Single-player only — online games replicate this flag server-side.</sys:String>
+	<sys:String x:Key="str.TP.GmState">State:</sys:String>
+	<sys:String x:Key="str.TP.GmOn">Force ON</sys:String>
+	<sys:String x:Key="str.TP.GmOff">Force OFF</sys:String>
+	<sys:String x:Key="str.TP.GmRefresh">↻</sys:String>
+	<sys:String x:Key="str.TP.GmCopyScript">Add to CE</sys:String>
+	<sys:String x:Key="str.Tip.TP.GmOn">Turn God Mode ON (clear bCanBeDamaged). Idempotent; the DLL re-asserts the bit every ~300 ms so it survives respawns.</sys:String>
+	<sys:String x:Key="str.Tip.TP.GmOff">Turn God Mode OFF (restore bCanBeDamaged) and stop the re-assert worker.</sys:String>
+	<sys:String x:Key="str.Tip.TP.GmRefresh">Re-read the live God Mode state (1=immune / 0=can be damaged / unknown if no pawn).</sys:String>
+	<sys:String x:Key="str.Tip.TP.GmCopyScript">Add a self-contained Cheat Engine AA record (tick = ON, untick = OFF) that drives God Mode via the DLL mailbox. Pushed straight into CE via AOBMaker, or copied as paste-able CE memory-record XML if AOBMaker isn't connected (right-click the address list → Paste). Works offline — no pipe / UI connection needed.</sys:String>
+
+	<!-- Player Stealth meter (Solide — auto-find + hold a stealth/visibility float at 0) -->
+	<sys:String x:Key="str.TP.StHeader">Stealth Meter</sys:String>
+	<sys:String x:Key="str.TP.StState">State:</sys:String>
+	<sys:String x:Key="str.TP.StHint">Auto-finds a numeric "visibility / noise / detection / awareness" meter on the player pawn (and its owned components) and holds it at 0 so detection that reads that meter never fills. There is NO universal detection flag in Unreal — this only works when the game exposes a reflected stealth/visibility field. Click Detect, verify the field it locked onto, then Hold @0. If nothing is found, search Property Search (e.g. 'visib', 'detect', 'noise') and Force a numeric field to 0. Single-player only.</sys:String>
+	<sys:String x:Key="str.TP.StDetect">Detect meter</sys:String>
+	<sys:String x:Key="str.TP.StHold">Hold @0</sys:String>
+	<sys:String x:Key="str.TP.StReset">Reset</sys:String>
+	<sys:String x:Key="str.Tip.TP.StDetect">Resolve the player pawn + its owned components and keyword-score reflected numeric fields for a stealth/visibility/detection meter. Read-only — loads the top candidate into the readout for you to verify before holding it.</sys:String>
+	<sys:String x:Key="str.Tip.TP.StHold">Force the detected meter to 0 on every live instance of its class and hold it there (re-asserted on a timer). "N held" shows how many instances are held.</sys:String>
+	<sys:String x:Key="str.Tip.TP.StReset">Release the hold — restore the captured base value and stop holding the meter.</sys:String>
+	<sys:String x:Key="str.TP.FgHeader">Keep Foreground</sys:String>
+	<sys:String x:Key="str.TP.FgState">State:</sys:String>
+	<sys:String x:Key="str.TP.FgHint">Force the game to always behave as the foreground app so it doesn't idle/pause its game thread when unfocused (t.IdleWhenNotForeground). Needed for POV / UFunction invokes on games that halt when backgrounded — e.g. Persona 3 Reload. Off by default.</sys:String>
+	<sys:String x:Key="str.TP.FgOn">Force ON</sys:String>
+	<sys:String x:Key="str.TP.FgOff">Force OFF</sys:String>
+	<sys:String x:Key="str.TP.FgRefresh">↻</sys:String>
+	<sys:String x:Key="str.Tip.TP.FgOn">Turn the foreground lock ON — the DLL hooks GetForegroundWindow so the game always thinks it is focused. Keeps the game thread ticking (invokes / POV) while this tool or Cheat Engine holds the foreground.</sys:String>
+	<sys:String x:Key="str.Tip.TP.FgOff">Turn the foreground lock OFF — restore normal focus behaviour (the game may idle/pause when unfocused).</sys:String>
+	<sys:String x:Key="str.Tip.TP.FgRefresh">Re-read the live foreground-lock state (ON / OFF).</sys:String>
+	<sys:String x:Key="str.TP.FgCopyScript">Add to CE</sys:String>
+	<sys:String x:Key="str.Tip.TP.FgCopyScript">Add a self-contained Cheat Engine AA record (tick = ON, untick = OFF) that drives Keep Foreground via the DLL mailbox. Pushed straight into CE via AOBMaker, or copied as paste-able CE memory-record XML if AOBMaker isn't connected (right-click the address list → Paste). Works offline — no pipe / UI connection needed.</sys:String>
+
+	<!-- Standalone trainer export (no-DLL CE Lua .CT via AOBMaker) -->
+	<sys:String x:Key="str.TP.TrainerHeader">Standalone Trainer (no DLL)</sys:String>
+	<sys:String x:Key="str.TP.TrainerExport">Export to CE (this game/version)</sys:String>
+	<sys:String x:Key="str.Tip.TP.TrainerExport">Bake this game's GWorld chain + offsets into a self-contained CE Lua trainer (Move Speed / Gravity / Super Jump / GodMode / coordinate TP) and push it straight into Cheat Engine via the AOBMaker plugin. Runs WITHOUT the DLL afterwards. Valid only for this exact game build — regenerate after a patch. Requires the AOBMaker plugin.</sys:String>
+
+	<!-- Move Speed multiplier (Laufen — force UCharacterMovementComponent.MaxWalkSpeed) -->
+	<sys:String x:Key="str.TP.MsHeader">Move Speed</sys:String>
+	<sys:String x:Key="str.TP.MsState">State:</sys:String>
+	<sys:String x:Key="str.TP.MsHint">Scales the player pawn's UCharacterMovementComponent.MaxWalkSpeed by the slider multiplier (10%–1000%, log scale, 100% = base). The DLL captures the original value on first Apply and re-asserts the target every ~250 ms so it survives respawns and per-tick recomputation. Only normal walk speed is engine-standard — sprint / dash are game-specific (find them in Property Search). Needs a live pawn with a CharacterMovement (not vehicles / custom movement). Single-player only — online games replicate movement server-side.</sys:String>
+	<sys:String x:Key="str.TP.MsApply">Apply</sys:String>
+	<sys:String x:Key="str.TP.MsReset">Reset</sys:String>
+	<sys:String x:Key="str.TP.MsRefresh">↻</sys:String>
+	<sys:String x:Key="str.TP.MsLocate">🌍 Locate</sys:String>
+	<sys:String x:Key="str.Tip.TP.MsApply">Force MaxWalkSpeed to base × the slider multiplier and hold it (re-asserted on a timer so a sprint/ability system can't revert it).</sys:String>
+	<sys:String x:Key="str.Tip.TP.MsReset">Restore MaxWalkSpeed to its captured base value and stop holding it. Resets the slider to 100%.</sys:String>
+	<sys:String x:Key="str.Tip.TP.MsRefresh">Re-read the live MaxWalkSpeed and override state from the current pawn's CharacterMovement.</sys:String>
+	<sys:String x:Key="str.Tip.TP.MsLocate">Find the MaxWalkSpeed float in GWorld and select it in the Live Walker — to freeze or inspect it directly.</sys:String>
+
+	<!-- Time dilation (Hemmung) — global slow-mo / freeze / speed-up -->
+	<sys:String x:Key="str.TP.TdHeader">Time Dilation</sys:String>
+	<sys:String x:Key="str.TP.TdSubtitle">slow-mo / bullet time / freeze / fast-forward</sys:String>
+	<sys:String x:Key="str.TP.TdState">State:</sys:String>
+	<sys:String x:Key="str.TP.TdHint">Slows, freezes, or speeds up game time by forcing a reflected dilation float. The two levers are independent and held together: "Whole world" writes AWorldSettings.TimeDilation (everything — enemies, projectiles, physics); "Player pawn" writes the pawn's AActor.CustomTimeDilation. The pawn's effective rate is world × pawn, so World 0.5× + Player 2× = the player at normal speed in a half-speed world (bullet time). The DLL captures each natural value on first Apply and re-asserts it every ~250 ms, so a slow-mo ability or Sequencer time-track can't revert it. 1× = normal, 0.5× = half speed, 0 = frozen (a literal 0 can destabilise physics on some games — use a small value like 0.05×). A paused world can't be stepped this way. Single-player only.</sys:String>
+	<sys:String x:Key="str.TP.TdWorldHeader">Whole world (AWorldSettings.TimeDilation)</sys:String>
+	<sys:String x:Key="str.TP.TdPawnHeader">Player pawn (AActor.CustomTimeDilation)</sys:String>
+	<sys:String x:Key="str.TP.TdApply">Apply</sys:String>
+	<sys:String x:Key="str.TP.TdReset">Reset</sys:String>
+	<sys:String x:Key="str.TP.TdRefreshBoth">↻ Refresh both</sys:String>
+	<sys:String x:Key="str.TP.TdFreeze">Freeze</sys:String>
+	<sys:String x:Key="str.TP.TdQuarter">¼×</sys:String>
+	<sys:String x:Key="str.TP.TdHalf">½×</sys:String>
+	<sys:String x:Key="str.TP.TdNormal">1×</sys:String>
+	<sys:String x:Key="str.TP.TdDouble">2×</sys:String>
+	<sys:String x:Key="str.Tip.TP.TdApply">Hold this lever at the slider's absolute dilation and re-assert it on a timer so the game can't revert it. World and player are independent — applying one doesn't disturb the other.</sys:String>
+	<sys:String x:Key="str.Tip.TP.TdReset">Restore this lever to its captured natural value and stop holding it. Resets its slider to 1×; the other lever is untouched.</sys:String>
+	<sys:String x:Key="str.Tip.TP.TdRefresh">Re-read both levers' live dilation values and override state.</sys:String>
+	<sys:String x:Key="str.Tip.TP.TdEffective">The player's real speed is world × pawn — UE multiplies the global world dilation into the pawn's CustomTimeDilation, so "Whole world" slows the player too. For a slow world but a normal-speed player (bullet time), set Player = 1 ÷ World (e.g. World 0.5× → Player 2×).</sys:String>
+
+	<!-- Gravity multiplier (Laufen — force UCharacterMovementComponent.GravityScale) -->
+	<sys:String x:Key="str.TP.GrHeader">Gravity</sys:String>
+	<sys:String x:Key="str.TP.GrState">State:</sys:String>
+	<sys:String x:Key="str.TP.GrHint">Scales the player pawn's UCharacterMovementComponent.GravityScale by the slider (10%–1000%, log scale, 100% = base). Below 100% = floaty / moon-jump; above = heavy. Held against per-tick overwrites by the re-assert worker. Per-pawn only — it does not change world gravity for other actors. Extreme values can clip you through floors or break fall damage. Arbitrary gravity direction (UE5.4+) is not yet exposed. Needs a live pawn with a CharacterMovement. Single-player only.</sys:String>
+	<sys:String x:Key="str.TP.GrApply">Apply</sys:String>
+	<sys:String x:Key="str.TP.GrReset">Reset</sys:String>
+	<sys:String x:Key="str.TP.GrRefresh">↻</sys:String>
+	<sys:String x:Key="str.TP.GrLocate">🌍 Locate</sys:String>
+	<sys:String x:Key="str.Tip.TP.GrApply">Force GravityScale to base × the slider multiplier and hold it (re-asserted on a timer).</sys:String>
+	<sys:String x:Key="str.Tip.TP.GrReset">Restore GravityScale to its captured base value. Resets the slider to 100%.</sys:String>
+	<sys:String x:Key="str.Tip.TP.GrRefresh">Re-read the live GravityScale and override state from the current pawn's CharacterMovement.</sys:String>
+	<sys:String x:Key="str.Tip.TP.GrLocate">Find the GravityScale float in GWorld and select it in the Live Walker.</sys:String>
+
+	<!-- Super Jump toggle (Laufen — force UCharacterMovementComponent.JumpZVelocity) -->
+	<sys:String x:Key="str.TP.SjHeader">Super Jump</sys:String>
+	<sys:String x:Key="str.TP.SjState">State:</sys:String>
+	<sys:String x:Key="str.TP.SjHint">Persistent high-jump toggle: forces UCharacterMovementComponent.JumpZVelocity and re-asserts it. The slider is jump HEIGHT (10%–3000%, 100% = base); apex height grows with the square of launch velocity, so the applied velocity multiplier is √(height) — e.g. 400% height = ×2 velocity. Force ON holds it; Force OFF restores the base, Reset also snaps the slider to 100%. There is no engine "jump height" property, so this works by scaling the launch impulse. Needs a live pawn with a CharacterMovement. Single-player only.</sys:String>
+	<sys:String x:Key="str.TP.SjOn">Force ON</sys:String>
+	<sys:String x:Key="str.TP.SjOff">Force OFF</sys:String>
+	<sys:String x:Key="str.TP.SjReset">Reset</sys:String>
+	<sys:String x:Key="str.TP.SjRefresh">↻</sys:String>
+	<sys:String x:Key="str.TP.SjLocate">🌍 Locate</sys:String>
+	<sys:String x:Key="str.TP.SjHotkeyHint">Bind a global hotkey to "Super Jump toggle" in the Marker Hotkeys section above to toggle it in-game.</sys:String>
+	<sys:String x:Key="str.Tip.TP.SjOn">Turn Super Jump ON — set JumpZVelocity to base × √(slider height %) and hold it (survives respawns).</sys:String>
+	<sys:String x:Key="str.Tip.TP.SjOff">Turn Super Jump OFF — restore JumpZVelocity to its captured base.</sys:String>
+	<sys:String x:Key="str.Tip.TP.SjReset">Turn Super Jump OFF and snap the height slider back to 100%.</sys:String>
+	<sys:String x:Key="str.Tip.TP.SjRefresh">Re-read the live JumpZVelocity and override state from the current pawn's CharacterMovement.</sys:String>
+	<sys:String x:Key="str.Tip.TP.SjLocate">Find the JumpZVelocity float in GWorld and select it in the Live Walker.</sys:String>
+
+	<!-- Fly (Dunste — no-gravity keyboard-driven 3D flight) -->
+	<sys:String x:Key="str.TP.FlyHeader">Fly (no-gravity 3D flight)</sys:String>
+	<sys:String x:Key="str.TP.FlyState">State:</sys:String>
+	<sys:String x:Key="str.TP.FlyHint">No-gravity free flight: forces the pawn's CharacterMovement into MOVE_Flying and steers it with the keyboard. Input is read inside the game, so keep the GAME window focused. Control is VIEW-relative: forward/back/strafe fly where the camera looks (you turn with the mouse/gamepad as usual), and the up/down keys move straight up/down. Pick a keyboard preset and a speed below, then Fly ON / OFF (or bind the "Fly toggle" global hotkey). Default keeps collision (you won't pass through walls); tick Noclip to disable the character's collision and fly through geometry. Needs a live pawn with a CharacterMovement. Single-player only; a few games with an authoritative movement system (e.g. FF7 Rebirth) override the velocity and won't move.</sys:String>
+	<sys:String x:Key="str.TP.FlyPreset">Keys:</sys:String>
+	<sys:String x:Key="str.TP.FlyNoclip">Noclip (fly through walls)</sys:String>
+	<sys:String x:Key="str.Tip.TP.FlyNoclip">OFF = collision kept (the flying sweep blocks on walls). ON = disable the character's collision (SetActorEnableCollision) so flight passes through geometry. Movement is the same velocity-drive either way; only collision changes. Collision is restored when you turn Noclip or Fly off.</sys:String>
+	<sys:String x:Key="str.TP.FlyOn">Fly ON</sys:String>
+	<sys:String x:Key="str.TP.FlyOff">Fly OFF</sys:String>
+	<sys:String x:Key="str.TP.FlyRefresh">↻</sys:String>
+	<sys:String x:Key="str.TP.FlyHotkeyHint">Bind a global hotkey to "Fly toggle" in the Hotkey Settings section above to toggle Fly in-game without alt-tabbing.</sys:String>
+	<sys:String x:Key="str.Tip.TP.FlyPreset">Which keys drive flight: WASD (+Q/E turn, Z/C up-down), the numeric keypad, or the arrow keys (+Ins/Del turn, PgUp/PgDn up-down).</sys:String>
+	<sys:String x:Key="str.Tip.TP.FlyOn">Turn Fly ON — force MOVE_Flying and start reading the keyboard (held against the game re-asserting its own movement mode).</sys:String>
+	<sys:String x:Key="str.Tip.TP.FlyOff">Turn Fly OFF — restore the pawn's captured MovementMode and stop.</sys:String>
+	<sys:String x:Key="str.Tip.TP.FlyRefresh">Re-read the live fly state and MovementMode from the current pawn's CharacterMovement.</sys:String>
+
+	<!-- See-through occluders (Schlacht) -->
+	<sys:String x:Key="str.TP.SeeThroughHeader">See-through (occluders)</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughState">State:</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughHint">Hide the object blocking your view: each tick traces a line from the camera along the view direction and, if the NEAREST thing in the way is world geometry (a wall/pillar), makes it invisible. Enemies, NPCs and your own character are never hidden (only non-Pawn/Character actors). Stage 1 hides one nearest occluder at a time; it is un-hidden as you look around and everything is restored when you turn it off. Needs a live pawn + camera. Single-player only; best-effort. NOTE: works on games where an object's collision and visible mesh are the same actor (most games) — on games that split them into separate collision-proxy actors (e.g. FF7 Rebirth's CollisionAssetActor) the ray hits the invisible collision proxy, so hiding it has no visible effect. TIP: turning it OFF needs the game running — clicking here backgrounds the game, and a game that pauses when it loses focus cannot un-hide right then. It is restored automatically the moment you click back into the game, and the Keep Foreground card above prevents the pause entirely.</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughOn">See-through ON</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughOff">See-through OFF</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughRefresh">↻</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughAddCe">Add to CE</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughPierce">Pierce depth:</sys:String>
+	<sys:String x:Key="str.Tip.TP.SeeThroughPierce">How many nearest objects to make invisible along the view ray. 1 = just the nearest object (e.g. a painting on a wall); 2 = it plus the wall behind it; and so on. Enemies / NPCs / your character on the ray are skipped (kept visible) and do not count. Changing this while See-through is ON applies immediately.</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughHotkeyHint">Bind a global hotkey to "See-through toggle" in the Experimental Hotkeys section above to toggle it in-game without alt-tabbing.</sys:String>
+	<sys:String x:Key="str.Tip.TP.SeeThroughOn">Turn See-through ON — start the worker that traces the view direction and hides the nearest non-Pawn occluder.</sys:String>
+	<sys:String x:Key="str.Tip.TP.SeeThroughOff">Turn See-through OFF — un-hide any hidden object and stop the worker.</sys:String>
+	<sys:String x:Key="str.Tip.TP.SeeThroughRefresh">Re-read the live see-through state (active / whether it has a target / how many objects are hidden).</sys:String>
+	<sys:String x:Key="str.Tip.TP.SeeThroughAddCe">Push a self-contained CE toggle script (tick = ON / untick = OFF) straight into Cheat Engine via AOBMaker. It drives the DLL's See-through through the mailbox, so no pipe connection is needed once added. Disabled when the AOBMaker CE plugin isn't detected.</sys:String>
+
+	<!-- Gravity Direction (Laufen — UE5.4+ UCharacterMovementComponent.GravityDirection) -->
+	<sys:String x:Key="str.TP.GdHeader">Gravity Direction (UE5.4+)</sys:String>
+	<sys:String x:Key="str.TP.GdState">State:</sys:String>
+	<sys:String x:Key="str.TP.GdHint">Tilt gravity to any direction by setting the per-axis components (each −100%…+100%, i.e. −1.0…+1.0). This is DIRECTION only — the DLL normalizes to a unit vector, so a single-axis setting like (0,0,−62%) collapses to (0,0,−1): it only re-aims gravity, it does NOT change strength (use the Gravity card for strength). To tilt you must mix axes, e.g. X=+100%, Z=−100% → diagonal. Default (0,0,−100%) = straight down; X=+100%, Z=0 makes gravity pull along +X (walk on a wall). Apply holds the direction; Reset restores the game's captured default and snaps the sliders back to down. Needs UE5.4+ with a reflected GravityDirection (pre-5.4 games show Unavailable). Single-player only.</sys:String>
+	<sys:String x:Key="str.TP.GdApply">Apply</sys:String>
+	<sys:String x:Key="str.TP.GdReset">Reset</sys:String>
+	<sys:String x:Key="str.TP.GdRefresh">↻</sys:String>
+	<sys:String x:Key="str.TP.GdLocate">🌍 Locate</sys:String>
+	<sys:String x:Key="str.TP.GdHotkeyHint">Bind a global hotkey to "Gravity Dir toggle" in the Hotkey Settings section to toggle it in-game.</sys:String>
+	<sys:String x:Key="str.Tip.TP.GdApply">Force GravityDirection to the (X,Y,Z) sliders (normalized) and hold it (re-asserted on a timer). All-zero = off.</sys:String>
+	<sys:String x:Key="str.Tip.TP.GdReset">Restore GravityDirection to the captured game default and snap the sliders to straight down (0,0,−100%).</sys:String>
+	<sys:String x:Key="str.Tip.TP.GdRefresh">Re-read the live GravityDirection and override state from the current pawn's CharacterMovement (UE5.4+).</sys:String>
+	<sys:String x:Key="str.Tip.TP.GdLocate">Find the GravityDirection FVector in GWorld and select it in the Live Walker.</sys:String>
+
+	<!-- Teleport: Camera POV (read-only) -->
+	<sys:String x:Key="str.TP.PovHeader">Camera POV (read-only)</sys:String>
+	<sys:String x:Key="str.TP.GetPov">Get POV</sys:String>
+	<sys:String x:Key="str.TP.Fov">FOV:</sys:String>
+	<sys:String x:Key="str.TP.PovHint">The on-screen camera (APlayerCameraManager) — its world location, rotation and field-of-view, read via the engine's GetCameraLocation / GetCameraRotation / GetFOVAngle. This is DISTINCT from the pawn pose above: on games that drive the camera independently of the possessed pawn (HD-2D / fixed-view) the two diverge. Read-only — there is no universal Set POV (the view is recomputed every frame); to actually move the camera, use the Debug Camera buttons below.</sys:String>
+	<sys:String x:Key="str.Tip.TP.GetPov">Read the current on-screen camera location, rotation and FOV (invokes APlayerCameraManager getters on the game thread). Try it during gameplay — in menus/loading the game thread is idle and it can't read. Compare the location to the pawn's: a large delta that barely changes after a teleport means the camera is independent of the pawn.</sys:String>
+	<sys:String x:Key="str.Tip.TP.PovSource">How the POV was read: "invoke" = the camera-manager getters; "raw" = a direct read of the cached POV, used as a fallback on games where the getters exist but return nothing (e.g. TQ2 / Octopath).</sys:String>
+
+	<!-- Teleport: directional / coordinate / cursor force -->
+	<sys:String x:Key="str.TP.RelHeader">Teleport in Facing Direction</sys:String>
+	<sys:String x:Key="str.TP.RelGo">Teleport forward</sys:String>
+	<sys:String x:Key="str.TP.RelDist">Distance (uu):</sys:String>
+	<sys:String x:Key="str.TP.RelHoriz">Horizontal only (keep Z)</sys:String>
+	<sys:String x:Key="str.Tip.TP.RelGo">Step the pawn along the direction it is facing by the distance below (negative distance = backward). The facing comes from the actor's forward vector (GetActorForwardVector), falling back to the control rotation. Undo with Recall last.</sys:String>
+	<sys:String x:Key="str.Tip.TP.RelDist">How far to move along the facing direction, in unreal units (1 uu ≈ 1 cm). Negative values step backward.</sys:String>
+	<sys:String x:Key="str.Tip.TP.RelHoriz">On: move on the ground plane (yaw only, keep your current height) — the natural "walk toward that compass bearing". Off: follow the full view direction including pitch, so looking up/down moves you up/down (fly / noclip feel).</sys:String>
+
+	<sys:String x:Key="str.TP.CoordHeader">Teleport to Coordinates (force)</sys:String>
+	<sys:String x:Key="str.TP.CoordXyz">X / Y / Z:</sys:String>
+	<sys:String x:Key="str.TP.CoordPyr">Pitch / Yaw / Roll:</sys:String>
+	<sys:String x:Key="str.TP.CoordGo">Teleport to coordinates</sys:String>
+	<sys:String x:Key="str.TP.CoordFill">Fill from current pos</sys:String>
+	<sys:String x:Key="str.TP.CoordSetRot">Also set rotation</sys:String>
+	<sys:String x:Key="str.Tip.TP.CoordGo">Force-teleport the pawn to the exact world X/Y/Z below. No map check, so you can jump anywhere on the current level. Undo with Recall last.</sys:String>
+	<sys:String x:Key="str.Tip.TP.CoordFill">Read the current pose and fill the X/Y/Z (and Pitch/Yaw/Roll) boxes with it — a quick way to nudge from where you are.</sys:String>
+	<sys:String x:Key="str.Tip.TP.CoordSetRot">When ticked, also restore the Pitch/Yaw/Roll below after the jump. Leave off to keep your current facing.</sys:String>
+
+	<!-- Coordinate Library (P1) — docs/teleport-coord-library-spec.md -->
+	<sys:String x:Key="str.TP.LibHint">An unlimited, labelled list of positions saved per game. Separate from the 3 marker slots above: those live in the DLL and are hotkey-driven, this one is a curated list that persists across game patches.</sys:String>
+	<sys:String x:Key="str.TP.LibSaveCurrent">＋ Save current pos</sys:String>
+	<sys:String x:Key="str.TP.LibAddFields">＋ From fields</sys:String>
+	<sys:String x:Key="str.TP.LibDuplicate">Duplicate</sys:String>
+	<sys:String x:Key="str.TP.LibDelete">Delete</sys:String>
+	<sys:String x:Key="str.TP.LibClear">Clear all</sys:String>
+	<sys:String x:Key="str.TP.LibClear.ConfirmTitle">Clear the whole coordinate library?</sys:String>
+	<sys:String x:Key="str.TP.LibClear.ConfirmMessage">
+		This deletes all {0} entries for this game and removes the library file.
+
+		A .preclear.bak copy is written first, so this can be recovered by hand from the app data folder.
 	</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Inject">注入到正在运行的游戏…</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Refresh">刷新游戏列表</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Deploy">部署代理</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Undeploy">卸载代理</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.UpdateAll">批量更新全部代理</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Force">强制覆盖文件</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.SelectAll">全选游戏</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.UnselectAll">清空选择</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.InvertSel">反选</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.SourceDll">源DLL路径：</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColName">游戏名称</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColPath">游戏二进制目录</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColStatus">部署状态</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColSuggested">推荐代理文件名</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColVersion">DLL版本</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColError">部署错误信息</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.SuggestToggle">自动推荐代理类型</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Source">扫描源：</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Source.Steam">Steam库</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Source.Drives">全盘扫描</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ScanDrives">扫描磁盘</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.RefreshDrives">刷新磁盘列表</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.CancelScan">停止扫描</sys:String>
-	<!-- 残留代理清理 -->
-	<sys:String x:Key="str.ProxyDeploy.Orphans.Header">残留代理清理</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.Intro">卸载游戏后残留的代理DLL，扫描并删除，不会删除第三方MOD代理</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.Scan">扫描残留文件</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.Report">导出清理报告…</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.Delete">删除选中({0})</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.DeleteTip">移至回收站，空文件夹一并删除</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.OpenFolder">打开游戏目录</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.FileOnly">仅删除DLL，保留文件夹</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmTitle">确认删除残留代理？</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmLead">选中DLL将移入回收站，文件夹空时同步删除，可从回收站恢复</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ConfirmFilesHeader">待删除文件列表</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ConfirmDirsHeader">待删除空目录</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ConfirmWhy">残留判定依据</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ConfirmKeptNote">保留不删除：{0}</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ConfirmYes">确认删除</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ConfirmNo">取消</sys:String>
-	<!-- 导出菜单 -->
-	<sys:String x:Key="str.Toolbar.Options">⚙ 全局选项</sys:String>
-	<sys:String x:Key="str.Toolbar.Export">导出功能</sys:String>
-	<sys:String x:Key="str.Export.SymbolsX64dbg">x64dbg符号文件</sys:String>
-	<sys:String x:Key="str.Export.SymbolsGhidra">Ghidra符号文本</sys:String>
-	<sys:String x:Key="str.Export.SymbolsIda">IDA自动脚本</sys:String>
-	<sys:String x:Key="str.Export.SdkHeader">C++头文件</sys:String>
-	<sys:String x:Key="str.Export.Usmap">USMAP反射文件</sys:String>
-	<sys:String x:Key="str.Export.DumpAll">完整元数据JSONL导出</sys:String>
-	<sys:String x:Key="str.Tip.Export.DumpAll">导出游戏全部类、属性、函数，用于外部脚本分析，体积较大</sys:String>
-	<sys:String x:Key="str.LiveWalker.ExportHeader">导出头文件</sys:String>
+	<sys:String x:Key="str.TP.LibClear.ConfirmYes">Clear all</sys:String>
+	<sys:String x:Key="str.TP.LibClear.Empty">The library is already empty.</sys:String>
+	<sys:String x:Key="str.TP.LibClear.Result">Cleared {0} entries.</sys:String>
+	<sys:String x:Key="str.TP.LibClear.ResultBackedUp">Cleared {0} entries. Backed up to {1}</sys:String>
+	<sys:String x:Key="str.TP.LibFilter">Filter:</sys:String>
+	<sys:String x:Key="str.TP.LibFilterPlaceholder">space = AND (label, group, map)</sys:String>
+	<sys:String x:Key="str.TP.LibGroup">Group:</sys:String>
+	<sys:String x:Key="str.TP.LibCurrentMapOnly">Current map only</sys:String>
+	<sys:String x:Key="str.TP.LibGo">Teleport</sys:String>
+	<sys:String x:Key="str.TP.LibForceGo">Force teleport</sys:String>
+	<sys:String x:Key="str.TP.LibToFields">→ Fields</sys:String>
+	<sys:String x:Key="str.TP.LibEditLabel">Label:</sys:String>
+	<sys:String x:Key="str.TP.LibEditGroup">Group:</sys:String>
+	<sys:String x:Key="str.TP.LibApplyEdit">Apply</sys:String>
+	<sys:String x:Key="str.TP.LibUpdateCoords">Update coords from current</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibSaveCurrent">Read the live pose and add it to the library, labelled after the current map.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibAddFields">Add whatever is currently typed in the "Teleport to Coordinates" boxes above as a new library entry.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibGo">Teleport to the selected entry. Refused when the entry was saved on a different map — the tool cannot LOAD another map, it can only move you within the one the game has open.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibForceGo">Teleport ignoring the map check. Only useful if the map name changed but the level is the same; jumping to another map's coordinates puts you outside the world.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibCurrentMapOnly">Hide entries saved on other maps. On by default — coordinates from different maps are often numerically close, so mixing them is how you end up under the floor.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibUpdateCoords">Overwrite the selected entry's coordinates (and map) with the live pose, keeping its label and group.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibClear">Delete every entry for this game, and its file. Asks first, and writes a .preclear.bak you can restore by hand.</sys:String>
 
-	<!-- 主窗口顶部工具栏 提示 -->
-	<sys:String x:Key="str.Tip.Connect">通过命名管道连接注入的DLL</sys:String>
-	<sys:String x:Key="str.Tip.Disconnect">断开与DLL管道服务端的连接</sys:String>
-	<sys:String x:Key="str.Tip.StartScan">触发代理DLL模式下的延迟全局扫描</sys:String>
-	<sys:String x:Key="str.Tip.AddressFormat">内存地址展示格式：绝对地址 / 模块相对偏移</sys:String>
-	<sys:String x:Key="str.Tip.CollapsePointers">导出CE XML时折叠多层指针链节点</sys:String>
-	<sys:String x:Key="str.Tip.ArrayLimit">单行读取数组最大元素数量（2的幂次）</sys:String>
-	<sys:String x:Key="str.Tip.DropDownLimit">CE下拉列表最大条目数（2的幂次）</sys:String>
-	<sys:String x:Key="str.Tip.StringLength">CE字符串字段展示字符长度（2的幂，范围16-4096），仅作用于复制CE脚本功能。数值足够大不会截断短字符串（CE以空终止符截断），预留空间适配游戏运行中变长字符串。</sys:String>
-	<sys:String x:Key="str.Tip.Fabricate">仅复制单字段CE脚本生效：0=关闭。设置数值(2~4096)后，选中顶层数组会自动填充空占位条目，依照元素布局补齐空指针与超出当前长度的索引。仅填充选中数组，不会递归填充内部嵌套数组；仅支持TArray，Map/Set为稀疏结构无法填充。超出游戏当前数组长度的条目会读取尾后内存（无崩溃风险）。数值大于256慎用，会生成超大CE表格，造成CE卡顿或触发表格条目上限。</sys:String>
-	<sys:String x:Key="str.Tip.PreviewLimit">数值列展示的结构体子字段数量（0=关闭预览）</sys:String>
-	<sys:String x:Key="str.Tip.CsxDepth">指针递归解析深度（0=平铺无层级），CSX导出、CE脚本导出均生效。0~4常规，5~6深层遍历，层级越高导出文件体积指数级增长，UWorld深度6会生成数MB的XML文件。</sys:String>
-	<sys:String x:Key="str.Tip.Toolbar.Options">导出格式全局设置：指针折叠、数组/下拉/预览上限、递归深度，会话内永久生效</sys:String>
-	<sys:String x:Key="str.Tip.Export">多种格式导出游戏对象内存结构</sys:String>
-	<sys:String x:Key="str.Tip.Tools">独立工具集，无需连接游戏DLL即可使用（辅助脚本导出、注入功能等）</sys:String>
-	<sys:String x:Key="str.Tip.Tools.InjectCeBootstrap">部署方案第三种：为当前打开的CE表格添加一次性注入记录。频繁使用CE推荐自动启动脚本替代。对应四类方案：①代理DLL部署、②运行时注入、③本条临时注入、④独立CT表。会直接在当前表格添加启用/禁用注入记录，一键加载DLL并启动管道通信，无需先打开独立CT文件。勾选后自动轮询DLL就绪状态，固定15秒等待改为实时检测，失败会弹出明确报错。依赖AOBMaker插件，无插件则复制脚本至剪贴手动粘贴。</sys:String>
-	<sys:String x:Key="str.Tip.Tools.InstallCeAutorun">将ue5_autorun.lua写入CE自动启动目录，CE打开任意表格都会内置ue5_inject()、ue5_shutdown()函数，主菜单新增快捷入口。唯一无需代理DLL、独立CT、AOB插件的方案，重度CE用户首选。检测到运行中的CE直接写入；未运行则选择保存路径，重启CE生效。迁移程序后需重新安装，脚本内会固化DLL完整路径。</sys:String>
-	<sys:String x:Key="str.Tip.Tools.InjectCeHelperLua">一键注入核心调用脚本ue5_invoke_helper.lua至当前CE表格，已有文件会覆盖。依赖AOBMaker插件，未安装会降级提示手动导出。</sys:String>
-	<sys:String x:Key="str.Tip.Tools.ExportCeHelperLua">导出ue5_invoke_helper.lua文件，可放到CT表同级目录，通过CE菜单添加文件。所有固化AA脚本均依赖此脚本，每张CT仅需配置一次。</sys:String>
-	<sys:String x:Key="str.Tip.Tools.InjectFreezeHelperLua">一键注入冻结字段辅助脚本至当前CE表格，属性搜索冻结功能依赖，可与调用辅助脚本共存。</sys:String>
+	<sys:String x:Key="str.TP.LibExportCsv">Export CSV</sys:String>
+	<sys:String x:Key="str.TP.LibExportTemplate">Sample CSV</sys:String>
+	<sys:String x:Key="str.TP.LibImportCsv">Import CSV…</sys:String>
+	<sys:String x:Key="str.TP.LibImportReplace">Replace (not merge)</sys:String>
+	<sys:String x:Key="str.TP.LibImportApply">Apply import</sys:String>
+	<sys:String x:Key="str.TP.LibImportCancel">Cancel import</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibExportCsv">Write the WHOLE library (not just the filtered rows) as UTF-8 CSV with a BOM, so Excel opens non-ASCII labels correctly.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibExportTemplate">Write a small sample CSV — a header plus three example rows — to fill in by hand.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibImportCsv">Read a CSV and show what it WOULD change. Nothing is written until you press Apply. Columns are matched by header name, so extra or reordered columns are fine.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibImportReplace">On: the file becomes the whole library and anything missing from it is deleted. Off (default): only add new entries and update matching ones.</sys:String>
 
+	<sys:String x:Key="str.TP.LibExportLua">Push to CE</sys:String>
+	<sys:String x:Key="str.TP.LibSaveLua">Save .lua</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibExportLua">Emit the whole library as a Cheat Engine AA script with its own filterable picker. Delivery is via the AOBMaker CE plugin; without it the script is copied to the clipboard as paste-able CE XML instead. The generated script needs UE5Dumper.dll injected — it teleports through the DLL mailbox.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibSaveLua">Write the same AA script to a .lua file instead of pushing it into Cheat Engine.</sys:String>
 
-		<!-- 对象树提示 -->
-		<sys:String x:Key="str.Tip.ObjectTree.Reload">重新扫描全部游戏对象</sys:String>
-		<sys:String x:Key="str.Tip.ObjectTree.Cancel">终止加载扫描</sys:String>
-		<sys:String x:Key="str.Tip.ObjectTree.Search">关键词检索对象，空格为与条件</sys:String>
-		<sys:String x:Key="str.Tip.ObjectTree.ClassFilter">按类过滤对象列表</sys:String>
-		<sys:String x:Key="str.Tip.Collapse">收起对象树，扩大右侧面板</sys:String>
-		<sys:String x:Key="str.Tip.Expand">展开对象树</sys:String>
-		<sys:String x:Key="str.Tip.ObjectTree.TextFilter">列表快速文本过滤</sys:String>
-		<sys:String x:Key="str.Tip.ObjectTree.InstancesOnly">仅显示游戏实体，隐藏反射类模板</sys:String>
-		<!-- 实例查找面板提示 -->
-		<sys:String x:Key="str.Tip.InstanceFinder.ClassName">要检索的类名，默认模糊匹配；勾选精确匹配则完整名称一致才命中。可与对象名称组合（逻辑与），也可清空类名仅按对象名检索。</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.AddressField">反向检索地址，支持十六进制、模块+偏移格式，程序会查找该地址所属UObject或最近容器对象。</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.Search">根据类名/对象名检索实例，至少填写一项条件才可执行</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.ObjectName">可选，要求对象名称包含指定文本（大小写不敏感），与类名同时生效为且关系；清空类名可仅按名称检索。过滤逻辑在游戏进程内执行，不会遗漏被其他对象包裹的实例，但列表有最大条数限制，提示截断时请缩小筛选条件。</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.ExactMatch">仅类名开启完整精确匹配，不再模糊检索</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.NewestFirst">从最新创建的实例开始遍历（内部索引值最大），能抓到刚生成的怪物等实体，避免结果上限截断新对象；关闭则优先最早生成的实例（蓝图默认模板等）。可点击索引列表头切换排序。</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.MaxResults">单次返回实例最大行数，区间100~50000。游戏端会完整遍历所有对象，仅限制前端展示条数；出现截断提示时调高数值，数值越大数据传输与渲染越慢。</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.Keyword">对已加载结果做本地临时过滤，空格分隔关键词为且关系，匹配类名/对象名/地址。仅客户端筛选，不会突破最大条数限制；如需找回被截断实例，需在类过滤器屏蔽无用类重新检索，或调高最大条数。</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.Lookup">根据输入地址反向查找所属游戏对象</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.CopyAddr">复制当前实例内存地址至剪贴板</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.OpenWalker">在实时结构查看器打开该实例</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.LocateGWorld">GWorld定位：查找从GWorld到该实例最短指针路径，跳转实时查看器并停在父对象层级</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.LocateGWorldContainer">容器GWorld定位：查找GWorld到该数组容器的路径，自动展开容器并定位到目标元素旁</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngine">GameEngine定位：从引擎根对象查找最短指针路径，可访问GWorld无法遍历的引擎层对象；大世界实体请使用GWorld定位。</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngineContainer">容器引擎定位：从GameEngine根定位容器所属对象，自动展开容器定位目标元素；引擎专属对象适用，世界实体优先GWorld定位。</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.ExportCE">导出该实例完整指针链为CE内存记录XML</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.CopyFieldAddr">复制字段绝对内存地址</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.A">生成CE自动汇编AOB脚本</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.CopyName">复制对象名称到剪贴板</sys:String>
-		<sys:String x:Key="str.Tip.InstanceFinder.FindFunc">检索所有入参/返回值为此类的UFunction，包含原生C++函数（区别于单字段字节码交叉引用）</sys:String>
+	<sys:String x:Key="str.TP.LibImportLua">Parse pasted script</sys:String>
+	<sys:String x:Key="str.TP.LibImportLuaFile">Import .lua…</sys:String>
+	<sys:String x:Key="str.TP.LibPastePlaceholder">Paste a previously generated coordinate script here (the whole thing — only the @UE5CD:COORDS block is read)</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibImportLua">Read the coordinates back out of a script you exported earlier and hand-edited. Only the fenced @UE5CD:COORDS block is parsed; the rest of the script is ignored and never executed.</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibImportLuaFile">Same, but read the script from a .lua file.</sys:String>
 
-		<!-- 属性搜索面板提示 -->
-		<sys:String x:Key="str.Tip.PropertySearch.Query">按属性名模糊检索（大小写不敏感），例如 生命值(Health)、魔力(Mana)、金币(Gold)，可搭配类型筛选缩小范围，回车或点击检索执行。</sys:String>
-		<sys:String x:Key="str.Tip.PropertySearch.Search">遍历所有类检索属性，名称或类型至少填写一项，多类型使用英文逗号分隔。</sys:String>
-		<sys:String x:Key="str.Tip.PropertySearch.TypeFilter">限定FProperty属性类型，输入字符筛选下拉建议（输入opt匹配OptionalProperty），多类型逗号分隔为或关系。</sys:String>
-		<sys:String x:Key="str.Tip.PropertySearch.ResultFilter">本地过滤当前检索结果，匹配类名/属性/类型/父类/预览字段，无需与DLL通信。</sys:String>
-		<sys:String x:Key="str.Tip.PropertySearch.GameOnly">仅显示游戏自定义类，过滤引擎内置属性</sys:String>
-		<sys:String x:Key="str.Tip.PropertySearch.Deep">递归检索嵌套结构体、结构体数组（TArray/TSet/TMap）内部字段，可检索存档结构体深层属性；开启后检索速度变慢，匹配项会显示完整层级路径。关闭仅检索对象一级直属字段。</sys:String>
-		<sys:String x:Key="str.Tip.PropertySearch.FindInstances">跳转实例查找面板，自动填充当前类名并检索全部实时实例</sys:String>
-		<sys:String x:Key="str.Tip.PropertySearch.CopyOffset">复制该属性内存偏移至剪贴板</sys:String>
+	<sys:String x:Key="str.TP.LibExportLuaNoDll">Push to CE (no DLL)</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibExportLuaNoDll">Same picker, but the generated script teleports by raw memory write, so UE5Dumper.dll does NOT have to be injected. "No DLL" refers to that only. REQUIRES the AOBMaker CE plugin and is disabled without it — unlike the button on its left there is deliberately no clipboard fallback, because the script calls helpers defined by the Standalone Trainer's Setup record, which only an AOBMaker push can deliver. Lands in the "UE5CEDumper (no-DLL trainer)" group; enable "UE5 Trainer: Setup" before using it. Weaker than the DLL path: no map guard (the map name is only readable through the DLL), and the offsets go stale when the game is patched.</sys:String>
 
-		<!-- 类筛选提示 -->
-		<sys:String x:Key="str.Tip.GameClassFilter.Load">加载全部游戏类列表</sys:String>
-		<sys:String x:Key="str.Tip.GameClass.GameOnly">仅显示业务游戏类</sys:String>
-		<sys:String x:Key="str.Tip.GameClass.Filter">按父类/包名过滤</sys:String>
-		<sys:String x:Key="str.Tip.GameClass.Clear">清空筛选条件</sys:String>
-		<sys:String x:Key="str.Tip.GameClass.FindInstances">查找该类全部实例</sys:String>
-		<sys:String x:Key="str.Tip.GameClass.WalkClass">打开类结构面板查看字段布局</sys:String>
-		<sys:String x:Key="str.Tip.GameClass.FindFunc">查找参数/返回值包含此类的函数</sys:String>
-		<!-- 实时查看器：函数面板 -->
-		<sys:String x:Key="str.LiveWalker.Functions">函数列表</sys:String>
-		<sys:String x:Key="str.LiveWalker.FuncGenScript">INV</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.FuncGenScript">INV：生成独立CE自动汇编Lua脚本并发送至Cheat Engine（未安装AOBMaker则复制到剪贴板）。通过DLL管道读取游戏实例与目标UFunction，直接调用ProcessEvent，无需额外辅助文件。带输入参数的函数会弹出CE参数输入窗口，返回值默认不展示；在CE Lua控制台设置UE5_DEBUG=1，或修改脚本DEBUG开关，即可打印解析后的返回值并保持Lua窗口。</sys:String>
-		<sys:String x:Key="str.LiveWalker.FuncPipeInvoke">PIPE</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.FuncPipeInvoke">PIPE：在本软件内直接调用该函数，经由DLL管道执行ProcessEvent，无需依赖Cheat Engine。弹窗填写参数后执行，可直接在界面查看解析后的返回值。适合即时测试；如需分发可复用脚本请使用INV或固化AA功能。</sys:String>
-		<sys:String x:Key="str.LiveWalker.FuncCopyBaked">固化AA</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.FuncCopyBaked">固化AA：生成参数预填充的CE自动汇编脚本，生成时填入的数值直接写死，启用内存记录就会一次性执行，运行时无需弹窗。体积约为INV脚本的1/5，便于分享。要求CT表嵌入ue5_invoke_helper.lua（可通过工具-导出CE辅助Lua获取）。弹窗勾选“校验返回值”可对比调用前后内存，或设置UE5_DEBUG=1打印返回数据。</sys:String>
+	<sys:String x:Key="str.TP.LibZTol">Z tolerance:</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibZTol">Extra height (uu) added to Z on arrival, so landing exactly on the floor the position was captured on does not drop you through it. 0 = off. Applied at teleport time only — the saved entry keeps its exact captured Z — and baked into the Lua export so the generated picker behaves the same. Not part of the CSV.</sys:String>
 
-		<sys:String x:Key="str.LiveWalker.GuessWhat">自动猜测字段</sys:String>
+	<sys:String x:Key="str.TP.CursorForceHeader">Force Mouse Cursor</sys:String>
+	<sys:String x:Key="str.TP.CursorForceHint">Force the OS mouse cursor visible or hidden by writing the PlayerController's bShowMouseCursor. Handy when a game hides the cursor but you want Cursor Teleport. One-shot: a game that re-sets the flag every frame may revert it, and a captured input mode can still hide the cursor.</sys:String>
+	<sys:String x:Key="str.TP.CursorStateLabel">State:</sys:String>
+	<sys:String x:Key="str.TP.CursorOn">Force ON</sys:String>
+	<sys:String x:Key="str.TP.CursorOff">Force OFF</sys:String>
+	<sys:String x:Key="str.TP.CursorRefresh">↻</sys:String>
+	<sys:String x:Key="str.Tip.TP.CursorOn">Show the mouse cursor (sets bShowMouseCursor = true on the local PlayerController).</sys:String>
+	<sys:String x:Key="str.Tip.TP.CursorOff">Hide the mouse cursor (sets bShowMouseCursor = false).</sys:String>
+	<sys:String x:Key="str.Tip.TP.CursorRefresh">Re-read the live bShowMouseCursor state (1=ON / 0=OFF / unknown if no live PlayerController).</sys:String>
 
-		<!-- 实时查看器 提示文本 -->
-		<sys:String x:Key="str.Tip.LiveWalker.StartWorld">跳转至GWorld并展示顶层游戏对象</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.StartGameEngine">以GameEngine（引擎根对象）作为浏览起点，可逐层查看游戏实例、视口、世界。依靠反射成员定位，而非类名，无法生成AOB锚定脚本，仅支持固定地址记录。</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.Back">返回上一个浏览对象，恢复之前选中行与滚动位置。快捷键：Alt+左箭头、鼠标侧键4、浏览器后退键（仅当前标签激活时生效）。</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.Forward">前进至后退前的对象，恢复选中项与滚动位置。快捷键：Alt+右箭头、鼠标侧键5、浏览器前进键。前进会重新读取游戏内存；若对象已释放/复用，会清空选中并提示。浏览新对象时清空前进历史，逻辑和浏览器一致。</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.Refresh">从内存重新读取当前对象所有字段</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.FindRefs">查找所有持有该对象指针的UObject（真正逻辑所有者，Outer/父级仅代表命名层级包结构）</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.AddressInput">输入跳转地址，支持纯十六进制（0x7FF… / 7FF…）、CE模块偏移格式 Game.exe+1A2B3C，带引号格式"Game.exe"+1A2B也可自动去除引号，支持带空格模块名，输入回车或点击跳转。</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.Go">跳转到输入的内存地址</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.FieldInst">在实例查找器打开该字段对应类，自动填充类名并检索所有实例</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.ExportCE">将完整指针链复制为CE内存记录XML到剪贴板</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.ExportCEField">仅导出选中字段为CE XML，Ctrl/Shift多选批量导出</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.CancelExport">终止正在执行的导出（复制CE脚本/导出CSX），剪贴板与文件不会生成内容</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.AobToggle">启用AOB特征码锚定GWorld，不用固定地址，游戏重启后记录仍有效</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.ExportOptions">CE导出设置：内存记录描述格式、偏移/类型后缀开关、AOB锚定、指针链折叠、原生字段猜测选项</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.DescShowOffset">CE记录名称末尾追加十六进制字段偏移，例如 AbilitySystemComponent (7E0)；关闭则只显示字段名</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.DescShowType">CE记录末尾追加类/结构体类型，例如 AbilitySystemComponent (LSAbilitySystem)；折叠指针链时不会附加类型，关闭仅显示名称</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.DedupShared">去重共享对象：同一个实体被多处引用时仅完整展开一次，后续仅显示(共享)指针。避免遍历世界等高密度对象时导出数据爆炸、内存溢出；关闭则每条引用完整展开，深度过高文件极大。</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.ExcludeSysComponents">默认开启，遍历导出时跳过UI、贴图、粒子、动画等引擎系统类，只保留游戏业务数据。手动选中字段不会过滤，仅自动遍历子对象生效。Actor/角色/控制器等游戏实体永远保留；数组元素不做过滤。过滤时底部提示隐藏系统字段数量；关闭则导出全部字段。</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.CollapseChain">多层GWorld指针链合并为单条CE多级指针记录，仅保留基址、合并路径与目标字段，仅作用于完整/单字段导出功能</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.FlattenGas">扁平化GAS属性结构体，HP/MP这类属性原本会拆分为父节点+BaseValue/CurrentValue子项；开启后合并为同级条目 生命值 ▸ 基础值，层级更少更易编辑。仅对GameplayAttributeData生效，其他结构体保持嵌套。关闭恢复分组结构。</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.FlattenLeafStruct">扁平化所有基础原生结构体，是GAS扁平化的扩展。仅由数字、布尔、枚举构成的结构体（坐标、旋转、数值区间）会拆分为同级条目；结构体内部包含对象、字符串、数组时保持嵌套。关闭恢复分组结构。</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.FlattenLeafRecords">扁平化带名字符串的存储结构体，在基础结构体扁平化之上支持FName/FString文本字段。存档类结构体可全部平铺展示，数组内每条记录独立展开；包含对象/文本容器的结构体不扁平化。关闭恢复分组结构。</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.RecordColors">记录配色设置面板，数组每条记录奇偶行区分颜色，CE导出后易区分条目；支持自定义十六进制色值或重置默认配色，设置自动保存。</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.CollapseLeafPointers">单值指针折叠：指针目标仅单个数字/名字/字符串时直接合并为 指针 ▸ 数值 单条记录，不生成文件夹；目标存在多个字段则保留分组。关闭恢复嵌套文件夹结构。</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.ExportCsx">导出CE结构体解析脚本(.csx)，可选择对应CE版本格式</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.ExportCsxPre77">兼容CE7.7旧版格式：位域布尔整体存为字节，描述标注比特位，无独立位切换控件</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.ExportCsx77">CE7.7及以上新版：原生二进制位域，CE内可直接开关比特</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.ExportHeader">导出C++结构体头文件(.h)</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.CeAA">生成CE自动汇编脚本，以GWorld为根的记录支持重启稳定锚定；非GWorld路径仅固定地址，重启失效</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.GuessWhat">自动填充未知内存间隙，猜测指针、数字等基础数据类型</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.CopyFieldAddr">复制当前字段绝对内存地址</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.CopyFieldName">复制字段名称到剪贴板</sys:String>
-		<sys:String x:Key="str.Tip.LiveWalker.Search">按名称检索高亮字段，检索记录最多保存8条，切换对象清空，切换标签页保留检索词</sys:String>
+	<!-- Interesting Properties Finder (B' / Unusual Location) -->
+	<sys:String x:Key="str.IP.Load">Load</sys:String>
+	<sys:String x:Key="str.IP.GameOnly">Game Only</sys:String>
+	<sys:String x:Key="str.IP.FilterHint">Filter by name (property or class)...</sys:String>
+	<sys:String x:Key="str.IP.UnusualOnly">⚠ Unusual Only</sys:String>
+	<sys:String x:Key="str.IP.ShowAll">Show All (incl. low-score)</sys:String>
+	<sys:String x:Key="str.IP.ClearFilters">Clear</sys:String>
+	<sys:String x:Key="str.IP.OpenInst">inst</sys:String>
+	<sys:String x:Key="str.IP.OpenLive">Live</sys:String>
+	<sys:String x:Key="str.IP.LocateGWorld">🌍</sys:String>
+	<sys:String x:Key="str.IP.LocateGameEngine">⚙</sys:String>
+	<sys:String x:Key="str.IP.CopyName">Name</sys:String>
+	<sys:String x:Key="str.Tip.IP.Load">Fan-out search across the seed keyword list (HP/Damage/Gold/Speed/etc.) and score the results client-side. Highlights properties in non-canonical locations (LocalPlayer / HUD / GameViewportClient) — the kind of cheat-relevant fields a CE user would miss looking only in Character/Pawn.</sys:String>
+	<sys:String x:Key="str.Tip.IP.GameOnly">Skip /Script/Engine, /Script/CoreUObject, etc. Recommended on — game-specific properties are the cheat-table targets.</sys:String>
+	<sys:String x:Key="str.Tip.IP.Filter">Substring match against property name OR class name (case-insensitive). e.g. "Health" or "PlayerState".</sys:String>
+	<sys:String x:Key="str.Tip.IP.ClearFilters">Clear the name filter, category, and the Unusual-only / Show-all toggles (reset to defaults).</sys:String>
+	<sys:String x:Key="str.Tip.IP.OpenInst">Open this row's class in the Instance Finder tab — pre-fills the class name and runs the search to list its live instances.</sys:String>
+	<sys:String x:Key="str.Tip.IP.Category">Filter by category. Stats / Combat / Resources / Movement / Utility / Other.</sys:String>
+	<sys:String x:Key="str.Tip.IP.UnusualOnly">Show only properties whose owning class is in the Unusual Location list (LocalPlayer / GameViewportClient / HUD / CheatManager) — properties developers placed outside the conventional Character/Pawn/PlayerState containers.</sys:String>
+	<sys:String x:Key="str.Tip.IP.ShowAll">When off, hide rows below the InterestingThreshold (currently 4). When on, show every property regardless of score.</sys:String>
+	<sys:String x:Key="str.Tip.IP.OpenLive">Open this property's owning class in Live Walker (live instance lookup), or fall back to Class Struct if no live instance exists.</sys:String>
+	<sys:String x:Key="str.Tip.IP.LocateGWorld">Locate in GWorld: find a live instance of this property's class, then show the shortest pointer path from GWorld down to it in Live Walker (stops at the parent that points to it). Disabled until GWorld is resolved.</sys:String>
+	<sys:String x:Key="str.Tip.IP.LocateGameEngine">Locate in GameEngine: find a live instance of this property's class, then show the shortest pointer path from the live UGameEngine down to it in Live Walker (stops at the parent that points to it). Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
+	<sys:String x:Key="str.Tip.IP.CopyName">Copy this property's name to the clipboard.</sys:String>
+	<sys:String x:Key="str.IP.GenerateCT">📦 Generate CT</sys:String>
+	<sys:String x:Key="str.Tip.IP.GenerateCT">Generate one .CT file containing freeze entries for every selected row. Use Ctrl/Shift+click in the grid to multi-select first. Each entry uses ue5_freeze_helper.lua — embed it in the resulting CT via Tools → Inject Freeze Helper, or open the CT in CE and edit CFG.value before enabling. Struct / array / non-scalar rows are skipped.</sys:String>
 
-		<!-- 系统指针面板 提示 -->
-		<sys:String x:Key="str.Tip.Pointers.Copy">复制地址到剪贴板</sys:String>
-		<sys:String x:Key="str.Tip.Pointers.CopyScan">复制AOB特征码匹配地址</sys:String>
-		<sys:String x:Key="str.Tip.Pointers.ExtraScan">执行深度兜底扫描，尝试读取未识别全局指针</sys:String>
-		<sys:String x:Key="str.Tip.Pointers.TestExtraScan">模拟扫描界面，仅开发调试使用，不读取真实内存</sys:String>
-		<sys:String x:Key="str.Tip.Pointers.ClearGameCache">清空当前游戏缓存特征码，下次完整扫描全部模式</sys:String>
-		<sys:String x:Key="str.Tip.Pointers.ResetAllCache">全部缓存文件重命名备份，重新生成扫描缓存</sys:String>
+	<!-- Proxy DLL / Deferred Scan -->
+	<sys:String x:Key="str.Toolbar.StartScan">Start Scan</sys:String>
 
-		<!-- 代理部署面板 提示 -->
-		<sys:String x:Key="str.Tip.ProxyDeploy.Scan">扫描Steam库内虚幻游戏</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.Inject">方案2：游戏已运行时临时注入DLL，无需部署代理，重启失效。通过远程线程注入UE5Dumper，仅单机离线可用，反作弊可能拦截。需要管理员权限会弹出UAC授权弹窗。</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.Refresh">刷新游戏部署状态列表</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.Deploy">方案1（推荐）：部署代理DLL，游戏启动自动加载，重启永久生效，无需CE。将选中代理写入勾选游戏目录</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.Undeploy">卸载本工具所有代理文件，其他MOD/工具的dll不会删除。仅清理当前工具部署的文件</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.UpdateAll">批量更新所有已部署游戏的代理至最新版本</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.Force">强制覆盖现有同版本或第三方同名文件</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.Type.Version">劫持version.dll，兼容性最广，几乎所有Windows程序都会加载</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.Type.Dinput8">劫持dinput8.dll，version冲突时备选方案</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.Type.Dxgi">劫持dxgi.dll，适用于D3D11/12虚幻游戏，绝大多数UE程序导入该库</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.Type.Winmm">劫持winmm.dll，dxgi被ReShade占用时备用通用插槽，全部虚幻游戏均可加载</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.SuggestToggle">显示推荐代理列，记录你上次部署的类型；从未部署默认version.dll，仅参考不自动修改你的选择</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.Source">Steam：仅扫描Steam游戏；全盘：扫描本地磁盘所有虚幻游戏（Epic/手动安装等）</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.ScanDrives">扫描选中磁盘分区，单硬盘顺序扫描，多硬盘并行，跳过系统目录与Steam库</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.RefreshDrives">重新读取本机可用磁盘列表</sys:String>
-		<sys:String x:Key="str.Tip.ProxyDeploy.CancelScan">终止正在执行的全盘扫描</sys:String>
-	</ResourceDictionary>
+	<!-- Errors -->
+
+	<!-- Tooltips: MainWindow toolbar -->
+	<sys:String x:Key="str.Tip.Connect">Connect to injected DLL via named pipe</sys:String>
+	<sys:String x:Key="str.Tip.Disconnect">Disconnect from DLL pipe server</sys:String>
+	<sys:String x:Key="str.Tip.StartScan">Trigger deferred scan (proxy DLL mode)</sys:String>
+	<sys:String x:Key="str.Tip.AddressFormat">Address display format (absolute / module-relative)</sys:String>
+	<sys:String x:Key="str.Tip.CollapsePointers">Collapse pointer chain nodes in CE XML export</sys:String>
+	<sys:String x:Key="str.Tip.ArrayLimit">Max array elements to read inline (2^N)</sys:String>
+	<sys:String x:Key="str.Tip.DropDownLimit">Max CE DropDownList entries (2^N)</sys:String>
+	<sys:String x:Key="str.Tip.StringLength">CE String field display length in characters (2^N; 16-4096). Applies to Copy CE XML / Copy CE Field. A generous value never truncates a shorter live string (CE stops at the null terminator) — it reserves room for strings that grow between saves.</sys:String>
+	<sys:String x:Key="str.Tip.Fabricate">Copy CE Field only: 0 = Off. When set (2^N = 2..4096), the SELECTED top-level TArray is padded to this many element rows — null pointers and indices beyond the live Num are fabricated using a resolved element's field layout, so the CE table already has slots for items a later save/ship will hold. Only the selected array is padded, never nested arrays inside its elements. TArray only (Map/Set are sparse and never fabricated). Rows past the current Num read past-the-end memory (harmless) until the game grows the array. Values above 256 (use at your own risk) can produce very large tables that slow Cheat Engine or hit the export entry cap.</sys:String>
+	<sys:String x:Key="str.Tip.PreviewLimit">Struct sub-fields shown in Value column (0 = no preview)</sys:String>
+	<sys:String x:Key="str.Tip.CsxDepth">Pointer drill-down depth (0 = flat). Applies to both CSX export and CE XML / CE Field copy. 0-4 normal; 5-6 deep — output size grows exponentially per level (depth 6 on UWorld can produce multi-MB CE XML).</sys:String>
+	<sys:String x:Key="str.Tip.Toolbar.Options">Export-shape settings: pointer-node collapse, array/dropdown/preview limits, drill depth. Set once per session.</sys:String>
+	<sys:String x:Key="str.Tip.Export">Export object data in various formats</sys:String>
+	<sys:String x:Key="str.Tip.Tools">Tools that don't depend on a live DLL connection (helper file export/inject, etc.)</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InjectCeBootstrap">Route ③ of 4 — a one-off record for the table you have open. If you work in Cheat Engine a lot, prefer Tools ▸ Install CE autorun Helper instead: that gives EVERY table an ue5_inject() permanently. (① is deploying a proxy DLL from the Proxy Deploy tab; ② is injecting into a running game; ④ is the standalone dist\UE5CEDumper.CT.) Adds an [ENABLE]/[DISABLE] record that injects UE5Dumper.dll and starts the pipe server, straight into the CE table you already have open — so you never have to load the standalone .CT first (Cheat Engine holds one table at a time). Tick the record to inject; it polls the DLL for readiness instead of sleeping a fixed 15s, and reports a real error on failure. The standalone .CT is still shipped for developer use. Needs the AOBMaker CE Plugin; without it the record is copied to the clipboard as CE XML to paste in.</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InstallCeAutorun">Writes ue5_autorun.lua into &lt;CheatEngine&gt;\autorun\, which CE runs at start-up — so ue5_inject() and ue5_shutdown() then exist in EVERY table, permanently, and a "UE5CEDumper: Inject DLL" entry appears in CE's main menu. This is the only route that needs neither the standalone .CT nor the AOBMaker plugin, so it is the best option when you work in Cheat Engine a lot. Installs straight into a running Cheat Engine when one is found; otherwise you choose where to save. Takes effect the NEXT time Cheat Engine starts. Re-run this after moving UE5DumpUI — the DLL path is baked into the file.</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InjectCeHelperLua">One-click: send ue5_invoke_helper.lua straight into the currently open CE table via the AOBMaker plugin. Replaces existing copy if present. Skips the manual save-to-disk + Table -&gt; Add File... dance. Requires the AOBMaker CE Plugin to be loaded (open Cheat Engine first); falls back gracefully if unavailable.</sys:String>
+	<sys:String x:Key="str.Tip.Tools.ExportCeHelperLua">Save ue5_invoke_helper.lua to a file you can drop next to your .CT and add via Cheat Engine's Table -&gt; Add File... menu. Required by every "Copy AA Script (Baked)" output -- one-time setup per cheat table.</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InjectFreezeHelperLua">One-click: send ue5_freeze_helper.lua into the currently open CE table via the AOBMaker plugin. Required once per .CT by every Property Search "Freeze" script. Coexists with ue5_invoke_helper.lua.</sys:String>
+	<sys:String x:Key="str.Tip.Tools.ExportFreezeHelperLua">Save ue5_freeze_helper.lua to a file you can drop next to your .CT and add via Cheat Engine's Table -&gt; Add File... menu. Manual fallback when AOBMaker plugin is unavailable.</sys:String>
+
+	<!-- Tooltips: Object Tree -->
+	<sys:String x:Key="str.Tip.ObjectTree.Reload">Reload all objects from game process</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.Cancel">Cancel current loading operation</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.Search">Search objects by name or class</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.SearchField">Type a keyword and press Enter or the magnifier to search every object in the game server-side. Multiple space-separated terms are ANDed, each matching the object name OR class name. Respects the "Instances only" toggle. Results are capped (you'll be told if more exist — narrow, or Reload + use the bottom filter for the whole pool uncapped). Leave it empty and press the magnifier (or Reload) to list all objects again. Recent searches are suggested as you type.</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.ClassFilter">Filter by class type</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.Collapse">Collapse the Object Tree to give the right-hand panels the full window width</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.Expand">Show the Object Tree</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.TextFilter">Filter the loaded objects by text. Separate multiple terms with spaces — every term must match (AND), each against Name, Class, or Address. Example: "BP_ char" keeps objects matching both BP_ and char. Leave the Search box empty + press the magnifier (or Reload) to list all again.</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.InstancesOnly">Hide the reflection/type layer (UClass, UFunction, UScriptStruct, UEnum, UPackage, and UE4 property descriptors) so only live gameplay instances remain. Applies to BOTH the top Search (server-side) and the bottom text filter, over the ENTIRE loaded pool — not just the visible page. Reload + the bottom filter scans the whole pool uncapped; the top Search is faster but caps its results.</sys:String>
+
+	<!-- Tooltips: Instance Finder -->
+	<sys:String x:Key="str.Tip.InstanceFinder.ClassName">Class name to search for (substring by default, e.g. "Character"). Tick Exact match for a whole-name match. Combine with the Object name box (AND), or leave this empty to search by object name alone.</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.AddressField">An address to reverse-look-up — hex (0x7FF…) or module.exe+offset. Finds the UObject that contains it (or the nearest one / the container it lives in).</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.Search">Search for instances by class name and/or object name (at least one is required)</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.ObjectName">Optional: also require the object's NAME to contain this text (case-insensitive). Combined with the class name as AND. Leave the class box empty to search by object name alone. Filtering runs in the game (across every object) so you won't miss matches hidden behind unrelated objects — but the result list is still capped; if you see "⚠ capped" in the status, narrow the search.</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.ExactMatch">Match class name exactly (no substring). Applies to the class box only.</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.NewestFirst">Scan from the newest (highest InternalIndex) end → catches just-spawned instances (e.g. an enemy that just appeared) and avoids the result cap truncating the newest. Off = oldest first (class-default object / template / earliest instances — good for finding a Blueprint's defaults). Tip: click the Index column to re-sort either way.</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.MaxResults">Maximum rows returned (100–50000). The game-side scan is always exhaustive; this only caps the returned list. Raise it if you see "⚠ capped". Larger values are slower to transfer + filter.</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.Keyword">Temporary filter over the rows already returned — whitespace-separated terms are ANDed across Name / Class / Address (e.g. "BP_ char"). Instant + client-side: it does NOT reach past the result cap. To recover an instance hidden past the cap, exclude noise classes in the class-filter (⚑) — that re-runs the scan in the game — or raise Max.</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.Lookup">Lookup UObject at the specified address</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.CopyAddr">Copy instance address to clipboard</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.OpenWalker">Open this instance in Live Walker</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this instance and show it in Live Walker (stops at the parent that points to it)</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.LocateGWorldContainer">Locate in GWorld: find the shortest pointer path from GWorld down to this container's owning object, then drill into the element so you land next to the value</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngine">Locate in GameEngine: find the shortest pointer path from the live UGameEngine down to this instance and show it in Live Walker (stops at the parent that points to it). Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngineContainer">Locate in GameEngine: find the shortest pointer path from the live UGameEngine down to this container's owning object, then drill into the element so you land next to the value. Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.ExportCE">Export instance as CE XML pointer chain</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.CopyFieldAddr">Copy field absolute address</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.AA">Generate CE Auto Assembler script</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.CopyName">Copy the object name to clipboard</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.FindFunc">Find UFunctions that take this instance's class as a parameter or return value (reflection scan — includes native functions, unlike the per-field bytecode xref)</sys:String>
+
+	<!-- Tooltips: Property Search -->
+	<sys:String x:Key="str.Tip.PropertySearch.Query">Property name to search for (substring, case-insensitive), e.g. Health, Mana, Gold. Combine with the Type filter to narrow further. Press Enter or Search to run.</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.Search">Search across all classes. Either Name or Type must be set; comma-separate multiple types.</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.TypeFilter">Restrict by FProperty type. Type a few characters to filter the suggestion dropdown (e.g. 'opt' → OptionalProperty). Comma-separated for OR.</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.ResultFilter">Filter the current result list locally (case-insensitive substring across Class / Property / Type / Super / Preview). No DLL roundtrip.</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.GameOnly">Show only game-specific classes (exclude engine)</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.Deep">Also descend into nested struct members and struct-typed container elements (TArray/TSet/TMap of structs), so a field buried inside a struct/array (e.g. SaveSlotList[].MsTuneData.GP) becomes findable by name. Slower; matches show a dotted path and an owning class. Off = fast direct-field search only.</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.FindInstances">Find in Instance Finder: switch to the Instance Finder tab, fill in this row's class name, and run the search to list all live instances of it.</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.CopyOffset">Copy property offset to clipboard</sys:String>
+
+	<!-- Tooltips: Game Class Filter -->
+	<sys:String x:Key="str.Tip.GameClassFilter.Load">Load class list from game process</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.GameOnly">Show only game-specific classes (exclude engine)</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.SuperFilter">Filter by super/parent class</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.PackageFilter">Filter by UE package name</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.Clear">Clear all filters</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.FindInstances">Find live instances of this class</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.WalkClass">Open class in the Class Struct tab to inspect its full property layout and offsets</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.FindFunc">Find UFunctions that take this class as a parameter or return value (reflection scan — includes native functions, unlike the per-field bytecode xref)</sys:String>
+
+	<!-- Live Walker: Functions -->
+	<sys:String x:Key="str.LiveWalker.Functions">Functions</sys:String>
+	<sys:String x:Key="str.LiveWalker.FuncGenScript">INV</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FuncGenScript">INV = generate a self-contained CE AA (Auto-Assembler) Lua script for this UFunction and push it to CE (or clipboard if AOBMaker is off). It resolves a live instance + the UFunction through the DLL mailbox and calls ProcessEvent — no helper file needed. Functions with input params pop a CE form so you type values at runtime. The return value is written into the mailbox params buffer; it is NOT shown by default. Set UE5_DEBUG=1 in CE's Lua console (or edit the script's DEBUG line) to make it print the decoded return value and keep the Lua Engine window open.</sys:String>
+	<sys:String x:Key="str.LiveWalker.FuncPipeInvoke">PIPE</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FuncPipeInvoke">PIPE = invoke this function right now, in-app, over the pipe (the DLL runs ProcessEvent in-process, bypassing CE). Opens a dialog to fill params, FIRE, and read the DECODED return value inline (this is where you SEE the result). Use this to test a call; use INV / AA(Baked) to ship a reusable CE script.</sys:String>
+	<sys:String x:Key="str.LiveWalker.FuncCopyBaked">AA(Baked)</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FuncCopyBaked">AA(Baked) = &quot;baked&quot; CE AA (Auto-Assembler) script: the param values you enter are inlined at generation time, so enabling the memory-record fires the call once with those fixed values — no runtime form. ~5x smaller than INV and redistributable. Requires ue5_invoke_helper.lua embedded in your .CT via Table -&gt; Add File... (Tools -&gt; Export CE Helper Lua File... to obtain it). Tick &quot;Verify return value&quot; in the dialog for a full before/after dump, or set UE5_DEBUG=1 to print the decoded return value.</sys:String>
+
+	<sys:String x:Key="str.LiveWalker.GuessWhat">Guess?</sys:String>
+
+	<!-- Tooltips: Live Walker -->
+	<sys:String x:Key="str.Tip.LiveWalker.StartWorld">Navigate to GWorld and list top-level objects</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.StartGameEngine">Root the walker on the live GameEngine (UEngine) object — drill GameInstance / GameViewport / World. Found by reflected member, not class name. AOB export is unavailable from this root (direct address only).</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.Back">Go back to the previous object, restoring the rows you had selected and the scroll position. Shortcut: Alt+Left, mouse button 4, or the Browser Back key (only while this tab is on screen).</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.Forward">Return to the object Back just left, restoring the rows you had selected and the scroll position. Shortcut: Alt+Right, mouse button 5, or the Browser Forward key (only while this tab is on screen). Forward re-reads the object from the game: if it was freed or recycled meanwhile, the selection is dropped and that is reported. Navigating anywhere new clears the forward history, exactly like a browser.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.Refresh">Re-read current object fields from memory</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FindRefs">Find UObjects that hold a pointer to this one (true logical owner — Outer/Parent often only gives the naming-hierarchy package)</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.AddressInput">Address to navigate to. Accepts plain hex (0x7FF… or 7FF…) or a CE module+offset such as Game.exe+1A2B3C. A CE-copied, quoted form like &quot;Game.exe&quot;+1A2B is accepted too — the surrounding quotes are stripped and module names containing spaces work. Press Enter or click Go.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.Go">Navigate to the specified address</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FieldInst">List live instances of this field's object class in the Instance Finder tab — pre-fills the class name and runs the search.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportCE">Copy full CE XML pointer chain to clipboard</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportCEField">Copy CE XML for the selected field(s) only (Ctrl/Shift-click to multi-select)</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CancelExport">Abort the in-progress export (Copy CE XML / Copy CE Field / Export CSX) — stops resolving the object graph; the clipboard/file is left untouched</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.AobToggle">Use AOB-scanned GWorld symbol instead of hardcoded address (survives game restarts)</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportOptions">Copy CE XML / Copy CE Field options: memory-record Description format (+Offset / +Type) and the AOB / Collapse chain / Guess? toggles.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.DescShowOffset">Append each node's field offset (hex) to its CE Description — e.g. "AbilitySystemComponent (7E0)". Off = name only.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.DescShowType">Append each node's class / struct / element type to its CE Description — e.g. "AbilitySystemComponent (LSAbilitySystemComponent)", "[0] (ShieldAttributeSet)". The folded (Collapse chain) spine never adds a type. Off = name only.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.DedupShared">Expand each drilled object once: a shared object reached from several fields (or a back-reference) is fully expanded the first time and shown as a flat "(shared)" pointer afterwards. Prevents the huge / out-of-memory export when the drilldown reaches a densely-connected object (e.g. the World). Off = expand every reference fully (can be very large at high Drill Depth).</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExcludeSysComponents">Default ON. When DRILLING into pointer/struct children, skip fields whose object class is a system/engine asset (Widget, SoundBase, Texture, Material, ParticleSystem, Niagara, AnimInstance) so the CE export stays focused on gameplay data. The fields you explicitly selected are always kept — only resolved children are filtered. Gameplay classes (Actor / Pawn / Character / components / Controller / PlayerState / GameInstance) are never skipped. Container (array/map/set) elements are not filtered. A "N system fields hidden" note shows when anything was dropped. Off = export every drilled field.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CollapseChain">Collapse the multi-level GWorld-to-target pointer hops into a single CE multi-level-pointer entry (keeps base, one merged spine node, and the target field with its drill-down). Applies to Copy CE XML and Copy CE Field only.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FlattenGas">Flatten GAS attributes one level in Copy CE XML / Copy CE Field. A GameplayAttributeData struct (HealthPoint, Mana, …) normally exports as a parent node with BaseValue / CurrentValue children; with this on, those become sibling leaves named "HealthPoint ▸ BaseValue" at the combined offset — fewer nodes, easier to read and edit in CE. Scoped to GameplayAttributeData structs only; other structs keep their nested group. The "▸" segments honour Append +Offset; the struct type (Append +Type) is shown once at the end. Off = keep the nested attribute group.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FlattenLeafStructs">Flatten ANY terminal struct one level in Copy CE XML / Copy CE Field — a superset of Flatten GAS attributes. When a struct's whole contents are primitive inline values (int / float / bool / enum) — e.g. a Vector (X/Y/Z), a Rotator, or a plain {Min, Max} pair — its children are promoted to "Struct ▸ Field" sibling leaves at the combined offset instead of a nested group, identical to the GAS flatten. A struct that contains a pointer / object, a string (FString / FName / FText) or a container (array / map / set) keeps its nested group (pointer-backed values are never flattened). The "▸" segments honour Append +Offset; the struct type (Append +Type) is shown once at the end. Off = keep nested groups.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FlattenLeafRecords">Flatten leaf "record" structs one level in Copy CE XML / Copy CE Field — a superset of Flatten primitive-leaf structs. In addition to primitive scalars (int / float / bool / enum), it also accepts FName and FString (FString / FUtf8String / FAnsiString) fields as leaves, so a save-data record like {Score, Time, Rank, MsID (FName), PilotName (FString)} has every field promoted to a "Struct ▸ Field" sibling leaf instead of a nested group — including records stored inside a TMap / TArray (the per-element groups collapse to flat rows). An FName renders as its 4-byte index; an FString renders as a CE String (one Data-pointer deref). No field-count limit (the all-leaf requirement is the safety gate). A struct that still contains a pointer / object, an FText, a container, or an unresolved nested struct keeps its nested group. The "▸" segments honour Append +Offset; the struct type (Append +Type) is shown once at the end. Off = keep nested groups.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.RecordColors">Open the Record Colors editor. When a TMap / TArray of records is flattened (Copy CE XML / Copy CE Field), each element's rows are tinted by index parity so the records stay separable in CE once the per-element folder is gone. Even-indexed (struct[0], [2], …) and odd-indexed (struct[1], [3], …) get different text colors; pick from a neutral preset palette or a hex value, or Reset to use CE's theme. Default: Even = azure, Odd = unset. Persisted.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CollapseLeafPointers">Collapse a drilled pointer one level in Copy CE XML / Copy CE Field when its target holds a SINGLE watchable value. If an Object/Weak/etc. pointer resolves to an object whose only field is a scalar, an FName, or an FString, it is emitted as one "Pointer ▸ Field" record at the pointer offset with a dereference chain (scalar/name: Offsets=[fieldOffset]; FString: Offsets=[0, fieldOffset]) instead of a folder containing a lone child — the "pointer to a string" case. A pointer whose target has two or more fields keeps its group (its object identity is worth a boundary). Off = keep the nested pointer group.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportCsx">Export CE Structure Dissect script (.csx). Pick the CE format version from the dropdown.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportCsxPre77">Legacy format for CE before 7.7: a bit-field bool is exported as a whole Byte with the bit index noted in its description (no bit switch).</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportCsx77">CE 7.7 and later: a bit-field bool is exported as a real Binary element (Vartype=Binary, BitStart/BitSize) — a proper bit switch in CE's Structure Dissect.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportHeader">Export C++ SDK header (.h)</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CeAA">Copy an Auto Assembler script that registers this object as a CE symbol. On a GWorld-rooted path it emits a RESTART-STABLE script: it walks GWorld → … → this object at enable time (Lua), so it keeps working after the game restarts — AOB-anchored when GWorld came from an AOB scan (AOB symbol ticked), or with a hardcoded GWorld base you update after a restart. Off a non-GWorld path it falls back to a hardcoded absolute address (breaks on restart).</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.GuessWhat">Fill gaps between known fields with guessed data types (pointer, float, int, etc.)</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CopyFieldAddr">Copy field absolute address</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CopyFieldName">Copy field name to clipboard</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.Search">Search/highlight fields by name. Keywords that return matches are remembered for this session (up to 8, most-recent first) — type a few letters to pick one again. The box clears when you navigate to different data (drill-down / Back / Parent); it's kept across tab switches and refreshes.</sys:String>
+
+	<!-- Tooltips: Pointer Panel -->
+	<sys:String x:Key="str.Tip.Pointers.Copy">Copy address to clipboard</sys:String>
+	<sys:String x:Key="str.Tip.Pointers.CopyScan">Copy AOB scan hit address to clipboard</sys:String>
+	<sys:String x:Key="str.Tip.Pointers.ExtraScan">Run aggressive fallback scan for missing pointers</sys:String>
+	<sys:String x:Key="str.Tip.Pointers.TestExtraScan">Simulate scan progress UI (dev testing only)</sys:String>
+	<sys:String x:Key="str.Tip.Pointers.ClearGameCache">Remove cached scan hints for the current game (next scan will try all patterns)</sys:String>
+	<sys:String x:Key="str.Tip.Pointers.ResetAllCache">Rename the entire cache file with a numbered backup (.001-.010) and start fresh</sys:String>
+
+	<!-- Tooltips: Proxy Deploy -->
+	<sys:String x:Key="str.Tip.ProxyDeploy.Scan">Detect Steam-installed UE games</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Inject">Route ② of 4 — use this when the game is already running and you did not deploy a proxy (① Deploy is better when you can restart the game: it loads with it and survives restarts). Inject UE5Dumper.dll into an already-running UE game (CreateRemoteThread + LoadLibraryW) — no Cheat Engine or pre-deployed proxy needed. Pick the process, then auto-connect. If the game runs as Administrator you'll get a UAC prompt to inject elevated (no manual restart). x64 games only; single-player / offline use only (anti-cheat may block).</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Refresh">Refresh deploy status for detected games</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Deploy">Route ① of 4 — the best one when you can restart the game: the proxy loads with it, survives restarts, and needs no Cheat Engine. Deploy the selected proxy DLL to the ticked games.</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Undeploy">Remove OUR proxy DLLs from the selected games — every flavour (version / dinput8 / dxgi), not just the one selected above: that radio governs deploying, while this is a clean-up. A version.dll or dxgi.dll belonging to another program (a mod loader, another tool) is always left alone, and is reported rather than deleted.</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.UpdateAll">Update all deployed games to latest version</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Force">Overwrite even if same version or other proxy detected</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Version">Hijack version.dll — broadest game compatibility (loaded by virtually every Windows process)</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Dinput8">Hijack dinput8.dll — fallback when version.dll conflicts with installer or anti-tamper shim</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Dxgi">Hijack dxgi.dll — for D3D11/D3D12 games whose EXE imports neither version.dll nor dinput8.dll (most UE games on Windows)</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Winmm">Hijack winmm.dll — measured importable by 24/24 installed UE games, exactly the same set as dxgi. Use it when the dxgi.dll or version.dll slot is already TAKEN by something else: ReShade commonly installs itself as dxgi.dll, and some games ship their own version.dll. A proxy only works if its filename is free, so this is the spare universally-viable slot (dinput8 is only 2/24). It reaches no game that dxgi cannot.</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.SuggestToggle">Show a per-game 'Suggested proxy' column: the proxy you last deployed for that game (remembered by name, survives reinstall); or 'injection' if you've only ever loaded it via Inject; else version.dll (the safe default) with the proxies the EXE can actually load. Advisory only — never changes your selection or auto-deploys.</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Source">Steam = detect Steam-installed games; Scan Drives = search chosen drives for UE games installed anywhere (Epic, GOG, manual, etc.)</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.ScanDrives">Scan the selected drives for non-Steam UE games. Partitions on one physical disk are scanned sequentially; different disks scan in parallel. Steam libraries and system folders are skipped.</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.RefreshDrives">Re-enumerate available drives</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.CancelScan">Stop the running drive scan</sys:String>
+
+</ResourceDictionary>
