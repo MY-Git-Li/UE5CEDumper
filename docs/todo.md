@@ -2550,12 +2550,15 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
   shape. Re-scan drives so the game leaves the live list (it does, 9 → 8, so no `LiveGameFolder`
   veto can mask the result), then press *Find leftovers*.
 
+  The VALID pair — same process, same bytes on disk, one registry DWORD between them. (An earlier
+  pair, before the app was restarted, read **22 examined / 0 rows both ways** and is discarded: 22
+  means the T: folder was not among the candidates, so those two runs measured nothing. See ② — that
+  discrepancy is the whole finding.)
+
   | run | `T:` `NukeOnDelete` | folders examined | rows |
   |---|---|---|---|
   | 1 | **1** (bin off) | 23 | **0** — the refusal is computed, then dropped |
   | 2 | **0** (bin on) | 23 | **1** — `Recycle version.dll — folders left in place` |
-
-  Same process, same bytes on disk, one registry DWORD between them.
 
   #### ① The predicted defect — now MEASURED, and fixed
 
@@ -2568,13 +2571,16 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
 
   #### ② The defect the CONTROL found — and it is the one users hit daily
 
-  Run 2 was supposed to be a formality. It also returned 0, **which is what proved run 1 had measured
-  nothing**: the T: folder was never a candidate. `CandidatesFromLogs` read our own `view-*.log` with
+  In the FIRST pair (the discarded one above), flipping the bin back on was supposed to be a
+  formality. It also returned 0, **which is what proved the bin-off run had measured nothing**: the
+  T: folder was never a candidate. `CandidatesFromLogs` read our own `view-*.log` with
   `File.ReadLines`, which opens `FileShare.Read` and therefore **cannot open the live `view-0.log`
   that our own logger is holding**. The per-file `catch` swallowed the sharing violation, so the
-  current session's entire deploy log contributed zero candidates; run 1's 22 came from an *archived*
-  `view-20260731-*.log`. Restarting the app rotated the line into an archive and the count went
-  22 → 23, which is the number that made the real measurement possible.
+  current session's entire deploy log contributed zero candidates; those 22 came from an *archived*
+  `view-20260731-*.log`. Restarting the app rotated our deploy line into an archive too, the count
+  went **22 → 23**, and only then was the folder actually examined. That single number is what
+  separates "looked and found nothing" from "never looked" — without it, the discarded pair would
+  have been recorded as a clean confirmation of the prediction.
 
   > **What this cost the user:** deploy a proxy, uninstall the game, press *Find leftovers* in the
   > same session → **nothing found**. It only appears after an app restart. `SteamShapeScan` hides
