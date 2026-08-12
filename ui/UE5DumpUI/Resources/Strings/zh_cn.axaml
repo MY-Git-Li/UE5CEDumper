@@ -1647,64 +1647,64 @@
 	<sys:String x:Key="str.LiveWalker.GuessWhat">智能识别?</sys:String>
 
 	<!-- Tooltips: Live Walker -->
-	<sys:String x:Key="str.Tip.LiveWalker.StartWorld">Navigate to GWorld and list top-level objects</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.StartGameEngine">Root the walker on the live GameEngine (UEngine) object — drill GameInstance / GameViewport / World. Found by reflected member, not class name. AOB export is unavailable from this root (direct address only).</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.Back">Go back to the previous object, restoring the rows you had selected and the scroll position. Shortcut: Alt+Left, mouse button 4, or the Browser Back key (only while this tab is on screen).</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.Forward">Return to the object Back just left, restoring the rows you had selected and the scroll position. Shortcut: Alt+Right, mouse button 5, or the Browser Forward key (only while this tab is on screen). Forward re-reads the object from the game: if it was freed or recycled meanwhile, the selection is dropped and that is reported. Navigating anywhere new clears the forward history, exactly like a browser.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.Refresh">Re-read current object fields from memory</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.FindRefs">Find UObjects that hold a pointer to this one (true logical owner — Outer/Parent often only gives the naming-hierarchy package)</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.AddressInput">Address to navigate to. Accepts plain hex (0x7FF… or 7FF…) or a CE module+offset such as Game.exe+1A2B3C. A CE-copied, quoted form like &quot;Game.exe&quot;+1A2B is accepted too — the surrounding quotes are stripped and module names containing spaces work. Press Enter or click Go.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.Go">Navigate to the specified address</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.FieldInst">List live instances of this field's object class in the Instance Finder tab — pre-fills the class name and runs the search.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.ExportCE">Copy full CE XML pointer chain to clipboard</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.ExportCEField">Copy CE XML for the selected field(s) only (Ctrl/Shift-click to multi-select)</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.CancelExport">Abort the in-progress export (Copy CE XML / Copy CE Field / Export CSX) — stops resolving the object graph; the clipboard/file is left untouched</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.AobToggle">Use AOB-scanned GWorld symbol instead of hardcoded address (survives game restarts)</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.ExportOptions">Copy CE XML / Copy CE Field options: memory-record Description format (+Offset / +Type) and the AOB / Collapse chain / Guess? toggles.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.DescShowOffset">Append each node's field offset (hex) to its CE Description — e.g. "AbilitySystemComponent (7E0)". Off = name only.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.DescShowType">Append each node's class / struct / element type to its CE Description — e.g. "AbilitySystemComponent (LSAbilitySystemComponent)", "[0] (ShieldAttributeSet)". The folded (Collapse chain) spine never adds a type. Off = name only.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.DedupShared">Expand each drilled object once: a shared object reached from several fields (or a back-reference) is fully expanded the first time and shown as a flat "(shared)" pointer afterwards. Prevents the huge / out-of-memory export when the drilldown reaches a densely-connected object (e.g. the World). Off = expand every reference fully (can be very large at high Drill Depth).</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.ExcludeSysComponents">Default ON. When DRILLING into pointer/struct children, skip fields whose object class is a system/engine asset (Widget, SoundBase, Texture, Material, ParticleSystem, Niagara, AnimInstance) so the CE export stays focused on gameplay data. The fields you explicitly selected are always kept — only resolved children are filtered. Gameplay classes (Actor / Pawn / Character / components / Controller / PlayerState / GameInstance) are never skipped. Container (array/map/set) elements are not filtered. A "N system fields hidden" note shows when anything was dropped. Off = export every drilled field.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.CollapseChain">Collapse the multi-level GWorld-to-target pointer hops into a single CE multi-level-pointer entry (keeps base, one merged spine node, and the target field with its drill-down). Applies to Copy CE XML and Copy CE Field only.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.FlattenGas">Flatten GAS attributes one level in Copy CE XML / Copy CE Field. A GameplayAttributeData struct (HealthPoint, Mana, …) normally exports as a parent node with BaseValue / CurrentValue children; with this on, those become sibling leaves named "HealthPoint ▸ BaseValue" at the combined offset — fewer nodes, easier to read and edit in CE. Scoped to GameplayAttributeData structs only; other structs keep their nested group. The "▸" segments honour Append +Offset; the struct type (Append +Type) is shown once at the end. Off = keep the nested attribute group.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.FlattenLeafStructs">Flatten ANY terminal struct one level in Copy CE XML / Copy CE Field — a superset of Flatten GAS attributes. When a struct's whole contents are primitive inline values (int / float / bool / enum) — e.g. a Vector (X/Y/Z), a Rotator, or a plain {Min, Max} pair — its children are promoted to "Struct ▸ Field" sibling leaves at the combined offset instead of a nested group, identical to the GAS flatten. A struct that contains a pointer / object, a string (FString / FName / FText) or a container (array / map / set) keeps its nested group (pointer-backed values are never flattened). The "▸" segments honour Append +Offset; the struct type (Append +Type) is shown once at the end. Off = keep nested groups.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.FlattenLeafRecords">Flatten leaf "record" structs one level in Copy CE XML / Copy CE Field — a superset of Flatten primitive-leaf structs. In addition to primitive scalars (int / float / bool / enum), it also accepts FName and FString (FString / FUtf8String / FAnsiString) fields as leaves, so a save-data record like {Score, Time, Rank, MsID (FName), PilotName (FString)} has every field promoted to a "Struct ▸ Field" sibling leaf instead of a nested group — including records stored inside a TMap / TArray (the per-element groups collapse to flat rows). An FName renders as its 4-byte index; an FString renders as a CE String (one Data-pointer deref). No field-count limit (the all-leaf requirement is the safety gate). A struct that still contains a pointer / object, an FText, a container, or an unresolved nested struct keeps its nested group. The "▸" segments honour Append +Offset; the struct type (Append +Type) is shown once at the end. Off = keep nested groups.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.RecordColors">Open the Record Colors editor. When a TMap / TArray of records is flattened (Copy CE XML / Copy CE Field), each element's rows are tinted by index parity so the records stay separable in CE once the per-element folder is gone. Even-indexed (struct[0], [2], …) and odd-indexed (struct[1], [3], …) get different text colors; pick from a neutral preset palette or a hex value, or Reset to use CE's theme. Default: Even = azure, Odd = unset. Persisted.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.CollapseLeafPointers">Collapse a drilled pointer one level in Copy CE XML / Copy CE Field when its target holds a SINGLE watchable value. If an Object/Weak/etc. pointer resolves to an object whose only field is a scalar, an FName, or an FString, it is emitted as one "Pointer ▸ Field" record at the pointer offset with a dereference chain (scalar/name: Offsets=[fieldOffset]; FString: Offsets=[0, fieldOffset]) instead of a folder containing a lone child — the "pointer to a string" case. A pointer whose target has two or more fields keeps its group (its object identity is worth a boundary). Off = keep the nested pointer group.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.ExportCsx">Export CE Structure Dissect script (.csx). Pick the CE format version from the dropdown.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.ExportCsxPre77">Legacy format for CE before 7.7: a bit-field bool is exported as a whole Byte with the bit index noted in its description (no bit switch).</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.ExportCsx77">CE 7.7 and later: a bit-field bool is exported as a real Binary element (Vartype=Binary, BitStart/BitSize) — a proper bit switch in CE's Structure Dissect.</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.ExportHeader">Export C++ SDK header (.h)</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.CeAA">Copy an Auto Assembler script that registers this object as a CE symbol. On a GWorld-rooted path it emits a RESTART-STABLE script: it walks GWorld → … → this object at enable time (Lua), so it keeps working after the game restarts — AOB-anchored when GWorld came from an AOB scan (AOB symbol ticked), or with a hardcoded GWorld base you update after a restart. Off a non-GWorld path it falls back to a hardcoded absolute address (breaks on restart).</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.GuessWhat">Fill gaps between known fields with guessed data types (pointer, float, int, etc.)</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.CopyFieldAddr">Copy field absolute address</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.CopyFieldName">Copy field name to clipboard</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.Search">Search/highlight fields by name. Keywords that return matches are remembered for this session (up to 8, most-recent first) — type a few letters to pick one again. The box clears when you navigate to different data (drill-down / Back / Parent); it's kept across tab switches and refreshes.</sys:String>
-
+	<sys:String x:Key="str.Tip.LiveWalker.StartWorld">跳转至GWorld全局根对象，展开顶层场景实体列表</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.StartGameEngine">以运行态UGameEngine引擎对象为根节点浏览；可向下遍历游戏实例、视口客户端、世界场景。依靠成员反射定位，非类名查找；该根路径无法生成AOB特征码，仅支持固定绝对地址</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.Back">后退至上一个浏览对象，还原选中条目与滚动位置；快捷键：Alt+左方向键、鼠标侧键4、浏览器后退键（仅当前标签激活时生效）</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.Forward">前进回到后退前的对象，还原选中状态与滚动位置；快捷键：Alt+右方向键、鼠标侧键5、浏览器前进键。前进会重新读取游戏内存：若原对象已释放/内存复用，会清空选中并提示；打开新地址会清空前进历史，逻辑和浏览器完全一致</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.Refresh">重新从游戏内存读取当前对象所有字段数据</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FindRefs">检索所有持有当前对象指针的UObject真实所有者；Outer/父层级仅代表资源命名打包层级，并非实际内存引用关系</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.AddressInput">地址跳转输入框：支持纯十六进制(0x7FF… / 7FF…)、CE模块偏移格式Game.exe+1A2B3C；兼容CE复制带引号格式"Game.exe"+1A2B，程序会自动剔除引号，适配含空格模块名。输入后回车或点击前往</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.Go">跳转至输入的内存地址</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FieldInst">跳转实例查找标签页，自动填充当前字段所属类名并检索全部运行实例</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportCE">将完整多级指针链以CE XML格式复制到剪贴板</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportCEField">仅复制选中字段的CE XML（Ctrl/Shift多选可批量导出）</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CancelExport">终止正在执行的导出任务（CE XML/字段导出/CSX结构体脚本），停止对象图谱解析，剪贴板与文件均不会生成内容</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.AobToggle">使用AOB特征码扫描获取GWorld基址，替代硬编码固定地址；游戏重启后指针依旧有效</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportOptions">CE导出全局设置：内存记录描述格式（附加偏移/类型）、AOB开关、指针折叠、智能识别选项</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.DescShowOffset">CE条目描述末尾追加十六进制字段偏移，示例：AbilitySystemComponent (7E0)；关闭则仅显示名称</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.DescShowType">CE条目末尾追加类/结构体/元素类型，示例：AbilitySystemComponent (LSAbilitySystemComponent)、[0] (ShieldAttributeSet)；折叠指针主干不会附加类型；关闭仅展示名称</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.DedupShared">共享对象去重：多处引用的同一对象首次展开完整层级，后续仅显示扁平「(共享)」指针；避免遍历World这类高关联对象时导出体积爆炸、内存溢出。关闭则每次引用都完整递归展开，深度过高文件会极其庞大</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExcludeSysComponents">默认开启。递归解析指针/结构体子项时，过滤引擎系统资源类（控件、音效、贴图、材质、粒子、尼亚加拉、动画实例），让CE导出聚焦游戏玩法数据；手动勾选的字段始终保留，仅自动解析子项会被过滤。角色、控制器、玩家状态、游戏实例等玩法类不会被屏蔽；数组、映射容器内元素不参与过滤。过滤后底部会提示隐藏系统字段数量；关闭则导出所有字段</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CollapseChain">将GWorld到目标的多级跳转合并为CE单层多级指针条目，保留基址、合并主干节点与目标字段；仅作用于完整XML导出与选中字段导出</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FlattenGas">GAS游戏属性扁平化（仅作用CE导出）：原本嵌套结构GameplayAttributeData（生命值、法力值等）包含基础值/当前值子节点，开启后平铺为同级条目「生命值 ▸ 基础值」，合并总偏移，CE编辑更简洁；仅适配GAS属性结构体，其余结构体维持嵌套层级。▸分隔符附带偏移信息，结构体类型统一标注在末尾；关闭保留嵌套分组</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FlattenLeafStructs">基础叶子结构体全局扁平化（GAS扁平化超集）：结构体全部由数字、浮点、布尔、枚举基础类型构成时（向量、旋转体、最大最小值结构体等），子字段平铺为同级「结构体 ▸ 字段」，合并偏移；若结构体包含对象指针、字符串、数组容器，则维持嵌套。▸附带偏移，类型统一后置；关闭保留嵌套</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FlattenLeafRecords">存档记录结构体扁平化（叶子结构体扁平化升级版）：除基础数值外，FName、FString文本字段也视为叶子节点；存档数据{分数、时长、段位、ID、角色名}会全部平铺展开，数组/映射内每条记录都会拆分为扁平条目。结构体包含对象指针、富文本、容器则不扁平化；▸附带偏移，类型后置；关闭维持嵌套文件夹结构</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.RecordColors">记录配色设置：数组/映射扁平化导出后，奇偶行赋予不同文字底色，取消文件夹层级后依旧能区分每条存档记录；偶数行、奇数行可自定义十六进制色值，支持预设配色，重置恢复CE原生主题。默认：偶数天蓝、奇数无配色；配置永久保存</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CollapseLeafPointers">叶子指针折叠：指针指向的对象仅存有单个可监视数值（数字、FName、字符串）时，合并为「指针 ▸ 字段」单条记录，附带多级偏移；目标对象包含2个及以上字段则保留文件夹嵌套。关闭维持指针嵌套结构</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportCsx">导出CE结构体解析脚本(.csx)，下拉选择CE版本格式</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportCsxPre77">CE7.7旧版兼容格式：位域布尔值整体导出为字节，位索引标注在描述内，无独立位开关控件</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportCsx77">CE7.7及以上新版格式：位域布尔生成原生二进制类型，精准配置起始位、位宽，结构体解析面板可直接切换开关</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.ExportHeader">导出C++结构体SDK头文件(.h)</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CeAA">生成CE汇编脚本，将当前对象注册为CE全局符号。GWorld根路径生成重启可用脚本：启用时Lua自动遍历GWorld链路寻址，游戏重启依旧生效；勾选AOB则依托特征码定位GWorld，未勾选则为固定基址，重启需手动更新。非GWorld路径仅生成固定绝对地址，重启失效</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.GuessWhat">字段空白区间自动推测数据类型（指针、浮点、整型等）填充内存布局</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CopyFieldAddr">复制字段绝对内存地址</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CopyFieldName">复制字段名称至剪贴板</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.Search">按名称检索并高亮字段；检索记录会话内最多保存8条，输入首字母快速唤起；切换对象、后退、返回父级会清空输入框；切换标签页、刷新页面保留检索记录</sys:String>
+	
 	<!-- Tooltips: Pointer Panel -->
-	<sys:String x:Key="str.Tip.Pointers.Copy">Copy address to clipboard</sys:String>
-	<sys:String x:Key="str.Tip.Pointers.CopyScan">Copy AOB scan hit address to clipboard</sys:String>
-	<sys:String x:Key="str.Tip.Pointers.ExtraScan">Run aggressive fallback scan for missing pointers</sys:String>
-	<sys:String x:Key="str.Tip.Pointers.TestExtraScan">Simulate scan progress UI (dev testing only)</sys:String>
-	<sys:String x:Key="str.Tip.Pointers.ClearGameCache">Remove cached scan hints for the current game (next scan will try all patterns)</sys:String>
-	<sys:String x:Key="str.Tip.Pointers.ResetAllCache">Rename the entire cache file with a numbered backup (.001-.010) and start fresh</sys:String>
-
+	<sys:String x:Key="str.Tip.Pointers.Copy">复制内存地址到剪贴板</sys:String>
+	<sys:String x:Key="str.Tip.Pointers.CopyScan">复制AOB特征码扫描结果地址</sys:String>
+	<sys:String x:Key="str.Tip.Pointers.ExtraScan">激进兜底扫描，尝试搜寻缺失指针特征码</sys:String>
+	<sys:String x:Key="str.Tip.Pointers.TestExtraScan">模拟扫描进度界面，仅供开发者调试使用</sys:String>
+	<sys:String x:Key="str.Tip.Pointers.ClearGameCache">清空当前游戏的扫描特征缓存，下次扫描会遍历全部特征模式</sys:String>
+	<sys:String x:Key="str.Tip.Pointers.ResetAllCache">缓存文件重命名备份(001~010)，清空全局缓存从头生成</sys:String>
+	
 	<!-- Tooltips: Proxy Deploy -->
-	<sys:String x:Key="str.Tip.ProxyDeploy.Scan">Detect Steam-installed UE games</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.Inject">Route ② of 4 — use this when the game is already running and you did not deploy a proxy (① Deploy is better when you can restart the game: it loads with it and survives restarts). Inject UE5Dumper.dll into an already-running UE game (CreateRemoteThread + LoadLibraryW) — no Cheat Engine or pre-deployed proxy needed. Pick the process, then auto-connect. If the game runs as Administrator you'll get a UAC prompt to inject elevated (no manual restart). x64 games only; single-player / offline use only (anti-cheat may block).</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.Refresh">Refresh deploy status for detected games</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.Deploy">Route ① of 4 — the best one when you can restart the game: the proxy loads with it, survives restarts, and needs no Cheat Engine. Deploy the selected proxy DLL to the ticked games.</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.Undeploy">Remove OUR proxy DLLs from the selected games — every flavour (version / dinput8 / dxgi), not just the one selected above: that radio governs deploying, while this is a clean-up. A version.dll or dxgi.dll belonging to another program (a mod loader, another tool) is always left alone, and is reported rather than deleted.</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.UpdateAll">Update all deployed games to latest version</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.Force">Overwrite even if same version or other proxy detected</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Version">Hijack version.dll — broadest game compatibility (loaded by virtually every Windows process)</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Dinput8">Hijack dinput8.dll — fallback when version.dll conflicts with installer or anti-tamper shim</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Dxgi">Hijack dxgi.dll — for D3D11/D3D12 games whose EXE imports neither version.dll nor dinput8.dll (most UE games on Windows)</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Winmm">Hijack winmm.dll — measured importable by 24/24 installed UE games, exactly the same set as dxgi. Use it when the dxgi.dll or version.dll slot is already TAKEN by something else: ReShade commonly installs itself as dxgi.dll, and some games ship their own version.dll. A proxy only works if its filename is free, so this is the spare universally-viable slot (dinput8 is only 2/24). It reaches no game that dxgi cannot.</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.SuggestToggle">Show a per-game 'Suggested proxy' column: the proxy you last deployed for that game (remembered by name, survives reinstall); or 'injection' if you've only ever loaded it via Inject; else version.dll (the safe default) with the proxies the EXE can actually load. Advisory only — never changes your selection or auto-deploys.</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.Source">Steam = detect Steam-installed games; Scan Drives = search chosen drives for UE games installed anywhere (Epic, GOG, manual, etc.)</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.ScanDrives">Scan the selected drives for non-Steam UE games. Partitions on one physical disk are scanned sequentially; different disks scan in parallel. Steam libraries and system folders are skipped.</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.RefreshDrives">Re-enumerate available drives</sys:String>
-	<sys:String x:Key="str.Tip.ProxyDeploy.CancelScan">Stop the running drive scan</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Scan">扫描Steam库内已安装虚幻引擎游戏</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Inject">四种部署方案第②种：游戏已经运行、无法重启时选用；无需提前部署代理、不用CE，通过CreateRemoteThread注入UE5Dumper.dll。选中进程即可注入并自动建立连接；游戏以管理员运行会弹出UAC授权；仅支持64位单机离线游戏，反作弊大概率拦截</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Refresh">刷新已检测游戏的代理部署状态</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Deploy">四种部署方案第①种（最优方案）：可以重启游戏首选；DLL随游戏启动加载，重启永久生效，全程无需CE。将代理文件部署至勾选的游戏目录</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Undeploy">清理工具部署的全部版本代理文件（version/dinput8/dxgi/winmm）；仅单选框控制部署类型，卸载会全量清理。第三方工具（ReShade、MOD加载器）自带的同名文件会保留并提示，不会删除</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.UpdateAll">将所有已部署游戏的代理更新至最新版本</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Force">强制覆盖文件，版本一致或已存在其他代理时也进行替换</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Version">劫持version.dll：兼容性最强，几乎所有Windows程序都会加载</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Dinput8">劫持dinput8.dll：version.dll与安装程序/防篡改冲突时备选方案</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Dxgi">劫持dxgi.dll：适配D3D11/D3D12虚幻游戏，程序未导入前两个库时选用（绝大多数Windows虚幻游戏首选）</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Type.Winmm">劫持winmm.dll：dxgi、version被占用时备用通用插槽（ReShade普遍占用dxgi，部分游戏自带version.dll）；覆盖范围和dxgi完全一致，兼容性兜底选项</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.SuggestToggle">显示游戏推荐代理列：记录上一次部署的劫持类型，仅注入则标注注入；默认推荐version.dll，同时展示程序可加载的全部劫持库。仅参考提示，不会自动修改选型与部署</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.Source">Steam：扫描Steam商店游戏；全盘扫描：检索选定盘符内非Steam游戏（Epic、GOG、绿色版、手动安装）</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.ScanDrives">扫描选中硬盘分区查找非Steam虚幻游戏；同一块磁盘分区串行扫描，多块物理硬盘并行扫描；跳过Steam库目录与系统文件夹</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.RefreshDrives">重新枚举电脑可用磁盘驱动器</sys:String>
+	<sys:String x:Key="str.Tip.ProxyDeploy.CancelScan">终止正在运行的全盘扫描任务</sys:String>
 
 </ResourceDictionary>
