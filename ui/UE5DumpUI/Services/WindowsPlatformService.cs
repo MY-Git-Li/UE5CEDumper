@@ -5,6 +5,7 @@ using System.Text;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
+using Microsoft.Win32;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
 
@@ -788,12 +789,69 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
 
             if (new DriveInfo(root).DriveType != DriveType.Fixed) return false;
 
+            // POLICY FIRST. SHQueryRecycleBin below reports on the bin's CONTENTS and is
+            // structurally incapable of reporting on whether the bin is switched on: a
+            // volume with NukeOnDelete=1 still answers S_OK, because the stale
+            // $RECYCLE.BIN folder and its leftover items are still there. Measured
+            // 2026-08-12 -- see RecycleBinPolicy for the end-to-end capture, including the
+            // FOF_ALLOWUNDO delete that returned success while destroying the file.
+            var guid = RecycleBinPolicy.VolumeGuidFromVolumeName(VolumeNameFor(root));
+            if (RecycleBinPolicy.IsDisabled(
+                    ReadDword(Registry.LocalMachine, RecycleBinPolicy.PoliciesExplorerKey, "NoRecycleFiles"),
+                    ReadDword(Registry.CurrentUser,  RecycleBinPolicy.PoliciesExplorerKey, "NoRecycleFiles"),
+                    ReadDword(Registry.CurrentUser,  RecycleBinPolicy.BitBucketKey, "UseGlobalSettings"),
+                    ReadDword(Registry.CurrentUser,  RecycleBinPolicy.BitBucketKey, "NukeOnDelete"),
+                    guid.Length == 0
+                        ? null
+                        : ReadDword(Registry.CurrentUser,
+                                    RecycleBinPolicy.BitBucketKey + @"\Volume\" + guid,
+                                    "NukeOnDelete")))
+            {
+                return false;
+            }
+
+            // Kept as the SECOND gate, not the only one: it still catches a volume the
+            // shell cannot service at all (no bin folder, a broken/!S_OK root), which the
+            // registry says nothing about. Both must pass.
             var info = new SHQUERYRBINFO { cbSize = Marshal.SizeOf<SHQUERYRBINFO>() };
             return SHQueryRecycleBinW(root, ref info) == 0;   // S_OK
         }
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// <c>\\?\Volume{guid}\</c> for a volume ROOT path ("D:\"), or "" on failure.
+    /// Distinct from <c>GetVolumePathNameW</c>, which maps a file to its mount point;
+    /// this maps that mount point to the stable volume identity the Recycle Bin settings
+    /// are keyed by.
+    /// </summary>
+    private static string VolumeNameFor(string volumeRoot)
+    {
+        var buf = new StringBuilder(64);
+        return GetVolumeNameForVolumeMountPointW(volumeRoot, buf, buf.Capacity)
+            ? buf.ToString()
+            : "";
+    }
+
+    /// <summary>
+    /// One DWORD from the registry, or null when the key or value is absent or is not a
+    /// DWORD. Null is load-bearing — <see cref="RecycleBinPolicy.IsDisabled"/> treats
+    /// absent and 0 differently, and collapsing them here would silently re-introduce the
+    /// defect for the "never configured" machine.
+    /// </summary>
+    private static int? ReadDword(RegistryKey hive, string subKey, string valueName)
+    {
+        try
+        {
+            using var key = hive.OpenSubKey(subKey);
+            return key?.GetValue(valueName) as int?;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -808,6 +866,10 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "SHQueryRecycleBinW", ExactSpelling = true)]
     private static extern int SHQueryRecycleBinW(string pszRootPath, ref SHQUERYRBINFO pSHQueryRBInfo);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetVolumeNameForVolumeMountPointW", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetVolumeNameForVolumeMountPointW(string lpszVolumeMountPoint, StringBuilder lpszVolumeName, int cchBufferLength);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetVolumePathNameW", SetLastError = true, ExactSpelling = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
