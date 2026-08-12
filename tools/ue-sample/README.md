@@ -214,19 +214,34 @@ The repo already has the right pattern and it is worth copying exactly: the AOB 
   not look like staleness: it looks like the dumper reading the wrong value.
 
   ```bash
-  py tools/ue-sample/capture_package_identity.py "D:\UE_Analyze_Data\For Testing\DumperTest" --check
+  py tools/ue-sample/capture_package_identity.py "D:\UE_Analyze_Data\For Testing\DumperTest" --project "D:\Unreal Projects\DumperTest" --check
   ```
 
   `--check` compares instead of writing, so a rebuilt package is caught in one second **before** a
   test session rather than halfway through one. Drop `--check` to re-record after a deliberate
   rebuild.
 
+  **Pass `--project`.** It is optional only in the sense that the script runs without it. It names
+  the UE project the package was actually built from, and it is the only tree the freshness check
+  may legitimately consult — the repo working tree cannot stand in, because `git checkout` stamps
+  files with the checkout time and never preserves the author's mtime, so a fresh clone always looks
+  "newer" than a correct older package. Without `--project` the script now says the check was
+  **skipped** rather than inventing a verdict.
+
   The record also asserts the **absences**, which is the half worth having: `RawInt` / `RawFloat` /
   `RawDouble` must appear **zero** times in either binary. They are the non-UPROPERTY holes the
   Native-C scan exists to find, so if they ever start appearing someone has reflected them and that
   test is dead without anything failing.
 
-  *Captured 2026-08-05 from commit `8b812a5`: Development 279,200,256 B · Shipping 132,302,848 B,
+  > **The absence question is asked of ASCII only, and whole-word.** A reflected property name
+  > reaches the binary as a **narrow** string in `FPropertyParams`; a `TEXT()` literal reaches it as
+  > **UTF-16**. `ADumperTestHUD` prints `RawInt_Ticking=%d …` on screen, so all three names *are* in
+  > the binary as UTF-16 — and counting both encodings made the script declare
+  > *"the Native-C test is dead"* on a **correct** package, on every build since `b3d8593`. The
+  > narrow/wide split is the signal that separates *reflected* from *merely printed*; the word
+  > boundary stops `RawInt` matching inside `RawInt_Ticking` if a future readout is ever ASCII.
+
+  *Captured 2026-08-12 from commit `270ac0d`: Development 279,211,008 B · Shipping 132,310,016 B,
   every reflected name present in both, all three raw members absent in both, zero problems.*
 
   > **Trap:** class names are emitted as **UTF-16** (from `TEXT()` in the UHT registration) while
