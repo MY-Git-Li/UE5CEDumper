@@ -657,253 +657,278 @@
     <sys:String x:Key="str.Snapshot.Group.LocateGameEngine">⚙</sys:String>
 
 	<!-- SPC Query (experimental) -->
-	<sys:String x:Key="str.Spc.Intro">Find fields whose value SEQUENCE across snapshots matches a direction chain — no type, no value. Pick two or more snapshots (they may span game sessions), set how each should compare to the previous one (Increased / Decreased / Unchanged / Changed), and run. This is CE's "Unknown Initial Value + Increased/Decreased" generalised across persisted snapshots and restarts.</sys:String>
-	<sys:String x:Key="str.Spc.Join">Join:</sys:String>
-	<sys:String x:Key="str.Spc.JoinHint">Strict = same class + normalised path + offset (fewest false positives). Loose = class + outer chain + name (recovers some spawned objects across sessions). In-session = same game launch only (exact).</sys:String>
-	<sys:String x:Key="str.Spc.ClassFilter">Class:</sys:String>
-	<sys:String x:Key="str.Spc.PropFilter">Field:</sys:String>
-	<sys:String x:Key="str.Spc.ResClass">Class:</sys:String>
-	<sys:String x:Key="str.Spc.ResField">Field:</sys:String>
-	<sys:String x:Key="str.Spc.ResObject">Object:</sys:String>
-	<sys:String x:Key="str.Spc.ResGlobal">Filter all:</sys:String>
-	<sys:String x:Key="str.Spc.ResGlobalHint">match any column…</sys:String>
-	<sys:String x:Key="str.Spc.SeqFirst">First:</sys:String>
-	<sys:String x:Key="str.Spc.SeqLast">Last:</sys:String>
-	<sys:String x:Key="str.Spc.ApplyRange">Apply range</sys:String>
-	<sys:String x:Key="str.Spc.ResetRange">Reset</sys:String>
-	<sys:String x:Key="str.Spc.Run">Run SPC</sys:String>
-	<sys:String x:Key="str.Spc.Refresh">Refresh</sys:String>
-	<sys:String x:Key="str.Spc.OpenWalker">Live</sys:String>
+	<sys:String x:Key="str.Spc.Intro">依据字段在多份快照里的数值变化趋势链检索内存字段，无需限定具体数值与数据类型。选取两份及以上快照（可跨游戏重启会话），依次设定每份快照相对前一份的变化规则（上升/下降/不变/发生变动）后执行检索。该功能是CE未知初始数值扫描+增减扫描的升级版，支持持久快照存储与游戏重启后接续检索。</sys:String>
+	<sys:String x:Key="str.Spc.Join">匹配规则：</sys:String>
+	<sys:String x:Key="str.Spc.JoinHint">严格匹配：类一致+标准化字段路径+内存偏移，误报最少；宽松匹配：类+外层层级+字段名称，可找回跨会话重生生成的对象；本次会话内：仅限同一次游戏启动进程，匹配精度最高。</sys:String>
+	<sys:String x:Key="str.Spc.ClassFilter">类筛选：</sys:String>
+	<sys:String x:Key="str.Spc.PropFilter">字段筛选：</sys:String>
+	<sys:String x:Key="str.Spc.ResClass">所属类</sys:String>
+	<sys:String x:Key="str.Spc.ResField">字段</sys:String>
+	<sys:String x:Key="str.Spc.ResObject">对象</sys:String>
+	<sys:String x:Key="str.Spc.ResGlobal">全局检索：</sys:String>
+	<sys:String x:Key="str.Spc.ResGlobalHint">匹配列表任意列内容……</sys:String>
+	<sys:String x:Key="str.Spc.SeqFirst">数值下限：</sys:String>
+	<sys:String x:Key="str.Spc.SeqLast">数值上限：</sys:String>
+	<sys:String x:Key="str.Spc.ApplyRange">应用区间</sys:String>
+	<sys:String x:Key="str.Spc.ResetRange">重置</sys:String>
+	<sys:String x:Key="str.Spc.Run">执行序列检索(SPC)</sys:String>
+	<sys:String x:Key="str.Spc.Refresh">刷新列表</sys:String>
+	<sys:String x:Key="str.Spc.OpenWalker">实时查看</sys:String>
 	<sys:String x:Key="str.Spc.LocateGWorld">🌍</sys:String>
-	<sys:String x:Key="str.Tip.Spc.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this row's owning object and show it in Live Walker, scrolled to the changed field</sys:String>
+	<sys:String x:Key="str.Tip.Spc.LocateGWorld">GWorld定位：解析从GWorld到目标归属对象的最短指针路径，在实时浏览器打开并跳转至变动字段</sys:String>
 	<sys:String x:Key="str.Spc.LocateGameEngine">⚙</sys:String>
-	<sys:String x:Key="str.Tip.Spc.LocateGameEngine">Locate in GameEngine: shortest pointer path from the live UGameEngine down to this row's owning object, shown in Live Walker scrolled to the changed field. Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
-	<sys:String x:Key="str.Spc.CopyAddr">Addr</sys:String>
-	<sys:String x:Key="str.Spc.PickerHeader">Snapshot sequence</sys:String>
-	<sys:String x:Key="str.Spc.BaselineHint">The oldest ticked snapshot is the baseline (its predicate is ignored). Each later snapshot's predicate compares it to the previous ticked one. Hit → Copy Address / Open in Live Walker hands the newest snapshot's live address to CE.</sys:String>
-	<sys:String x:Key="str.Spc.Col.Use">Use</sys:String>
-	<sys:String x:Key="str.Spc.Col.Label">Label</sys:String>
-	<sys:String x:Key="str.Spc.Col.Captured">Captured (UTC)</sys:String>
-	<sys:String x:Key="str.Spc.Col.Session">Session</sys:String>
-	<sys:String x:Key="str.Spc.Col.Predicate">Compare</sys:String>
-	<sys:String x:Key="str.Spc.Col.ValueFilter">Value filter</sys:String>
-	<sys:String x:Key="str.Spc.Col.Preview">Matches</sys:String>
-	<sys:String x:Key="str.Spc.Res.Class">Class</sys:String>
-	<sys:String x:Key="str.Spc.Res.Object">Object</sys:String>
-	<sys:String x:Key="str.Spc.Res.Field">Field</sys:String>
-	<sys:String x:Key="str.Spc.Res.Type">Type</sys:String>
-	<sys:String x:Key="str.Spc.Res.Sequence">Value sequence</sys:String>
+	<sys:String x:Key="str.Tip.Spc.LocateGameEngine">GameEngine定位：解析从运行态UGameEngine到归属对象的最短指针链路，跳转至变动字段；可访问GWorld无法覆盖的引擎层级对象，绝大多数场景实体优先选用GWorld定位</sys:String>
+	<sys:String x:Key="str.Spc.CopyAddr">复制地址</sys:String>
+	<sys:String x:Key="str.Spc.PickerHeader">快照序列配置</sys:String>
+	<sys:String x:Key="str.Spc.BaselineHint">勾选的最早快照作为基准快照，其对比规则不生效；后续每份快照均与前一份勾选快照做数值对比。检索命中后，复制地址、实时查看功能会将最新快照的运行内存地址发送至Cheat Engine。</sys:String>
+	<sys:String x:Key="str.Spc.Col.Use">选用</sys:String>
+	<sys:String x:Key="str.Spc.Col.Label">快照标签</sys:String>
+	<sys:String x:Key="str.Spc.Col.Captured">捕获时间(UTC)</sys:String>
+	<sys:String x:Key="str.Spc.Col.Session">游戏会话</sys:String>
+	<sys:String x:Key="str.Spc.Col.Predicate">对比规则</sys:String>
+	<sys:String x:Key="str.Spc.Col.ValueFilter">数值筛选</sys:String>
+	<sys:String x:Key="str.Spc.Col.Preview">匹配预览</sys:String>
+	<sys:String x:Key="str.Spc.Res.Class">类名</sys:String>
+	<sys:String x:Key="str.Spc.Res.Object">对象实例</sys:String>
+	<sys:String x:Key="str.Spc.Res.Field">字段名称</sys:String>
+	<sys:String x:Key="str.Spc.Res.Type">数据类型</sys:String>
+	<sys:String x:Key="str.Spc.Res.Sequence">数值变化序列</sys:String>
+
 
 	<!-- SPC GROUP (multiple values) — Single/Group toggle + matrix editor -->
-	<sys:String x:Key="str.Spc.Group.ModeLabel">Mode:</sys:String>
-	<sys:String x:Key="str.Spc.Group.ModeSingle">Single field</sys:String>
-	<sys:String x:Key="str.Spc.Group.ModeGroup">Group (Multiple Values)</sys:String>
-	<sys:String x:Key="str.Spc.Group.Intro">Find OBJECTS holding ALL of 2–4 fields at distinct offsets, where EACH field follows its own direction chain across the snapshots (e.g. Current HP: ·→↓→↑ while Max HP: ·→=→= over [full, damaged, healed]). Tick the snapshots above, pick a value with the selector, then set that value's Compare + Value filter down the snapshot rows. Repeat per value. Run finds objects where every value's chain holds at the same time.</sys:String>
-	<sys:String x:Key="str.Spc.Group.Run">Find group</sys:String>
-	<sys:String x:Key="str.Spc.Group.Clear">Clear</sys:String>
-	<sys:String x:Key="str.Spc.Group.AddSlot">+ value</sys:String>
-	<sys:String x:Key="str.Spc.Group.RemoveSlot">− value</sys:String>
-	<sys:String x:Key="str.Spc.Group.Editing">Editing:</sys:String>
-	<sys:String x:Key="str.Spc.Group.EditingHint">Pick which value's chain the snapshot grid below edits. Each value also has its own width scope.</sys:String>
-	<sys:String x:Key="str.Spc.Group.SlotsHeader">Values (width scope per value):</sys:String>
-	<sys:String x:Key="str.Spc.Group.Col.Class">Class</sys:String>
-	<sys:String x:Key="str.Spc.Group.Col.Object">Object</sys:String>
-	<sys:String x:Key="str.Spc.Group.Col.Matched">Matched values</sys:String>
-	<sys:String x:Key="str.Spc.Group.Detail.Pattern">Pattern</sys:String>
+	<sys:String x:Key="str.Spc.Group.ModeLabel">检索模式：</sys:String>
+	<sys:String x:Key="str.Spc.Group.ModeSingle">单字段序列检索</sys:String>
+	<sys:String x:Key="str.Spc.Group.ModeGroup">多字段组合序列检索</sys:String>
+	<sys:String x:Key="str.Spc.Group.Intro">查找同时包含2~4处不同内存偏移字段的游戏对象，且每个字段各自遵循独立的数值变化趋势链。示例：当前血量走势：基准→下降→回升；最大血量走势：基准→不变→不变（完整血量→受损→回血）。先勾选上方快照，选中一组数值并为每一段快照设定对比规则与数值区间，依次配置全部条件；执行检索后，会筛选出所有同时满足整套变化规律的对象。</sys:String>
+	<sys:String x:Key="str.Spc.Group.Run">开始组合检索</sys:String>
+	<sys:String x:Key="str.Spc.Group.Clear">清空配置</sys:String>
+	<sys:String x:Key="str.Spc.Group.AddSlot">+ 添加数值条件</sys:String>
+	<sys:String x:Key="str.Spc.Group.RemoveSlot">− 移除数值条件</sys:String>
+	<sys:String x:Key="str.Spc.Group.Editing">当前编辑项：</sys:String>
+	<sys:String x:Key="str.Spc.Group.EditingHint">选定需要在下方快照表格中配置变化序列的数值；每组数值均可独立设置数据位宽范围。</sys:String>
+	<sys:String x:Key="str.Spc.Group.SlotsHeader">数值条件列表（每组独立位宽范围）：</sys:String>
+	<sys:String x:Key="str.Spc.Group.Col.Class">所属类</sys:String>
+	<sys:String x:Key="str.Spc.Group.Col.Object">对象实例</sys:String>
+	<sys:String x:Key="str.Spc.Group.Col.Matched">匹配字段序列</sys:String>
+	<sys:String x:Key="str.Spc.Group.Detail.Pattern">变化规律</sys:String>
+
 
 	<!-- N1: per-game class denylist (noise picker) — shared by SPC + Diff -->
-	<sys:String x:Key="str.Noise.PanelHeader">Noise picker — top classes in this result</sys:String>
-	<sys:String x:Key="str.Noise.PanelHint">Tick classes whose hits you consider noise (UI widgets, animation, tick state). Apply adds them to this game's denylist and re-runs the query. The denylist also filters Snapshot Diff and the Class Pivot picker.</sys:String>
-	<sys:String x:Key="str.Noise.Col.Pick">Hide</sys:String>
-	<sys:String x:Key="str.Noise.Col.Class">Class</sys:String>
-	<sys:String x:Key="str.Noise.Col.Hits">Hits</sys:String>
-	<sys:String x:Key="str.Noise.Col.SampleProps">Sample fields</sys:String>
-	<sys:String x:Key="str.Noise.Apply">Apply &amp; re-run</sys:String>
-	<sys:String x:Key="str.Noise.ActiveHeader">Active denylist for this game:</sys:String>
-	<sys:String x:Key="str.Noise.Clear">Clear all</sys:String>
-	<sys:String x:Key="str.Noise.Reset">Reset ticks</sys:String>
-	<sys:String x:Key="str.Noise.RemoveTip">Remove from denylist</sys:String>
+	<sys:String x:Key="str.Noise.PanelHeader">冗余类筛选面板 — 当前结果高频类排行</sys:String>
+	<sys:String x:Key="str.Noise.PanelHint">勾选你判定为无效冗余的类型（UI控件、动画组件、帧状态类等）。点击应用后会将这些类加入当前游戏黑名单，并重新执行检索。黑名单会同步作用于快照对比、类数据透视功能。</sys:String>
+	<sys:String x:Key="str.Noise.Col.Pick">隐藏</sys:String>
+	<sys:String x:Key="str.Noise.Col.Class">类名称</sys:String>
+	<sys:String x:Key="str.Noise.Col.Hits">匹配数量</sys:String>
+	<sys:String x:Key="str.Noise.Col.SampleProps">示例字段</sys:String>
+	<sys:String x:Key="str.Noise.Apply">应用并重新检索</sys:String>
+	<sys:String x:Key="str.Noise.ActiveHeader">当前游戏生效黑名单：</sys:String>
+	<sys:String x:Key="str.Noise.Clear">清空全部黑名单</sys:String>
+	<sys:String x:Key="str.Noise.Reset">取消全部勾选</sys:String>
+	<sys:String x:Key="str.Noise.RemoveTip">从黑名单中移除</sys:String>
+
 
 	<!-- Client-side class-noise filter (Instance / Interesting Funcs+Props / Property Search) -->
-	<sys:String x:Key="str.ClassFilter.Button">Class filter</sys:String>
-	<sys:String x:Key="str.Tip.ClassFilter">Group these results by class and hide noise classes (UI widgets, sound, system components) from the list. Hiding is display-only — untick or Clear to restore.</sys:String>
-	<sys:String x:Key="str.ClassFilter.Hint">Tick a class to hide its rows from the results below (e.g. UI widgets, sound, system components). This only hides them from view — the underlying data is unchanged. Untick or Clear to restore.</sys:String>
-	<sys:String x:Key="str.ClassFilter.Partial">⚠ Counts are partial — the result list was capped, so these are a lower bound.</sys:String>
-	<sys:String x:Key="str.ClassFilter.Clear">Clear (show all)</sys:String>
-	<sys:String x:Key="str.ClassFilter.AutoDetect">Auto-detect</sys:String>
-	<sys:String x:Key="str.Tip.ClassFilter.AutoDetect">Pre-tick classes that are provably engine/system noise — UI widgets, sound, textures, materials, particles, anim instances, or classes in an engine package. Safe by construction (never your gameplay classes); the picks are reversible — untick any you want to keep.</sys:String>
+	<sys:String x:Key="str.ClassFilter.Button">类筛选</sys:String>
+	<sys:String x:Key="str.Tip.ClassFilter">将检索结果按类分组，并在列表中屏蔽UI控件、音效、系统组件这类冗余无用类。仅做界面隐藏，不会删除原始数据；取消勾选或清空即可恢复显示。</sys:String>
+	<sys:String x:Key="str.ClassFilter.Hint">勾选对应类，下方结果列表就会隐藏该类条目（如UI界面、音效资源、系统内置组件）。该操作仅影响视图展示，底层数据不会变动；取消勾选或清空筛选就能重新显示。</sys:String>
+	<sys:String x:Key="str.ClassFilter.Partial">⚠ 统计数值为不完全统计：结果存在条数上限，此处数字仅为最低预估量。</sys:String>
+	<sys:String x:Key="str.ClassFilter.Clear">清空筛选（显示全部）</sys:String>
+	<sys:String x:Key="str.ClassFilter.AutoDetect">自动识别冗余类</sys:String>
+	<sys:String x:Key="str.Tip.ClassFilter.AutoDetect">自动预勾选判定为引擎系统冗余的类型：UI控件、音效、贴图、材质、粒子特效、动画实例以及引擎内置包下所有类。不会误勾选游戏玩法实体类，可手动取消勾选需要保留的类型。</sys:String>
 
 	<!-- Class Pivot: right-click hide + hidden-class chips -->
-	<sys:String x:Key="str.Pivot.HideClass">Hide selected class from picker</sys:String>
-	<sys:String x:Key="str.Pivot.HiddenHeader">Hidden classes (Pivot only):</sys:String>
+	<sys:String x:Key="str.Pivot.HideClass">将选中类从透视列表中隐藏</sys:String>
+	<sys:String x:Key="str.Pivot.HiddenHeader">已隐藏类（仅作用于数据透视模块）：</sys:String>
 
 	<!-- Class Pivot (experimental) -->
-	<sys:String x:Key="str.Pivot.Intro">Group one class's instances by a key field's value (e.g. inventory by ItemID) or by object identity, and project the value fields per group. The best key field is auto-suggested (type + name + cardinality). Differing values inside a group render as a collision ⟨N: v1,v2,+M⟩. Snapshot capture is all-numeric, so keys are int/enum IDs. Tip: for transient inventory objects (whose object path is identical, e.g. //Engine/Transient/Item) use a Field key like ItemID — Identity mode would merge them into one group. Switch Source to Snapshot Array to pivot a captured struct array (e.g. Cargo) by its inner-key value (e.g. ItemID) — reorder- and session-immune. Or DataTable for a zero-config pivot of a live DataTable (RowName is the key — no discovery needed).</sys:String>
-	<sys:String x:Key="str.Pivot.SourceHeader">⚙ Pivot target — Source · Snapshot · Class</sys:String>
-	<sys:String x:Key="str.Pivot.Source">Source:</sys:String>
-	<sys:String x:Key="str.Pivot.Snapshot">Snapshot:</sys:String>
-	<sys:String x:Key="str.Pivot.DataTable">DataTable:</sys:String>
-	<sys:String x:Key="str.Pivot.ArrayField">Array field:</sys:String>
-	<sys:String x:Key="str.Pivot.RefreshDataTables">🔄 Find DataTables</sys:String>
-	<sys:String x:Key="str.Pivot.KeyRowName">Key = RowName (zero-config)</sys:String>
-	<sys:String x:Key="str.Pivot.KeyInnerKey">Key = inner-key value (reorder-immune)</sys:String>
-	<sys:String x:Key="str.Pivot.ThisProperty">Pivot this property…</sys:String>
-	<sys:String x:Key="str.Pivot.ClassFilter">Class:</sys:String>
-	<sys:String x:Key="str.Pivot.ClassFilterHint">type to filter, then pick…</sys:String>
-	<sys:String x:Key="str.Pivot.Run">Run Pivot</sys:String>
-	<sys:String x:Key="str.Pivot.OpenWalker">Open in Live Walker</sys:String>
-	<sys:String x:Key="str.Pivot.CopyAddr">Copy Address</sys:String>
+	<sys:String x:Key="str.Pivot.Intro">
+		将同一个类的所有实例，依据关键字段数值（例如背包按物品ID分组）或者对象本体进行归类聚合，并展示每组内各项字段数值。系统会自动推荐最优关键字段（结合类型、字段名、数据基数判定）。同一分组内数值不一致时会以冲突形式展示：⟨数量: 值1,值2,+更多⟩。快照仅采集数字数据，因此分组键仅限整型/枚举ID。
+		小贴士：临时生成的背包道具对象内存路径完全一致（//Engine/Transient/Item），请选用ItemID这类字段作为分组键；若选用对象本体模式会全部合并为一组。
+		数据源切换为快照数组，可对结构体数组（如货舱列表）依照内部ID透视分组，不受数组顺序、游戏会话重启影响；也可选用数据表模式，一键透视运行中DataTable数据表，以行名作为分组键无需额外配置。
+	</sys:String>
+	<sys:String x:Key="str.Pivot.SourceHeader">⚙ 透视数据源设置 — 来源 · 快照 · 目标类</sys:String>
+	<sys:String x:Key="str.Pivot.Source">数据源：</sys:String>
+	<sys:String x:Key="str.Pivot.Snapshot">快照：</sys:String>
+	<sys:String x:Key="str.Pivot.DataTable">数据表：</sys:String>
+	<sys:String x:Key="str.Pivot.ArrayField">数组字段：</sys:String>
+	<sys:String x:Key="str.Pivot.RefreshDataTables">🔄 扫描加载数据表</sys:String>
+	<sys:String x:Key="str.Pivot.KeyRowName">分组键 = 数据表行名（无需配置）</sys:String>
+	<sys:String x:Key="str.Pivot.KeyInnerKey">分组键 = 数组内部键值（不受排序变动影响）</sys:String>
+	<sys:String x:Key="str.Pivot.ThisProperty">对该字段执行透视统计…</sys:String>
+	<sys:String x:Key="str.Pivot.ClassFilter">筛选类：</sys:String>
+	<sys:String x:Key="str.Pivot.ClassFilterHint">输入字符检索，之后选中目标类…</sys:String>
+	<sys:String x:Key="str.Pivot.Run">执行数据透视</sys:String>
+	<sys:String x:Key="str.Pivot.OpenWalker">在实时内存浏览器打开</sys:String>
+	<sys:String x:Key="str.Pivot.CopyAddr">复制内存地址</sys:String>
 	<sys:String x:Key="str.Pivot.LocateGWorld">🌍</sys:String>
-	<sys:String x:Key="str.Tip.Pivot.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to the selected group's representative object and show it in Live Walker</sys:String>
+	<sys:String x:Key="str.Tip.Pivot.LocateGWorld">GWorld定位：解析从GWorld到选中分组代表对象的最短指针路径，并在实时浏览器打开</sys:String>
 	<sys:String x:Key="str.Pivot.LocateGameEngine">⚙</sys:String>
-	<sys:String x:Key="str.Tip.Pivot.LocateGameEngine">Locate in GameEngine: shortest pointer path from the live UGameEngine down to the selected group's representative object. Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
-	<sys:String x:Key="str.Pivot.ResultFilterHint">filter results…</sys:String>
-	<sys:String x:Key="str.Pivot.GroupBy">Group by:</sys:String>
-	<sys:String x:Key="str.Pivot.KeyField">Key field:</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Key">Key</sys:String>
-	<sys:String x:Key="str.Pivot.Col.KeyTip">Add this field to the group key (Field mode). The key becomes the tuple of the Key field above + every ticked field, so e.g. (Team · Slot) groups by the combination. A single key = a plain group key.</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Project">Value</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Field">Field</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Type">Type</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Distinct">Distinct</sys:String>
-	<sys:String x:Key="str.Pivot.Col.Insts">Instances</sys:String>
-	<sys:String x:Key="str.Pivot.Col.KeyScore">Key score</sys:String>
-	<sys:String x:Key="str.Pivot.ResultsHint">Tick the value fields above to project them; tick Key to build a composite key (e.g. Team · Slot) — Field mode only. Identity mode groups spawn-normalised siblings (BP_Enemy_C_0/_1/…) together. Select a group → Open in Live Walker / Copy Address hands its representative instance to CE.</sys:String>
-	<sys:String x:Key="str.Pivot.Res.Count">Count</sys:String>
-	<sys:String x:Key="str.Pivot.Res.Key">Key</sys:String>
-	<sys:String x:Key="str.Pivot.Res.Values">Projected values</sys:String>
+	<sys:String x:Key="str.Tip.Pivot.LocateGameEngine">GameEngine定位：从运行态UGameEngine检索至分组代表对象的最短指针链路；可访问GWorld无法覆盖的引擎层级对象，绝大多数场景实体优先使用GWorld定位</sys:String>
+	<sys:String x:Key="str.Pivot.ResultFilterHint">筛选结果内容…</sys:String>
+	<sys:String x:Key="str.Pivot.GroupBy">分组依据：</sys:String>
+	<sys:String x:Key="str.Pivot.KeyField">关键字段：</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Key">复合分组键</sys:String>
+	<sys:String x:Key="str.Pivot.Col.KeyTip">将此字段加入分组键（仅限字段分组模式）。最终键变为主关键字段+所有勾选字段的组合，例如（阵营 · 背包槽位）进行联合分组；仅单个字段即为普通单键分组。</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Project">展示数值</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Field">字段名称</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Type">数据类型</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Distinct">唯一值数量</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Insts">实例总数</sys:String>
+	<sys:String x:Key="str.Pivot.Col.KeyScore">键适配评分</sys:String>
+	<sys:String x:Key="str.Pivot.ResultsHint">勾选上方数值字段即可聚合展示；勾选复合键可搭建多条件分组（如阵营+槽位），仅字段模式可用。对象本体分组模式会将同蓝图生成的多个实例归为一组（BP_Enemy_C_0/_1等）。选中分组后，打开浏览器、复制地址会将该组代表实例内存地址发送至CE。</sys:String>
+	<sys:String x:Key="str.Pivot.Res.Count">实例数量</sys:String>
+	<sys:String x:Key="str.Pivot.Res.Key">分组键</sys:String>
+	<sys:String x:Key="str.Pivot.Res.Values">聚合字段数值</sys:String>
 
 	<!-- Class Pivot: change-driven discovery (the automatic front-door) -->
-	<sys:String x:Key="str.Pivot.Discover.Header">🔍 Suggest targets — find what changed</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Intro">Don't know which class to pivot? Capture 2-4 snapshots around an in-game action (e.g. spend gold, take damage), tick them below, and Discover ranks the (class, property) targets that MOVED — by how much each looks like game state (named fields, specific changes, low noise). Pick one and Use → to pivot it. No class/key guessing.</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Pick">Snapshots (tick 2-4, oldest → newest = Before … After):</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Run">🔍 Discover</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Use">Use → (pivot this)</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Header">🔍 智能推荐目标 — 定位发生变动的数值</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Intro">不清楚需要透视哪个类？在执行游戏操作前后捕获2~4份快照（例如消耗金币、受到伤害），勾选下方快照后点击检索，系统会按照变动可信度对（类、属性）进行排序；评判依据包含字段命名规范性、数值变化特征、冗余干扰程度，筛选出最贴合游戏状态的目标项。选中条目后点击使用，即可直接跳转数据透视页面，无需手动猜测类与关键字段。</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Pick">快照选择（勾选2~4份，从旧到新 = 操作前 … 操作后）：</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Run">🔍 开始智能检索</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Use">选用 → 以此进行透视分析</sys:String>
+
 	<!-- Usage limits, shown on the tab so expectations are clear up front. -->
-	<sys:String x:Key="str.Pivot.Discover.Limits">How it works &amp; limits:&#10;• Capture 2-4 snapshots around the action you want to isolate (Before … After).&#10;• Use 3-4 to separate a one-time change from constant per-frame noise (rotation, timers, positions); with only 2, both just look "changed".&#10;• Only fields that MOVED appear — a value that never changed between your captures will not show.&#10;• Across a game restart, only objects that re-appear with a stable identity (GameInstance / PlayerState / Pawn / components / GAS) re-join reliably; randomly-spawned actors may not.&#10;• The scan covers the numeric fields captured in the snapshot and runs server-side; on a large capture it can take several seconds (cancellable).</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Class">Class</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Prop">Property</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Changed">Changed</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Dir">Δ</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Cat">Category</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Shape">Shape</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Seq">Sample (oldest → newest)</sys:String>
-	<sys:String x:Key="str.Pivot.Discover.Col.Score">Score</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Limits">
+		运行原理与约束：
+		• 在目标操作节点前后捕获2~4份快照；
+		• 推荐使用3~4份快照，可区分一次性数值变动和每帧持续刷新的干扰数据（旋转、计时器、坐标等）；仅2份快照会把所有变动统一判定为有效更改；
+		• 仅展示数值发生变化的字段，全程无变动的字段不会出现在列表中；
+		• 跨游戏重启场景：仅有身份稳定持久的对象可稳定匹配（游戏实例、玩家状态、角色实体、组件、GAS属性集等）；随机生成的场景实体大概率无法正常关联；
+		• 检索范围为快照内所有数字字段，运算交由服务端执行；超大快照耗时可达数秒，支持中途取消。
+	</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Class">所属类</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Prop">属性字段</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Changed">变动次数</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Dir">变化趋势</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Cat">数据分类</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Shape">变化形态</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Seq">数值序列（最早→最新）</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Score">可信度评分</sys:String>
 
 	<!-- Proxy Deploy -->
-	<sys:String x:Key="str.ProxyDeploy.ProxyType">Proxy DLL:</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ProxyType">代理DLL文件：</sys:String>
 	<sys:String x:Key="str.ProxyDeploy.Type.Version">version.dll</sys:String>
 	<sys:String x:Key="str.ProxyDeploy.Type.Dinput8">dinput8.dll</sys:String>
 	<sys:String x:Key="str.ProxyDeploy.Type.Dxgi">dxgi.dll</sys:String>
 	<sys:String x:Key="str.ProxyDeploy.Type.Winmm">winmm.dll</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Scan">Scan Steam</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.RouteOrder">How the DLL gets into the game — best route first:  ① Deploy a proxy DLL (below) — loads with the game, survives restarts, no Cheat Engine involved.  ② Inject into a running game (button above) — nothing to install, but repeat every launch.  ③ Working in Cheat Engine? Tools ▸ Install CE autorun Helper gives every table an ue5_inject(), permanently; Tools ▸ Add "Inject DLL" Record pushes a one-off record into the table you have open.  ④ dist\UE5CEDumper.CT — a standalone table; developer fallback.</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Inject">Inject into running game…</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Refresh">Refresh</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Deploy">Deploy</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Undeploy">Undeploy</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.UpdateAll">Update All</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Force">Force Overwrite</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.SelectAll">All</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.UnselectAll">None</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.InvertSel">Invert</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.SourceDll">Source DLL:</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColName">Game</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColPath">Binaries Path</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColStatus">Status</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColSuggested">Suggested proxy</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColVersion">Version</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ColError">Error</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.SuggestToggle">Suggest proxy</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Source">Source:</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Source.Steam">Steam</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Source.Drives">Scan Drives</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.DriveHint">Select drive(s):</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.ScanDrives">Scan Drives</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.RefreshDrives">Refresh Drives</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.CancelScan">Cancel</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Scan">扫描Steam游戏</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.RouteOrder">
+		DLL载入游戏的四种方案（推荐优先级从高至低）：
+		① 部署下方代理DLL：随游戏进程一同加载，重启游戏依旧生效，无需依赖Cheat Engine；
+		② 注入正在运行的游戏进程（上方按钮）：无需安装文件，但每次开游戏都要重新注入；
+		③ Cheat Engine常驻方案：工具→安装CE自启动助手，可给所有脚本表永久添加ue5_inject()注入函数；工具→添加DLL注入记录，可给当前打开的脚本表插入单次注入条目；
+		④ dist\UE5CEDumper.CT：独立脚本表，供开发者备用兜底方案。
+	</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Inject">注入至正在运行的游戏进程…</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Refresh">刷新列表</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Deploy">部署代理文件</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Undeploy">卸载代理文件</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.UpdateAll">批量更新全部</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Force">强制覆盖写入</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.SelectAll">全选</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.UnselectAll">取消全选</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.InvertSel">反选</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.SourceDll">源DLL路径：</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColName">游戏名称</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColPath">二进制程序目录</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColStatus">部署状态</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColSuggested">推荐代理文件名</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColVersion">文件版本</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColError">错误信息</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.SuggestToggle">自动推荐适配代理DLL</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Source">扫描来源：</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Source.Steam">Steam平台</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Source.Drives">全盘扫描</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.DriveHint">勾选需要扫描的磁盘分区：</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ScanDrives">开始全盘扫描</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.RefreshDrives">刷新磁盘列表</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.CancelScan">取消扫描</sys:String>
 
-	<!-- Leftover ("orphan") proxy cleanup. Uninstalling a game leaves its folder behind BECAUSE our
-         proxy DLL is a file Steam does not own, so an empty shell survives with our DLL inside it. -->
-	<sys:String x:Key="str.ProxyDeploy.Orphans.Header">Leftover proxy DLLs</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.Intro">Uninstalling a game leaves its folder behind when our proxy DLL is still in it — Steam will not delete a file it does not own. This finds those leftovers. Nothing is removed until you check a row and confirm.</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.Scan">Find leftovers</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ScanTip">Scans your Steam libraries for folders that hold only our proxy DLL, plus any location our own logs show a proxy was deployed to. Reports only — it never deletes.</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.Report">Report…</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ReportTip">Writes a dry-run text file listing exactly what would be removed and what would be left alone, then opens it. Changes nothing on disk.</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.Delete">Delete checked ({0})</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.DeleteTip">Moves the checked DLLs to the Recycle Bin, then removes the folders they leave empty. You will see the exact paths first.</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.OpenFolder">Open folder</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.NoneFound">No leftover proxy DLLs found.</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.FileOnlyNote">Only the DLL is removed — no folders are touched for this row. (See the note below for why.)</sys:String>
+
+	<!-- Leftover ("orphan") proxy cleanup. Uninstalling a game leaves its folder behind BECAUSE our-->
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Header">残留代理DLL清理</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Intro">游戏卸载后，若目录内仍存在我们部署的代理DLL，Steam不会删除这份不属于自身管理的文件，从而产生残留文件夹。该功能用于检索这类遗留文件；勾选条目并确认前不会执行任何删除操作。</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Scan">检索残留文件</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ScanTip">遍历所有Steam库目录，查找仅存放代理DLL的空文件夹，同时检索程序日志记录过代理部署的全部路径；仅生成扫描报告，不会自动删除任何文件。</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Report">生成预览报告…</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ReportTip">生成一份试运行文本清单，标注将要删除与保留的全部路径并自动打开，不会对硬盘文件产生任何改动。</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Delete">删除已勾选项（共{0}个）</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.DeleteTip">将勾选的DLL移入回收站，同时清空删除文件后变为空白的文件夹；执行前会完整展示所有文件路径供核对。</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.OpenFolder">打开所在文件夹</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.NoneFound">未检索到任何残留代理DLL文件。</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.FileOnlyNote">本条仅删除DLL文件，不会处理对应文件夹（下方注释可查看具体缘由）。</sys:String>
+
 
 	<!-- Confirmation window -->
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmTitle">Remove leftover proxy DLLs?</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmLead">Our DLLs below are moved to the Recycle Bin, so this can be undone from there. Folders are then removed one level at a time and only while each is left completely empty — the moment a folder still holds anything, that folder and everything above it are kept.</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmFilesHeader">Files moved to the Recycle Bin</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmDirsHeader">Folders tried, in this order — each only if it is left empty</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmWhyHeader">Why this is judged a leftover</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmKeptNote">Not touched: {0}</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmYes">Move to Recycle Bin</sys:String>
-	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmNo">Cancel</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmTitle">确认清理残留代理DLL文件？</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmLead">下方列出的DLL文件将会移入回收站，后续可前往回收站撤销恢复。程序会逐层向上尝试删除文件夹，但**仅当文件夹彻底清空时才会被移除**；只要文件夹内还存有任意文件，该文件夹及其上级目录都会完整保留，不会被删除。</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmFilesHeader">即将移入回收站的文件列表</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmDirsHeader">待清理目录顺序：仅目录完全空置才会被删除</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmWhyHeader">判定为残留文件的依据</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmKeptNote">将保留不作处理：{0}</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmYes">移入回收站</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmNo">取消</sys:String>
+
 
 	<!-- Export -->
-	<sys:String x:Key="str.Toolbar.Options">⚙ Options</sys:String>
-	<sys:String x:Key="str.Toolbar.Export">Export</sys:String>
-	<sys:String x:Key="str.Export.SymbolsX64dbg">Symbols (x64dbg .dd64)</sys:String>
-	<sys:String x:Key="str.Export.SymbolsGhidra">Symbols (Ghidra .txt)</sys:String>
-	<sys:String x:Key="str.Export.SymbolsIda">Symbols (IDA .idc)</sys:String>
-	<sys:String x:Key="str.Export.SdkHeader">SDK Header (.h)</sys:String>
-	<sys:String x:Key="str.Export.Usmap">USMAP (.usmap)</sys:String>
-	<sys:String x:Key="str.Export.DumpAll">Dump All Metadata (.jsonl)</sys:String>
-	<sys:String x:Key="str.Tip.Export.DumpAll">Stream every class + property + function (including BPGCs) to a JSON Lines file. Used by scripts/analysis/analyze_dumps.py to derive keyword tables / class bonuses / threshold calibration from real-game data. ~30-60s per game; output is 50-500 MB depending on game size.</sys:String>
-	<sys:String x:Key="str.LiveWalker.ExportHeader">Export .h</sys:String>
+	<sys:String x:Key="str.Toolbar.Options">⚙ 设置选项</sys:String>
+	<sys:String x:Key="str.Toolbar.Export">导出</sys:String>
+	<sys:String x:Key="str.Export.SymbolsX64dbg">符号文件（x64dbg 格式 .dd64）</sys:String>
+	<sys:String x:Key="str.Export.SymbolsGhidra">符号文件（Ghidra 文本格式 .txt）</sys:String>
+	<sys:String x:Key="str.Export.SymbolsIda">符号脚本（IDA 格式 .idc）</sys:String>
+	<sys:String x:Key="str.Export.SdkHeader">SDK 头文件（.h）</sys:String>
+	<sys:String x:Key="str.Export.Usmap">UE 映射文件（.usmap）</sys:String>
+	<sys:String x:Key="str.Export.DumpAll">导出全部元数据（.jsonl）</sys:String>
+	<sys:String x:Key="str.Tip.Export.DumpAll">将所有类、属性、函数（含蓝图生成GC结构）流式导出为JSON Lines文件。可供Python分析脚本analyze_dumps.py解析真实游戏数据，生成关键词库、属性加成表、数值阈值校准数据。单次导出耗时约30~60秒；文件体积随游戏规模浮动，范围50~500MB。</sys:String>
+	<sys:String x:Key="str.LiveWalker.ExportHeader">导出头文件(.h)</sys:String>
+
 
 	<!-- Tools (always-available menu; doesn't depend on a DLL connection) -->
-	<sys:String x:Key="str.Toolbar.Tools">Tools</sys:String>
-	<sys:String x:Key="str.Tools.InjectCeBootstrap">Add "Inject DLL" Record to Current CE Table</sys:String>
-	<sys:String x:Key="str.Tools.InstallCeAutorun">Install CE autorun Helper (every table, permanent)…</sys:String>
-	<sys:String x:Key="str.Tools.InjectCeHelperLua">Inject Helper into Current CE Table</sys:String>
-	<sys:String x:Key="str.Tools.ExportCeHelperLua">Export CE Helper Lua File...</sys:String>
-	<sys:String x:Key="str.Tools.InjectFreezeHelperLua">Inject Freeze Helper into Current CE Table</sys:String>
-	<sys:String x:Key="str.Tools.ExportFreezeHelperLua">Export Freeze Helper Lua File...</sys:String>
+	<sys:String x:Key="str.Toolbar.Tools">工具</sys:String>
+	<sys:String x:Key="str.Tools.InjectCeBootstrap">向当前CE脚本表添加「DLL注入」记录</sys:String>
+	<sys:String x:Key="str.Tools.InstallCeAutorun">安装CE自启动助手（所有脚本表永久生效）…</sys:String>
+	<sys:String x:Key="str.Tools.InjectCeHelperLua">向当前CE脚本表注入辅助运行脚本</sys:String>
+	<sys:String x:Key="str.Tools.ExportCeHelperLua">导出CE辅助Lua脚本文件…</sys:String>
+	<sys:String x:Key="str.Tools.InjectFreezeHelperLua">向当前CE脚本表注入数值冻结辅助脚本</sys:String>
+	<sys:String x:Key="str.Tools.ExportFreezeHelperLua">导出数值冻结Lua脚本文件…</sys:String>
 
 	<!-- Property Search -->
-	<sys:String x:Key="str.PropertySearch.QueryHint">Property name (e.g. Health, Mana, Gold)</sys:String>
-	<sys:String x:Key="str.PropertySearch.TypeHint">Type filter (start typing — e.g. opt, weak)</sys:String>
-	<sys:String x:Key="str.PropertySearch.ResultFilterLabel">Filter results:</sys:String>
-	<sys:String x:Key="str.PropertySearch.ResultFilterHint">Refine current results (no re-query)</sys:String>
-	<sys:String x:Key="str.PropertySearch.Search">Search</sys:String>
-	<sys:String x:Key="str.PropertySearch.GameOnly">Game classes only</sys:String>
-	<sys:String x:Key="str.PropertySearch.Deep">Deep (structs/containers)</sys:String>
-	<sys:String x:Key="str.PropertySearch.FindInstances">finder</sys:String>
-	<sys:String x:Key="str.PropertySearch.CopyOffset">Copy Offset</sys:String>
-	<sys:String x:Key="str.PropertySearch.Freeze">Freeze</sys:String>
+	<sys:String x:Key="str.PropertySearch.QueryHint">属性名称（示例：Health、Mana、Gold）</sys:String>
+	<sys:String x:Key="str.PropertySearch.TypeHint">类型筛选（输入关键词检索，例：opt、weak）</sys:String>
+	<sys:String x:Key="str.PropertySearch.ResultFilterLabel">结果筛选：</sys:String>
+	<sys:String x:Key="str.PropertySearch.ResultFilterHint">精简当前列表（无需重新检索）</sys:String>
+	<sys:String x:Key="str.PropertySearch.Search">检索</sys:String>
+	<sys:String x:Key="str.PropertySearch.GameOnly">仅游戏自定义类</sys:String>
+	<sys:String x:Key="str.PropertySearch.Deep">深度检索（包含结构体/容器内部字段）</sys:String>
+	<sys:String x:Key="str.PropertySearch.FindInstances">实例查找</sys:String>
+	<sys:String x:Key="str.PropertySearch.CopyOffset">复制内存偏移</sys:String>
+	<sys:String x:Key="str.PropertySearch.Freeze">冻结数值</sys:String>
+
 	<!-- Force field (Solide) — hold a discovered field across live instances -->
-	<sys:String x:Key="str.PropertySearch.ForceMenu">Force field (hold across instances)</sys:String>
-	<sys:String x:Key="str.PropertySearch.ForceOn">Force ON</sys:String>
-	<sys:String x:Key="str.PropertySearch.ForceOff">Force OFF</sys:String>
-	<sys:String x:Key="str.PropertySearch.ForceNull">Force → null</sys:String>
-	<sys:String x:Key="str.PropertySearch.ForceValue">Force value…</sys:String>
-	<sys:String x:Key="str.PropertySearch.ForcedHeader">Forced fields:</sys:String>
-	<sys:String x:Key="str.PropertySearch.ForcedClearAll">Clear all</sys:String>
-	<sys:String x:Key="str.Tip.PropertySearch.ForcedClearAll">Release every forced-field hold (best-effort restore each field's captured base).</sys:String>
-	<sys:String x:Key="str.Tip.PropertySearch.ForcedRemove">Release this hold (restore the captured base) and stop re-asserting it.</sys:String>
-	<sys:String x:Key="str.PropertySearch.ForcedCapped">⚠ capped</sys:String>
-	<sys:String x:Key="str.Tip.PropertySearch.ForcedCapped">The instance pool hit the DLL's cap, so the held count is a FLOOR — more live instances of this class exist and are NOT being held. The pool is walked in ascending GObjects order, so the ones dropped are the most recently spawned.</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForceMenu">强制锁定字段（所有实例统一管控）</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForceOn">开启强制锁定</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForceOff">关闭强制锁定</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForceNull">强制置空(null)</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForceValue">自定义强制数值…</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForcedHeader">已锁定字段列表：</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForcedClearAll">清空全部锁定</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.ForcedClearAll">解除所有字段锁定，尽力恢复字段原始捕获基准值</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.ForcedRemove">取消本条锁定，恢复初始数值并停止持续改写</sys:String>
+	<sys:String x:Key="str.PropertySearch.ForcedCapped">⚠ 已达上限</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.ForcedCapped">实例池数量抵达DLL预设上限，当前锁定数为下限值；该类仍存在更多运行实例并未被锁定。遍历顺序依照GObjects升序排列，最晚生成的实例会被舍弃</sys:String>
 
 	<!-- Game Class Filter -->
-	<sys:String x:Key="str.GameClassFilter.Load">Load</sys:String>
-	<sys:String x:Key="str.GameClassFilter.GameOnly">Game classes only</sys:String>
-	<sys:String x:Key="str.GameClassFilter.FilterHint">Filter by name...</sys:String>
-	<sys:String x:Key="str.GameClassFilter.FindInstances">inst</sys:String>
-	<sys:String x:Key="str.GameClassFilter.WalkClass">Walk Class</sys:String>
-	<sys:String x:Key="str.GameClassFilter.FindFunc">Find Func</sys:String>
-	<sys:String x:Key="str.GameClassFilter.SuperLabel">Super:</sys:String>
-	<sys:String x:Key="str.GameClassFilter.SuperHint">(All)</sys:String>
-	<sys:String x:Key="str.GameClassFilter.PackageLabel">Package:</sys:String>
-	<sys:String x:Key="str.GameClassFilter.PackageHint">(All)</sys:String>
-	<sys:String x:Key="str.GameClassFilter.Clear">Clear</sys:String>
+	<sys:String x:Key="str.GameClassFilter.Load">加载类数据</sys:String>
+	<sys:String x:Key="str.GameClassFilter.GameOnly">仅游戏自定义类</sys:String>
+	<sys:String x:Key="str.GameClassFilter.FilterHint">名称筛选…</sys:String>
+	<sys:String x:Key="str.GameClassFilter.FindInstances">实例</sys:String>
+	<sys:String x:Key="str.GameClassFilter.WalkClass">遍历类结构</sys:String>
+	<sys:String x:Key="str.GameClassFilter.FindFunc">查找函数</sys:String>
+	<sys:String x:Key="str.GameClassFilter.SuperLabel">父类：</sys:String>
+	<sys:String x:Key="str.GameClassFilter.SuperHint">（全部）</sys:String>
+	<sys:String x:Key="str.GameClassFilter.PackageLabel">所属包：</sys:String>
+	<sys:String x:Key="str.GameClassFilter.PackageHint">（全部）</sys:String>
+	<sys:String x:Key="str.GameClassFilter.Clear">清空筛选</sys:String>
 
 	<!-- Interesting Functions Finder -->
 	<sys:String x:Key="str.IF.Load">Load</sys:String>
