@@ -931,202 +931,283 @@
 	<sys:String x:Key="str.GameClassFilter.Clear">清空筛选</sys:String>
 
 	<!-- Interesting Functions Finder -->
-	<sys:String x:Key="str.IF.Load">Load</sys:String>
-	<sys:String x:Key="str.IF.GameOnly">Game Only</sys:String>
-	<sys:String x:Key="str.IF.FilterHint">Filter by name (function or class)...</sys:String>
-	<sys:String x:Key="str.IF.ShowAll">Show All (incl. low-score)</sys:String>
-	<sys:String x:Key="str.IF.GameplayActions">Gameplay Actions</sys:String>
-	<sys:String x:Key="str.IF.CallableOnly">BP/Exec only</sys:String>
-	<sys:String x:Key="str.IF.ClearFilters">Clear</sys:String>
-	<sys:String x:Key="str.IF.OpenInst">inst</sys:String>
-	<sys:String x:Key="str.IF.Props">Props</sys:String>
-	<sys:String x:Key="str.IF.OpenLive">Live</sys:String>
-	<sys:String x:Key="str.IF.LocateGWorld">🌍</sys:String>
-	<sys:String x:Key="str.IF.LocateGameEngine">⚙</sys:String>
-	<sys:String x:Key="str.IF.CopyAaScript">AA(B)</sys:String>
-	<sys:String x:Key="str.IF.CopyName">Name</sys:String>
-	<sys:String x:Key="str.Tip.IF.Load">Scan all UFunctions across all loaded UClasses. Takes 2-10s on large games (1M+ objects). Score is computed client-side from name keywords + class bonus + flag bonus.</sys:String>
-	<sys:String x:Key="str.Tip.IF.GameOnly">Skip /Script/Engine, /Script/CoreUObject, etc. Typically reduces the result set ~5x for shipping games. Recheck + re-Load to refresh.</sys:String>
-	<sys:String x:Key="str.Tip.IF.Filter">Substring match against function name OR class name (case-insensitive). e.g. "Money" or "PlayerCharacter".</sys:String>
-	<sys:String x:Key="str.Tip.IF.ClearFilters">Clear the name filter, category, and Show-all toggle (reset to defaults).</sys:String>
-	<sys:String x:Key="str.Tip.IF.OpenInst">Open this row's class in the Instance Finder tab — pre-fills the class name and runs the search to list its live instances.</sys:String>
-	<sys:String x:Key="str.Tip.IF.Category">Filter by category. Categories are picked from the strongest-scoring keyword bucket per function (Stats &gt; Inventory &gt; Movement &gt; Combat &gt; Utility tied with same score).</sys:String>
-	<sys:String x:Key="str.Tip.IF.ShowAll">When off, hide rows with score below the InterestingThreshold (currently 5). When on, show every UFunction regardless of score.</sys:String>
-	<sys:String x:Key="str.Tip.IF.GameplayActions">Opt-in (default off). Fold an extra keyword pack into scoring for character-control + world-interaction + shop verbs the default buckets skip — Dash / Dodge / Roll / Slide / Climb / Interact / Use / Open / Buy / Sell / Shop / Vendor / Merchant / Trade / Purchase. Lets a plain OpenShop() / Dash() / Interact() clear the threshold and show up (tip: combine with a name filter like "shop" or "buy"). Re-scores the loaded set in place — no reload needed. Noisier by design; turn off to return to the cheat-value default.</sys:String>
-	<sys:String x:Key="str.Tip.IF.CallableOnly">Filter (default off): show only functions flagged BlueprintCallable or Exec. Gameplay/control/shop entry points are almost always one of these two, and both flags survive cooking — so this hides native getters/setters/engine plumbing noise. Pairs well with "Gameplay Actions" + "Show All" to browse callable action functions. Pure display filter — doesn't change scores.</sys:String>
-	<sys:String x:Key="str.Tip.IF.Props">List the properties this function reads/writes (static Blueprint-bytecode scan). Native functions have no bytecode and show nothing.</sys:String>
-	<sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Struct tab. Auto-expands the Functions section and selects the target row.</sys:String>
-	<sys:String x:Key="str.Tip.IF.LocateGWorld">Locate in GWorld: find a live instance of this function's class, then show the shortest pointer path from GWorld down to it in Live Walker (stops at the parent that points to it)</sys:String>
-	<sys:String x:Key="str.Tip.IF.LocateGameEngine">Locate in GameEngine: find a live instance of this function's class, then show the shortest pointer path from the live UGameEngine down to it in Live Walker (stops at the parent that points to it). Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
-	<sys:String x:Key="str.Tip.IF.CopyAaScript">Open the Copy AA Script (Baked) dialog for this function. Output requires ue5_invoke_helper.lua embedded in your CE table (Tools -&gt; Export CE Helper Lua File...).</sys:String>
-	<sys:String x:Key="str.Tip.IF.CopyName">Copy this function's name to the clipboard. Useful when pasting into a CE script or another tool.</sys:String>
-	<sys:String x:Key="str.IF.GenerateCT">📦 Generate CT</sys:String>
-	<sys:String x:Key="str.Tip.IF.GenerateCT">Generate one .CT file containing baked-invoke entries for every selected row. Use Ctrl/Shift+click in the grid to multi-select first. Functions with parameters: the helper zero-fills PARAMS; edit the baked PARAMS table in the generated entry before activating.</sys:String>
-	<sys:String x:Key="str.IF.BatchProps">⤋ Props</sys:String>
-	<sys:String x:Key="str.Tip.IF.BatchProps">Fill the "Uses" column for the selected rows at once (or all rows if none selected), so you see which class fields each function reads/writes without opening the per-row popup. Fast — each call reads only that one function's bytecode. Most rows show 0 (native funcs / no field access).</sys:String>
-	<sys:String x:Key="str.IF.UsesCol">Uses</sys:String>
-	<sys:String x:Key="str.Common.CancelBatch">✕ Cancel</sys:String>
-	<sys:String x:Key="str.Common.BatchFuncs">⤋ Funcs</sys:String>
-	<sys:String x:Key="str.Common.BatchFindFunc">⤋ Find Func</sys:String>
-	<sys:String x:Key="str.Tip.Common.BatchFindFunc">Fill the "Funcs" column for the selected rows (or all currently-filtered rows if none selected): which UFunctions take each class as a parameter or return value (reflection scan — includes native functions). Each call is a full game-wide sweep, so narrow the filter or select rows first. Already-scanned rows are skipped (cached).</sys:String>
-	<sys:String x:Key="str.Common.FuncsCol">Funcs</sys:String>
-	<sys:String x:Key="str.Tip.Common.BatchFuncs">Fill the "Funcs" column for the selected rows (or all rows if none selected): which UFunctions reference each property (Blueprint bytecode xref). Each call is a full game scan, so this is slower than the function-side batch — select rows first (Ctrl/Shift+click) to scope it. Most rows show 0 (native-only access / unreferenced).</sys:String>
-
+	<sys:String x:Key="str.IF.Load">加载全部函数</sys:String>
+	<sys:String x:Key="str.IF.GameOnly">仅游戏自定义函数</sys:String>
+	<sys:String x:Key="str.IF.FilterHint">名称筛选（函数名/类名）…</sys:String>
+	<sys:String x:Key="str.IF.ShowAll">显示全部（含低分函数）</sys:String>
+	<sys:String x:Key="str.IF.GameplayActions">游戏交互动作库</sys:String>
+	<sys:String x:Key="str.IF.CallableOnly">仅蓝图可调用/执行入口函数</sys:String>
+	<sys:String x:Key="str.IF.ClearFilters">重置筛选</sys:String>
+	<sys:String x:Key="str.IF.OpenInst">实例</sys:String>
+	<sys:String x:Key="str.IF.Props">读写字段</sys:String>
+	<sys:String x:Key="str.IF.OpenLive">实时内存浏览</sys:String>
+	<sys:String x:Key="str.IF.LocateGWorld">🌍 GWorld定位</sys:String>
+	<sys:String x:Key="str.IF.LocateGameEngine">⚙ GameEngine定位</sys:String>
+	<sys:String x:Key="str.IF.CopyAaScript">生成AA汇编脚本(B)</sys:String>
+	<sys:String x:Key="str.IF.CopyName">复制函数名</sys:String>
+	<sys:String x:Key="str.Tip.IF.Load">扫描所有UClass下的UFunction函数。大型游戏（百万对象以上）耗时2~10秒。分数由客户端依据关键词、所属类权重、函数标识综合计算得出</sys:String>
+	<sys:String x:Key="str.Tip.IF.GameOnly">排除引擎底层模块：/Script/Engine、/Script/CoreUObject等；正式版游戏结果数量通常缩减5倍。重新勾选并加载即可刷新</sys:String>
+	<sys:String x:Key="str.Tip.IF.Filter">模糊匹配函数名或所属类名，大小写不敏感；例：Money、PlayerCharacter</sys:String>
+	<sys:String x:Key="str.Tip.IF.ClearFilters">清空名称检索、分类筛选、全部显示开关，恢复默认状态</sys:String>
+	<sys:String x:Key="str.Tip.IF.OpenInst">跳转实例查找面板，自动填入当前类名并检索运行实例列表</sys:String>
+	<sys:String x:Key="str.Tip.IF.Category">分类筛选；依照函数最高权重关键词划分优先级：属性数值 > 背包物品 > 移动操控 > 战斗逻辑 > 通用工具（同分并列）</sys:String>
+	<sys:String x:Key="str.Tip.IF.ShowAll">关闭时隐藏分值低于阈值（默认5分）的条目；开启后展示所有UFunction函数</sys:String>
+	<sys:String x:Key="str.Tip.IF.GameplayActions">可选附加词库（默认关闭）：为角色操控、场景交互、商店交易类词汇追加权重：闪避、翻滚、滑铲、攀爬、交互、开启、购买、售卖、商人、交易等。可让OpenShop、Dash、Interact这类函数达标显示；常搭配shop/buy关键词检索。结果冗余会小幅提升，关闭即可恢复偏向修改数值的检索模式</sys:String>
+	<sys:String x:Key="str.Tip.IF.CallableOnly">筛选开关（默认关闭）：仅展示标记BlueprintCallable/Exec的函数。游戏操控、商店入口基本均为此类型，打包后标识不会丢失；可过滤原生存取器、引擎底层冗余代码。搭配「游戏交互动作库」+「显示全部」适合浏览交互入口；仅界面筛选，不改动分值</sys:String>
+	<sys:String x:Key="str.Tip.IF.Props">解析蓝图字节码，列出该函数读取、修改的属性；原生C++函数无字节码，不会显示内容</sys:String>
+	<sys:String x:Key="str.Tip.IF.OpenLive">在实时内存浏览器打开该函数；若无运行实例则跳转类结构体面板，自动展开函数列表并选中目标</sys:String>
+	<sys:String x:Key="str.Tip.IF.LocateGWorld">GWorld路径查找：获取该类运行实例，解析从全局GWorld到实例的最短指针链路并展示</sys:String>
+	<sys:String x:Key="str.Tip.IF.LocateGameEngine">GameEngine路径查找：从全局UGameEngine解析指针链路，可访问GWorld无法覆盖的引擎层对象；绝大多数场景实体优先选用GWorld定位</sys:String>
+	<sys:String x:Key="str.Tip.IF.CopyAaScript">弹出烘焙AA汇编脚本窗口；需要CE脚本内置ue5_invoke_helper.lua（工具→导出CE辅助Lua脚本）</sys:String>
+	<sys:String x:Key="str.Tip.IF.CopyName">复制函数名称至剪贴板，方便粘贴到CE脚本或其他逆向工具</sys:String>
+	<sys:String x:Key="str.IF.GenerateCT">📦 批量生成CE脚本(.CT)</sys:String>
+	<sys:String x:Key="str.Tip.IF.GenerateCT">将选中条目批量导出为单个CT文件，内置函数调用入口。按住Ctrl/Shift多选条目；带参数函数默认参数置零，激活前可自行修改参数列表</sys:String>
+	<sys:String x:Key="str.IF.BatchProps">⤋ 批量读取读写字段</sys:String>
+	<sys:String x:Key="str.Tip.IF.BatchProps">批量填充选中条目「读写字段」列（未选中则全部条目），无需逐个点开弹窗查看；仅解析单函数字节码速度较快。原生函数大多无结果</sys:String>
+	<sys:String x:Key="str.IF.UsesCol">读写字段</sys:String>
+	<sys:String x:Key="str.Common.CancelBatch">✕ 取消批量任务</sys:String>
+	<sys:String x:Key="str.Common.BatchFuncs">⤋ 批量引用函数检索</sys:String>
+	<sys:String x:Key="str.Common.BatchFindFunc">⤋ 批量检索调用函数</sys:String>
+	<sys:String x:Key="str.Tip.Common.BatchFindFunc">填充选中条目「调用函数」列：检索所有入参/返回值包含此类的UFunction（含原生函数）。全局扫描耗时较长，建议先筛选范围或多选条目；已扫描条目会缓存跳过</sys:String>
+	<sys:String x:Key="str.Common.FuncsCol">关联函数</sys:String>
+	<sys:String x:Key="str.Tip.Common.BatchFuncs">批量填充属性对应的引用函数：扫描蓝图字节码查找调用该字段的所有函数。全局扫描开销更高，建议框选条目缩小范围；纯原生访问的字段通常无结果</sys:String>
+	
 	<!-- Live Funcs (Live ProcessEvent Call Profiler) -->
-	<sys:String x:Key="str.LF.Start">● Start</sys:String>
-	<sys:String x:Key="str.LF.Stop">■ Stop</sys:String>
-	<sys:String x:Key="str.LF.Refresh">Refresh</sys:String>
-	<sys:String x:Key="str.LF.Clear">Clear</sys:String>
-	<sys:String x:Key="str.LF.FilterHint">Filter by name (function or class)...</sys:String>
-	<sys:String x:Key="str.LF.OpenLive">Live</sys:String>
-	<sys:String x:Key="str.LF.CopyName">Name</sys:String>
-	<sys:String x:Key="str.LF.SetBaseline">⚑ Set Baseline</sys:String>
-	<sys:String x:Key="str.LF.Diff">Diff vs baseline</sys:String>
-	<sys:String x:Key="str.LF.NewOnly">New/changed only</sys:String>
-	<sys:String x:Key="str.LF.ClearBaseline">Clear baseline</sys:String>
-	<sys:String x:Key="str.LF.HideWidgets">Hide UI widgets</sys:String>
-	<sys:String x:Key="str.LF.HideEvents">Hide events/delegates</sys:String>
-	<sys:String x:Key="str.LF.PeriodicOnly">Periodic only</sys:String>
-	<sys:String x:Key="str.LF.EarliestFirst">Earliest first</sys:String>
-	<sys:String x:Key="str.Tip.LF.Start">Start recording which UFunctions the game dispatches through ProcessEvent. Forces the game-thread PE hook to install. After clicking, ALT-TAB to the game and perform ONE action (open the shop, dash, attack), then click Stop — behaviour-based discovery finds the exact function even when its name is unguessable.</sys:String>
-	<sys:String x:Key="str.Tip.LF.Stop">Stop recording and show the UFunctions that fired, ranked by call count. The action-specific function is usually near the top with a low count (a handful of calls), while per-frame Tick/Update functions have huge counts.</sys:String>
-	<sys:String x:Key="str.Tip.LF.Refresh">Re-fetch the current fire-count table without stopping — a live peek while recording, or a re-pull after Stop.</sys:String>
-	<sys:String x:Key="str.Tip.LF.Filter">Substring match against function name OR class name (space = AND, case-insensitive). e.g. "shop" or "open".</sys:String>
-	<sys:String x:Key="str.Tip.LF.OpenLive">Open this function in Live Walker on a live instance of its class (falls back to Class Struct if the class has no live instance). From there you can invoke it.</sys:String>
-	<sys:String x:Key="str.Tip.LF.CopyName">Copy this function's name to the clipboard.</sys:String>
-	<sys:String x:Key="str.Tip.LF.SetBaseline">Capture the CURRENT results as a baseline (an idle reference). Do this: Start → stand still a few seconds → Stop → Set Baseline. Then record the ACTION (open shop) and the list flips to a diff — functions that DIDN'T fire while idle ("NEW") rank to the top, so the action's function stops drowning under per-frame Tick/Update noise.</sys:String>
-	<sys:String x:Key="str.Tip.LF.Diff">Show the "Δ vs base" column and rank new/increased functions first (needs a baseline). Turn off to rank by raw call count again.</sys:String>
-	<sys:String x:Key="str.Tip.LF.NewOnly">Show ONLY functions that are new or fired more than the baseline — the action-specific set. The shop/dash function is almost always in here.</sys:String>
-	<sys:String x:Key="str.Tip.LF.HideWidgets">Hide functions whose owning class is a UI widget (UUserWidget-derived, tagged "UI"). When a shop/menu opens, the widget is CREATED, so all its own methods fire at once and flood the diff — but the widget is the RESULT, not the entry point. Hiding them leaves the persistent opener (on a PlayerController / UI-manager subsystem / interaction component) — the function you can actually call in the open world.</sys:String>
-	<sys:String x:Key="str.Tip.LF.HideEvents">Hide event handlers and delegate signatures (tagged "Event"/"Deleg" in the Type column — On*/callbacks). These are reactions the engine fires AT the game when something happens, not functions you can call to MAKE it happen. Hiding them leaves imperative callables ("Call"). Note: if this empties the list, the action's real entry point wasn't captured (it opened via a native C++ call the ProcessEvent hook can't see, or the panel hadn't appeared yet — record through until it's fully on screen).</sys:String>
-	<sys:String x:Key="str.Tip.LF.PeriodicOnly">Show ONLY functions firing at a regular timer-like cadence (tagged "Timer" in the Kind column) — a steady period, low variation, not the per-frame Tick band. The behaviour-based way to find the callback that drives a cooldown / respawn / damage-over-tick: record while standing IDLE for ~15-20 s (the inverse of the action-diff flow), then enable this to leave just the periodic callbacks. The "Period" column shows the measured interval. Caveat: native C++/lambda timers (SetTimer(this, &amp;UClass::Method)) bypass ProcessEvent entirely and never appear here — only UFUNCTION-bound (BP timer event / SetTimerByFunctionName) timers are visible.</sys:String>
-	<sys:String x:Key="str.Tip.LF.EarliestFirst">Sort by call order — the function that fired FIRST during the recording goes to the top (see the "Order" column). An action's entry point runs BEFORE the reactions it triggers (widget creation, On* notifications), so combined with "New/changed only" this floats the true opener to the top instead of ranking by raw call count. Causal, name-independent.</sys:String>
+	<sys:String x:Key="str.LF.Start">● 开始录制</sys:String>
+	<sys:String x:Key="str.LF.Stop">■ 停止录制</sys:String>
+	<sys:String x:Key="str.LF.Refresh">刷新统计</sys:String>
+	<sys:String x:Key="str.LF.Clear">清空记录</sys:String>
+	<sys:String x:Key="str.LF.FilterHint">名称筛选（函数名/所属类）…</sys:String>
+	<sys:String x:Key="str.LF.OpenLive">实时浏览</sys:String>
+	<sys:String x:Key="str.LF.CopyName">复制函数名</sys:String>
+	<sys:String x:Key="str.LF.SetBaseline">⚑ 设定基准快照</sys:String>
+	<sys:String x:Key="str.LF.Diff">对比基准差值</sys:String>
+	<sys:String x:Key="str.LF.NewOnly">仅新增/变动调用</sys:String>
+	<sys:String x:Key="str.LF.ClearBaseline">清除基准快照</sys:String>
+	<sys:String x:Key="str.LF.HideWidgets">隐藏UI控件类函数</sys:String>
+	<sys:String x:Key="str.LF.HideEvents">隐藏事件/委托回调</sys:String>
+	<sys:String x:Key="str.LF.PeriodicOnly">仅定时周期函数</sys:String>
+	<sys:String x:Key="str.LF.EarliestFirst">按调用先后排序</sys:String>
 
+	<sys:String x:Key="str.Tip.LF.Start">开始捕获游戏经由ProcessEvent分发执行的所有UFunction调用；会自动挂载游戏主线程ProcessEvent钩子。操作流程：点击开始 → 切回游戏执行单一动作（开商店、冲刺、攻击）→ 点击停止。依靠行为差异定位目标函数，即便函数名称完全无法猜测也能精准找到。</sys:String>
+	<sys:String x:Key="str.Tip.LF.Stop">终止录制，展示所有被触发的函数，并按照调用次数排序。动作专属入口函数通常调用次数很少、排名靠前；每帧循环Tick/更新类函数调用量极大，会排在末尾。</sys:String>
+	<sys:String x:Key="str.Tip.LF.Refresh">无需停止录制即可实时拉取当前调用计数；录制中实时查看，或是停止后重新刷新数据。</sys:String>
+	<sys:String x:Key="str.Tip.LF.Filter">函数名/类名字符串模糊匹配，空格代表多关键词同时匹配，大小写不敏感；示例输入：shop、open。</sys:String>
+	<sys:String x:Key="str.Tip.LF.OpenLive">在实时内存浏览器打开该函数所属类的运行实例；若无活跃实例则跳转类结构体页面，可直接调用测试函数。</sys:String>
+	<sys:String x:Key="str.Tip.LF.CopyName">将函数名称复制到剪贴板，方便写入CE脚本或逆向工具。</sys:String>
+	<sys:String x:Key="str.Tip.LF.SetBaseline">将当前闲置状态的调用统计保存为基准参照。标准用法：开始录制 → 原地静置数秒 → 停止 → 设定基准；之后再录制执行游戏动作，列表会计算差值，闲置期间未触发的函数置顶，彻底规避Tick帧更新噪音干扰。</sys:String>
+	<sys:String x:Key="str.Tip.LF.Diff">开启差值Δ列，优先排序新增、调用次数上涨的函数（需提前保存基准快照）；关闭则恢复原始调用次数排序。</sys:String>
+	<sys:String x:Key="str.Tip.LF.NewOnly">只展示相较基准新增、调用频次提升的函数列表，也就是本次动作专属调用集合，商店开启、冲刺这类函数基本都会出现在这里。</sys:String>
+	<sys:String x:Key="str.Tip.LF.HideWidgets">隐藏继承自UUserWidget的UI界面类函数。打开商店/菜单时会批量创建UI控件，大量UI回调会淹没真实入口；UI界面是动作最终呈现结果，并非触发入口。屏蔽后只会保留玩家控制器、UI管理器、交互组件这类可全局调用的开启函数。</sys:String>
+	<sys:String x:Key="str.Tip.LF.HideEvents">
+		隐藏事件、委托回调函数（类型栏标注Event/Deleg）。这类是引擎事件触发的被动回调，无法主动调用去触发对应行为；关闭后仅保留可主动调用的指令型函数。
+		注意：勾选后列表为空代表目标入口未被捕获：入口经由原生C++调用绕过ProcessEvent钩子无法抓取，或是界面尚未完全加载完毕，需完整录制直至面板彻底弹出。
+	</sys:String>
+	<sys:String x:Key="str.Tip.LF.PeriodicOnly">
+		仅展示稳定周期运行的计时器函数（类型标注Timer），周期波动极小，区别于逐帧Tick循环。用于查找冷却、重生、持续掉血这类定时回调：原地闲置录制15~20秒（和动作溯源相反流程），开启此项过滤后仅剩定时任务，周期列会显示实测间隔。
+		局限：原生C++ Lambda定时器完全绕过ProcessEvent无法捕获；仅蓝图定时器、SetTimerByFunctionName绑定的UFUNCTION定时器可见。
+	</sys:String>
+	<sys:String x:Key="str.Tip.LF.EarliestFirst">按照调用时序先后排序，录制期间最先触发的函数排在顶端（查看Order调用序号）。动作入口永远早于后续UI创建、事件回调；搭配「仅新增变动」使用，可抛开函数名称、调用次数干扰，依靠因果顺序锁定真正触发源头。</sys:String>
+	
 	<!-- Console (UFUNCTION(exec) discovery + invoke) -->
-	<sys:String x:Key="str.Con.Load">Load</sys:String>
-	<sys:String x:Key="str.Con.GameOnly">Game Only</sys:String>
-	<sys:String x:Key="str.Con.FilterHint">Filter exec commands by name...</sys:String>
-	<sys:String x:Key="str.Con.ClearFilter">Clear</sys:String>
-	<sys:String x:Key="str.Con.CommandHint">type command (e.g. fly, ghost, god)</sys:String>
-	<sys:String x:Key="str.Con.Run">Run</sys:String>
-	<sys:String x:Key="str.Con.RunSelected">Run Selected</sys:String>
-	<sys:String x:Key="str.Con.RunRow">Run</sys:String>
-	<sys:String x:Key="str.Con.OpenLive">Live</sys:String>
-	<sys:String x:Key="str.Con.CopyAaScript">AA(B)</sys:String>
-	<sys:String x:Key="str.Con.HistoryHeader">Recent invocations</sys:String>
-	<sys:String x:Key="str.Tip.Con.Load">Scan every UFunction and surface those marked with UFUNCTION(exec) (FUNC_Exec=0x200). Many games leave these intact in cooked Shipping — they're the cheat surface the developer already curated.</sys:String>
-	<sys:String x:Key="str.Tip.Con.GameOnly">When OFF (default), engine-side UCheatManager exec commands are included — usually what you want. Flip ON to see only game-specific exec commands.</sys:String>
-	<sys:String x:Key="str.Tip.Con.ClearFilter">Clear the command-name filter and show the full list again.</sys:String>
-	<sys:String x:Key="str.Tip.Con.Filter">Substring match against command name OR class name (case-insensitive). Empty = show all.</sys:String>
-	<sys:String x:Key="str.Tip.Con.CommandInput">Type an exec command name and press Run. No-arg commands invoke directly; commands with parameters open the InvokeParamDialog. Leading slash is stripped (/fly == fly).</sys:String>
-	<sys:String x:Key="str.Tip.Con.RunCommand">Resolve the typed command against the loaded list and invoke. Match is case-insensitive exact funcName; first match wins if multiple classes implement the same name.</sys:String>
-	<sys:String x:Key="str.Tip.Con.RunSelected">Invoke the currently selected row. Same code path as Run on a row.</sys:String>
-	<sys:String x:Key="str.Tip.Con.RunRow">Invoke this exec command. No-arg commands run directly via pipe; commands with parameters open the InvokeParamDialog.</sys:String>
-	<sys:String x:Key="str.Tip.Con.OpenLive">Try to open the implementing class in Live Walker. Falls back to Class Struct on CDO-only classes (UCheatManager subclasses often have no live instance until a PlayerController spawns).</sys:String>
-	<sys:String x:Key="str.Tip.Con.CopyAaScript">Open the Copy AA Script (Baked) dialog for this exec command — useful when you want to bake the invoke into a CE Auto Assembler script for table sharing.</sys:String>
-	<sys:String x:Key="str.Tip.Con.Replay">Re-run this command. Requires the discovery list to still be loaded (re-launch wipes the cache).</sys:String>
+	<sys:String x:Key="str.Con.Load">加载指令列表</sys:String>
+	<sys:String x:Key="str.Con.GameOnly">仅游戏自定义指令</sys:String>
+	<sys:String x:Key="str.Con.FilterHint">指令名称筛选…</sys:String>
+	<sys:String x:Key="str.Con.ClearFilter">清空筛选</sys:String>
+	<sys:String x:Key="str.Con.CommandHint">输入指令（例：fly、ghost、god）</sys:String>
+	<sys:String x:Key="str.Con.Run">执行</sys:String>
+	<sys:String x:Key="str.Con.RunSelected">执行选中项</sys:String>
+	<sys:String x:Key="str.Con.RunRow">运行</sys:String>
+	<sys:String x:Key="str.Con.OpenLive">实时浏览</sys:String>
+	<sys:String x:Key="str.Con.CopyAaScript">生成AA汇编脚本(B)</sys:String>
+	<sys:String x:Key="str.Con.HistoryHeader">最近执行记录</sys:String>
 
+	<sys:String x:Key="str.Tip.Con.Load">遍历全部UFunction，提取标记UFUNCTION(exec)的控制台调试指令。多数正式版打包游戏依旧保留这类接口，属于官方原生调试作弊指令集合。</sys:String>
+	<sys:String x:Key="str.Tip.Con.GameOnly">默认关闭：会包含引擎底层UCheatManager全局指令（最常用）；开启后只显示游戏项目专属自定义指令。</sys:String>
+	<sys:String x:Key="str.Tip.Con.ClearFilter">清空名称检索条件，恢复完整指令列表。</sys:String>
+	<sys:String x:Key="str.Tip.Con.Filter">指令名/所属类模糊匹配，大小写不敏感；空白则展示全部指令。</sys:String>
+	<sys:String x:Key="str.Tip.Con.CommandInput">输入指令后点击执行；无参数指令直接运行，带参数指令会弹出参数填写窗口；开头斜杠会自动剔除（/fly 等同于 fly）。</sys:String>
+	<sys:String x:Key="str.Tip.Con.RunCommand">匹配已加载列表执行指令，大小写不敏感精准匹配函数名；多个类同名指令时，优先命中最先检索到的条目。</sys:String>
+	<sys:String x:Key="str.Tip.Con.RunSelected">执行当前选中的控制台指令，和条目点击运行共用一套调用逻辑。</sys:String>
+	<sys:String x:Key="str.Tip.Con.RunRow">调用本条exec指令；无参数经由管道直接执行，带参数唤起参数配置弹窗。</sys:String>
+	<sys:String x:Key="str.Tip.Con.OpenLive">尝试在实时浏览器打开指令所属类；仅存在CDO默认对象无运行实例时回落至类结构体页面（UCheatManager子类通常要玩家控制器生成后才有实例）。</sys:String>
+	<sys:String x:Key="str.Tip.Con.CopyAaScript">为本条控制台指令生成烘焙Auto Assembler脚本，适合打包分享CE修改表。</sys:String>
+	<sys:String x:Key="str.Tip.Con.Replay">重复执行该指令；程序重启缓存清空后无法回放。</sys:String>
+	
 	<!-- Console: Debug Camera state-aware helper (visible only when the
          loaded exec list contains ToggleDebugCamera). ToggleDebugCamera is
          a stateful toggle; these controls read the CheatManager's
          DebugCameraControllerRef to show ON/OFF and drive deterministic
          Force On / Force Off instead of blind toggling. -->
-	<sys:String x:Key="str.Con.DbgCam.Label">Debug Camera</sys:String>
-	<sys:String x:Key="str.Con.DbgCam.ForceOn">Force On</sys:String>
-	<sys:String x:Key="str.Con.DbgCam.ForceOff">Force Off</sys:String>
-	<sys:String x:Key="str.Con.DbgCam.Refresh">↻</sys:String>
-	<sys:String x:Key="str.Con.DbgCam.CopyCe">Copy CE Script</sys:String>
-	<sys:String x:Key="str.Tip.Con.DbgCam.State">Live Debug Camera state, read from the CheatManager's DebugCameraControllerRef member — the exact field ToggleDebugCamera branches on. ON = a DebugCameraController is active (next plain toggle would turn it OFF). Press ↻ to re-read.</sys:String>
-	<sys:String x:Key="str.Tip.Con.DbgCam.Refresh">Re-read the live Debug Camera state from the CheatManager instance.</sys:String>
-	<sys:String x:Key="str.Tip.Con.DbgCam.ForceOn">Ensure Debug Camera is ON: read current state, and fire ToggleDebugCamera only if it is currently OFF. Idempotent — does nothing if already ON.</sys:String>
-	<sys:String x:Key="str.Tip.Con.DbgCam.ForceOff">Ensure Debug Camera is OFF: read current state, and fire ToggleDebugCamera only if it is currently ON. This is the reliable "turn it off" — plain Run just flips whatever state it's in.</sys:String>
-	<sys:String x:Key="str.Tip.Con.DbgCam.CopyCe">Generate a stateful CE memory-record AA Script (tick = camera ON, untick = camera OFF) — the same robust DLL path as Force On/Off. Self-contained: talks to the DLL mailbox directly, so NO ue5_invoke_helper.lua embed is needed (just UE5Dumper.dll injected). Ships to AOBMaker if connected, else the clipboard.</sys:String>
-
+	<sys:String x:Key="str.Con.DbgCam.Label">调试相机</sys:String>
+	<sys:String x:Key="str.Con.DbgCam.ForceOn">强制开启</sys:String>
+	<sys:String x:Key="str.Con.DbgCam.ForceOff">强制关闭</sys:String>
+	<sys:String x:Key="str.Con.DbgCam.Refresh">↻ 刷新</sys:String>
+	<sys:String x:Key="str.Con.DbgCam.CopyCe">复制CE脚本</sys:String>
+	<sys:String x:Key="str.Tip.Con.DbgCam.State">
+		实时读取CheatManager的DebugCameraControllerRef字段判定调试相机状态，ToggleDebugCamera指令正是依据此字段进行分支判断。
+		开启：存在激活的调试相机控制器，再次点击原生切换指令会关闭；点击刷新可重新读取状态
+	</sys:String>
+	<sys:String x:Key="str.Tip.Con.DbgCam.Refresh">重新从CheatManager运行实例读取调试相机当前状态</sys:String>
+	<sys:String x:Key="str.Tip.Con.DbgCam.ForceOn">稳定开启调试相机：先读取当前状态，仅在关闭状态时调用ToggleDebugCamera；幂等操作，已开启时无任何动作</sys:String>
+	<sys:String x:Key="str.Tip.Con.DbgCam.ForceOff">稳定关闭调试相机：先读取当前状态，仅在开启状态时执行关闭；区别于原生盲切换指令，可稳妥关闭相机</sys:String>
+	<sys:String x:Key="str.Tip.Con.DbgCam.CopyCe">
+		生成带状态判定的CE汇编脚本（勾选开启相机、取消勾选关闭），底层逻辑与面板强制开关完全一致；
+		脚本独立封装，直接和注入的UE5Dumper.dll消息队列通信，无需嵌入ue5_invoke_helper.lua；
+		已接入AOBMaker则直接推送至CE，未连接则复制文本至剪贴板
+	</sys:String>
+	
 	<!-- Teleport panel (BugIt-style: marker save/recall + cursor teleport) -->
-	<sys:String x:Key="str.TP.PoseHeader">Current Pose</sys:String>
-	<sys:String x:Key="str.TP.Refresh">Refresh</sys:String>
-	<sys:String x:Key="str.TP.Auto">Auto (0.5s)</sys:String>
-	<sys:String x:Key="str.TP.Loc">Location (X / Y / Z):</sys:String>
-	<sys:String x:Key="str.TP.Rot">Rotation (Pitch / Yaw / Roll):</sys:String>
-	<sys:String x:Key="str.TP.Map">Map:</sys:String>
-	<sys:String x:Key="str.TP.Pawn">Pawn:</sys:String>
-	<sys:String x:Key="str.TP.Locate">🌍 Locate</sys:String>
-	<sys:String x:Key="str.TP.LocateGameEngine">⚙ Locate</sys:String>
-	<sys:String x:Key="str.TP.LocatePos">🌍 Locate</sys:String>
-	<sys:String x:Key="str.TP.LocateVel">🌍 Locate</sys:String>
-	<sys:String x:Key="str.TP.LocateAccel">🌍 Locate</sys:String>
-	<sys:String x:Key="str.TP.LocateSpeed">🌍 Locate</sys:String>
-	<sys:String x:Key="str.TP.LocateCamLoc">🌍 Locate</sys:String>
-	<sys:String x:Key="str.TP.LocateCamFov">🌍 Locate</sys:String>
-	<sys:String x:Key="str.TP.LocateRot">🌍 Locate</sys:String>
-	<sys:String x:Key="str.TP.LocateCamRot">🌍 Locate</sys:String>
-	<sys:String x:Key="str.TP.Velocity">Velocity (X / Y / Z):</sys:String>
-	<sys:String x:Key="str.TP.Speed">Speed:</sys:String>
-	<sys:String x:Key="str.TP.Accel">Acceleration (X / Y / Z):</sys:String>
-	<sys:String x:Key="str.TP.MarkersHeader">Markers</sys:String>
-	<sys:String x:Key="str.TP.Save">Save</sys:String>
-	<sys:String x:Key="str.TP.Recall">Recall</sys:String>
-	<sys:String x:Key="str.TP.Force">Force</sys:String>
-	<sys:String x:Key="str.TP.Clear">Clear</sys:String>
-	<sys:String x:Key="str.TP.CursorHeader">Cursor Teleport (2.5D / 45° games)</sys:String>
-	<sys:String x:Key="str.TP.ToCursor">Teleport to cursor</sys:String>
-	<sys:String x:Key="str.TP.ZOffset">Z offset:</sys:String>
-	<sys:String x:Key="str.TP.Channel">Channel:</sys:String>
-	<sys:String x:Key="str.TP.FallbackCenter">Fall back to screen center</sys:String>
-	<sys:String x:Key="str.TP.CursorHotkey">Global cursor hotkey (keep game focused)</sys:String>
-	<sys:String x:Key="str.TP.BugHeader">BugItGo Interop</sys:String>
-	<sys:String x:Key="str.TP.CopyBugItGo">Copy as BugItGo</sys:String>
-	<sys:String x:Key="str.TP.RunBugItGo">Run</sys:String>
-	<sys:String x:Key="str.TP.BugHint">Paste 'BugItGo X Y Z', 'X Y Z', or a ?BugLoc=(...)?BugRot=(...) string</sys:String>
-	<sys:String x:Key="str.TP.LastHeader">Last Position (auto-saved)</sys:String>
-	<sys:String x:Key="str.TP.LastHint">The dumper records where you were just before every Recall / Force / BugItGo / cursor teleport, so you can undo a jump that went wrong. This slot is managed by the system — you can't save into it, only recall it.</sys:String>
-	<sys:String x:Key="str.TP.RecallLast">Recall last</sys:String>
-	<sys:String x:Key="str.TP.HkHeader">Hotkey Settings</sys:String>
-	<sys:String x:Key="str.TP.HkHint">Global hotkeys for markers (Save / Recall / Recall-last), BugItGo, Debug camera, and the God Mode / Super Jump / Move Speed / Gravity toggles + teleport / cursor actions (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Click Cancel or press Esc to abort. Keyboard only for now (mouse extra-buttons / gamepad not yet supported). Saved automatically. A combo marked ⚠ is held by another app — free it and reconnect, or bind a different one.</sys:String>
-	<sys:String x:Key="str.TP.ExpHkHeader">Experimental Hotkeys</sys:String>
-	<sys:String x:Key="str.TP.ExpHkHint">Global hotkeys for the experimental features (Keep Foreground ON/OFF, Fly toggle). These are only active while Experimental features is enabled — turning it off unbinds them (and the emergency Keep-Foreground-OFF key). Bind them the same way: click Set, then press the combo.</sys:String>
-	<sys:String x:Key="str.TP.HkClear">Clear</sys:String>
-	<sys:String x:Key="str.TP.CeHeader">CE Export</sys:String>
-	<sys:String x:Key="str.TP.AddActions">Add action records to CE</sys:String>
-	<sys:String x:Key="str.TP.SaveCt">Save .CT…</sys:String>
+	<sys:String x:Key="str.TP.PoseHeader">当前姿态坐标</sys:String>
+	<sys:String x:Key="str.TP.Refresh">刷新</sys:String>
+	<sys:String x:Key="str.TP.Auto">自动刷新（0.5秒间隔）</sys:String>
+	<sys:String x:Key="str.TP.Loc">坐标位置（X / Y / Z）：</sys:String>
+	<sys:String x:Key="str.TP.Rot">旋转角度（俯仰/偏航/翻滚）：</sys:String>
+	<sys:String x:Key="str.TP.Map">当前关卡：</sys:String>
+	<sys:String x:Key="str.TP.Pawn">操控角色：</sys:String>
+	<sys:String x:Key="str.TP.Locate">🌍 GWorld定位</sys:String>
+	<sys:String x:Key="str.TP.LocateGameEngine">⚙ GameEngine定位</sys:String>
+	<sys:String x:Key="str.TP.LocatePos">🌍 定位坐标字段</sys:String>
+	<sys:String x:Key="str.TP.LocateVel">🌍 定位速度字段</sys:String>
+	<sys:String x:Key="str.TP.LocateAccel">🌍 定位加速度字段</sys:String>
+	<sys:String x:Key="str.TP.LocateSpeed">🌍 定位速率</sys:String>
+	<sys:String x:Key="str.TP.LocateCamLoc">🌍 定位相机坐标</sys:String>
+	<sys:String x:Key="str.TP.LocateCamFov">🌍 定位相机视野FOV</sys:String>
+	<sys:String x:Key="str.TP.LocateRot">🌍 定位视角旋转</sys:String>
+	<sys:String x:Key="str.TP.LocateCamRot">🌍 定位相机旋转</sys:String>
+	<sys:String x:Key="str.TP.Velocity">运动速度（X / Y / Z 厘米/秒）：</sys:String>
+	<sys:String x:Key="str.TP.Speed">合速率：</sys:String>
+	<sys:String x:Key="str.TP.Accel">加速度（X / Y / Z 厘米/秒²）：</sys:String>
+
+	<sys:String x:Key="str.TP.MarkersHeader">坐标标记点</sys:String>
+	<sys:String x:Key="str.TP.Save">保存点位</sys:String>
+	<sys:String x:Key="str.TP.Recall">传送至标记</sys:String>
+	<sys:String x:Key="str.TP.Force">强制跨关卡传送</sys:String>
+	<sys:String x:Key="str.TP.Clear">清空标记</sys:String>
+
+	<sys:String x:Key="str.TP.CursorHeader">光标传送（适配2.5D、45度俯视角游戏）</sys:String>
+	<sys:String x:Key="str.TP.ToCursor">传送到鼠标光标处</sys:String>
+	<sys:String x:Key="str.TP.ZOffset">Z轴高度偏移：</sys:String>
+	<sys:String x:Key="str.TP.Channel">碰撞检测通道：</sys:String>
+	<sys:String x:Key="str.TP.FallbackCenter">无光标时改用屏幕中心落点</sys:String>
+	<sys:String x:Key="str.TP.CursorHotkey">全局光标传送热键（保持游戏窗口焦点即可触发）</sys:String>
+
+	<sys:String x:Key="str.TP.BugHeader">BugItGo 互通功能</sys:String>
+	<sys:String x:Key="str.TP.CopyBugItGo">转为BugItGo格式复制</sys:String>
+	<sys:String x:Key="str.TP.RunBugItGo">执行坐标传送</sys:String>
+	<sys:String x:Key="str.TP.BugHint">粘贴格式支持：BugItGo X Y Z、纯XYZ坐标、?BugLoc=(坐标)?BugRot=(旋转)字符串</sys:String>
+
+	<sys:String x:Key="str.TP.LastHeader">上一位置（系统自动存档）</sys:String>
+	<sys:String x:Key="str.TP.LastHint">
+		每次执行召回、强制传送、BugItGo、光标传送前，工具都会自动记录当前位置，用于传送失误后撤销；
+		该存储位由系统管理，无法手动存入，仅可撤回调用
+	</sys:String>
+	<sys:String x:Key="str.TP.RecallLast">返回上一位置</sys:String>
+
+	<sys:String x:Key="str.TP.HkHeader">热键设置</sys:String>
+	<sys:String x:Key="str.TP.HkHint">
+		全局热键配置：标记保存/召回/回退、BugItGo、调试相机、无敌模式/超级跳跃/移速/重力开关、各类传送动作；
+		游戏处于前台时即可触发。绑定方式：点击设置，按下组合键（Ctrl/Alt/Shift+按键）或单键；Esc取消绑定。
+		暂仅支持键盘，鼠标侧键、手柄无效；配置自动保存。带⚠标识代表热键已被其他程序占用，需释放或更换组合键
+	</sys:String>
+
+	<sys:String x:Key="str.TP.ExpHkHeader">实验性功能热键</sys:String>
+	<sys:String x:Key="str.TP.ExpHkHint">前台常驻开关、飞行模式切换等实验功能全局热键；仅开启实验功能后生效，关闭则自动解绑（含紧急后台退出热键）；绑定方式同上</sys:String>
+	<sys:String x:Key="str.TP.HkClear">清空热键绑定</sys:String>
+
+	<sys:String x:Key="str.TP.CeHeader">导出至CE</sys:String>
+	<sys:String x:Key="str.TP.AddActions">批量添加动作记录至CE地址列表</sys:String>
+	<sys:String x:Key="str.TP.SaveCt">保存CE修改表(.CT)…</sys:String>
+
 	<!-- Global pointers (CE) — DLL-invoke GWorld / GameEngine as CE symbols -->
-	<sys:String x:Key="str.TP.PtrHeader">Global Pointers → Cheat Engine symbols</sys:String>
-	<sys:String x:Key="str.TP.PtrHint">Add a CE record that asks the injected UE5Dumper.dll for a live global pointer and publishes it as a registered CE symbol you can reference directly. ENABLE the record → it registers the symbol (UE_GWorld / UE_GameEngine); DISABLE → it unregisters (and frees any buffer). Use the symbol as a pointer base: [UE_GWorld]+offset / [UE_GameEngine]+offset, freeze it, or read it in any record. GWorld is bound to the stable &amp;GWorld slot (auto-follows level changes); GameEngine is a snapshot of the UEngine* (re-tick to refresh). Pushed into Cheat Engine via the AOBMaker plugin; if AOBMaker isn't connected, the CE memory-record XML is copied to the clipboard instead — paste it into CE's address list (right-click → Paste). Needs the DLL injected and a running game.</sys:String>
-	<sys:String x:Key="str.TP.PtrGWorld">Get GWorld</sys:String>
-	<sys:String x:Key="str.TP.PtrGameEngine">Get GameEngine</sys:String>
-	<sys:String x:Key="str.Tip.TP.PtrGWorld">Add a CE record that resolves the stable &amp;GWorld pointer slot via the DLL and registers it directly as the symbol UE_GWorld, so [UE_GWorld]+offset dereferences the slot to the CURRENT UWorld and chains into it — it auto-follows level transitions (no snapshot). Enable = register, disable = unregister (nothing to free — the slot is a game address). Pushed via AOBMaker, or copied as paste-able CE memory-record XML if AOBMaker isn't connected. Uses the mailbox (CMD_QUERY_PTR), so it works where executeCodeEx can't read export returns.</sys:String>
-	<sys:String x:Key="str.Tip.TP.PtrGameEngine">Add a CE record that resolves the live UEngine* (GameEngine instance) via the DLL and registers it as the symbol UE_GameEngine, so [UE_GameEngine]+offset chains straight into the engine. Resolved by walking GObjects — no static GEngine slot needed. Enable = register, disable = unregister + free. Pushed via AOBMaker, or copied as paste-able CE memory-record XML if AOBMaker isn't connected. Uses the mailbox (CMD_QUERY_PTR).</sys:String>
-	<sys:String x:Key="str.TP.Warning">⚠ Single-player only. Online games will rubber-band or may flag teleports.</sys:String>
-	<sys:String x:Key="str.TP.BestEffort">ℹ Best-effort, per the design spec (docs/teleport-spec.md): the pawn is resolved by reflection and moved via the engine's own functions where available, with memory-write fallbacks. Works on most games, but some drive the character or the camera from separate internal systems — so on certain titles the character may not move, or it teleports but the camera (POV) doesn't follow.</sys:String>
-	<sys:String x:Key="str.Tip.TP.Refresh">Read the current pawn's world location and control rotation (DLL resolves the local PlayerController → Pawn → RootComponent via reflection).</sys:String>
-	<sys:String x:Key="str.Tip.TP.Auto">Re-read the pose every 0.5s, and the camera POV too (POV is skipped silently on games where it isn't available). Off by default; stops automatically on disconnect.</sys:String>
-	<sys:String x:Key="str.Tip.TP.Locate">Find this pawn (the object whose Current Pose is shown) in the Live Walker and select it — switches to Live Walker, walks the GWorld → … → pawn path, and lands on it. Reads a fresh pose first to get the live pawn address. World-Partition / streaming pawns resolve via the level back-reference (Live Walker shows 'via level'); a just-spawned, unreferenced pawn may be unreachable.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LocateGameEngine">Locate in GameEngine: find this pawn via the live UGameEngine graph instead of GWorld. NOTE: a pawn is a world actor and usually lives BELOW GWorld, so this is typically unreachable — use the 🌍 Locate in GWorld button for pawns. Provided only for parity.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LocatePos">Locate the position vector in GWorld: walk the GWorld → … → RootComponent path and land directly on the RelativeLocation FVector field (X/Y/Z), so you can build a pointer chain straight to the coordinates. Reads a fresh pose first. (On attached pawns the stored RelativeLocation is parent-relative.)</sys:String>
-	<sys:String x:Key="str.Tip.TP.LocateVel">Locate the velocity vector in GWorld: walk the GWorld → … → CharacterMovement path and land directly on the Velocity FVector field, for a pointer chain straight to the movement vector. Reads a fresh pose first. Unavailable on pawns with no CharacterMovement (vehicles / custom movement frameworks).</sys:String>
-	<sys:String x:Key="str.Tip.TP.LocateAccel">Locate the acceleration vector in GWorld: land directly on CharacterMovement.Acceleration (the input acceleration the movement uses). Reads a fresh pose first. Unavailable on pawns with no CharacterMovement.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LocateSpeed">Speed has no own field — it is the magnitude of Velocity. This lands on the Velocity FVector it is computed from (freeze/inspect the components there). Reads a fresh pose first.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LocateCamLoc">Locate the camera's cached POV Location in GWorld: land on APlayerCameraManager.CameraCachePrivate.POV.Location. Reads a fresh POV first. Unavailable when the cached-POV layout isn't reflected.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LocateCamFov">Locate the camera's cached POV FOV float in GWorld: land on APlayerCameraManager.CameraCachePrivate.POV.FOV. Reads a fresh POV first. Unavailable when the cached-POV layout isn't reflected.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LocateRot">Locate the rotation in GWorld: land directly on Controller.ControlRotation (the FRotator Pitch/Yaw/Roll that drives the view/aim). Reads a fresh pose first.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LocateCamRot">Locate the camera's cached POV Rotation in GWorld: land on APlayerCameraManager.CameraCachePrivate.POV.Rotation. Reads a fresh POV first. Unavailable when the cached-POV layout isn't reflected.</sys:String>
-	<sys:String x:Key="str.Tip.TP.Velocity">Live velocity (cm/s) and acceleration (cm/s²) read straight from the pawn's CharacterMovement (no invoke). Enable Auto to watch them change while moving. Shown as — with a note on pawns that have no CharacterMovement (vehicles / custom movement frameworks).</sys:String>
-	<sys:String x:Key="str.Tip.TP.Save">Save the current pose into this marker slot. Markers live in the DLL — they survive a UI restart as long as the game process lives.</sys:String>
-	<sys:String x:Key="str.Tip.TP.Recall">Teleport back to this marker (invokes K2_SetActorLocation with bTeleport=true, then restores rotation and zeroes velocity). Refused if you've changed maps — use Force.</sys:String>
-	<sys:String x:Key="str.Tip.TP.Force">Recall even if the marker was saved on a different map. May land you in an unloaded area — use with care.</sys:String>
-	<sys:String x:Key="str.Tip.TP.Clear">Forget this marker.</sys:String>
-	<sys:String x:Key="str.Tip.TP.HkClear">Clear this row's hotkey binding.</sys:String>
-	<sys:String x:Key="str.Tip.TP.ToCursor">Teleport the pawn to the world position under the mouse cursor (or screen center if no cursor). Uses K2_TeleportTo so the pawn lands beside geometry, not inside it.</sys:String>
-	<sys:String x:Key="str.Tip.TP.ZOffset">Height added above the hit point so the capsule doesn't spawn intersecting the ground (default 100).</sys:String>
-	<sys:String x:Key="str.Tip.TP.Channel">ETraceTypeQuery byte. 0 = Visibility (default engine mapping). Games can remap channels — change this if cursor hits land on the wrong surface.</sys:String>
-	<sys:String x:Key="str.Tip.TP.FallbackCenter">When the game has no cursor (HD-2D-style), trace from the screen center instead.</sys:String>
-	<sys:String x:Key="str.Tip.TP.CursorHotkey">Bind a system-wide hotkey for cursor teleport so you can keep the game focused (the cursor stays in the game). Auto-picks the first free combo: Ctrl+F8→F5, then Alt+F8→F5. The chosen combo shows beside this box.</sys:String>
-	<sys:String x:Key="str.Tip.TP.CopyBugItGo">Read the current pose, copy a 'BugItGo X Y Z' string to the clipboard, and paste it into the Run field so you can fire BugItGo immediately. (BugIt itself can't return data to the dumper — it writes to the game's own log/clipboard — so this reads the pose directly.)</sys:String>
-	<sys:String x:Key="str.Tip.TP.RunBugItGo">Parse the pasted string and teleport there. Works without any CheatManager — feeds X/Y/Z into the same recall path as markers.</sys:String>
-	<sys:String x:Key="str.Tip.TP.RecallLast">Undo the most recent teleport: jump back to the pose auto-saved just before your last Recall / Force / BugItGo / cursor teleport. One-way — recalling it doesn't change the saved spot, so you can press it repeatedly. The system writes this slot; you can't save into it.</sys:String>
-	<sys:String x:Key="str.Tip.TP.HkSet">Click, then press the key combo you want for this action. Hold modifiers (Ctrl/Alt/Shift) then a key, or press a single key. Esc cancels. The combo is registered system-wide so it works while the game is focused.</sys:String>
-	<sys:String x:Key="str.Tip.TP.AddActions">Ship the 17 momentary teleport records (Save 1-3, Recall 1-3, Recall last, BugIt, BugItGo, Cursor, Get POV, Get current coords, TP facing direction, TP to coordinates, Cursor ON, Cursor OFF, Clear all) PLUS 3 movement on/off toggles (Move Speed, Gravity, Super Jump — baked at the current slider %, tick = apply, untick = OFF) into the open Cheat Engine table via AOBMaker. Teleport records fire once and auto-untick; movement records stay on while ticked (the DLL holds the value). The directional/coordinate/movement records bake the current field values. Requires the AOBMaker plugin connected.</sys:String>
-	<sys:String x:Key="str.Tip.TP.SaveCt">Backup: save a Cheat Engine .CT file with the 17 teleport records + 3 movement on/off toggles (Move Speed / Gravity / Super Jump baked at the current slider %), for when AOBMaker isn't connected. Import via CE File → Open.</sys:String>
+	<!-- 全局指针 → 注入CE符号映射 -->
+	<sys:String x:Key="str.TP.PtrHeader">全局指针 → Cheat Engine 符号注册</sys:String>
+	<sys:String x:Key="str.TP.PtrHint">
+		创建CE内存条目，由已注入的UE5Dumper.dll读取运行时全局指针，并注册为CE全局符号，可直接在指针链中调用。
+		启用条目：注册符号（UE_GWorld / UE_GameEngine）；
+		关闭条目：注销符号并释放占用缓冲区。
+		符号可直接作为指针基址使用：[UE_GWorld]+偏移 / [UE_GameEngine]+偏移，支持冻结数值、任意CE条目读取调用。
+		GWorld绑定稳定的 GWorld内存槽位，切换关卡自动跟随更新；
+		GameEngine为UEngine*引擎实例快照，需手动刷新获取最新值。
+		数据通过AOBMaker插件推送至Cheat Engine；未连接插件时，会将CE内存条目XML复制到剪贴板，右键CE地址列表选择粘贴即可导入。
+		依赖DLL注入与游戏正常运行。
+	</sys:String>
+
+	<sys:String x:Key="str.TP.PtrGWorld">获取 GWorld 指针</sys:String>
+	<sys:String x:Key="str.TP.PtrGameEngine">获取 GameEngine 指针</sys:String>
+
+	<sys:String x:Key="str.Tip.TP.PtrGWorld">
+		创建CE条目，经由DLL解析稳定 GWorld内存槽，注册为符号 UE_GWorld；
+		使用 [UE_GWorld]+偏移 即可自动解引用获取当前UWorld实例，切换场景全程自动适配，不会停留在旧快照。
+		启用=注册符号，关闭=注销（槽位属于游戏原生地址，无需额外释放内存）。
+		有AOBMaker则直接推送CE；无插件则生成可粘贴的CE内存条目XML。
+		基于内部消息队列CMD_QUERY_PTR实现，规避executeCodeEx无法读取导出函数返回值的限制。
+	</sys:String>
+
+	<sys:String x:Key="str.Tip.TP.PtrGameEngine">
+		创建CE条目，DLL遍历GObjects全局对象表解析实时UEngine*引擎实例，注册符号 UE_GameEngine；
+		[UE_GameEngine]+偏移可直接遍历引擎内部结构，无需依赖静态GEngine导出槽。
+		启用=注册符号；关闭=注销符号+释放缓冲区。
+		推送/剪贴板逻辑同上，底层均调用消息队列CMD_QUERY_PTR。
+	</sys:String>
+
+	<sys:String x:Key="str.TP.Warning">⚠ 仅单机可用；联机游戏会触发服务器回弹修正，瞬移还可能触发反作弊风控</sys:String>
+	<sys:String x:Key="str.TP.BestEffort">
+		ℹ 容错执行机制（遵循 teleport-spec.md 设计规范）：
+		依靠反射解析玩家Pawn对象，优先调用引擎原生接口完成位移，调用失败则降级为直接内存写入；
+		绝大多数虚幻游戏均可适配，但部分游戏角色、相机由独立内部系统驱动：可能出现角色瞬移但视角不跟随的情况。
+	</sys:String>
+
+	<sys:String x:Key="str.Tip.TP.Refresh">读取当前玩家世界坐标与控制旋转（DLL通过反射链路：本地PlayerController → Pawn → 根组件解析）</sys:String>
+	<sys:String x:Key="str.Tip.TP.Auto">每0.5秒自动刷新坐标与相机视角；无相机反射字段的游戏会静默跳过视角读取；默认关闭；断开注入后自动停止刷新</sys:String>
+	<sys:String x:Key="str.Tip.TP.Locate">
+		在实时内存浏览器定位当前Pawn对象：跳转Live Walker，沿GWorld链路逐层寻址定位角色实体；
+		先刷新最新坐标获取实时Pawn地址；
+		启用世界分区/关卡流送的游戏，会依托关卡反向引用寻址（浏览器标注via level）；刚生成、暂无引用的临时实体无法检索
+	</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateGameEngine">
+		从GameEngine结构查找Pawn：不通过GWorld，直接遍历引擎实例图谱检索角色；
+		备注：Pawn属于世界Actor，层级隶属于GWorld之下，绝大多数场景无法访问，角色寻址优先使用上方🌍GWorld定位按钮；仅作功能对称保留
+	</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocatePos">
+		GWorld内定位坐标矢量：沿GWorld链路直达根组件RelativeLocation三维向量(X/Y/Z)，一键生成完整指针链指向坐标；刷新最新姿态后执行；
+		父子绑定角色存储的是相对父物体的偏移坐标
+	</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateVel">
+		GWorld内定位速度矢量：寻址CharacterMovement组件Velocity三维速度向量，生成指针链读取运动速率；
+		无移动组件的载具、自定义移动框架不可用
+	</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateAccel">定位加速度矢量：直达CharacterMovement.Acceleration输入加速度字段；刷新姿态后寻址；无移动组件不支持</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateSpeed">速度无独立存储字段，由速度矢量模长计算得出；此按钮跳转Velocity矢量地址查看三轴分量；刷新姿态后寻址</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateCamLoc">定位相机缓存视角坐标：APlayerCameraManager.CameraCachePrivate.POV.Location；刷新视角后寻址；视角布局未开放反射时失效</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateCamFov">定位相机视野FOV浮点值：APlayerCameraManager.CameraCachePrivate.POV.FOV；刷新视角后寻址；布局无反射则不可用</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateRot">定位操控旋转值：直达控制器ControlRotation俯仰/偏航/翻滚旋转体，控制瞄准与视角朝向；刷新姿态后寻址</sys:String>
+	<sys:String x:Key="str.Tip.TP.LocateCamRot">定位相机缓存旋转：APlayerCameraManager.CameraCachePrivate.POV.Rotation；刷新视角后寻址；无反射布局失效</sys:String>
+	<sys:String x:Key="str.Tip.TP.Velocity">实时速度(厘米/秒)、加速度(厘米/秒²)：直接读取角色移动组件数据，无需引擎函数调用；开启自动刷新可实时观测数值变化；载具/自定义移动框架会显示无数据</sys:String>
+	<sys:String x:Key="str.Tip.TP.Save">将当前坐标姿态存入标记位；标记存储于DLL内存，重启UI只要游戏进程不关闭就不会丢失</sys:String>
+	<sys:String x:Key="str.Tip.TP.Recall">瞬移回该标记点位：调用K2_SetActorLocation开启强制传送，同步恢复旋转姿态并清空速度；切换关卡后禁止召回，需勾选强制方可执行</sys:String>
+	<sys:String x:Key="str.Tip.TP.Force">跨关卡强制召回标记点位；可能被传送至未加载区域，谨慎使用</sys:String>
+	<sys:String x:Key="str.Tip.TP.Clear">清空当前标记存储数据</sys:String>
+	<sys:String x:Key="str.Tip.TP.HkClear">清空本条快捷键绑定</sys:String>
+	<sys:String x:Key="str.Tip.TP.ToCursor">角色瞬移至鼠标指向的世界位置；无鼠标界面则默认屏幕中心；调用K2_TeleportTo规避模型嵌入地形问题</sys:String>
+	<sys:String x:Key="str.Tip.TP.ZOffset">落点额外抬高高度，防止角色胶囊体穿模卡地面（默认100单位）</sys:String>
+	<sys:String x:Key="str.Tip.TP.Channel">碰撞检测通道ETraceTypeQuery字节值：0=可见通道（引擎默认）；部分游戏重映射碰撞通道，落点异常时可修改此项</sys:String>
+	<sys:String x:Key="str.Tip.TP.FallbackCenter">无鼠标画面（HD-2D类游戏）时，统一从屏幕中心发射碰撞射线</sys:String>
+	<sys:String x:Key="str.Tip.TP.CursorHotkey">绑定全局系统快捷键触发鼠标瞬移，游戏窗口保持前台聚焦、鼠标不会切出；自动分配空闲组合键：优先Ctrl+F8~F5，其次Alt+F8~F5；绑定按键会显示在输入框旁</sys:String>
+	<sys:String x:Key="str.Tip.TP.CopyBugItGo">
+		读取当前坐标，生成 BugItGo X Y Z 格式字符串存入剪贴板，可直接粘贴输入框一键传送；
+		BugIt调试指令无法向DLL回传数据，因此由程序直接读取姿态拼接坐标
+	</sys:String>
+	<sys:String x:Key="str.Tip.TP.RunBugItGo">解析粘贴的坐标字符串执行瞬移；无需开启CheatManager，底层逻辑与标记召回完全一致</sys:String>
+	<sys:String x:Key="str.Tip.TP.RecallLast">撤销上一次瞬移：返回瞬移前自动备份的坐标；仅单向回退，重复点击可反复撤销最近一次传送；系统自动占用该存储位，无法手动保存点位</sys:String>
+	<sys:String x:Key="str.Tip.TP.HkSet">快捷键录制：点击后按下想要绑定的按键组合（Ctrl/Alt/Shift修饰键+普通按键，或单键）；ESC取消录制；全局注册，游戏前台内均可触发</sys:String>
+	<sys:String x:Key="str.Tip.TP.AddActions">
+		批量导入17组瞬发烫点记录（标记保存1-3、标记召回1-3、撤销上次瞬移、BugIt、BugItGo、鼠标瞬移、获取视角、读取坐标、朝向瞬移、指定坐标传送、鼠标瞬移开关、清空全部标记）
+		外加3项移动属性开关（移速、重力、超级跳跃，数值取当前滑块倍率，勾选生效、取消关闭），经由AOBMaker写入CE修改表；
+		瞬发烫点触发一次自动取消勾选；移速开关勾选期间DLL持续锁定数值；方向/坐标类记录固化当前参数；需要AOBMaker插件在线连接
+	</sys:String>
+	<sys:String x:Key="str.Tip.TP.SaveCt">离线备份：导出包含17组瞬移记录+3项移动开关的CE .CT修改表，适配当前滑块参数；未连接AOBMaker时使用，CE通过文件-打开载入</sys:String>
+
 	<!-- Teleport: Debug Camera (free-look) -->
 	<sys:String x:Key="str.TP.DcHeader">Debug Camera (free-look)</sys:String>
 	<sys:String x:Key="str.TP.DcHint">Detach the view into a free-fly debug camera (UCheatManager::ToggleDebugCamera). Turning it back OFF is handled even on Shipping builds that stripped the disable path — the DLL switches the local player's controller back. Needs a live PlayerController, so enter gameplay first. Available only on games that kept ToggleDebugCamera.</sys:String>
