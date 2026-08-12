@@ -37,11 +37,33 @@
 | 組別 | 剩幾項 | 內容 |
 |---|---|---|
 | ① 可從 log 取得 | 6 ⬜ + 1 🟡 | B4、B29（log 半）、B18、B19、B10、B28 反向確認、B8 🟡 |
-| ② 一定要人工操作 | 8 ⬜ | B2、B29（人工半）、B13/B41、B25、B26、B16、B5（主動半）、`.CT` registry fallback |
-| ③ DumperTest 樣本 | 1 ⬜ | Shipping 包的畫面心跳（要重 cook） |
-| ④ Vendor 更新 | 1 ⬜ | Z1 zydis |
+| ② 一定要人工操作 | 6 ⬜ + 1 🔴 | B2、B29（人工半）、B25、B26、B5（主動半）、`.CT` registry fallback；~~B16~~ ✅、**B13/B41 🔴 驗出缺陷已修，端到端仍 ⬜** |
+| ③ DumperTest 樣本 | **0** | ~~Shipping 包的畫面心跳~~ ✅ **根本不用重 cook** |
+| ④ Vendor 更新 | **0** | ~~Z1 zydis~~ ✅ |
 
-其中屬於 audit #4 的 `- ⬜` 條目是 **13 項**（與英文正本的計數一致）。
+> ### 🆕 2026-08-12 這一輪：結掉三項，而且驗出一個真缺陷
+>
+> **完整證據一律在英文正本 [todo.md](todo.md)，這裡只記結論。**
+>
+> | 項目 | 結果 |
+> |---|---|
+> | **B16** 五個死掉的排序欄位 | ✅ 十個狀態（五欄 × 升降冪）全部符合**事前**寫下的預測。資料集刻意讓 X/Y/Z/Yaw/Dist 與插入順序induce **六種互不相同**的排序 —— 否則一個「什麼都沒做」的排序也會看起來像通過。**未測到 Group / Map**（`+ From fields` 讓 Group 全空、Map 全同）。 |
+> | **③** 樣本 Shipping 心跳 | ✅ 五行都在。**而且不用重 cook** —— 磁碟上那包本來就是 HUD commit 之後 5 分鐘建的。`TickCount` +15 / 14.2 秒，F32÷10.25、F64÷0.25、RawDouble÷0.5 **四條獨立路徑都算出 15 跳**。 |
+> | **Z1** zydis | ✅ 零 decode error、有函式 mapped props 非零。`instrs` 8–33 比 v5 的 17–65 低，但**那個 9 instrs 的函式正是唯一解出來的**，所以是 stock template 的 getter 短，不是 decoder 提早放棄。 |
+> | **B13/B41** | 🔴 **驗出來是 FAIL** —— 探針看不見它自己命名的那個條件。已修（build 2799）+ 18 個單元測試。端到端（實際在 UI 上看到拒絕字串）仍 ⬜。 |
+>
+> **三個方法論教訓，比結果本身值錢：**
+>
+> 1. **「這台不能編 UE」擋了 ③ 一週，而結案的那個 binary 早就在 `For Testing\` 裡。**
+>    接受任何「環境做不到」的阻塞之前，先比對產物的 mtime 和那個應該被編進去的 commit。
+> 2. **B13/B41 根本不用開 UI。** 閘門在 `VolumeHasRecycleBin`，在每一列的上游 ——
+>    量那個函式就結案了，在 Proxy Deploy 上點半天不會改變結果。
+>    **先找閘門在哪裡，再決定要不要動 UI。**
+> 3. **空的 grep 不是證據。** Z1 第一次查 log 是空的，差點被記成失敗 ——
+>    DLL 還沒 flush（`offsets-0.log` 之後從 6,048 長到 7,885 bytes）。
+>    先確認指令有送出去（`grep find_property_xrefs ui-pipe-0.log`），再從空結果下任何結論。
+
+其中屬於 audit #4 的 `- ⬜` 條目是 **11 項**（與英文正本的計數一致）。
 
 > **B4 的分類要看清楚：修正早就 ship 了（build 2592），⬜ 的是「驗證」。**
 > 程式碼已核對過：`Tot.h:75-76` 的獨立旗標 `t_cancelImmune` + `MarkCancelImmune()`、
@@ -357,8 +379,12 @@ Snapshot capture 本來就包在 `DiagnosticsProbe` 裡，**不需要新增任�
 
 # ② 一定要人工操作
 
-## ⬜ B16 —— 座標表格五個沒作用的排序欄位
-**build 2610** · 力氣 **極小** · **兩分鐘就能做完，建議先做這個**
+## ✅ B16 —— 座標表格五個沒作用的排序欄位
+**build 2610** · **已於 2026-08-12 驗證通過（AOT build 2794 + DumperTest）**
+
+> 十個狀態全中，**但 Group / Map 這一半沒測到** —— `+ From fields` 讓 Group 全空、Map 全同，
+> 沒有順序可以觀察。要補的人：在列編輯器把 Group 設成不同值再點一次。
+> 完整證據見 [todo.md](todo.md)。下面的步驟保留給重測用。
 
 > ⚠ **必須在 publish（AOT / trimmed）的 build 上檢查** —— 整個缺陷就是被 trim 掉的 reflection
 > metadata，所以單純 `dotnet run` 或非 trimmed build **不會重現**。
@@ -451,8 +477,28 @@ Snapshot capture 本來就包在 `DiagnosticsProbe` 裡，**不需要新增任�
 - **順便看一眼**：含非 ASCII 字元的遊戲路徑現在必須在那個訊息裡**完整顯示**
   （以前會變成 `EVERSPACE? 2`）。
 
-## ⬜ B13 / B41 —— 磁碟區沒有資源回收筒時會拒絕刪除
-**build 2621** · 力氣 **中**
+## 🔴 B13 / B41 —— 磁碟區沒有資源回收筒時會拒絕刪除
+**build 2621** · **2026-08-12 驗出來是 FAIL，已修（build 2799）；端到端仍 ⬜**
+
+> **這一項根本不需要開 UI**，而這正是最值錢的教訓：閘門是
+> `WindowsPlatformService.VolumeHasRecycleBin`，在每一列的**上游**。
+> 它原本只靠 `SHQueryRecycleBin(root) == S_OK` 判斷，而那個 API 查的是**回收筒的內容**、
+> 不是**政策** —— 在 `NukeOnDelete=1` 的固定磁碟區上照樣回 S_OK（因為 `$RECYCLE.BIN`
+> 資料夾和舊項目還在），所以拒絕永遠不會觸發。
+>
+> 用拋棄式檔案實測（`SHFileOperation` + `FOF_ALLOWUNDO`，**與 `MoveToRecycleBin` 完全相同**）：
+> `rc=0`、`aborted=false`、回收筒項目數 **5 → 5 沒變**、**檔案不見了** ——
+> 呼叫端會回報「moved to the Recycle Bin」，而檔案已被永久銷毀。
+>
+> **修法**：改成先讀登錄檔政策（純函式 `RecycleBinPolicy`，涵蓋 Group Policy →
+> `UseGlobalSettings` → per-volume `NukeOnDelete`，且**「不存在」≠ 0**），
+> `SHQueryRecycleBin` 降為第二道閘門。18 個單元測試。
+> 修後實測：T:（`NukeOnDelete=1`）→ 拒絕；C:/D:（=0）→ 放行，
+> 而且 **D: 當時回收筒是空的** —— 「已啟用但空」必須仍讀成有回收筒，
+> 任何用項目數判斷的實作都會在這裡壞掉。
+>
+> ⬜ **還沒做的**：實際在 UI 上種一個殘留、看到那串拒絕文字。
+> 登錄檔管線已對三個真實磁碟區驗過、政策有 18 個測試，中間只剩 6 行膠水沒被走過。
 
 **執行步驟**
 1. 找一個**備用的固定磁碟區**（不要拿系統碟做），
@@ -511,8 +557,18 @@ Snapshot capture 本來就包在 `DiagnosticsProbe` 裡，**不需要新增任�
 > **D3**（`FUObjectItem` stride 被偵測成一半）三項都已 ✅ 修復並驗證，整條刪除。
 > 只剩樣本自己的一個問題。
 
-## ⬜ 樣本 Shipping 包的畫面心跳看不到
-**build 2719** · 力氣 **卡住 —— 這台機器不能編 UE**
+## ✅ 樣本 Shipping 包的畫面心跳看不到
+**build 2719** · **已於 2026-08-12 驗證通過 —— 而且完全不用重 cook**
+
+> ⚠ **下面「卡住 —— 這台機器不能編 UE」的判斷是錯的，保留下來當教訓。**
+> 磁碟上 `For Testing\DumperTest\Shipping\` 那包建於 2026-08-05 20:15，
+> 比 HUD 的 commit `b3d8593`（20:10:50）**晚五分鐘** —— 它一直都帶著 `ADumperTestHUD`。
+> 直接啟動就看到五行，`TickCount` 在 14.2 秒內 +15，
+> 而且 F32÷10.25、F64÷0.25、RawDouble÷0.5 三條路徑都獨立算出同樣的 15 跳。
+> **接受「環境做不到」之前，先比對產物 mtime 和那個 commit。** 完整表格見 [todo.md](todo.md)。
+>
+> 另外一個會浪費一個 session 的細節：**`-ExecCmds="t.MaxFPS 30"` 在 Shipping 包會被靜默忽略**
+> （`Exec.h:13`：Shipping 走 `UE_ALLOW_EXEC_COMMANDS_IN_SHIPPING`），要壓 FPS 得用 Development 包。
 
 `UEngine::AddOnScreenDebugMessage` 在 UE 5.4 是**整個函式本體**被
 `#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)` 包起來（`UnrealEngine.cpp:11397`），
@@ -539,8 +595,17 @@ Snapshot capture 本來就包在 `DiagnosticsProbe` 裡，**不需要新增任�
 
 # ④ Vendor 更新帶來的
 
-## ⬜ Z1 —— zydis `a95bb71`：Path-2 原生反組譯還解得出 `[this+off]`
-**2026-08-05 bump** · 力氣 **小** · **① 靠 log 就能驗**，但需要一個刻意動作
+## ✅ Z1 —— zydis `a95bb71`：Path-2 原生反組譯還解得出 `[this+off]`
+**2026-08-05 bump** · **已於 2026-08-12 驗證通過（DumperTest Development，DLL 2794）**
+
+> 八次 Path-2 分析，`instrs` 8–33，其中一個 **9 instrs 的函式解出 `1 mapped props`**，
+> 全資料夾**零 decode error**。`instrs` 比 v5 的 17–65 低，但解出來的正是最短那個，
+> 所以是 stock template 的 getter 短、不是 decoder 提早放棄。
+>
+> ⚠ **不要太早去 grep log。** 第一次點完 20 秒就查，結果是空的，差點被記成失敗 ——
+> DLL 還沒 flush（`offsets-0.log` 之後從 6,048 長到 7,885 bytes）。
+> **先 `grep find_property_xrefs ui-pipe-0.log` 確認指令有送出去**，
+> 再從空的結果下任何結論。完整數字見 [todo.md](todo.md)。
 
 zydis 從 `85d7518` 升到 `a95bb71`（"Decoder patch for variable-position decoder-tree filters" #638）
 是 decoder 修正**加上整份 decoder table 重新生成** —— +34.9k / −45.7k 行。這正是當初 v4→v5
