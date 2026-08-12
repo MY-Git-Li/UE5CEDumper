@@ -1346,152 +1346,181 @@
 	<sys:String x:Key="str.Tip.TP.SjLocate">在GWorld内存链路找到JumpZVelocity起跳速度浮点字段，跳转实时内存浏览器选中。</sys:String>
 
 	<!-- Fly (Dunste — no-gravity keyboard-driven 3D flight) -->
-	<sys:String x:Key="str.TP.FlyHeader">Fly (no-gravity 3D flight)</sys:String>
-	<sys:String x:Key="str.TP.FlyState">State:</sys:String>
-	<sys:String x:Key="str.TP.FlyHint">No-gravity free flight: forces the pawn's CharacterMovement into MOVE_Flying and steers it with the keyboard. Input is read inside the game, so keep the GAME window focused. Control is VIEW-relative: forward/back/strafe fly where the camera looks (you turn with the mouse/gamepad as usual), and the up/down keys move straight up/down. Pick a keyboard preset and a speed below, then Fly ON / OFF (or bind the "Fly toggle" global hotkey). Default keeps collision (you won't pass through walls); tick Noclip to disable the character's collision and fly through geometry. Needs a live pawn with a CharacterMovement. Single-player only; a few games with an authoritative movement system (e.g. FF7 Rebirth) override the velocity and won't move.</sys:String>
-	<sys:String x:Key="str.TP.FlyPreset">Keys:</sys:String>
-	<sys:String x:Key="str.TP.FlyNoclip">Noclip (fly through walls)</sys:String>
-	<sys:String x:Key="str.Tip.TP.FlyNoclip">OFF = collision kept (the flying sweep blocks on walls). ON = disable the character's collision (SetActorEnableCollision) so flight passes through geometry. Movement is the same velocity-drive either way; only collision changes. Collision is restored when you turn Noclip or Fly off.</sys:String>
-	<sys:String x:Key="str.TP.FlyOn">Fly ON</sys:String>
-	<sys:String x:Key="str.TP.FlyOff">Fly OFF</sys:String>
-	<sys:String x:Key="str.TP.FlyRefresh">↻</sys:String>
-	<sys:String x:Key="str.TP.FlyHotkeyHint">Bind a global hotkey to "Fly toggle" in the Hotkey Settings section above to toggle Fly in-game without alt-tabbing.</sys:String>
-	<sys:String x:Key="str.Tip.TP.FlyPreset">Which keys drive flight: WASD (+Q/E turn, Z/C up-down), the numeric keypad, or the arrow keys (+Ins/Del turn, PgUp/PgDn up-down).</sys:String>
-	<sys:String x:Key="str.Tip.TP.FlyOn">Turn Fly ON — force MOVE_Flying and start reading the keyboard (held against the game re-asserting its own movement mode).</sys:String>
-	<sys:String x:Key="str.Tip.TP.FlyOff">Turn Fly OFF — restore the pawn's captured MovementMode and stop.</sys:String>
-	<sys:String x:Key="str.Tip.TP.FlyRefresh">Re-read the live fly state and MovementMode from the current pawn's CharacterMovement.</sys:String>
-
-	<!-- See-through occluders (Schlacht) -->
-	<sys:String x:Key="str.TP.SeeThroughHeader">See-through (occluders)</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughState">State:</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughHint">Hide the object blocking your view: each tick traces a line from the camera along the view direction and, if the NEAREST thing in the way is world geometry (a wall/pillar), makes it invisible. Enemies, NPCs and your own character are never hidden (only non-Pawn/Character actors). Stage 1 hides one nearest occluder at a time; it is un-hidden as you look around and everything is restored when you turn it off. Needs a live pawn + camera. Single-player only; best-effort. NOTE: works on games where an object's collision and visible mesh are the same actor (most games) — on games that split them into separate collision-proxy actors (e.g. FF7 Rebirth's CollisionAssetActor) the ray hits the invisible collision proxy, so hiding it has no visible effect. TIP: turning it OFF needs the game running — clicking here backgrounds the game, and a game that pauses when it loses focus cannot un-hide right then. It is restored automatically the moment you click back into the game, and the Keep Foreground card above prevents the pause entirely.</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughOn">See-through ON</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughOff">See-through OFF</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughRefresh">↻</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughAddCe">Add to CE</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughPierce">Pierce depth:</sys:String>
-	<sys:String x:Key="str.Tip.TP.SeeThroughPierce">How many nearest objects to make invisible along the view ray. 1 = just the nearest object (e.g. a painting on a wall); 2 = it plus the wall behind it; and so on. Enemies / NPCs / your character on the ray are skipped (kept visible) and do not count. Changing this while See-through is ON applies immediately.</sys:String>
-	<sys:String x:Key="str.TP.SeeThroughHotkeyHint">Bind a global hotkey to "See-through toggle" in the Experimental Hotkeys section above to toggle it in-game without alt-tabbing.</sys:String>
-	<sys:String x:Key="str.Tip.TP.SeeThroughOn">Turn See-through ON — start the worker that traces the view direction and hides the nearest non-Pawn occluder.</sys:String>
-	<sys:String x:Key="str.Tip.TP.SeeThroughOff">Turn See-through OFF — un-hide any hidden object and stop the worker.</sys:String>
-	<sys:String x:Key="str.Tip.TP.SeeThroughRefresh">Re-read the live see-through state (active / whether it has a target / how many objects are hidden).</sys:String>
-	<sys:String x:Key="str.Tip.TP.SeeThroughAddCe">Push a self-contained CE toggle script (tick = ON / untick = OFF) straight into Cheat Engine via AOBMaker. It drives the DLL's See-through through the mailbox, so no pipe connection is needed once added. Disabled when the AOBMaker CE plugin isn't detected.</sys:String>
-
-	<!-- Gravity Direction (Laufen — UE5.4+ UCharacterMovementComponent.GravityDirection) -->
-	<sys:String x:Key="str.TP.GdHeader">Gravity Direction (UE5.4+)</sys:String>
-	<sys:String x:Key="str.TP.GdState">State:</sys:String>
-	<sys:String x:Key="str.TP.GdHint">Tilt gravity to any direction by setting the per-axis components (each −100%…+100%, i.e. −1.0…+1.0). This is DIRECTION only — the DLL normalizes to a unit vector, so a single-axis setting like (0,0,−62%) collapses to (0,0,−1): it only re-aims gravity, it does NOT change strength (use the Gravity card for strength). To tilt you must mix axes, e.g. X=+100%, Z=−100% → diagonal. Default (0,0,−100%) = straight down; X=+100%, Z=0 makes gravity pull along +X (walk on a wall). Apply holds the direction; Reset restores the game's captured default and snaps the sliders back to down. Needs UE5.4+ with a reflected GravityDirection (pre-5.4 games show Unavailable). Single-player only.</sys:String>
-	<sys:String x:Key="str.TP.GdApply">Apply</sys:String>
-	<sys:String x:Key="str.TP.GdReset">Reset</sys:String>
-	<sys:String x:Key="str.TP.GdRefresh">↻</sys:String>
-	<sys:String x:Key="str.TP.GdLocate">🌍 Locate</sys:String>
-	<sys:String x:Key="str.TP.GdHotkeyHint">Bind a global hotkey to "Gravity Dir toggle" in the Hotkey Settings section to toggle it in-game.</sys:String>
-	<sys:String x:Key="str.Tip.TP.GdApply">Force GravityDirection to the (X,Y,Z) sliders (normalized) and hold it (re-asserted on a timer). All-zero = off.</sys:String>
-	<sys:String x:Key="str.Tip.TP.GdReset">Restore GravityDirection to the captured game default and snap the sliders to straight down (0,0,−100%).</sys:String>
-	<sys:String x:Key="str.Tip.TP.GdRefresh">Re-read the live GravityDirection and override state from the current pawn's CharacterMovement (UE5.4+).</sys:String>
-	<sys:String x:Key="str.Tip.TP.GdLocate">Find the GravityDirection FVector in GWorld and select it in the Live Walker.</sys:String>
-
-	<!-- Teleport: Camera POV (read-only) -->
-	<sys:String x:Key="str.TP.PovHeader">Camera POV (read-only)</sys:String>
-	<sys:String x:Key="str.TP.GetPov">Get POV</sys:String>
-	<sys:String x:Key="str.TP.Fov">FOV:</sys:String>
-	<sys:String x:Key="str.TP.PovHint">The on-screen camera (APlayerCameraManager) — its world location, rotation and field-of-view, read via the engine's GetCameraLocation / GetCameraRotation / GetFOVAngle. This is DISTINCT from the pawn pose above: on games that drive the camera independently of the possessed pawn (HD-2D / fixed-view) the two diverge. Read-only — there is no universal Set POV (the view is recomputed every frame); to actually move the camera, use the Debug Camera buttons below.</sys:String>
-	<sys:String x:Key="str.Tip.TP.GetPov">Read the current on-screen camera location, rotation and FOV (invokes APlayerCameraManager getters on the game thread). Try it during gameplay — in menus/loading the game thread is idle and it can't read. Compare the location to the pawn's: a large delta that barely changes after a teleport means the camera is independent of the pawn.</sys:String>
-	<sys:String x:Key="str.Tip.TP.PovSource">How the POV was read: "invoke" = the camera-manager getters; "raw" = a direct read of the cached POV, used as a fallback on games where the getters exist but return nothing (e.g. TQ2 / Octopath).</sys:String>
-
-	<!-- Teleport: directional / coordinate / cursor force -->
-	<sys:String x:Key="str.TP.RelHeader">Teleport in Facing Direction</sys:String>
-	<sys:String x:Key="str.TP.RelGo">Teleport forward</sys:String>
-	<sys:String x:Key="str.TP.RelDist">Distance (uu):</sys:String>
-	<sys:String x:Key="str.TP.RelHoriz">Horizontal only (keep Z)</sys:String>
-	<sys:String x:Key="str.Tip.TP.RelGo">Step the pawn along the direction it is facing by the distance below (negative distance = backward). The facing comes from the actor's forward vector (GetActorForwardVector), falling back to the control rotation. Undo with Recall last.</sys:String>
-	<sys:String x:Key="str.Tip.TP.RelDist">How far to move along the facing direction, in unreal units (1 uu ≈ 1 cm). Negative values step backward.</sys:String>
-	<sys:String x:Key="str.Tip.TP.RelHoriz">On: move on the ground plane (yaw only, keep your current height) — the natural "walk toward that compass bearing". Off: follow the full view direction including pitch, so looking up/down moves you up/down (fly / noclip feel).</sys:String>
-
-	<sys:String x:Key="str.TP.CoordHeader">Teleport to Coordinates (force)</sys:String>
-	<sys:String x:Key="str.TP.CoordXyz">X / Y / Z:</sys:String>
-	<sys:String x:Key="str.TP.CoordPyr">Pitch / Yaw / Roll:</sys:String>
-	<sys:String x:Key="str.TP.CoordGo">Teleport to coordinates</sys:String>
-	<sys:String x:Key="str.TP.CoordFill">Fill from current pos</sys:String>
-	<sys:String x:Key="str.TP.CoordSetRot">Also set rotation</sys:String>
-	<sys:String x:Key="str.Tip.TP.CoordGo">Force-teleport the pawn to the exact world X/Y/Z below. No map check, so you can jump anywhere on the current level. Undo with Recall last.</sys:String>
-	<sys:String x:Key="str.Tip.TP.CoordFill">Read the current pose and fill the X/Y/Z (and Pitch/Yaw/Roll) boxes with it — a quick way to nudge from where you are.</sys:String>
-	<sys:String x:Key="str.Tip.TP.CoordSetRot">When ticked, also restore the Pitch/Yaw/Roll below after the jump. Leave off to keep your current facing.</sys:String>
-
-	<!-- Coordinate Library (P1) — docs/teleport-coord-library-spec.md -->
-	<sys:String x:Key="str.TP.LibHint">An unlimited, labelled list of positions saved per game. Separate from the 3 marker slots above: those live in the DLL and are hotkey-driven, this one is a curated list that persists across game patches.</sys:String>
-	<sys:String x:Key="str.TP.LibSaveCurrent">＋ Save current pos</sys:String>
-	<sys:String x:Key="str.TP.LibAddFields">＋ From fields</sys:String>
-	<sys:String x:Key="str.TP.LibDuplicate">Duplicate</sys:String>
-	<sys:String x:Key="str.TP.LibDelete">Delete</sys:String>
-	<sys:String x:Key="str.TP.LibClear">Clear all</sys:String>
-	<sys:String x:Key="str.TP.LibClear.ConfirmTitle">Clear the whole coordinate library?</sys:String>
-	<sys:String x:Key="str.TP.LibClear.ConfirmMessage">
-		This deletes all {0} entries for this game and removes the library file.
-
-		A .preclear.bak copy is written first, so this can be recovered by hand from the app data folder.
+	<sys:String x:Key="str.TP.FlyHeader">飞行模式（无重力3D飞行）</sys:String>
+	<sys:String x:Key="str.TP.FlyState">状态：</sys:String>
+	<sys:String x:Key="str.TP.FlyHint">
+		无重力自由飞行：强制将角色移动模式切换为飞行模式MOVE_Flying，依靠键盘操控移动。按键输入由游戏内部读取，请保持游戏窗口处于前台聚焦。
+		操控以相机视角为准：前后、左右平移均朝向镜头看向的方向（鼠标/手柄正常转动视角）；升降按键垂直上下移动。
+		先选择按键方案、设定飞行速度，再开启/关闭飞行，也可绑定全局热键一键切换。
+		默认开启碰撞检测，不会穿墙；勾选穿墙模式即可关闭角色碰撞，穿透场景几何体。
+		需要角色正常生成并挂载角色移动组件；仅单机可用；少数服务器权威移动机制游戏（如最终幻想7重生）会持续覆写速度，飞行无法生效。
 	</sys:String>
-	<sys:String x:Key="str.TP.LibClear.ConfirmYes">Clear all</sys:String>
-	<sys:String x:Key="str.TP.LibClear.Empty">The library is already empty.</sys:String>
-	<sys:String x:Key="str.TP.LibClear.Result">Cleared {0} entries.</sys:String>
-	<sys:String x:Key="str.TP.LibClear.ResultBackedUp">Cleared {0} entries. Backed up to {1}</sys:String>
-	<sys:String x:Key="str.TP.LibFilter">Filter:</sys:String>
-	<sys:String x:Key="str.TP.LibFilterPlaceholder">space = AND (label, group, map)</sys:String>
-	<sys:String x:Key="str.TP.LibGroup">Group:</sys:String>
-	<sys:String x:Key="str.TP.LibCurrentMapOnly">Current map only</sys:String>
-	<sys:String x:Key="str.TP.LibGo">Teleport</sys:String>
-	<sys:String x:Key="str.TP.LibForceGo">Force teleport</sys:String>
-	<sys:String x:Key="str.TP.LibToFields">→ Fields</sys:String>
-	<sys:String x:Key="str.TP.LibEditLabel">Label:</sys:String>
-	<sys:String x:Key="str.TP.LibEditGroup">Group:</sys:String>
-	<sys:String x:Key="str.TP.LibApplyEdit">Apply</sys:String>
-	<sys:String x:Key="str.TP.LibUpdateCoords">Update coords from current</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibSaveCurrent">Read the live pose and add it to the library, labelled after the current map.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibAddFields">Add whatever is currently typed in the "Teleport to Coordinates" boxes above as a new library entry.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibGo">Teleport to the selected entry. Refused when the entry was saved on a different map — the tool cannot LOAD another map, it can only move you within the one the game has open.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibForceGo">Teleport ignoring the map check. Only useful if the map name changed but the level is the same; jumping to another map's coordinates puts you outside the world.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibCurrentMapOnly">Hide entries saved on other maps. On by default — coordinates from different maps are often numerically close, so mixing them is how you end up under the floor.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibUpdateCoords">Overwrite the selected entry's coordinates (and map) with the live pose, keeping its label and group.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibClear">Delete every entry for this game, and its file. Asks first, and writes a .preclear.bak you can restore by hand.</sys:String>
+	<sys:String x:Key="str.TP.FlyPreset">按键方案：</sys:String>
+	<sys:String x:Key="str.TP.FlyNoclip">穿墙模式（穿透墙体）</sys:String>
+	<sys:String x:Key="str.Tip.TP.FlyNoclip">关闭：保留碰撞，飞行会被墙壁阻挡；开启：关闭角色全局碰撞，可直接穿过地形模型。两种模式移动速率一致，仅碰撞逻辑有区别；关闭穿墙或飞行时会自动恢复角色碰撞。</sys:String>
+	<sys:String x:Key="str.TP.FlyOn">开启飞行</sys:String>
+	<sys:String x:Key="str.TP.FlyOff">关闭飞行</sys:String>
+	<sys:String x:Key="str.TP.FlyRefresh">↻</sys:String>
+	<sys:String x:Key="str.TP.FlyHotkeyHint">可在上方快捷键设置区绑定「飞行切换」全局热键，无需切出窗口即可在游戏内开关飞行。</sys:String>
+	<sys:String x:Key="str.Tip.TP.FlyPreset">可选操控按键：WASD（Q/E转向、Z/C升降）、数字小键盘、方向键（Ins/Del转向、PgUp/PgDn升降）</sys:String>
+	<sys:String x:Key="str.Tip.TP.FlyOn">开启飞行：强制锁定飞行移动模式，持续读取键盘输入，抵御游戏帧循环自动还原移动模式。</sys:String>
+	<sys:String x:Key="str.Tip.TP.FlyOff">关闭飞行：恢复开启前记录的角色移动模式，终止飞行操控。</sys:String>
+	<sys:String x:Key="str.Tip.TP.FlyRefresh">重新读取当前角色移动组件的飞行状态与移动模式。</sys:String>
+	
+	<!-- See-through occluders (Schlacht) -->
+	<sys:String x:Key="str.TP.SeeThroughHeader">透视功能（遮挡物体透明）</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughState">状态：</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughHint">
+		消除遮挡视野的障碍物：每帧从相机沿视线发射射线，若最近阻挡物为场景墙体、立柱等地形几何体，则将其临时隐藏。
+		敌人、NPC、玩家自身永远不会被隐藏，仅对非角色类场景物体生效。
+		一档仅隐藏视线最近一处遮挡物；转动视角会自动恢复物体显示，关闭功能后全部物体复原。
+		依赖正常角色与相机组件；仅单机、容错运行。
+		适用前提：场景碰撞体与可视网格为同一个Actor（绝大多数游戏）；部分游戏将碰撞与模型拆分独立实体（FF7重生CollisionAssetActor），射线命中隐形碰撞代理，透视无效果。
+		注意：切出窗口游戏暂停时无法恢复物体，切回游戏会自动复原；开启上方「保持前台」可彻底避免暂停问题。
+	</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughOn">开启透视</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughOff">关闭透视</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughRefresh">↻</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughAddCe">添加至CE</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughPierce">透视层数：</sys:String>
+	<sys:String x:Key="str.Tip.TP.SeeThroughPierce">视线方向需要透明的最近物体数量：1=仅第一层遮挡墙体；2=第一层+后方墙体，以此类推。射线途经敌人、玩家会跳过不计入层数；透视开启时修改数值即时生效。</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughHotkeyHint">可在上方实验快捷键区域绑定「透视切换」全局热键，游戏内一键开关无需切窗。</sys:String>
+	<sys:String x:Key="str.Tip.TP.SeeThroughOn">启动透视后台线程：持续视线射线检测，隐藏最近非角色遮挡物体。</sys:String>
+	<sys:String x:Key="str.Tip.TP.SeeThroughOff">关闭透视，恢复所有隐藏物体，终止检测线程。</sys:String>
+	<sys:String x:Key="str.Tip.TP.SeeThroughRefresh">刷新透视运行状态、生效目标数量。</sys:String>
+	<sys:String x:Key="str.Tip.TP.SeeThroughAddCe">经由AOBMaker推送独立CE勾选脚本（勾选开启/取消关闭），通过DLL消息队列驱动透视功能，添加后无需工具常驻连接；未检测到AOBMaker插件则不可用。</sys:String>
+	
+	<!-- Gravity Direction (Laufen — UE5.4+ UCharacterMovementComponent.GravityDirection) -->
+	<sys:String x:Key="str.TP.GdHeader">重力方向（UE5.4+）</sys:String>
+	<sys:String x:Key="str.TP.GdState">状态：</sys:String>
+	<sys:String x:Key="str.TP.GdHint">
+		自定义任意倾斜重力朝向，三轴范围 -100% ~ +100%（对应矢量 -1.0 ~ 1.0）。
+		仅控制重力朝向，不改变重力大小：DLL会自动归一化为单位向量；例如仅Z轴-62%会被修正为垂直向下(0,0,-1)。
+		如需斜向重力必须搭配多轴数值：X+100% + Z-100% = 斜向重力；默认(0,0,-100%)垂直向下；X+100%、Z=0可实现墙面行走。
+		点击应用锁定朝向；重置恢复游戏默认参数，滑块回归垂直向下。
+		仅支持UE5.4及以上版本且重力字段开放反射，旧版游戏显示不可用；仅限单机。
+	</sys:String>
+	<sys:String x:Key="str.TP.GdApply">应用设置</sys:String>
+	<sys:String x:Key="str.TP.GdReset">重置</sys:String>
+	<sys:String x:Key="str.TP.GdRefresh">↻</sys:String>
+	<sys:String x:Key="str.TP.GdLocate">🌍 内存定位</sys:String>
+	<sys:String x:Key="str.TP.GdHotkeyHint">快捷键设置区可绑定「重力方向切换」热键，游戏内快速启用关闭。</sys:String>
+	<sys:String x:Key="str.Tip.TP.GdApply">将三轴滑块数值归一化后锁定为重力方向，定时器持续覆写；三轴全部置零则关闭自定义重力。</sys:String>
+	<sys:String x:Key="str.Tip.TP.GdReset">恢复原生重力朝向，滑块复位垂直向下(0,0,-100%)。</sys:String>
+	<sys:String x:Key="str.Tip.TP.GdRefresh">读取角色移动组件实时重力方向与锁定状态（UE5.4+）。</sys:String>
+	<sys:String x:Key="str.Tip.TP.GdLocate">在GWorld结构中找到重力方向三维矢量FVector，跳转实时内存浏览器选中查看。</sys:String>
+	
+	<!-- Teleport: Camera POV (read-only) -->
+	<sys:String x:Key="str.TP.PovHeader">相机视角参数（只读）</sys:String>
+	<sys:String x:Key="str.TP.GetPov">获取视角</sys:String>
+	<sys:String x:Key="str.TP.Fov">视野FOV：</sys:String>
+	<sys:String x:Key="str.TP.PovHint">
+		读取画面主相机APlayerCameraManager数据：世界坐标、旋转角度、视野大小，调用引擎原生接口获取。
+		该数据和角色姿态相互独立：HD-2D、固定视角游戏相机与角色位置会出现明显偏差。
+		仅支持查看，无通用统一修改视角接口（画面每帧自动重新运算）；如需操控相机请使用下方调试相机功能。
+	</sys:String>
+	<sys:String x:Key="str.Tip.TP.GetPov">主线程调用相机接口读取当前坐标、旋转、FOV数值；菜单/加载界面主线程休眠无法读取。可对比相机与角色坐标，差值大且瞬移后不跟随代表相机独立运算。</sys:String>
+	<sys:String x:Key="str.Tip.TP.PovSource">视角读取方式：invoke=调用相机管理器接口；raw=直接读取缓存视角（接口失效游戏备用方案，如八方旅人2）</sys:String>
+	
+	<!-- Teleport: directional / coordinate / cursor force -->
+	<sys:String x:Key="str.TP.RelHeader">朝向视角瞬移</sys:String>
+	<sys:String x:Key="str.TP.RelGo">向前瞬移</sys:String>
+	<sys:String x:Key="str.TP.RelDist">距离（虚幻单位uu）：</sys:String>
+	<sys:String x:Key="str.TP.RelHoriz">仅水平面移动（高度不变）</sys:String>
+	<sys:String x:Key="str.Tip.TP.RelGo">沿角色面朝方向位移设定距离；负数向后移动。朝向优先读取角色前向矢量，无数据则取用操控旋转；可通过撤销上次瞬移回退。</sys:String>
+	<sys:String x:Key="str.Tip.TP.RelDist">位移距离单位：虚幻单位（1uu≈1厘米）；负值向后移动。</sys:String>
+	<sys:String x:Key="str.Tip.TP.RelHoriz">开启：仅水平方向移动，固定当前高度，等同于沿罗盘方向行走；关闭：跟随俯仰视角上下移动，飞行穿墙手感。</sys:String>
 
-	<sys:String x:Key="str.TP.LibExportCsv">Export CSV</sys:String>
-	<sys:String x:Key="str.TP.LibExportTemplate">Sample CSV</sys:String>
-	<sys:String x:Key="str.TP.LibImportCsv">Import CSV…</sys:String>
-	<sys:String x:Key="str.TP.LibImportReplace">Replace (not merge)</sys:String>
-	<sys:String x:Key="str.TP.LibImportApply">Apply import</sys:String>
-	<sys:String x:Key="str.TP.LibImportCancel">Cancel import</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibExportCsv">Write the WHOLE library (not just the filtered rows) as UTF-8 CSV with a BOM, so Excel opens non-ASCII labels correctly.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibExportTemplate">Write a small sample CSV — a header plus three example rows — to fill in by hand.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibImportCsv">Read a CSV and show what it WOULD change. Nothing is written until you press Apply. Columns are matched by header name, so extra or reordered columns are fine.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibImportReplace">On: the file becomes the whole library and anything missing from it is deleted. Off (default): only add new entries and update matching ones.</sys:String>
+	<sys:String x:Key="str.TP.CoordHeader">定点坐标瞬移</sys:String>
+	<sys:String x:Key="str.TP.CoordXyz">X / Y / Z 坐标：</sys:String>
+	<sys:String x:Key="str.TP.CoordPyr">俯仰/偏航/翻滚：</sys:String>
+	<sys:String x:Key="str.TP.CoordGo">传送至坐标</sys:String>
+	<sys:String x:Key="str.TP.CoordFill">填入当前坐标</sys:String>
+	<sys:String x:Key="str.TP.CoordSetRot">同步设置旋转</sys:String>
+	<sys:String x:Key="str.Tip.TP.CoordGo">强制将角色传送至输入的精准世界XYZ坐标，不校验关卡，可在当前场景任意位置跳转；支持撤销上次瞬移。</sys:String>
+	<sys:String x:Key="str.Tip.TP.CoordFill">读取角色当前姿态，自动填充XYZ坐标与旋转数值，方便微调点位。</sys:String>
+	<sys:String x:Key="str.Tip.TP.CoordSetRot">勾选后瞬移同时套用下方俯仰偏航旋转；取消则保留原有朝向。</sys:String>
+	
+	<!-- Coordinate Library (P1) — docs/teleport-coord-library-spec.md -->
+	<sys:String x:Key="str.TP.LibHint">分游戏独立存储无限量带备注坐标点位；和上方3个临时标记位区分：临时标记存放于DLL、适合热键调用；收藏库持久保存，游戏更新补丁后数据不会丢失。</sys:String>
+	<sys:String x:Key="str.TP.LibSaveCurrent">＋保存当前位置</sys:String>
+	<sys:String x:Key="str.TP.LibAddFields">＋录入上方坐标</sys:String>
+	<sys:String x:Key="str.TP.LibDuplicate">复制条目</sys:String>
+	<sys:String x:Key="str.TP.LibDelete">删除条目</sys:String>
+	<sys:String x:Key="str.TP.LibClear">清空全部</sys:String>
+	<sys:String x:Key="str.TP.LibClear.ConfirmTitle">确认清空当前游戏全部坐标收藏？</sys:String>
+	<sys:String x:Key="str.TP.LibClear.ConfirmMessage">
+		将删除该游戏总计 {0} 条坐标记录并删除存储文件。
+		清空前会自动生成 .preclear.bak 备份文件，可手动前往程序目录恢复。
+	</sys:String>
+	<sys:String x:Key="str.TP.LibClear.ConfirmYes">确认清空</sys:String>
+	<sys:String x:Key="str.TP.LibClear.Empty">收藏库暂无坐标数据</sys:String>
+	<sys:String x:Key="str.TP.LibClear.Result">已清空 {0} 条坐标记录</sys:String>
+	<sys:String x:Key="str.TP.LibClear.ResultBackedUp">已清空 {0} 条记录，备份文件存放于：{1}</sys:String>
+	<sys:String x:Key="str.TP.LibFilter">搜索筛选：</sys:String>
+	<sys:String x:Key="str.TP.LibFilterPlaceholder">空格分隔多条件：备注/分组/关卡名</sys:String>
+	<sys:String x:Key="str.TP.LibGroup">分组：</sys:String>
+	<sys:String x:Key="str.TP.LibCurrentMapOnly">仅显示当前关卡点位</sys:String>
+	<sys:String x:Key="str.TP.LibGo">传送至选中点位</sys:String>
+	<sys:String x:Key="str.TP.LibForceGo">跨关卡强制传送</sys:String>
+	<sys:String x:Key="str.TP.LibToFields">→填入上方坐标框</sys:String>
+	<sys:String x:Key="str.TP.LibEditLabel">备注名称：</sys:String>
+	<sys:String x:Key="str.TP.LibEditGroup">所属分组：</sys:String>
+	<sys:String x:Key="str.TP.LibApplyEdit">保存修改</sys:String>
+	<sys:String x:Key="str.TP.LibUpdateCoords">用当前位置更新坐标</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibSaveCurrent">读取实时坐标姿态，以当前关卡命名存入收藏库。</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibAddFields">将上方定点坐标框内填写的数值新建为收藏点位。</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibGo">传送至选中收藏点位；点位所属关卡与当前不一致会拒绝执行，工具无法加载新场景，仅可在当前关卡内传送。</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibForceGo">无视关卡校验强制传送；仅关卡更名但场景一致时可用；跨关卡坐标大概率会掉入场景外部虚空。</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibCurrentMapOnly">隐藏其他关卡坐标（默认开启）；不同关卡坐标数值极易重合，混用会导致坠地穿模。</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibUpdateCoords">保留条目备注与分组，用当前角色坐标覆盖原有点位数据。</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibClear">清空当前游戏所有坐标收藏，操作附带确认弹窗与备份文件，可手动恢复。</sys:String>
 
-	<sys:String x:Key="str.TP.LibExportLua">Push to CE</sys:String>
-	<sys:String x:Key="str.TP.LibSaveLua">Save .lua</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibExportLua">Emit the whole library as a Cheat Engine AA script with its own filterable picker. Delivery is via the AOBMaker CE plugin; without it the script is copied to the clipboard as paste-able CE XML instead. The generated script needs UE5Dumper.dll injected — it teleports through the DLL mailbox.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibSaveLua">Write the same AA script to a .lua file instead of pushing it into Cheat Engine.</sys:String>
+	<sys:String x:Key="str.TP.LibExportCsv">导出CSV表格</sys:String>
+	<sys:String x:Key="str.TP.LibExportTemplate">下载CSV模板</sys:String>
+	<sys:String x:Key="str.TP.LibImportCsv">导入CSV文件…</sys:String>
+	<sys:String x:Key="str.TP.LibImportReplace">覆盖原有数据（非合并）</sys:String>
+	<sys:String x:Key="str.TP.LibImportApply">确认导入</sys:String>
+	<sys:String x:Key="str.TP.LibImportCancel">取消导入</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibExportCsv">完整导出全部收藏坐标为UTF-8带BOM编码CSV，Excel可正常打开中文备注。</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibExportTemplate">生成示例CSV模板，包含表头与3条示范点位，可自行编辑填写。</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibImportCsv">读取CSV文件预览变更内容，点击确认导入才会写入数据；按表头匹配字段，列顺序调换、多余列均兼容。</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibImportReplace">开启：导入文件完全替换现有收藏库，未出现在文件中的条目全部删除；关闭（默认）：仅新增条目、更新同名条目。</sys:String>
 
-	<sys:String x:Key="str.TP.LibImportLua">Parse pasted script</sys:String>
-	<sys:String x:Key="str.TP.LibImportLuaFile">Import .lua…</sys:String>
-	<sys:String x:Key="str.TP.LibPastePlaceholder">Paste a previously generated coordinate script here (the whole thing — only the @UE5CD:COORDS block is read)</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibImportLua">Read the coordinates back out of a script you exported earlier and hand-edited. Only the fenced @UE5CD:COORDS block is parsed; the rest of the script is ignored and never executed.</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibImportLuaFile">Same, but read the script from a .lua file.</sys:String>
+	<sys:String x:Key="str.TP.LibExportLua">推送至CE</sys:String>
+	<sys:String x:Key="str.TP.LibSaveLua">保存为Lua脚本</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibExportLua">将全套坐标收藏打包为带筛选列表的CE汇编脚本，经由AOBMaker推送；无插件则复制脚本XML至剪贴板粘贴使用。脚本依赖UE5Dumper.dll注入，通过消息队列完成瞬移。</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibSaveLua">将上述脚本导出保存为本地.lua文件。</sys:String>
 
-	<sys:String x:Key="str.TP.LibExportLuaNoDll">Push to CE (no DLL)</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibExportLuaNoDll">Same picker, but the generated script teleports by raw memory write, so UE5Dumper.dll does NOT have to be injected. "No DLL" refers to that only. REQUIRES the AOBMaker CE plugin and is disabled without it — unlike the button on its left there is deliberately no clipboard fallback, because the script calls helpers defined by the Standalone Trainer's Setup record, which only an AOBMaker push can deliver. Lands in the "UE5CEDumper (no-DLL trainer)" group; enable "UE5 Trainer: Setup" before using it. Weaker than the DLL path: no map guard (the map name is only readable through the DLL), and the offsets go stale when the game is patched.</sys:String>
+	<sys:String x:Key="str.TP.LibImportLua">粘贴脚本解析坐标</sys:String>
+	<sys:String x:Key="str.TP.LibImportLuaFile">导入Lua脚本文件…</sys:String>
+	<sys:String x:Key="str.TP.LibPastePlaceholder">粘贴导出的坐标完整脚本（仅解析@UE5CD:COORDS区块，其余内容忽略）</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibImportLua">读取过往导出、手动修改过的Lua脚本坐标；仅识别指定标记区块，不会执行脚本代码。</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibImportLuaFile">功能同上，直接读取本地Lua文件。</sys:String>
 
-	<sys:String x:Key="str.TP.LibZTol">Z tolerance:</sys:String>
-	<sys:String x:Key="str.Tip.TP.LibZTol">Extra height (uu) added to Z on arrival, so landing exactly on the floor the position was captured on does not drop you through it. 0 = off. Applied at teleport time only — the saved entry keeps its exact captured Z — and baked into the Lua export so the generated picker behaves the same. Not part of the CSV.</sys:String>
+	<sys:String x:Key="str.TP.LibExportLuaNoDll">推送至CE（无需注入DLL）</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibExportLuaNoDll">
+		界面与筛选逻辑一致，瞬移依靠直接内存写入实现，不需要UE5Dumper.dll注入。
+		必须安装AOBMaker插件，无剪贴板备用方案；脚本依赖离线修改器初始化条目。
+		局限性：无关卡安全校验（关卡名称读取需要DLL）；游戏更新补丁后内存偏移直接失效，稳定性弱于DLL驱动模式；脚本归入「UE5CEDumper 离线修改器」分组，使用前需启用初始化条目。
+	</sys:String>
 
-	<sys:String x:Key="str.TP.CursorForceHeader">Force Mouse Cursor</sys:String>
-	<sys:String x:Key="str.TP.CursorForceHint">Force the OS mouse cursor visible or hidden by writing the PlayerController's bShowMouseCursor. Handy when a game hides the cursor but you want Cursor Teleport. One-shot: a game that re-sets the flag every frame may revert it, and a captured input mode can still hide the cursor.</sys:String>
-	<sys:String x:Key="str.TP.CursorStateLabel">State:</sys:String>
-	<sys:String x:Key="str.TP.CursorOn">Force ON</sys:String>
-	<sys:String x:Key="str.TP.CursorOff">Force OFF</sys:String>
+	<sys:String x:Key="str.TP.LibZTol">落地高度补偿：</sys:String>
+	<sys:String x:Key="str.Tip.TP.LibZTol">瞬移抵达时Z轴额外抬高的虚幻单位，避免精准落地时直接穿地板；0代表关闭。仅瞬移瞬间生效，收藏点位原始坐标不变；导出Lua脚本会同步带入该参数，保证效果统一；CSV导出不包含此项设置。</sys:String>
+
+	<sys:String x:Key="str.TP.CursorForceHeader">强制控制鼠标光标</sys:String>
+	<sys:String x:Key="str.TP.CursorForceHint">
+		修改玩家控制器bShowMouseCursor变量，强制系统光标显示或隐藏；多用于游戏默认隐藏光标、需要鼠标点选瞬移的场景。
+		单次生效：游戏逐帧刷新该参数会自动复原；输入模式锁定也可能重新隐藏光标。
+	</sys:String>
+	<sys:String x:Key="str.TP.CursorStateLabel">当前状态：</sys:String>
+	<sys:String x:Key="str.TP.CursorOn">强制显示</sys:String>
+	<sys:String x:Key="str.TP.CursorOff">强制隐藏</sys:String>
 	<sys:String x:Key="str.TP.CursorRefresh">↻</sys:String>
-	<sys:String x:Key="str.Tip.TP.CursorOn">Show the mouse cursor (sets bShowMouseCursor = true on the local PlayerController).</sys:String>
-	<sys:String x:Key="str.Tip.TP.CursorOff">Hide the mouse cursor (sets bShowMouseCursor = false).</sys:String>
-	<sys:String x:Key="str.Tip.TP.CursorRefresh">Re-read the live bShowMouseCursor state (1=ON / 0=OFF / unknown if no live PlayerController).</sys:String>
-
+	<sys:String x:Key="str.Tip.TP.CursorOn">开启本地玩家控制器光标显示开关。</sys:String>
+	<sys:String x:Key="str.Tip.TP.CursorOff">关闭光标显示。</sys:String>
+	<sys:String x:Key="str.Tip.TP.CursorRefresh">读取当前光标显示状态；无玩家控制器则显示未知。</sys:String>
+	
 	<!-- Interesting Properties Finder (B' / Unusual Location) -->
 	<sys:String x:Key="str.IP.Load">Load</sys:String>
 	<sys:String x:Key="str.IP.GameOnly">Game Only</sys:String>
