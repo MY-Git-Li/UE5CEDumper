@@ -2587,9 +2587,23 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
   > this for Steam titles (it sees them without the log), so it bites exactly the non-Steam
   > locations the log sources exist to cover.
   >
-  > **The generalisable lesson:** `File.ReadLines`/`ReadAllLines` cannot read a file anything else
+  > **Generalisable lesson 1:** `File.ReadLines`/`ReadAllLines` cannot read a file anything else
   > holds open for writing — including *our own* logs. Any future code that mines our logs must use
   > `ProxyDeployService.ReadLinesShared` (`FileShare.ReadWrite | FileShare.Delete`).
+  >
+  > **Generalisable lesson 2 — and it is the one that generalises furthest.** When the PASS criterion
+  > is that something does **not** appear, the run that makes it appear is not optional, however much
+  > it looks like a formality. **Absence is the cheapest result in the universe to produce by
+  > accident**: a broken rig, a filter that never ran, a candidate list that never included the item —
+  > all of them render as a clean-looking confirmation. Here the "formality" is the *only* thing that
+  > distinguished a correct prediction from a measurement of nothing. The companion habit is to read
+  > the **"examined N"** counter first: 22 → 23 was what separated *looked and found nothing* from
+  > *never looked*, and no amount of staring at the 0 would have revealed it.
+  >
+  > This also overturns a lesson recorded on 2026-08-12 that read *"B13/B41 does not need the UI at
+  > all — measure `VolumeHasRecycleBin` and you are done."* Measuring the gate proved only that the
+  > gate answers correctly; **it said nothing about whether the user is ever shown anything**, and in
+  > fact they were not. If the PASS criterion is a string on screen, the string has to be looked at.
 
   #### The fixes (build 2801)
 
