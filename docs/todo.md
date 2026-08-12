@@ -2490,8 +2490,12 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
   message, after which the UI cannot connect. Also worth eyeballing there: a game path with
   non-ASCII characters must now appear intact in that message (it used to render as `EVERSPACE? 2`).
 
-- 🔴 **Recycle-Bin refusal on a volume with no bin** (build 2621, B13/B41) — **VERIFIED 2026-08-12
-  AND IT FAILED. The detector could not see the condition it was named after; FIXED in build 2799.**
+- ✅ **Recycle-Bin refusal on a volume with no bin** (build 2621, B13/B41) — **VERIFIED 2026-08-12,
+  end to end, both directions. It FAILED twice on the way and took THREE fixes** (builds 2799 + 2801):
+  the detector could not see the condition it was named after, the refusal it then produced was
+  silently dropped before reaching a row, and — found only because the negative control was run — the
+  candidate folder was never examined at all. Post-fix re-measurement on the AOT build is at the
+  bottom of this entry.
 
   The check never needed the UI: `VolumeHasRecycleBin` is upstream of every row, and it answered the
   question with `SHQueryRecycleBin(root) == S_OK` alone. That call reports on the bin's **contents**,
@@ -2526,58 +2530,94 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
   must still read as present, and any "fix" keyed off the item count would refuse every clean
   machine.
 
-  ### ⬜ HANDOVER — the end-to-end half, set up and part-way through (2026-08-12)
+  ### ✅ The end-to-end half — DONE 2026-08-12. The prediction held, and the CONTROL found a second defect.
 
-  Nobody has yet watched a *row* carry the refusal wording. **Pick this up here; the rig is built.**
+  **The blocker recorded in the previous handover was a miscount, not a bug.** `FakeGameT` *was*
+  being detected the whole time — `Generic scan found 8 UE game(s)` already included it, and the
+  panel showed the row. Nothing in `LooksLikeUeGameRoot` / `WalkDrive` / `IsExcludedBySteam` needed
+  investigating. The fork written up for it (drop a `dummy.pak` and rescan) is moot; do not run it.
 
-  **On disk right now** (recreate if the volume was reclaimed):
+  **The rig, rebuilt with a real game** rather than a synthetic one — copy a small UE title wholesale
+  instead of faking its shape, which removes every "is the detector confused?" question at once:
 
   ```
-  T:  10 GB iSCSI scratch volume, Fixed, NukeOnDelete=1, $RECYCLE.BIN folder still present
-      T:\FakeGameT\Engine\Binaries\Win64\                      (empty — Tier 1 marker)
-      T:\FakeGameT\FakeGameT\Binaries\Win64\FakeGameT-Win64-Shipping.exe   (real 75.8 MB UE exe)
-  D:  same shape under D:\_b13_control\FakeGameD\  — control, bin ENABLED
+  T:  10 GB iSCSI volume, Fixed, $RECYCLE.BIN present, per-volume NukeOnDelete the ONLY variable
+      T:\Light Maze\   <- Steam's "Light Maze" (215 MB, 27 files) copied whole from D:
   ```
 
-  The iSCSI target is `iqn.2011-08.com.asustor:as1204t-4477f9.target009`; it needs a **wired**
-  connection (it dropped mid-session over Wi-Fi) and `Connect-IscsiTarget` needs elevation.
+  Deploy `version.dll` to it → delete everything Steam would own → `T:\Light Maze\LightMaze\
+  Binaries\Win64\version.dll` is the sole survivor, which is exactly the leftover-after-uninstall
+  shape. Re-scan drives so the game leaves the live list (it does, 9 → 8, so no `LiveGameFolder`
+  veto can mask the result), then press *Find leftovers*.
 
-  **The blocker, and what is already ruled out.** Proxy Deploy → *Scan Drives* with T: ticked
-  reports `Generic scan found 8 UE game(s) across 2 drive(s)` — T: **is** being walked, but the
-  fake game is not detected, so there is nothing to deploy to, so the deploy log never names a T:
-  folder, so `Find leftovers` never gets a candidate there (`SteamShapeScan` structurally cannot
-  reach a non-Steam volume). Ruled out by measurement, in this order:
+  | run | `T:` `NukeOnDelete` | folders examined | rows |
+  |---|---|---|---|
+  | 1 | **1** (bin off) | 23 | **0** — the refusal is computed, then dropped |
+  | 2 | **0** (bin on) | 23 | **1** — `Recycle version.dll — folders left in place` |
 
-  | hypothesis | result |
+  Same process, same bytes on disk, one registry DWORD between them.
+
+  #### ① The predicted defect — now MEASURED, and fixed
+
+  `PlanPrune` returns `NotOnFixedDrive`; the surface filter in
+  [`ProxyDeployService.cs`](../ui/UE5DumpUI/Services/ProxyDeployService.cs) kept only
+  `Deletable`/`FileOnly`, so the refusal never reached a row. The user was told **"No leftover proxy
+  DLLs found (23 folder(s) examined)"** while our DLL sat on the one kind of volume where deleting it
+  by hand cannot be undone. B13/B41's own PASS criterion was unobservable as shipped — exactly as
+  predicted from code reading, and now watched happening.
+
+  #### ② The defect the CONTROL found — and it is the one users hit daily
+
+  Run 2 was supposed to be a formality. It also returned 0, **which is what proved run 1 had measured
+  nothing**: the T: folder was never a candidate. `CandidatesFromLogs` read our own `view-*.log` with
+  `File.ReadLines`, which opens `FileShare.Read` and therefore **cannot open the live `view-0.log`
+  that our own logger is holding**. The per-file `catch` swallowed the sharing violation, so the
+  current session's entire deploy log contributed zero candidates; run 1's 22 came from an *archived*
+  `view-20260731-*.log`. Restarting the app rotated the line into an archive and the count went
+  22 → 23, which is the number that made the real measurement possible.
+
+  > **What this cost the user:** deploy a proxy, uninstall the game, press *Find leftovers* in the
+  > same session → **nothing found**. It only appears after an app restart. `SteamShapeScan` hides
+  > this for Steam titles (it sees them without the log), so it bites exactly the non-Steam
+  > locations the log sources exist to cover.
+  >
+  > **The generalisable lesson:** `File.ReadLines`/`ReadAllLines` cannot read a file anything else
+  > holds open for writing — including *our own* logs. Any future code that mines our logs must use
+  > `ProxyDeployService.ReadLinesShared` (`FileShare.ReadWrite | FileShare.Delete`).
+
+  #### The fixes (build 2801)
+
+  | # | change |
   |---|---|
-  | T: never scanned | ❌ log says 2 drives; the picker lists and ticks it |
-  | the dummy exe was not a real PE | ❌ replaced with a real 75.8 MB `*-Win64-Shipping.exe`, count unchanged |
-  | missing `Engine\Binaries\Win64` (Tier 1 in `LooksLikeUeGameRoot`) | ❌ created it, count unchanged (still 8) |
+  | ① | `OrphanVerdictRules.ShouldSurface` now keeps `NotOnFixedDrive`. The scan filter, the row's `IsActionable` and the removal re-check were three hand-written copies of two *different* predicates; they are now one pure pair in [`OrphanScanTypes.cs`](../ui/UE5DumpUI/Models/OrphanScanTypes.cs), so they cannot drift. |
+  | ② | `ReadLinesShared` replaces `File.ReadLines` for the log sweep **and** for the Steam `.acf` read (same bug there: a manifest Steam holds open made `TryReadAcfInstallDir` report *unreadable*, which fails closed and silently refuses every Steam candidate — safe, but the feature just stops working). |
+  | ③ | The recycler question moved **below** `ClassifyLeaf`, so a no-bin volume can no longer manufacture a refusal for a folder holding nothing of ours — and the refusal now carries the file list so the row can NAME the file. |
+  | ④ | Honesty: a blocked row authorises nothing (`AuthorisedFiles` empty even if the verdict gate were relaxed), the report says *"NOT removable"* instead of *"to be recycled"*, and the status line counts blocked rows separately. |
 
-  **The next measurement, and it is a fork — do this first.** Drop a
-  `T:\FakeGameT\FakeGameT\Content\Paks\dummy.pak` and rescan:
+  22 new tests, including the negative controls that make them mean something: the same folder with a
+  working bin is still `Deletable`; a no-bin volume holding a *foreign* DLL is `ForeignFilePresent`,
+  not a recycler refusal; `ShouldSurface` still drops all nine refusals that hold nothing of ours; and
+  the `ReadLinesShared` test asserts `File.ReadLines` **throws** on the same handle first, or it would
+  be asserting nothing.
 
-  * **it appears** → Tier 1 was not matching after all; the fault is in
-    [`LooksLikeUeGameRoot`](../ui/UE5DumpUI/Services/ProxyDeployService.cs) or in `ScanGameFolder`
-    rejecting a folder Tier 1 accepted.
-  * **it still does not** → `WalkDrive` never reaches `T:\FakeGameT` at all; look at `MaxWalkDepth`,
-    the reparse-point skip, and `IsExcludedBySteam`.
+  #### Post-fix re-measurement — build 2804, AOT/trimmed `dist\UE5DumpUI.exe` (54.3 MB), same rig
 
-  Then: deploy `version.dll` to it (that is what writes the `view-*.log` line the leftover scan
-  reads), delete the fake exe so the "game" is gone, and run **Find leftovers**.
+  Both directions, same process, one registry DWORD apart:
 
-  **⚠ Predicted result, from code reading and NOT yet measured — this is the thing to confirm.**
-  The row will probably **not appear at all**, rather than appearing refused: the no-recycler path
-  returns `OrphanVerdict.NotOnFixedDrive`, and
-  [`ProxyDeployService.cs:1360`](../ui/UE5DumpUI/Services/ProxyDeployService.cs:1360) keeps only
-  `Deletable`/`FileOnly`, so the carefully-worded refusal is computed and dropped. That contradicts
-  the filter's own comment ("*or that hold something of ours and are blocked for a reason worth
-  telling the user about*") and it means B13/B41's PASS criterion is unobservable as shipped. The
-  **delete** path does refuse correctly (`:1493`), so this is a "you never find out the leftover is
-  there" defect, not a "your files get destroyed" one. Two smaller things to fix alongside it: the
-  recycler check runs **before** `probe(leaf)`, so it would refuse folders holding nothing of ours;
-  and after the fix the second half of the test still has to run — **re-enable T:'s bin, rescan, and
-  the same row must become actionable**, or the probe is just refusing everything.
+  | `T:` `NukeOnDelete` | examined | rows | the row says | checkbox |
+  |---|---|---|---|---|
+  | **1** (bin off) | 23 | 1 | *"This volume has no working Recycle Bin (removable/network, or the bin is disabled for it), so a delete here would be PERMANENT. Refused — remove the file by hand if that is what you want."* | **disabled** — clicking it does nothing, `Delete checked (0)` stays greyed |
+  | **0** (bin on) | 23 | 1 | `Recycle version.dll — folders left in place` | **enabled** — ticks, `Delete checked (1)` goes live |
+
+  The second row is the half that stops this being a probe that merely refuses everything: the SAME
+  folder becomes actionable when, and only when, the bin is switched back on. Status line reads
+  *"Found 1 leftover proxy DLL(s) — nothing removed yet. 1 cannot be removed from here — read the row
+  for why."* Nothing was deleted at any point; the row was left unticked.
+
+  **The rig is still on disk** (`T:\Light Maze\LightMaze\Binaries\Win64\version.dll`, T: back to
+  `NukeOnDelete=1` as found) if this ever needs re-running. Rebuild it by copying any small UE game
+  wholesale to a scratch volume — that is what made this tractable after the synthetic one wasted a
+  session on a detection question that turned out not to exist.
 
 - ⬜ **The pre-4.11 refusal no longer fires on one PE field** (build 2621, B25). Provoke it with the
   UE-version override, or with any game whose PE ProductVersion reports a 4.0–4.10 major/minor.

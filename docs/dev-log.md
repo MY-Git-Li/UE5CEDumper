@@ -22,6 +22,53 @@ builds ≤696 in
 
 -----
 
+## 2026-08-12 - The leftover-proxy refusal nobody could see, and the log we could not read (build 2801/2804)
+
+Finished B13/B41's end-to-end half — *watch a leftover-proxy row actually carry the no-Recycle-Bin
+refusal* — and it took two failed runs to get one honest measurement.
+
+**The rig.** Previous attempts used a synthetic UE game on a scratch volume and stalled on "the scan
+does not detect it". That turned out to be **a miscount, not a bug** — `Generic scan found 8 UE
+game(s)` already included it and the row was on screen the whole time. Replacing it with a real game
+copied wholesale (Steam's *Light Maze*, 215 MB) removed the entire question: `Found 9 UE game(s)`,
+deploy `version.dll`, delete everything Steam would own, and the sole survivor is exactly the
+leftover-after-uninstall shape.
+
+**Defect ① — predicted, and confirmed.** `PlanPrune` computes `OrphanVerdict.NotOnFixedDrive` with a
+carefully worded refusal, and the scan's surface filter then threw it away, keeping only
+`Deletable`/`FileOnly`. The user was told *"No leftover proxy DLLs found (23 folder(s) examined)"*
+while our DLL sat on a volume where deleting it by hand is unrecoverable. The feature's own PASS
+criterion was unobservable as shipped.
+
+**Defect ② — found only by running the negative control.** Flipping the bin back ON was supposed to
+be a formality; it also returned 0 rows, which is what revealed that the first run had measured
+nothing. `CandidatesFromLogs` read our own `view-*.log` with `File.ReadLines`, which opens
+`FileShare.Read` and **cannot open the live `view-0.log` our own logger holds**. The per-file `catch`
+swallowed the sharing violation, so the current session's whole deploy log contributed zero
+candidates — the 22 examined came from an *archived* log. Practical cost: **deploy a proxy, uninstall
+the game, press Find leftovers in the same session → nothing found**, until a restart rotates the
+log. `SteamShapeScan` masks this for Steam titles, so it bit exactly the non-Steam locations the log
+sources exist to cover.
+
+**Fixes.** `OrphanVerdictRules.{IsActionable,ShouldSurface}` — one pure pair beside the enum,
+replacing three hand-written copies of two *different* predicates, with `NotOnFixedDrive` now
+surfaced but never actionable. `ReadLinesShared` (`FileShare.ReadWrite | FileShare.Delete`) for the
+log sweep and for the Steam `.acf` read, where a manifest Steam holds open made
+`TryReadAcfInstallDir` report unreadable and silently refuse every Steam candidate. The recycler
+question moved **below** `ClassifyLeaf` so a no-bin volume cannot manufacture a refusal for a folder
+holding nothing of ours, and it now carries the file list so the row can name the file. Plus honesty
+work: a blocked row authorises nothing, the report says *"NOT removable"* rather than *"to be
+recycled"*, and the status line counts blocked rows separately.
+
+**Post-fix, on the AOT/trimmed build 2804:** bin OFF → 23 examined, 1 row carrying the refusal, its
+checkbox disabled and `Delete checked (0)` greyed; bin ON → same folder becomes
+`Recycle version.dll — folders left in place`, tickable, `Delete checked (1)`. One registry DWORD
+apart, same process. 22 new tests, each with the negative control that makes it mean something —
+including one asserting `File.ReadLines` **throws** on the same handle first, or it would be
+asserting nothing. 3567 C# green.
+
+-----
+
 ## 2026-08-11 - `executeCodeEx`'s wait cannot be pumped, and one call site asked it to wait forever (build 2792)
 
 Started as a forum question about the mailbox `sleep()` loop — *"why not wrap the sleep in a

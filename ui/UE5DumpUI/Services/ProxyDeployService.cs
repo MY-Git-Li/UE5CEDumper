@@ -1264,7 +1264,7 @@ public sealed class ProxyDeployService : IProxyDeployService
         unreadable = false;
         try
         {
-            foreach (string line in File.ReadLines(acfPath))
+            foreach (string line in ReadLinesShared(acfPath))
             {
                 int k = line.IndexOf("\"installdir\"", StringComparison.OrdinalIgnoreCase);
                 if (k < 0) continue;
@@ -1357,8 +1357,17 @@ public sealed class ProxyDeployService : IProxyDeployService
                 // Only surface rows that either can be acted on, or that hold something of ours and
                 // are blocked for a reason worth telling the user about. A folder with nothing of
                 // ours in it is not this feature's business and must not appear.
-                bool actionable = plan.Verdict is OrphanVerdict.Deletable or OrphanVerdict.FileOnly;
-                if (!actionable) continue;
+                //
+                // NotOnFixedDrive is the second kind, and it was being DROPPED — the filter kept
+                // only the two actionable verdicts, so the carefully-worded no-Recycle-Bin refusal
+                // was computed and thrown away. Measured end to end on 2026-08-12 (a real leftover
+                // version.dll on a fixed volume with NukeOnDelete=1): the scan reported "No leftover
+                // proxy DLLs found (23 folder(s) examined)" while the file sat there, and flipping
+                // that one registry value — nothing else — made the same folder surface as a row.
+                // So the user was told nothing was there precisely on the kind of volume where a
+                // hand-delete is unrecoverable. Every OTHER refusal means ClassifyLeaf found none of
+                // our files, which is the case this filter's comment is about.
+                if (!OrphanVerdictRules.ShouldSurface(plan.Verdict)) continue;
 
                 rows.Add(BuildOrphanRow(dir, src, plan));
             }
@@ -1384,12 +1393,19 @@ public sealed class ProxyDeployService : IProxyDeployService
             catch { /* display-only detail; a missing size must not fail the row */ }
         }
 
+        // A refused row NAMES the files (so the user can deal with them by hand) but authorises
+        // NOTHING. AuthorisedFiles is the intersection set the removal path narrows its fresh plan
+        // against; leaving it populated on a non-actionable verdict would make the refusal one
+        // relaxed gate away from being a delete list. The verdict check in RemoveOrphanProxyAsync
+        // already stops it — this makes it stop twice, in the direction that matters.
+        bool actionable = OrphanVerdictRules.IsActionable(plan.Verdict);
+
         return new OrphanProxy
         {
             DllPath = plan.FilesToRecycle.Count > 0 ? plan.FilesToRecycle[0] : dir,
             DllDirectory = dir,
             DllNames = string.Join(", ", plan.FilesToRecycle.Select(Path.GetFileName)),
-            AuthorisedFiles = plan.FilesToRecycle,
+            AuthorisedFiles = actionable ? plan.FilesToRecycle : Array.Empty<string>(),
             SizeBytes = size,
             FileVersion = version,
             ChainDirs = plan.DirsToRemove,
@@ -1438,6 +1454,34 @@ public sealed class ProxyDeployService : IProxyDeployService
     }
 
     /// <summary>
+    /// Read a text file line by line WITHOUT requiring exclusive-ish access, for files something
+    /// else legitimately holds open for writing.
+    ///
+    /// <para><b>Why this is not <c>File.ReadLines</c>.</b> That helper opens with
+    /// <c>FileShare.Read</c>, which declares "other handles may only read" — so it fails with a
+    /// sharing violation against a writer that already has the file open, which is exactly what our
+    /// own logger is doing to <c>view-0.log</c> while the app runs. Measured 2026-08-12: deploying a
+    /// proxy and then pressing "Find leftovers" in the SAME session found nothing, because the only
+    /// log line naming that folder was in the live <c>view-0.log</c>, the read threw, and the
+    /// caller's per-file <c>catch</c> swallowed it — so the whole file contributed zero candidates
+    /// and the folder was never examined. It only became visible after a restart rotated the log to
+    /// an archive. <c>FileShare.ReadWrite | FileShare.Delete</c> is what tolerates the live writer;
+    /// <c>Delete</c> additionally survives the file being rotated out from under us mid-read.</para>
+    ///
+    /// <para>Lazy, like the helper it replaces, so an open failure surfaces at the first
+    /// <c>MoveNext</c> inside the caller's <c>try</c> rather than at the call site.</para>
+    /// </summary>
+    internal static IEnumerable<string> ReadLinesShared(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
+                                      FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(fs);   // UTF-8 + BOM detection, same as File.ReadLines
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+            yield return line;
+    }
+
+    /// <summary>
     /// Candidate directories recovered from our own log tree. Best-effort by design: the log
     /// retention window bounds how far back this can see, and a proxy deployed but never launched
     /// leaves no DLL banner at all — which is exactly why the Steam shape scan is the primary
@@ -1455,7 +1499,7 @@ public sealed class ProxyDeployService : IProxyDeployService
             {
                 foreach (string file in Directory.EnumerateFiles(dir, filePattern))
                 {
-                    try { lines.AddRange(File.ReadLines(file)); }
+                    try { lines.AddRange(ReadLinesShared(file)); }
                     catch { /* one unreadable log must not stop the sweep */ }
                 }
             }
@@ -1490,7 +1534,7 @@ public sealed class ProxyDeployService : IProxyDeployService
                 RealProbe, ClassifyFileOwnership, ProbeSteamLiveness,
                 _platform.VolumeHasRecycleBin);
 
-            if (plan.Verdict is not (OrphanVerdict.Deletable or OrphanVerdict.FileOnly))
+            if (!OrphanVerdictRules.IsActionable(plan.Verdict))
             {
                 string why = plan.Blockers.Count > 0 ? plan.Blockers[0] : "no longer eligible";
                 _log.Warn("ProxyDeploy", $"Orphan removal refused on re-check ({row.DllDirectory}): {why}");

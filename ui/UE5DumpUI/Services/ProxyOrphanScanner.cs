@@ -312,21 +312,6 @@ internal static class ProxyOrphanScanner
             return new PrunePlan(OrphanVerdict.LiveGameFolder, noFiles, noDirs, null,
                 new List<string> { "This is the binaries folder of a game that is currently installed." }, "");
 
-        // Ask about the RECYCLE BIN here, at scan time, so the confirm dialog never offers a
-        // recycle this volume cannot perform. The question used to be asked first inside
-        // MoveToRecycleBin — after the user had already been told what would happen — and it was
-        // asked as a drive-LETTER test, which a fixed volume with NukeOnDelete=1 passes while
-        // FOF_ALLOWUNDO silently hard-deletes and returns success. NotOnFixedDrive kept its name
-        // (it is in the shipped enum) but now means "no usable Recycle Bin here". (B13/B41)
-        if (hasRecycler != null && !hasRecycler(leaf))
-            return new PrunePlan(OrphanVerdict.NotOnFixedDrive, noFiles, noDirs, null,
-                new List<string>
-                {
-                    "This volume has no working Recycle Bin (removable/network, or the bin is " +
-                    "disabled for it), so a delete here would be PERMANENT. Refused — remove the " +
-                    "file by hand if that is what you want.",
-                }, "");
-
         DirSnapshot? leafSnap = probe(leaf);
         OrphanVerdict content = ClassifyLeaf(leafSnap, isOurs, out var ourNames, out var blockers,
                                              out bool prunableLeaf);
@@ -334,6 +319,29 @@ internal static class ProxyOrphanScanner
             return new PrunePlan(content, noFiles, noDirs, null, blockers, "");
 
         var filesToRecycle = ourNames.Select(n => Combine(leaf, n)).ToArray();
+
+        // Ask about the RECYCLE BIN here, at scan time, so the confirm dialog never offers a
+        // recycle this volume cannot perform. The question used to be asked first inside
+        // MoveToRecycleBin — after the user had already been told what would happen — and it was
+        // asked as a drive-LETTER test, which a fixed volume with NukeOnDelete=1 passes while
+        // FOF_ALLOWUNDO silently hard-deletes and returns success. NotOnFixedDrive kept its name
+        // (it is in the shipped enum) but now means "no usable Recycle Bin here". (B13/B41)
+        //
+        // AFTER ClassifyLeaf, not before, for two reasons measured end to end on 2026-08-12:
+        //   * a volume with no bin must not manufacture a refusal for a folder holding nothing of
+        //     ours — that folder is not this feature's business whatever the volume does; and
+        //   * the plan carries filesToRecycle so the surfaced row can NAME the file it found. A
+        //     refusal that cannot say which file it is about is not actionable by hand either.
+        // The verdict is still not actionable, so nothing is offered for removal: the caller's
+        // surface filter and RemoveOrphanProxyAsync both gate on Verdict before touching this list.
+        if (hasRecycler != null && !hasRecycler(leaf))
+            return new PrunePlan(OrphanVerdict.NotOnFixedDrive, filesToRecycle, noDirs, null,
+                new List<string>
+                {
+                    "This volume has no working Recycle Bin (removable/network, or the bin is " +
+                    "disabled for it), so a delete here would be PERMANENT. Refused — remove the " +
+                    "file by hand if that is what you want.",
+                }, "");
 
         // ---- chain authorisation, SEPARATE from the file authorisation above ----
         // From here on, every early return still recycles the files. Removing our own litter is
@@ -554,7 +562,11 @@ internal static class ProxyOrphanScanner
             string tick = row.IsSelected && row.IsActionable ? "[x]" : "[ ]";
             Line($"{tick} {++n}. {row.DllDirectory}");
             Line();
-            Line($"      Our file(s) to be recycled : {row.DllNames}");
+            // A blocked row still names its files — that is how the user finds them by hand — but
+            // must not claim they are "to be recycled", because nothing will be.
+            Line(row.IsActionable
+                ? $"      Our file(s) to be recycled : {row.DllNames}"
+                : $"      Our file(s) found here     : {row.DllNames}  (NOT removable — see Notes)");
             if (row.FileVersion.Length > 0) Line($"      Version                    : {row.FileVersion}");
             if (row.SizeText.Length > 0) Line($"      Size                       : {row.SizeText}");
             Line($"      Found by                   : {DescribeSources(row.Source)}");
