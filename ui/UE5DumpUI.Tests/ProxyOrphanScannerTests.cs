@@ -813,4 +813,170 @@ public class ProxyOrphanScannerTests
         Assert.Contains("No leftover proxy DLLs were found.", txt, StringComparison.Ordinal);
         Assert.DoesNotContain("folder(s) were examined", txt, StringComparison.Ordinal);
     }
+
+    // ── The Recycle-Bin refusal (B13/B41), measured end to end 2026-08-12 ─────
+    //
+    // The rig: a real UE game copied to a fixed 10 GB volume with NukeOnDelete=1, a proxy deployed
+    // to it, then the game deleted so only our version.dll survived. With the bin DISABLED the scan
+    // reported "No leftover proxy DLLs found (23 folder(s) examined)" while the file sat there; with
+    // ONLY that registry value flipped, the same folder surfaced as a row. Two separate defects made
+    // that happen, and both are pinned below.
+
+    private static RecyclerProbe NoBin => _ => false;
+    private static RecyclerProbe HasBin => _ => true;
+
+    [Fact]
+    public void PlanPrune_NoRecycleBin_RefusesButStillNamesOurFile()
+    {
+        // A refusal that cannot say WHICH file it is about is not actionable by hand either, so the
+        // plan carries the file list even though the verdict authorises nothing.
+        var (leaf, probe) = DqxiShape();
+
+        var plan = ProxyOrphanScanner.PlanPrune(
+            leaf, new[] { Common }, Empty(), probe, OursIf("version.dll"), Gone, NoBin);
+
+        Assert.Equal(OrphanVerdict.NotOnFixedDrive, plan.Verdict);
+        Assert.Single(plan.FilesToRecycle);
+        Assert.Equal(leaf + @"\version.dll", plan.FilesToRecycle[0]);
+        Assert.Empty(plan.DirsToRemove);              // nothing is authorised
+        Assert.Contains(plan.Blockers, b => b.Contains("PERMANENT", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PlanPrune_WorkingRecycleBin_SameShapeIsStillDeletable()
+    {
+        // The NEGATIVE CONTROL for the test above: identical inputs, bin present. Without this a
+        // probe that refused everything would look like a correct refusal.
+        var (leaf, probe) = DqxiShape();
+
+        var plan = ProxyOrphanScanner.PlanPrune(
+            leaf, new[] { Common }, Empty(), probe, OursIf("version.dll"), Gone, HasBin);
+
+        Assert.Equal(OrphanVerdict.Deletable, plan.Verdict);
+        Assert.Equal(4, plan.DirsToRemove.Count);
+    }
+
+    [Fact]
+    public void PlanPrune_NoRecycleBin_FolderWithNothingOfOurs_IsNotARecyclerRefusal()
+    {
+        // ORDERING. The recycler question used to be asked BEFORE the folder was even read, so a
+        // volume with no bin manufactured a refusal for folders this feature has no business in —
+        // and, after the surface fix, would have shown the user a row about someone else's DLL.
+        string leaf = Common + @"\SomeGame\Proj\Binaries\Win64";
+        var probe = ProbeOf(Dir(leaf, files: new[] { "d3d12.dll" }));
+
+        var plan = ProxyOrphanScanner.PlanPrune(
+            leaf, new[] { Common }, Empty(), probe, OursIf("version.dll"), Gone, NoBin);
+
+        Assert.Equal(OrphanVerdict.ForeignFilePresent, plan.Verdict);
+        Assert.NotEqual(OrphanVerdict.NotOnFixedDrive, plan.Verdict);
+        Assert.Empty(plan.FilesToRecycle);
+    }
+
+    [Fact]
+    public void PlanPrune_NoRecycleBin_UnreadableFolder_StillReportsTheFolder()
+    {
+        // Same ordering rule at the other extreme: "could not read it" outranks "no bin here",
+        // because the unreadable-directory refusal is the one that must never read as "empty".
+        string leaf = Common + @"\SomeGame\Proj\Binaries\Win64";
+
+        var plan = ProxyOrphanScanner.PlanPrune(
+            leaf, new[] { Common }, Empty(), ProbeOf(), OursIf("version.dll"), Gone, NoBin);
+
+        Assert.Equal(OrphanVerdict.UnreadableDirectory, plan.Verdict);
+    }
+
+    [Fact]
+    public void PlanPrune_NoRecyclerProbeSupplied_IsUnchanged()
+    {
+        // The probe is optional; omitting it must not start refusing things.
+        var (leaf, probe) = DqxiShape();
+
+        var plan = ProxyOrphanScanner.PlanPrune(
+            leaf, new[] { Common }, Empty(), probe, OursIf("version.dll"), Gone);
+
+        Assert.Equal(OrphanVerdict.Deletable, plan.Verdict);
+    }
+
+    // ── The surface/actionable split — the defect the measurement exposed ─────
+
+    [Fact]
+    public void ShouldSurface_KeepsTheNoRecycleBinRefusal()
+    {
+        // THE regression guard. Dropping this verdict is what made B13/B41's own PASS criterion
+        // unobservable: the refusal was computed, then discarded, and the user was told "No leftover
+        // proxy DLLs found" on the one kind of volume where a hand-delete cannot be undone.
+        Assert.True(OrphanVerdictRules.ShouldSurface(OrphanVerdict.NotOnFixedDrive));
+        Assert.False(OrphanVerdictRules.IsActionable(OrphanVerdict.NotOnFixedDrive));
+    }
+
+    [Theory]
+    [InlineData(OrphanVerdict.Deletable)]
+    [InlineData(OrphanVerdict.FileOnly)]
+    public void ShouldSurface_KeepsEverythingActionable(OrphanVerdict v)
+    {
+        Assert.True(OrphanVerdictRules.IsActionable(v));
+        Assert.True(OrphanVerdictRules.ShouldSurface(v));
+    }
+
+    [Theory]
+    [InlineData(OrphanVerdict.ForeignFilePresent)]   // none of our files
+    [InlineData(OrphanVerdict.UnreadableDll)]
+    [InlineData(OrphanVerdict.UnreadableDirectory)]
+    [InlineData(OrphanVerdict.NoFilesAtAll)]
+    [InlineData(OrphanVerdict.ReparsePointInChain)]
+    [InlineData(OrphanVerdict.LiveGameFolder)]       // the game is installed, not a leftover
+    [InlineData(OrphanVerdict.LiveContentPresent)]
+    [InlineData(OrphanVerdict.SteamManifestPresent)]
+    [InlineData(OrphanVerdict.NotUeShape)]
+    public void ShouldSurface_DropsRefusalsThatHoldNothingOfOurs(OrphanVerdict v)
+    {
+        // The other direction, and it matters just as much: "surface the refusals too" must not
+        // become "show a row for every folder we looked at".
+        Assert.False(OrphanVerdictRules.ShouldSurface(v));
+        Assert.False(OrphanVerdictRules.IsActionable(v));
+    }
+
+    [Fact]
+    public void OrphanRow_NoRecycleBin_IsNotSelectableAndSaysWhy()
+    {
+        var row = new OrphanProxy
+        {
+            DllPath = @"T:\Light Maze\LightMaze\Binaries\Win64\version.dll",
+            DllDirectory = @"T:\Light Maze\LightMaze\Binaries\Win64",
+            DllNames = "version.dll",
+            AuthorisedFiles = Array.Empty<string>(),
+            ChainDirs = Array.Empty<string>(),
+            Verdict = OrphanVerdict.NotOnFixedDrive,
+            Blockers = new[] { "This volume has no working Recycle Bin … would be PERMANENT." },
+        };
+
+        Assert.False(row.IsActionable);                       // checkbox is bound to this
+        Assert.Empty(row.AuthorisedFiles);                    // authorises nothing, even if ticked
+        Assert.Contains("PERMANENT", row.ActionSummary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildReport_BlockedRow_DoesNotClaimTheFileWillBeRecycled()
+    {
+        var row = new OrphanProxy
+        {
+            DllPath = @"T:\G\P\Binaries\Win64\version.dll",
+            DllDirectory = @"T:\G\P\Binaries\Win64",
+            DllNames = "version.dll",
+            AuthorisedFiles = Array.Empty<string>(),
+            ChainDirs = Array.Empty<string>(),
+            Verdict = OrphanVerdict.NotOnFixedDrive,
+            Blockers = new[] { "This volume has no working Recycle Bin, so a delete would be PERMANENT." },
+            IsSelected = true,   // even ticked, it is not authorised
+        };
+
+        string txt = ProxyOrphanScanner.BuildReport(new[] { row }, "t", "1", foldersExamined: 23);
+
+        Assert.Contains("NOT removable", txt, StringComparison.Ordinal);
+        Assert.DoesNotContain("to be recycled", txt, StringComparison.Ordinal);
+        Assert.Contains("[ ]", txt, StringComparison.Ordinal);          // never [x]
+        Assert.Contains("0 currently ticked", txt, StringComparison.Ordinal);
+        Assert.Contains("PERMANENT", txt, StringComparison.Ordinal);    // the reason survives
+    }
 }

@@ -12,7 +12,7 @@
 
 -----
 
-## 目前狀態（2026-08-06，build 2743）
+## 目前狀態（2026-08-12，build 2804）
 
 > ### 🆕 build 2743：CE Lua mailbox 三個缺陷已修，兩個留著
 >
@@ -37,11 +37,43 @@
 | 組別 | 剩幾項 | 內容 |
 |---|---|---|
 | ① 可從 log 取得 | 6 ⬜ + 1 🟡 | B4、B29（log 半）、B18、B19、B10、B28 反向確認、B8 🟡 |
-| ② 一定要人工操作 | 8 ⬜ | B2、B29（人工半）、B13/B41、B25、B26、B16、B5（主動半）、`.CT` registry fallback |
-| ③ DumperTest 樣本 | 1 ⬜ | Shipping 包的畫面心跳（要重 cook） |
-| ④ Vendor 更新 | 1 ⬜ | Z1 zydis |
+| ② 一定要人工操作 | **5 ⬜** | B29（人工半）、B25、B26、B5（主動半）、`.CT` registry fallback；~~B16~~ ✅、~~B2~~ ✅、~~B13/B41~~ ✅ **端到端已結案** |
+| ③ DumperTest 樣本 | **0** | ~~Shipping 包的畫面心跳~~ ✅ **根本不用重 cook** |
+| ④ Vendor 更新 | **0** | ~~Z1 zydis~~ ✅ |
 
-其中屬於 audit #4 的 `- ⬜` 條目是 **13 項**（與英文正本的計數一致）。
+> ### 🆕 2026-08-12 這一輪：結掉三項，而且驗出一個真缺陷
+>
+> **完整證據一律在英文正本 [todo.md](todo.md)，這裡只記結論。**
+>
+> | 項目 | 結果 |
+> |---|---|
+> | **B16** 五個死掉的排序欄位 | ✅ 十個狀態（五欄 × 升降冪）全部符合**事前**寫下的預測。資料集刻意讓 X/Y/Z/Yaw/Dist 與插入順序induce **六種互不相同**的排序 —— 否則一個「什麼都沒做」的排序也會看起來像通過。**未測到 Group / Map**（`+ From fields` 讓 Group 全空、Map 全同）。 |
+> | **③** 樣本 Shipping 心跳 | ✅ 五行都在。**而且不用重 cook** —— 磁碟上那包本來就是 HUD commit 之後 5 分鐘建的。`TickCount` +15 / 14.2 秒，F32÷10.25、F64÷0.25、RawDouble÷0.5 **四條獨立路徑都算出 15 跳**。 |
+> | **Z1** zydis | ✅ 零 decode error、有函式 mapped props 非零。`instrs` 8–33 比 v5 的 17–65 低，但**那個 9 instrs 的函式正是唯一解出來的**，所以是 stock template 的 getter 短，不是 decoder 提早放棄。 |
+> | **B13/B41** | ✅ **端到端已結案（build 2804）**，但路上驗出**三個**缺陷、失敗了兩輪。探針看不見它自己命名的那個條件（已修 build 2799）；接著發現拒絕訊息算出來後**被過濾掉**、根本到不了 UI；最後 negative control 又抓到**掃描讀不到自己的 live log**。全部已修 + 22 個新測試。 |
+>
+> **四個方法論教訓，比結果本身值錢：**
+>
+> 1. **「這台不能編 UE」擋了 ③ 一週，而結案的那個 binary 早就在 `For Testing\` 裡。**
+>    接受任何「環境做不到」的阻塞之前，先比對產物的 mtime 和那個應該被編進去的 commit。
+> 2. ~~**B13/B41 根本不用開 UI。**~~ **⚠ 這條 2026-08-12 被推翻了，寫在這裡當反例。**
+>    「量閘門函式就結案」只證明了 `VolumeHasRecycleBin` 會回 false，
+>    **完全沒有證明使用者看得到任何東西** —— 而實際上看不到：
+>    拒絕訊息被 surface filter 丟掉，那一列從頭到尾不會出現。
+>    真正的修正版教訓是：**先找閘門在哪裡，但「閘門答對了」不等於「使用者看得到」。
+>    只要 PASS 條件是寫在 UI 上的一串字，就一定要真的去看那串字。**
+> 3. **空的 grep 不是證據。** Z1 第一次查 log 是空的，差點被記成失敗 ——
+>    DLL 還沒 flush（`offsets-0.log` 之後從 6,048 長到 7,885 bytes）。
+>    先確認指令有送出去（`grep find_property_xrefs ui-pipe-0.log`），再從空結果下任何結論。
+> 4. 🆕 **PASS 條件是「某個東西不出現」時，一定要跑反方向那一次 —— 就算它看起來只是走形式。**
+>    B13/B41 預測「沒有回收筒時那一列不會出現」，第一次跑出來正是如此，看起來乾淨俐落。
+>    但把回收筒打開的**對照組也回傳 0** —— 那才揭穿第一次根本什麼都沒量到
+>    （候選資料夾壓根沒被檢查，因為 `File.ReadLines` 開不了我們自己正在寫的 log）。
+>    **「不存在」是全世界最容易誤打誤撞產生的結果。**
+>    配套：**先看「檢查了幾個」那個數字**（22 → 23 才是真正的分水嶺），
+>    它是唯一能分辨「看過了、沒有」與「根本沒看」的東西。
+
+其中屬於 audit #4 的 `- ⬜` 條目是 **10 項**（與英文正本的計數一致）。
 
 > **B4 的分類要看清楚：修正早就 ship 了（build 2592），⬜ 的是「驗證」。**
 > 程式碼已核對過：`Tot.h:75-76` 的獨立旗標 `t_cancelImmune` + `MarkCancelImmune()`、
@@ -67,19 +99,21 @@
 
 ### ⚠ 建議順序（按力氣排，不必照清單順序）
 
+> 編號保留不動，做完的直接畫掉 —— 這樣「第幾項」在對話裡講出來還是同一個東西。
+
 | 順序 | 項目 | 力氣 | 為什麼排這裡 |
 |---|---|---|---|
 | **1** | **B4** | 中 | **唯一還會讓使用者看到無聲錯誤資料的項目**。失敗時查詢回 0 卻寫 `scanned=<全部>`，看起來像「物件不存在」，CE-only session 會一直壞下去 |
-| **2** | **B16** | 極小 | AOT 包裡點五個欄位標題，兩分鐘 |
+| ~~2~~ | ~~**B16**~~ ✅ | — | 已結案 2026-08-12 |
 | **3** | **B26** | 小 | 兩次點擊 + 貼一段 XML |
 | **4** | **B5**（主動半） | 小 | proxy 啟動、掃描途中按一次 CE 熱鍵 |
 | **5** | **`.CT` registry fallback** | 小 | 刪一個檔、勾一次 `init` |
-| **6** | **Z1** | 小 | 注入任一 UE 遊戲 + 一次 Path-2 xref |
+| ~~6~~ | ~~**Z1**~~ ✅ | — | 已結案 2026-08-12 |
 | **7** | **B18** / **B19** | 中 | 各需要一個刻意佈置的前提 |
 | **8** | **B29**（兩半一起） | 中 | 要裝 ReShade 之類的第三方 wrapper |
-| **9** | **B13 / B41** | 中 | 要有一個關掉資源回收筒的磁碟區 |
-| **10** | **B2** / **B25** / **B28 反向** | 看手邊有沒有那款遊戲 | 各自綁死一款特定遊戲（Satisfactory / 4.0–4.10 / STVoyager） |
-| **11** | **B8** · **B10** · **樣本心跳** | 卡住 | 三項都卡在外部條件，見各自段落 |
+| ~~9~~ | ~~**B13 / B41**~~ ✅ | — | 已結案 2026-08-12（build 2804，端到端兩個方向都看過） |
+| **10** | ~~B2~~ ✅ / **B25** / **B28 反向** | 看手邊有沒有那款遊戲 | 剩下兩項各自綁死一款特定遊戲（4.0–4.10 / STVoyager） |
+| **11** | **B8** · **B10** · ~~樣本心跳~~ ✅ | 卡住 | 剩下兩項卡在外部條件，見各自段落 |
 
 ### 驗證時的兩條鐵則（B34 與 B14 各花了三輪換來的）
 
@@ -357,22 +391,6 @@ Snapshot capture 本來就包在 `DiagnosticsProbe` 裡，**不需要新增任�
 
 # ② 一定要人工操作
 
-## ⬜ B16 —— 座標表格五個沒作用的排序欄位
-**build 2610** · 力氣 **極小** · **兩分鐘就能做完，建議先做這個**
-
-> ⚠ **必須在 publish（AOT / trimmed）的 build 上檢查** —— 整個缺陷就是被 trim 掉的 reflection
-> metadata，所以單純 `dotnet run` 或非 trimmed build **不會重現**。
-> 用 `dist\UE5DumpUI.exe`，並先確認它是 `-Mode Publish` 出來的那一份。
-
-**執行步驟**
-1. 跑 `dist\UE5DumpUI.exe`
-2. Teleport → Coordinate Library，準備**至少 3 列**資料（隨便存三個座標）
-3. 依序點 **X**、**Y**、**Z**、**Yaw**、**Dist** 五個欄位標題，每個點兩次（升冪／降冪）
-
-- **PASS** = 五個都會重新排序，而且點第二次會反向。
-- **FAIL** = 標題的箭頭動了，但列沒有動。
-- **同時確認沒有回歸**：Label / Group / Map 本來就是好的，現在也必須還是好的。
-
 ## ⬜ B26 —— 重複的 GameEngine record 不再互相破壞
 **build 2621** · 力氣 **小**
 
@@ -451,24 +469,6 @@ Snapshot capture 本來就包在 `DiagnosticsProbe` 裡，**不需要新增任�
 - **順便看一眼**：含非 ASCII 字元的遊戲路徑現在必須在那個訊息裡**完整顯示**
   （以前會變成 `EVERSPACE? 2`）。
 
-## ⬜ B13 / B41 —— 磁碟區沒有資源回收筒時會拒絕刪除
-**build 2621** · 力氣 **中**
-
-**執行步驟**
-1. 找一個**備用的固定磁碟區**（不要拿系統碟做），
-   `資源回收筒內容 → 該磁碟區 → 不要將檔案移到資源回收筒`
-2. 在上面隨便造一個假的殘留 proxy（複製一份 `version.dll` 到一個像遊戲資料夾的目錄）
-3. UI → Proxy Deploy → **Find leftovers**，讓那一列被掃出來
-4. 嘗試對那一列執行刪除
-
-- **PASS** = 該列被拒絕，理由是
-  *"This volume has no working Recycle Bin … a delete here would be PERMANENT"*，
-  而且確認對話框從頭到尾**沒有**提供「移到資源回收筒」的選項。
-- **FAIL** = 該列可以執行，檔案永久消失，而狀態列卻寫著「moved to the Recycle Bin」。
-
-5. **做完之後把資源回收筒重新開啟，重掃，確認同一列又變成可執行**
-   —— 這後半段才能證明這個探測不是單純什麼都拒絕。
-
 ## ⬜ B25 —— pre-4.11 的拒絕掃描不再靠單一個 PE 欄位就開火
 **build 2621** · 力氣 **中**（正方向要有對的遊戲）
 
@@ -486,94 +486,19 @@ Snapshot capture 本來就包在 `DiagnosticsProbe` 裡，**不需要新增任�
   而且掃描**照樣跑下去**（tier 3 → low confidence → gate 不會武裝）。
 - **FAIL** = 一個能正常運作的遊戲卻出現 `SKIPPING the scan`。
 
-## ⬜ B2 —— Symbol-export 的 GWorld 不再宣稱自己有 AOB
-**build 2581** · 力氣 **看有沒有那款遊戲**
-
-**前置條件**：需要一款 GWorld 真的是透過 **symbol export** 解出來的遊戲 ——
-**Satisfactory**（`?GWorld@@3VUWorldProxy@@A`，見 [test-games.md](test-games.md)）。
-一般 RIP-pattern 的遊戲沒什麼好檢查的 —— 那裡的行為跟以前一樣，這正是重點。
-
-**執行步驟**
-1. 注入 Satisfactory，等掃描完成
-2. 去 CE-export 或 Standalone-Trainer，看 **AOB 切換鈕**
-3. 匯出一份表格，看裡面的位址
-
-- **PASS** = 切換鈕是**灰的**（不提供 AOB），而且匯出表格裡的位址透過非 AOB 路徑正常解析。
-- **FAIL** = 切換鈕可以按，而且匯出表格裡每一個位址都顯示 `??`。
-
------
-
-# ③ DumperTest 自建樣本
+# ③ DumperTest 自建樣本 —— **全部結清**
 
 > 來源是 2026-08-05 自建的 UE 5.4 `DumperTest` 樣本
 > （`tools/ue-sample/`，打包在 `D:\UE_Analyze_Data\For Testing\DumperTest\`）。
 > **D1**（GNames 解到 `EOSSDK-Win64-Shipping.dll`）、**D2**（群組掃描那一列的顯示）、
-> **D3**（`FUObjectItem` stride 被偵測成一半）三項都已 ✅ 修復並驗證，整條刪除。
-> 只剩樣本自己的一個問題。
+> **D3**（`FUObjectItem` stride 被偵測成一半）已於 2026-08-05/06 修復並驗證；
+> 最後一項 **Shipping 包的畫面心跳**於 **2026-08-12** 驗證通過 —— 而且**不用重 cook**。
+> 全部經過見 [todo.md](todo.md)。
 
-## ⬜ 樣本 Shipping 包的畫面心跳看不到
-**build 2719** · 力氣 **卡住 —— 這台機器不能編 UE**
+# ④ Vendor 更新帶來的 —— **全部結清**
 
-`UEngine::AddOnScreenDebugMessage` 在 UE 5.4 是**整個函式本體**被
-`#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)` 包起來（`UnrealEngine.cpp:11397`），
-**沒有任何 flag 能救回來**。已改用 `ADumperTestHUD`
-（`AHUD::DrawHUD` → `DrawText`，從 **Tick** 呼叫 `ClientSetHUD` 安裝，
-不走 1 Hz timer，也不靠 GameMode asset）。**程式碼寫好了，但沒有 build 過。**
-
-**執行步驟**（需要一台能編 UE 5.4 的機器）
-1. 重新 cook + 重新打包 `tools/ue-sample/` 的 **Shipping** 設定
-2. 執行，**不要**帶 `-DumperTestNoHud` 命令列參數
-3. 看畫面
-
-- **PASS** = 三行文字出現在 Shipping 包的畫面上，而且 `TickCount` 會往上跳。
-- **FAIL** = 還是空白 —— 現在這代表 **HUD 安裝失敗**（先確認命令列沒有 `-DumperTestNoHud`），
-  而不是「本來就看不到」。
-
-> ⚠ **Shipping 畫面空白不能證明樣本有問題。** 要驗樣本本身，用 **Development** 包，
-> 或直接在 Live Walker 讀 `TickCount` @ `0x518`。
-> 另外 `UE_LOG(..., Warning, ...)` 在 Shipping 也不會留下來
-> （`Build.h:328` 的 `NO_LOGGING`；`LogMacros.h:146-158` 只留 Fatal），
-> 所以 `[DumperTest] ADumperTestActor ready at 0x…` 只有 Development 印得出來。
-
------
-
-# ④ Vendor 更新帶來的
-
-## ⬜ Z1 —— zydis `a95bb71`：Path-2 原生反組譯還解得出 `[this+off]`
-**2026-08-05 bump** · 力氣 **小** · **① 靠 log 就能驗**，但需要一個刻意動作
-
-zydis 從 `85d7518` 升到 `a95bb71`（"Decoder patch for variable-position decoder-tree filters" #638）
-是 decoder 修正**加上整份 decoder table 重新生成** —— +34.9k / −45.7k 行。這正是當初 v4→v5
-被判定「值得做一次 in-game 檢查」的同一種形狀，理由也一樣：**離線測試解的是我們自己寫的位元組，
-而 table 重生會改變「任意遊戲程式碼」怎麼被解碼**。
-
-**離線證據已經涵蓋的部分**（所以這一項不是重做）：5 個 `Test_Denken_*` 把真實 x64 序列餵進
-Zydis 解碼且全過，含 `Test_Denken_ExcludesStackAndZeroDisp`（正是 v5 遷移動到的
-`disp.size == 0` 那條）。81 + 996 全綠，DLL 建置乾淨。
-**沒涵蓋的部分**：真實 UE 執行檔的編譯器輸出。
-
-**執行步驟**
-1. 注入**任何**一款 UE 遊戲（不挑）
-2. 跑一次 Path-2 property xref —— Interesting Funcs 挑一個原生 getter/setter，
-   或按 Property Search 的 xref 按鈕
-3. `grep -E "AnalyzeNativeFunctionProps|FindPropertyXrefs" offsets-0.log`
-
-```
-AnalyzeNativeFunctionProps: 0x… exec=0x… -> N mapped props (U unmapped, I instrs, C calls)
-FindPropertyXrefs: N xrefs (scanned … functions, … with script, …ms)
-```
-
-- **PASS** = `I instrs` 是合理的函式長度（v5 基準是每個函式 **17–65**），
-  至少有些函式的 `N mapped props` 非零，而且**沒有 decode error**。
-- **FAIL** = `instrs` 塌到接近 0（decoder 提早放棄），
-  或原本 v5 有數字的函式現在全部 `-> 0 mapped props`。
-- **不算 FAIL**：結果大多是空的是 Path 2 的**本質**，不是回歸 —— 只有原生的常數
-  `[this+off]` getter 才映射得到，純 script 的屬性根本沒有機器碼。v5 那次驗證也是同一個結論。
-
-*比較基準：2026-06-23 的 v5 smoke test（SEED + TQ2，皆 UE5）—— 每函式 17–65 instrs、
-1–5 個 `[this+off]` access、很多 `→ 1 mapped props`、TQ2 `2 xrefs`、零 decode error。*
-
------
+> **Z1**（zydis `a95bb71` 之後 Path-2 仍解得出 `[this+off]`）於 **2026-08-12** 驗證通過。
+> 下次 vendor bump 時這一組會再長出項目；現在是空的。
 
 # 已經不是「驗證」項目了
 

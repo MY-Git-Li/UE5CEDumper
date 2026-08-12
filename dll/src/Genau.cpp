@@ -804,6 +804,18 @@ struct ScanReport {
     bool                           hintUsed     = false;    // true if winner came from hint cache
 };
 
+// The `*_method` label for a successful scan. Every caller used to hardcode "aob", which
+// was wrong for the ~6 symbol-export and CallFollow entries: they reported method="aob"
+// next to a pattern_id of "GWLD_EXP" and an empty AOB triple, three fields in the same
+// payload contradicting each other.
+//
+// winningSig is null only if a winner was recorded without its signature; "aob" is the
+// right answer there because it is what every such path used to report, and a guess that
+// changes behaviour is worse than a guess that preserves it.
+static const char* ScanMethodFor(const ScanReport& report) {
+    return report.winningSig ? ScanMethodName(report.winningSig->resolve) : "aob";
+}
+
 // Try to resolve a symbol export from any loaded module.
 // Reuses the existing TrySymbolExport helper.
 static uintptr_t ResolveSymbolExport(const AobSignature& sig, ValidatorFn validate) {
@@ -1505,7 +1517,7 @@ uintptr_t FindGObjects(const char* hintPatternId) {
     LogScanReport(report);
 
     if (result) {
-        s_gobjectsMethod = "aob";
+        s_gobjectsMethod = ScanMethodFor(report);
     } else {
         // Fallback: exhaustive data-section pointer scan
         Sein::Warn("SCAN:GObj", "FindGObjects: All patterns failed, trying data-section scan fallback...");
@@ -2245,7 +2257,7 @@ uintptr_t FindGNames(const char* hintPatternId) {
     LogScanReport(report);
 
     if (result) {
-        s_gnamesMethod = "aob";
+        s_gnamesMethod = ScanMethodFor(report);
     } else {
         // Tier 2: string-reference fallback — find FNamePool via code that uses FName
         Sein::Warn("SCAN:GNam", "FindGNames: All patterns failed, trying string-ref fallback...");
@@ -2311,7 +2323,7 @@ uintptr_t FindGWorld(const char* hintPatternId) {
     LogScanReport(report);
 
     if (result) {
-        s_gworldMethod = "aob";
+        s_gworldMethod = ScanMethodFor(report);
     } else {
         Sein::Warn("SCAN:GWld", "FindGWorld: All patterns failed (non-critical)");
     }
@@ -2420,7 +2432,7 @@ uintptr_t FindSparseDelegateStorage() {
     LogScanReport(s_sparseReport);
 
     if (result) {
-        s_sparseDelegatesMethod = "aob";
+        s_sparseDelegatesMethod = ScanMethodFor(s_sparseReport);
         Sein::Info("SCAN:Sparse", "FindSparseDelegateStorage: Found at 0x%llX",
                    static_cast<unsigned long long>(result));
     } else {
@@ -4563,7 +4575,7 @@ uintptr_t FindGEngineSlot() {
     LogScanReport(s_gengineReport);
 
     if (result) {
-        s_gengineMethod = "aob";
+        s_gengineMethod = ScanMethodFor(s_gengineReport);
         Sein::Info("SCAN:Eng", "FindGEngineSlot: &GEngine = 0x%llX",
                    static_cast<unsigned long long>(result));
     } else {

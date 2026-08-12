@@ -1782,10 +1782,35 @@ and `Health.CurrentValue` falling, so the values genuinely change.
 > (`AHUD::DrawHUD` → `DrawText`, installed via `ClientSetHUD` from **Tick**, not the 1 Hz timer
 > and not a GameMode asset). Whole chain read in the 5.4 source first — see the dev-log entry.
 >
-> ⬜ **Needs a re-cook + re-package to verify** — this environment cannot compile UE, so nothing
-> about it is claimed to work until that run. **PASS** = the three lines appear in the *Shipping*
-> package and `TickCount` climbs; **FAIL** = still blank, which now means the HUD install failed
-> (check `-DumperTestNoHud` is not on the command line) rather than "expected".
+> ✅ **VERIFIED 2026-08-12 — and NO re-cook was needed.** The claim above ("needs a re-cook +
+> re-package", "this environment cannot compile UE") was **wrong about the artifact, not just about
+> the environment**: the Shipping package already on disk was built at 20:15 on 2026-08-05, five
+> minutes *after* the HUD commit `b3d8593` (20:10:50), so it had carried `ADumperTestHUD` all along.
+> Launching it (`-windowed -ResX=1280 -ResY=720`, no `-DumperTestNoHud`) puts **all five lines** on
+> screen in the *Shipping* package.
+>
+> `TickCount` climbing is the actual assertion, and three independent counters agree on the same
+> tick count over one 14.2 s window — which is what separates "numbers changed" from "the 1 Hz timer
+> runs":
+>
+> | field | T0 | T1 (+14.2 s) | contract | |
+> |---|---|---|---|---|
+> | `frames` | 4593 | 5444 | must ALWAYS climb | ✅ |
+> | **`TickCount`** | **78** | **93** | climbs **only** if the 1 Hz timer runs | ✅ **+15** |
+> | `Health.CurrentValue` | 22 | 7 | must fall | ✅ |
+> | `Health.BaseValue` / `FrozenInt` | 100 / 424242 | 100 / 424242 | must **NOT** move | ✅ |
+> | `F32_Ticking` | 201.000 | 47.250 | −10.25 per tick | ✅ Δ153.75 = 10.25 **× 15** |
+> | `F64_Ticking` | 20019.625 | 20023.375 | +0.25 per tick | ✅ Δ3.75 = 0.25 **× 15** |
+> | `RawDouble_Ticking` (native) | 50039.500 | 50047.000 | non-UPROPERTY | ✅ Δ7.5 = 0.5 **× 15** |
+>
+> **Lesson worth keeping:** the item sat ⬜ for a week behind "this machine cannot compile UE" when
+> the binary that settled it was already in `For Testing\`. Before accepting a build-environment
+> blocker, check the artifact's mtime against the commit that was supposed to go into it.
+>
+> **Incidental, and it costs a session if you don't know it:** `-ExecCmds="t.MaxFPS 30"` is **silently
+> ignored in Shipping**. `UE_ALLOW_EXEC_COMMANDS` is `UE_ALLOW_EXEC_COMMANDS_IN_SHIPPING` there
+> (`Exec.h:13`) and 1 only otherwise, so `frames` climbed at ~60/s despite the cap. Use the
+> **Development** package when a frame-rate cap actually matters.
 >
 > While verifying it, a **third** wrong Shipping assertion in the same file surfaced, pre-existing:
 > `UE_LOG(..., Warning, ...)` does NOT survive Shipping (`Build.h:328` sets
@@ -1794,8 +1819,36 @@ and `Health.CurrentValue` falling, so the values genuinely change.
 > came from inferring a gate from a sibling instead of opening it.
 
 
-**Z1 — zydis `a95bb71`: Path-2 native disassembly still resolves `[this+off]`.** ⬜ Effort **S** ·
-Risk low · **① log-verifiable**, one deliberate action.
+**Z1 — zydis `a95bb71`: Path-2 native disassembly still resolves `[this+off]`.** ✅ **VERIFIED
+2026-08-12** · Effort **S** · Risk low · **① log-verifiable**, one deliberate action.
+
+> ### ✅ VERIFIED 2026-08-12 — DumperTest Development, DLL build 2794
+>
+> Property Search → `JumpZVelocity` on `CharacterMovementComponent` → **⇊ Funcs**. From
+> `offsets-0.log`, eight Path-2 analyses:
+>
+> ```
+>  8 instrs / 0 mapped     33 instrs / 0 mapped     17 instrs / 0 mapped
+> 30 instrs / 0 mapped     31 instrs / 0 mapped     15 instrs / 0 mapped
+> 27 instrs / 0 mapped      9 instrs / 1 mapped props   <- the one that resolved
+> ```
+>
+> Against the criteria below: **zero decode errors** anywhere in the log folder, **at least one
+> function with non-zero `mapped props`**, and `instrs` nowhere near 0. Path 1 ran too —
+> `FindPropertyXrefs: 0 xrefs (scanned 9807 functions, 6 with script, 51ms)` — and 0 is expected on
+> a stock template that has almost no Blueprint script, which the "NOT a failure" note below already
+> covers.
+>
+> **One honest qualification:** the `instrs` distribution (8–33) skews **below** the v5 baseline of
+> 17–65. That is the sample, not the decoder — the 9-instr function is precisely the one that
+> **did** map a property, which is the opposite of a decoder bailing early, and a stock Third Person
+> template's native getters are genuinely shorter than a commercial title's. If a future run shows
+> the same skew *with* nothing mapping, that is a different result and worth chasing.
+>
+> ⚠ **Read the log LATE.** The first attempt in that session grepped ~20 s after the click, found
+> nothing, and would have been recorded as a failure — the DLL had not flushed yet, and
+> `offsets-0.log` grew from 6,048 to 7,885 bytes afterwards. Confirm the command was even sent
+> (`grep find_property_xrefs ui-pipe-0.log`) before concluding anything from an empty grep.
 
 The bump (`85d7518` → `a95bb71`, "Decoder patch for variable-position decoder-tree filters" #638)
 is a decoder fix **plus a full table regen** — +34.9k/−45.7k lines. That is the same shape as the
@@ -2390,14 +2443,42 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
 
 #### ② Manual-only
 
-- ⬜ **Symbol-export GWorld no longer claims to have an AOB** (build 2581, audit #4 B2). The gate is
-  unit-tested against the shipped pattern tables, but needs a game whose GWorld actually resolves
-  through a symbol export — **Satisfactory** (`?GWorld@@3VUWorldProxy@@A`, see
-  [test-games.md](test-games.md)). **To test:** scan, then look at the CE-export / Standalone-Trainer
-  AOB toggle. PASS = the toggle is greyed out (no AOB offered) and the exported table's addresses
-  resolve normally through the non-AOB path. FAIL = the toggle is enabled and every address in the
-  exported table shows `??`. Nothing to check on a normal RIP-pattern game — the toggle behaves as
-  before there, which is the point.
+- ✅ **Symbol-export GWorld no longer claims to have an AOB** (build 2581, audit #4 B2) —
+  **VERIFIED 2026-08-12 on Satisfactory** (UE 5.6, 137,391 objects, DLL build 2798). Both halves.
+
+  The precondition held live: `scan-0.log` shows
+  `TrySymbolExport: Found '?GWorld@@3VUWorldProxy@@A' in module 'FactoryGameSteam-Engine-Win64-Shipping.dll'`
+  → `GWLD_EXP … [WINNER]`. GObjects (`GOBJ_EXP`), GNames (`GNAM_EXP_TOSTR`) and GEngine (`GENG_EXP`)
+  resolve the same way — this build is modular, so **all four** exercise the gate at once.
+
+  | half | evidence |
+  |---|---|
+  | toggle greyed | `get_pointers` returns `gworld_aob: ""` → `IsAobSymbolAvailable=false` → `CanUseAobSymbol=false` → `IsEnabled` binding at [`LiveWalkerPanel.axaml:231`](../ui/UE5DumpUI/Views/LiveWalkerPanel.axaml:231). **Observed on screen**: the *AOB* item in Live Walker → Options renders dim while every sibling is white. |
+  | export resolves | *Copy CE XML* on `GWorld → PersistentLevel`: 160,036 chars, **zero `??`**, **zero AOB markers** (`AOBScanModuleUE` / `aobscan` / the mangled name / `UE_GWorld`), root `<Address>1E4542EAEA0</Address>` literal with `+30` child offsets. |
+
+  The mechanism is [`IsCeReplayableAob`](../dll/src/Himmel.h) suppressing the triple for
+  `SymbolExport` / `SymbolCallFollow` / `CallFollow`, whose comment already cited this item.
+
+  > ### 🔴 Found en route, and it was NOT cosmetic — fixed in build 2798
+  >
+  > The same payload reported `gworld_method: "aob"` next to `gworld_pattern_id: "GWLD_EXP"` and an
+  > empty AOB triple: three fields disagreeing. [`Genau.cpp`](../dll/src/Genau.cpp) hardcoded
+  > `"aob"` at all five sites whenever the scan returned non-zero, so every symbol-export and
+  > CallFollow win was mislabelled, and `FindAll: Complete` printed `(aob)` for all four.
+  >
+  > **The trap:** the obvious fix — report the true mechanism — regresses the UI on its own.
+  > `PointerPanelViewModel` asked `method != "aob"` to mean *"found via fallback"*, and
+  > `ShowGWorldRecovered` asked it to mean *"found via a recovery path"*. Relabelling alone would
+  > have raised a spurious **"found via fallback"** warning on all four pointers on Satisfactory
+  > **and** badged its GWorld as **"recovered"** when nothing recovered anything. A symbol export is
+  > the *strongest* result the scanner produces (priority 0, tried first, survives a recompile), not
+  > a fallback.
+  >
+  > So both sides moved: the DLL reports `symbol` / `symbol_call_follow` / `call_follow` / `aob`
+  > (`ScanMethodName`), and the panel asks a membership question (`IsDirectScan`) instead of an
+  > equality one. 8 tests, including recovery paths still badging and an unknown future value
+  > failing loud rather than silent. Measured before/after on the same game: all four went
+  > `aob` → `symbol` / `symbol_call_follow`, with the AOB triple still empty.
 
 - ⬜ **CE-plugin double-inject guard — the third-party-wrapper case** (build 2577, audit #4 B29).
   Ownership is now decided by PE ProductName, not file name. **Verified on real files here** (our 5
@@ -2409,14 +2490,154 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
   message, after which the UI cannot connect. Also worth eyeballing there: a game path with
   non-ASCII characters must now appear intact in that message (it used to render as `EVERSPACE? 2`).
 
-- ⬜ **Recycle-Bin refusal on a volume with no bin** (build 2621, B13/B41). Needs a volume whose
-  Recycle Bin is off: pick a spare fixed volume, `Recycle Bin Properties → Don't move files to the
-  Recycle Bin`, and put a leftover proxy on it. Run the orphan scan. **PASS** = the row is refused
-  with *"This volume has no working Recycle Bin … a delete here would be PERMANENT"*, and the
-  confirm dialog never offers to recycle it. **FAIL** = the row is offered and the file vanishes
-  permanently while the status says "moved to the Recycle Bin". Re-enable the bin afterwards and
-  confirm the same row becomes actionable again — that half proves the probe isn't just refusing
-  everything.
+- ✅ **Recycle-Bin refusal on a volume with no bin** (build 2621, B13/B41) — **VERIFIED 2026-08-12,
+  end to end, both directions. It FAILED twice on the way and took THREE fixes** (builds 2799 + 2801):
+  the detector could not see the condition it was named after, the refusal it then produced was
+  silently dropped before reaching a row, and — found only because the negative control was run — the
+  candidate folder was never examined at all. Post-fix re-measurement on the AOT build is at the
+  bottom of this entry.
+
+  The check never needed the UI: `VolumeHasRecycleBin` is upstream of every row, and it answered the
+  question with `SHQueryRecycleBin(root) == S_OK` alone. That call reports on the bin's **contents**,
+  not on its **policy**. Measured on two different fixed volumes with `NukeOnDelete=1` (a 10 GB iSCSI
+  scratch volume, and the data drive with the bin switched off deliberately):
+
+  | detector | result |
+  |---|---|
+  | registry | `HKCU\…\BitBucket\Volume\{guid}\NukeOnDelete = 1` |
+  | **functional** — throwaway file, `SHFileOperation` + `FOF_ALLOWUNDO` (*exactly* what `MoveToRecycleBin` issues) | `rc=0`, `fAnyOperationsAborted=false`, bin item count **5 → 5**, **file gone** |
+  | the shipped probe `SHQueryRecycleBinW(root)` | `hr=0x0`, `items=5` → **`VolumeHasRecycleBin` returned `true`** |
+
+  So the shipped sequence was: probe says the bin works → `MoveToRecycleBin` proceeds → the shell
+  returns success → the caller reports *"N files moved to the Recycle Bin"* → **the files were
+  permanently destroyed.** That is verbatim the outcome
+  [`WindowsPlatformService.cs`](../ui/UE5DumpUI/Services/WindowsPlatformService.cs)'s own comment
+  says the refusal exists to prevent; the refusal simply never fired. `SHQueryRecycleBin` succeeds
+  because the stale `$RECYCLE.BIN` folder and its leftover items are still on disk after the policy
+  is turned off — emptiness and disabled-ness are different facts and it can only see the first.
+
+  **Fix (build 2799):** the policy is now read from the registry *before* the shell is asked, via a
+  pure [`RecycleBinPolicy`](../ui/UE5DumpUI/Core/RecycleBinPolicy.cs) that encodes Windows' real
+  precedence — Group Policy `NoRecycleFiles` (machine, then user) → `UseGlobalSettings` +
+  global `NukeOnDelete` → per-volume `NukeOnDelete`, with **absent ≠ 0** throughout. The
+  `SHQueryRecycleBin` call is kept as a *second* gate (it still catches a volume the shell cannot
+  service at all); both must pass. 18 unit tests cover every combination, including the two
+  directions that are easy to get backwards under `UseGlobalSettings`.
+
+  **Post-fix measurement, same machine, same session:** `T:` (`NukeOnDelete=1`) → `IsDisabled=true`
+  → probe returns **false**, so the refusal fires. `C:` and `D:` (`NukeOnDelete=0`) → **true**.
+  `D:`'s bin was **empty** at the time, which is the control that matters: an enabled-but-empty bin
+  must still read as present, and any "fix" keyed off the item count would refuse every clean
+  machine.
+
+  ### ✅ The end-to-end half — DONE 2026-08-12. The prediction held, and the CONTROL found a second defect.
+
+  **The blocker recorded in the previous handover was a miscount, not a bug.** `FakeGameT` *was*
+  being detected the whole time — `Generic scan found 8 UE game(s)` already included it, and the
+  panel showed the row. Nothing in `LooksLikeUeGameRoot` / `WalkDrive` / `IsExcludedBySteam` needed
+  investigating. The fork written up for it (drop a `dummy.pak` and rescan) is moot; do not run it.
+
+  **The rig, rebuilt with a real game** rather than a synthetic one — copy a small UE title wholesale
+  instead of faking its shape, which removes every "is the detector confused?" question at once:
+
+  ```
+  T:  10 GB iSCSI volume, Fixed, $RECYCLE.BIN present, per-volume NukeOnDelete the ONLY variable
+      T:\Light Maze\   <- Steam's "Light Maze" (215 MB, 27 files) copied whole from D:
+  ```
+
+  Deploy `version.dll` to it → delete everything Steam would own → `T:\Light Maze\LightMaze\
+  Binaries\Win64\version.dll` is the sole survivor, which is exactly the leftover-after-uninstall
+  shape. Re-scan drives so the game leaves the live list (it does, 9 → 8, so no `LiveGameFolder`
+  veto can mask the result), then press *Find leftovers*.
+
+  The VALID pair — same process, same bytes on disk, one registry DWORD between them. (An earlier
+  pair, before the app was restarted, read **22 examined / 0 rows both ways** and is discarded: 22
+  means the T: folder was not among the candidates, so those two runs measured nothing. See ② — that
+  discrepancy is the whole finding.)
+
+  | run | `T:` `NukeOnDelete` | folders examined | rows |
+  |---|---|---|---|
+  | 1 | **1** (bin off) | 23 | **0** — the refusal is computed, then dropped |
+  | 2 | **0** (bin on) | 23 | **1** — `Recycle version.dll — folders left in place` |
+
+  #### ① The predicted defect — now MEASURED, and fixed
+
+  `PlanPrune` returns `NotOnFixedDrive`; the surface filter in
+  [`ProxyDeployService.cs`](../ui/UE5DumpUI/Services/ProxyDeployService.cs) kept only
+  `Deletable`/`FileOnly`, so the refusal never reached a row. The user was told **"No leftover proxy
+  DLLs found (23 folder(s) examined)"** while our DLL sat on the one kind of volume where deleting it
+  by hand cannot be undone. B13/B41's own PASS criterion was unobservable as shipped — exactly as
+  predicted from code reading, and now watched happening.
+
+  #### ② The defect the CONTROL found — and it is the one users hit daily
+
+  In the FIRST pair (the discarded one above), flipping the bin back on was supposed to be a
+  formality. It also returned 0, **which is what proved the bin-off run had measured nothing**: the
+  T: folder was never a candidate. `CandidatesFromLogs` read our own `view-*.log` with
+  `File.ReadLines`, which opens `FileShare.Read` and therefore **cannot open the live `view-0.log`
+  that our own logger is holding**. The per-file `catch` swallowed the sharing violation, so the
+  current session's entire deploy log contributed zero candidates; those 22 came from an *archived*
+  `view-20260731-*.log`. Restarting the app rotated our deploy line into an archive too, the count
+  went **22 → 23**, and only then was the folder actually examined. That single number is what
+  separates "looked and found nothing" from "never looked" — without it, the discarded pair would
+  have been recorded as a clean confirmation of the prediction.
+
+  > **What this cost the user:** deploy a proxy, uninstall the game, press *Find leftovers* in the
+  > same session → **nothing found**. It only appears after an app restart. `SteamShapeScan` hides
+  > this for Steam titles (it sees them without the log), so it bites exactly the non-Steam
+  > locations the log sources exist to cover.
+  >
+  > **Generalisable lesson 1:** `File.ReadLines`/`ReadAllLines` cannot read a file anything else
+  > holds open for writing — including *our own* logs. Any future code that mines our logs must use
+  > `ProxyDeployService.ReadLinesShared` (`FileShare.ReadWrite | FileShare.Delete`).
+  >
+  > **Generalisable lesson 2 — and it is the one that generalises furthest.** When the PASS criterion
+  > is that something does **not** appear, the run that makes it appear is not optional, however much
+  > it looks like a formality. **Absence is the cheapest result in the universe to produce by
+  > accident**: a broken rig, a filter that never ran, a candidate list that never included the item —
+  > all of them render as a clean-looking confirmation. Here the "formality" is the *only* thing that
+  > distinguished a correct prediction from a measurement of nothing. The companion habit is to read
+  > the **"examined N"** counter first: 22 → 23 was what separated *looked and found nothing* from
+  > *never looked*, and no amount of staring at the 0 would have revealed it.
+  >
+  > This also overturns a lesson recorded on 2026-08-12 that read *"B13/B41 does not need the UI at
+  > all — measure `VolumeHasRecycleBin` and you are done."* Measuring the gate proved only that the
+  > gate answers correctly; **it said nothing about whether the user is ever shown anything**, and in
+  > fact they were not. If the PASS criterion is a string on screen, the string has to be looked at.
+
+  #### The fixes (build 2801)
+
+  | # | change |
+  |---|---|
+  | ① | `OrphanVerdictRules.ShouldSurface` now keeps `NotOnFixedDrive`. The scan filter, the row's `IsActionable` and the removal re-check were three hand-written copies of two *different* predicates; they are now one pure pair in [`OrphanScanTypes.cs`](../ui/UE5DumpUI/Models/OrphanScanTypes.cs), so they cannot drift. |
+  | ② | `ReadLinesShared` replaces `File.ReadLines` for the log sweep **and** for the Steam `.acf` read (same bug there: a manifest Steam holds open made `TryReadAcfInstallDir` report *unreadable*, which fails closed and silently refuses every Steam candidate — safe, but the feature just stops working). |
+  | ③ | The recycler question moved **below** `ClassifyLeaf`, so a no-bin volume can no longer manufacture a refusal for a folder holding nothing of ours — and the refusal now carries the file list so the row can NAME the file. |
+  | ④ | Honesty: a blocked row authorises nothing (`AuthorisedFiles` empty even if the verdict gate were relaxed), the report says *"NOT removable"* instead of *"to be recycled"*, and the status line counts blocked rows separately. |
+
+  22 new tests, including the negative controls that make them mean something: the same folder with a
+  working bin is still `Deletable`; a no-bin volume holding a *foreign* DLL is `ForeignFilePresent`,
+  not a recycler refusal; `ShouldSurface` still drops all nine refusals that hold nothing of ours; and
+  the `ReadLinesShared` test asserts `File.ReadLines` **throws** on the same handle first, or it would
+  be asserting nothing.
+
+  #### Post-fix re-measurement — build 2804, AOT/trimmed `dist\UE5DumpUI.exe` (54.3 MB), same rig
+
+  Both directions, same process, one registry DWORD apart:
+
+  | `T:` `NukeOnDelete` | examined | rows | the row says | checkbox |
+  |---|---|---|---|---|
+  | **1** (bin off) | 23 | 1 | *"This volume has no working Recycle Bin (removable/network, or the bin is disabled for it), so a delete here would be PERMANENT. Refused — remove the file by hand if that is what you want."* | **disabled** — clicking it does nothing, `Delete checked (0)` stays greyed |
+  | **0** (bin on) | 23 | 1 | `Recycle version.dll — folders left in place` | **enabled** — ticks, `Delete checked (1)` goes live |
+
+  The second row is the half that stops this being a probe that merely refuses everything: the SAME
+  folder becomes actionable when, and only when, the bin is switched back on. Status line reads
+  *"Found 1 leftover proxy DLL(s) — nothing removed yet. 1 cannot be removed from here — read the row
+  for why."* Nothing was deleted at any point; the row was left unticked.
+
+  **The rig is still on disk** (`T:\Light Maze\LightMaze\Binaries\Win64\version.dll`, T: back to
+  `NukeOnDelete=1` as found) if this ever needs re-running. Rebuild it by copying any small UE game
+  wholesale to a scratch volume — that is what made this tractable after the synthetic one wasted a
+  session on a detection question that turned out not to exist.
 
 - ⬜ **The pre-4.11 refusal no longer fires on one PE field** (build 2621, B25). Provoke it with the
   UE-version override, or with any game whose PE ProductVersion reports a 4.0–4.10 major/minor.
@@ -2434,11 +2655,30 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
   *"another record owns UE_GameEngine now — leaving it alone"*). **FAIL** = the newer record's
   addresses go to `??`.
 
-- ⬜ **The five dead coord-grid sort headers** (build 2610, B16). Teleport → Coordinate Library with
-  ≥3 rows. Click the **X**, **Y**, **Z**, **Yaw** and **Dist** headers. **PASS** = rows reorder on
-  every one. **FAIL** = the header glyph animates and nothing moves. Must be checked on a
-  **published (AOT/trimmed)** build — the whole defect is trimmed-away reflection metadata, so a
-  plain `dotnet run` will not reproduce it. Label / Group / Map worked before and must still work.
+- ✅ **The five dead coord-grid sort headers** (build 2610, B16) — **VERIFIED 2026-08-12**, on the
+  AOT/trimmed `dist\UE5DumpUI.exe` (56.9 MB, build 2794) against the DumperTest Development package.
+  All five reorder **and** reverse on the second click; Label (the non-regression control) still
+  works. 10 of 10 observed orders matched the prediction made *before* clicking:
+
+  | click | order (by row label) | | click | order |
+  |---|---|---|---|---|
+  | X ↑ | 3,4,1,5,2 | | X ↓ | 2,5,1,4,3 |
+  | Y ↑ | 5,2,1,4,3 | | Y ↓ | 3,4,1,2,5 |
+  | Z ↑ | 4,1,2,5,3 | | Z ↓ | 3,5,2,1,4 |
+  | Yaw ↑ | 2,1,4,5,3 | | Yaw ↓ | 3,5,4,1,2 |
+  | Dist ↑ | 1,4,5,3,2 | | Dist ↓ | 2,3,5,4,1 |
+
+  > **The dataset was built so the test could fail.** Five rows were entered via *+ From fields* with
+  > values chosen so that **X, Y, Z, Yaw, Dist and insertion order all induce six DIFFERENT
+  > orderings**. With a lazier dataset — say monotonic coordinates — a sort that did nothing at all
+  > would have reproduced insertion order and read as a pass on every column. Dist was cross-checked
+  > independently: the grid's own values (0 / 4,205 / 3,734 / 891 / 3,590) matched hand-computed
+  > distances from the live pose to the unit, so the column is genuinely computed, not a placeholder.
+  >
+  > **Not exercised: Group and Map.** *+ From fields* leaves Group empty and stamps every row with
+  > the current map, so both columns held one value across all five rows and no ordering could be
+  > observed. Label carried the load as the text-column control. Anyone re-running this should set
+  > distinct groups (row editor → Group → Apply) to close that half.
 
 - ✅ **Second launch raises the first window** (build 2610, B42) — **VERIFIED 2026-08-04 (maintainer).** Run `dist\UE5DumpUI.exe`, then run
   it again (double-click the exe, or the shortcut). **PASS** = the existing window comes to the

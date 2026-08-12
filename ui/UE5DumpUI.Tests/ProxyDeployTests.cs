@@ -1030,4 +1030,74 @@ public class ProxyDeployTests
         };
         Assert.False(ProxyDeployService.ShouldApplyRefresh(@"d:\games\foo\binaries\win64", preserve));
     }
+
+    // ────────────────────────────────────────────────────────────────
+    // Reading a log the app itself has open (measured 2026-08-12)
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The leftover scan mines our own <c>view-*.log</c> for "Deployed … : &lt;path&gt;" lines. The
+    /// CURRENT run's <c>view-0.log</c> is held open by our own logger, and <c>File.ReadLines</c> —
+    /// which opens with <c>FileShare.Read</c> — cannot open a file a writer already has. The caller's
+    /// per-file <c>catch</c> swallowed the exception, so that whole file contributed zero candidates:
+    /// anything deployed in the current session was invisible to "Find leftovers" until a restart
+    /// rotated the log. Measured against a real deploy, then fixed with a shared-read open.
+    ///
+    /// <para>This test touches the filesystem on purpose. The bug IS the sharing mode, and a
+    /// fake/in-memory file has no sharing mode to get wrong.</para>
+    /// </summary>
+    [Fact]
+    public void ReadLinesShared_ReadsAFileThatIsStillOpenForWriting()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"ue5cedumper-share-{Guid.NewGuid():N}.log");
+        try
+        {
+            // Open it the way a logger does: we write, others may only read.
+            using (var writer = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read))
+            using (var sw = new StreamWriter(writer))
+            {
+                sw.WriteLine("[INFO] Deployed version.dll to Light Maze: T:\\Light Maze\\LM\\Binaries\\Win64\\version.dll");
+                sw.Flush();
+
+                // NEGATIVE CONTROL — without it this test would pass against a file nothing holds
+                // open, i.e. it would assert nothing. This is the exact call that was shipped.
+                Assert.ThrowsAny<IOException>(() => File.ReadLines(path).ToList());
+
+                var lines = ProxyDeployService.ReadLinesShared(path).ToList();
+                Assert.Single(lines);
+                Assert.Contains("Light Maze", lines[0], StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            try { File.Delete(path); } catch { /* temp file */ }
+        }
+    }
+
+    /// <summary>The candidate directory really is recovered from such a line — the two halves of the
+    /// defect joined up, so a future change to either the parser or the reader is caught.</summary>
+    [Fact]
+    public void ReadLinesShared_FeedsTheDeployLineParser()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"ue5cedumper-share-{Guid.NewGuid():N}.log");
+        try
+        {
+            using (var writer = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read))
+            using (var sw = new StreamWriter(writer))
+            {
+                sw.WriteLine("[2026-08-12 11:21:58.947] [INFO] Deployed version.dll to Light Maze: " +
+                             @"T:\Light Maze\LightMaze\Binaries\Win64\version.dll");
+                sw.Flush();
+
+                var dirs = ProxyOrphanScanner.CandidateDirsFrom(
+                    ProxyDeployService.ReadLinesShared(path), isDllLog: false);
+
+                Assert.Equal(new[] { @"T:\Light Maze\LightMaze\Binaries\Win64" }, dirs);
+            }
+        }
+        finally
+        {
+            try { File.Delete(path); } catch { /* temp file */ }
+        }
+    }
 }

@@ -65,6 +65,35 @@ public enum OrphanVerdict
     NotOnFixedDrive,
 }
 
+/// <summary>
+/// The two questions asked about a verdict, in ONE place so they cannot drift apart.
+///
+/// <para>They are deliberately DIFFERENT questions and were previously two hand-written copies of
+/// the same expression — the scan's surface filter, the row's <c>IsActionable</c>, and the removal
+/// path's re-check. "Can this be acted on?" and "should the user be told about it?" are not the same
+/// predicate, and the measured B13/B41 defect was exactly that gap: a
+/// <see cref="OrphanVerdict.NotOnFixedDrive"/> refusal is not actionable, but it is the one refusal
+/// the user most needs to see, because our DLL really is sitting there and the volume would destroy
+/// it rather than recycle it.</para>
+///
+/// <para>Lives beside the enum rather than in a service so the model, the scan and the report can
+/// all ask the same function without a layering inversion.</para>
+/// </summary>
+public static class OrphanVerdictRules
+{
+    /// <summary>May anything actually be removed for this verdict? The authorisation gate.</summary>
+    public static bool IsActionable(OrphanVerdict v) =>
+        v is OrphanVerdict.Deletable or OrphanVerdict.FileOnly;
+
+    /// <summary>
+    /// Should a row be shown at all? Everything actionable, plus the refusals that hold something of
+    /// ours and are blocked for a reason worth telling the user about. Every verdict NOT listed here
+    /// means the folder held none of our files, which is not this feature's business.
+    /// </summary>
+    public static bool ShouldSurface(OrphanVerdict v) =>
+        IsActionable(v) || v is OrphanVerdict.NotOnFixedDrive;
+}
+
 /// <summary>Where a candidate directory came from. Flags so a row can credit several sources.</summary>
 [Flags]
 public enum OrphanScanSources

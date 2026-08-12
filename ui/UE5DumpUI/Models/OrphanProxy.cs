@@ -86,8 +86,7 @@ public sealed partial class OrphanProxy : ObservableObject
     /// <summary>True when the row can be selected for removal at all. Depends on
     /// <see cref="IsRemoved"/>, so that property re-raises it (see OnIsRemovedChanged) — otherwise a
     /// cleaned row's checkbox stays enabled and it can be submitted again.</summary>
-    public bool IsActionable => !IsRemoved
-        && (Verdict == OrphanVerdict.Deletable || Verdict == OrphanVerdict.FileOnly);
+    public bool IsActionable => !IsRemoved && OrphanVerdictRules.IsActionable(Verdict);
 
     partial void OnIsRemovedChanged(bool value)
     {

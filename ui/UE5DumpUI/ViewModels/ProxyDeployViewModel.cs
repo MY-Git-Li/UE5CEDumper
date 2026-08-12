@@ -594,12 +594,20 @@ public partial class ProxyDeployViewModel : ViewModelBase
             // findings on screen looks finished — and the file was then never written. Saying which
             // button writes it costs one clause and removes the guess. The clean case also states
             // the coverage, because "found nothing" is only reassuring next to "…out of how many".
+            // Blocked rows are counted SEPARATELY. A row that cannot be removed here (no working
+            // Recycle Bin on its volume) is still a real leftover the user needs to know about, but
+            // folding it into "N leftover proxy DLL(s) … exactly what would go" would promise an
+            // action for something that is going nowhere.
+            int blocked = Orphans.Count(o => !o.IsActionable);
             SetOperationResult(
                 Orphans.Count == 0
                     ? $"No leftover proxy DLLs found ({_orphanFoldersExamined} folder(s) examined) — "
                       + "press “Report…” to save this result as a file."
-                    : $"Found {Orphans.Count} leftover proxy DLL(s) — nothing removed yet. "
-                      + "Press “Report…” for a dry run of exactly what would go.",
+                    : $"Found {Orphans.Count} leftover proxy DLL(s) — nothing removed yet."
+                      + (blocked > 0
+                            ? $" {blocked} cannot be removed from here — read the row for why."
+                            : "")
+                      + " Press “Report…” for a dry run of exactly what would go.",
                 0);
         }
         catch (OperationCanceledException)

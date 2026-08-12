@@ -35,6 +35,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -46,6 +47,18 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "package-identity
 # only ASCII makes every class name look missing from a Shipping build.
 MUST_EXIST = ["DumperTestActor", "DumperTestSubsystem", "DumperTestPayload",
               "Text_Even2_TwoNull", "Opt_Int_Unset", "FrozenInt"]
+
+# The ABSENT list asks a NARROWER question than the EXIST list, and must be counted
+# differently or it answers a question nobody asked. "Is RawInt reflected?" is answered
+# by the NARROW/ASCII string in FPropertyParams -- the same fact the comment above
+# states. A UTF-16 hit is a TEXT() literal, which proves the opposite: the member is
+# being PRINTED, i.e. it exists as a plain C++ field, which is exactly what the sample
+# wants. Counting both encodings made DumperTestHUD.cpp's own readout
+# ("RawInt_Ticking=%d  RawFloat_Ticking=%.3f  RawDouble_Ticking=%.3f") declare the
+# Native-C test dead on a perfectly correct package -- every build since commit
+# b3d8593 would have failed this check.
+# The word-boundary guard is the second half: without it "RawInt" matches inside
+# "RawInt_Ticking" even in ASCII, so a future ASCII readout would revive the same bug.
 MUST_BE_ABSENT = ["RawInt", "RawFloat", "RawDouble"]
 
 
@@ -62,14 +75,23 @@ def find_exe(root, config):
 def probe(path):
     with open(path, "rb") as fh:
         data = fh.read()
-    def count(name):
+
+    def count_either(name):
+        """Both encodings -- for MUST_EXIST, where either rendering proves presence."""
         return data.count(name.encode("ascii")) + data.count(name.encode("utf-16-le"))
+
+    def count_reflected(name):
+        """ASCII only, whole word -- for MUST_BE_ABSENT. See the MUST_BE_ABSENT note."""
+        pat = (rb"(?<![A-Za-z0-9_])" + re.escape(name.encode("ascii"))
+               + rb"(?![A-Za-z0-9_])")
+        return len(re.findall(pat, data))
+
     return {
         "file": os.path.basename(path),
         "size": len(data),
         "sha256": hashlib.sha256(data).hexdigest(),
-        "reflected_present": {n: count(n) for n in MUST_EXIST},
-        "raw_absent": {n: count(n) for n in MUST_BE_ABSENT},
+        "reflected_present": {n: count_either(n) for n in MUST_EXIST},
+        "raw_absent": {n: count_reflected(n) for n in MUST_BE_ABSENT},
     }
 
 
@@ -81,6 +103,19 @@ def hash_sources(src_dir):
     """One digest over the five sample sources, name-and-content, in fixed order.
 
     Name included so a rename cannot collide, order fixed so the digest is stable.
+
+    LINE ENDINGS ARE NORMALISED TO LF BEFORE HASHING, and that is load-bearing rather
+    than tidy. The two trees this digest compares are reached by different transports:
+    the repo copy arrives via `git checkout`, which rewrites EOLs whenever
+    `core.autocrlf=true` and no `.gitattributes` pins them, while the UE project copy
+    is usually a plain folder copy that preserves whatever bytes it was created with.
+    Hashing raw bytes therefore reported "STALE PACKAGE" for two byte-different
+    renderings of IDENTICAL content -- measured 2026-08-12, where every one of the five
+    files differed from its counterpart by exactly its own line count.
+
+    NOTE FOR ANYONE COMPARING AGAINST AN OLD RECORD: this changes the digest. Records
+    written before this normalisation carry the raw-bytes value and will read as drift
+    once; re-capture to settle it.
     """
     h = hashlib.sha256()
     missing = []
@@ -91,7 +126,7 @@ def hash_sources(src_dir):
             continue
         h.update(name.encode("utf-8"))
         with open(p, "rb") as fh:
-            h.update(fh.read())
+            h.update(fh.read().replace(b"\r\n", b"\n"))
     return h.hexdigest(), missing
 
 
@@ -135,10 +170,16 @@ def main():
         record["problems"].append("repo source '%s' is missing -- the record cannot bind "
                                   "the package to a source state" % name)
 
+    # Which tree may be used for the temporal (mtime) freshness check below. ONLY the
+    # tree the compiler actually read qualifies -- see the long note at the check itself.
+    mtime_src = None
+
     if args.project:
         proj_src = os.path.join(args.project, "Source", "DumperTest")
         proj_hash, proj_missing = hash_sources(proj_src)
         record["built_from"] = {"path": proj_src, "source_sha256": proj_hash}
+        if not proj_missing:
+            mtime_src = proj_src
         for name in proj_missing:
             record["problems"].append("project source '%s' is missing from %s" % (name, proj_src))
         if not proj_missing and proj_hash != repo_hash:
@@ -160,18 +201,38 @@ def main():
         # proxy for CONTENT freshness, which it is not. Here the question is literally
         # temporal -- "was the binary produced after this edit?" -- and mtime is the direct
         # answer, not a stand-in for one. Different question, so the same tool is right.
+        #
+        # BUT IT IS ONLY THE RIGHT ANSWER FOR THE TREE THE COMPILER READ. This check used
+        # to run against `repo_src`, and that made it fire on every machine that is not the
+        # one that did the build: `git checkout` stamps files with the CHECKOUT time and
+        # deliberately never preserves the author's mtime, while a folder copy of the
+        # package usually DOES preserve the exe's -- so a freshly cloned repo always looks
+        # "newer" than a correct older package. Measured 2026-08-12: all five repo sources
+        # carried one identical checkout stamp six days AFTER the exes, and both configs
+        # were reported STALE while the same comparison against the build tree passed.
+        # So: only compare against the project tree, and when there is no project tree to
+        # compare against, say the check was skipped rather than inventing a verdict.
         exe_mtime = os.path.getmtime(exe)
-        newest_src, newest_name = 0.0, None
-        for name in SOURCES:
-            p = os.path.join(repo_src, name)
-            if os.path.exists(p) and os.path.getmtime(p) > newest_src:
-                newest_src, newest_name = os.path.getmtime(p), name
         info["exe_mtime"] = datetime.datetime.fromtimestamp(
             exe_mtime, datetime.timezone.utc).replace(microsecond=0).isoformat()
-        if newest_name and newest_src > exe_mtime:
-            record["problems"].append(
-                "STALE BINARY: %s was built before '%s' was last edited -- re-package before "
-                "trusting any value from it" % (cfg, newest_name))
+        if mtime_src is None:
+            record.setdefault("checks_skipped", [])
+            note = ("freshness (mtime) check skipped: pass --project <the UE project this "
+                    "package was built from> to enable it. The repo working tree cannot "
+                    "stand in -- git stamps checkout time, not edit time.")
+            if note not in record["checks_skipped"]:
+                record["checks_skipped"].append(note)
+        else:
+            newest_src, newest_name = 0.0, None
+            for name in SOURCES:
+                p = os.path.join(mtime_src, name)
+                if os.path.exists(p) and os.path.getmtime(p) > newest_src:
+                    newest_src, newest_name = os.path.getmtime(p), name
+            if newest_name and newest_src > exe_mtime:
+                record["problems"].append(
+                    "STALE BINARY: %s was built before '%s' was last edited in %s -- "
+                    "re-package before trusting any value from it"
+                    % (cfg, newest_name, mtime_src))
         for n, c in info["reflected_present"].items():
             if c == 0:
                 record["problems"].append("%s: reflected name '%s' is MISSING from the binary" % (cfg, n))
@@ -188,12 +249,39 @@ def main():
             print("no stored record at %s" % OUT)
             return 1
         stored = json.load(open(OUT, encoding="utf-8"))
+
+        # An ABSENT config is not a match. `drift` iterates the freshly computed configs,
+        # so a root with no exes at all produces an empty dict, an empty drift list, and
+        # -- before this guard -- a cheerful "package matches the stored identity" with
+        # exit 0. A typo in the path, a half-copied package or a not-yet-archived cook all
+        # land there, and the caller is told the opposite of the truth. Compare the SETS
+        # first, then the hashes.
+        want = set(stored.get("configs", {}))
+        have = set(record["configs"])
+        missing = sorted(want - have)
+        if missing:
+            print("package INCOMPLETE under %s -- the record has %s but no exe was found "
+                  "for %s" % (args.root, ", ".join(sorted(want)), ", ".join(missing)))
+            return 1
+        if not have:
+            print("no packaged exe found under %s (and the stored record names none "
+                  "either) -- nothing was compared" % args.root)
+            return 1
+
         drift = [c for c in record["configs"]
                  if stored.get("configs", {}).get(c, {}).get("sha256") != record["configs"][c]["sha256"]]
         if drift:
             print("package DRIFT in %s -- rebuilt since the record was written" % ", ".join(drift))
             return 1
+
+        # --check computes `problems` and used to throw them away, so a package could be
+        # "matching" and unusable at the same time. Report them; they do not change the
+        # exit code, which stays a statement about identity.
         print("package matches the stored identity")
+        for p in record["problems"]:
+            print("  PROBLEM (identity still matches): %s" % p)
+        for note in record.get("checks_skipped", []):
+            print("  NOTE: %s" % note)
         return 0
 
     with open(OUT, "w", encoding="utf-8", newline="") as fh:
@@ -201,6 +289,8 @@ def main():
     print("wrote %s" % OUT)
     for p in record["problems"]:
         print("  PROBLEM: %s" % p)
+    for note in record.get("checks_skipped", []):
+        print("  NOTE: %s" % note)
     return 1 if record["problems"] else 0
 
 

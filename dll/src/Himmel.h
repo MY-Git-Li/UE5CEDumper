@@ -212,6 +212,34 @@ constexpr bool IsCeReplayableAob(AobResolve r) {
         || r == AobResolve::RipBoth;
 }
 
+// What actually FOUND this pointer — reported to the UI as `*_method` and printed in
+// `FindAll: Complete`.
+//
+// A DIFFERENT question from IsCeReplayableAob above, and the two must not be conflated:
+// that one asks "can a CE script replay this?", this one asks "which mechanism won?".
+// A symbol export is not replayable AND is the strongest result we can get (priority 0,
+// tried first, immune to a recompile moving bytes around).
+//
+// Before this existed the label was hardcoded to "aob" for every non-zero result, so a
+// symbol-export win reported `method="aob"` while `pattern_id="GWLD_EXP"` and the AOB
+// triple was empty — three fields in one payload disagreeing. Measured on Satisfactory
+// (UE 5.6) 2026-08-12, where all four of GObjects/GNames/GWorld/GEngine resolve by export.
+//
+// ⚠ The consumer side treats this as "was it the NORMAL scan path, or a fallback/recovery"
+// — see PointerPanelViewModel's ShowGObjectsWarning / ShowGWorldRecovered. Every value
+// returned here is a normal-scan value; recovery paths ("engine_recovery",
+// "instance_scan_recovery") and "not_found" are assigned elsewhere and must stay distinct
+// from these. Adding a value here without teaching that side about it turns a correct
+// scan into a spurious "recovered" badge.
+constexpr const char* ScanMethodName(AobResolve r) {
+    switch (r) {
+        case AobResolve::SymbolExport:     return "symbol";
+        case AobResolve::SymbolCallFollow: return "symbol_call_follow";
+        case AobResolve::CallFollow:       return "call_follow";
+        default:                           return "aob";
+    }
+}
+
 // Unified AOB signature descriptor.
 // All fields are POD — constexpr-constructible, stored in .rdata.
 struct AobSignature {

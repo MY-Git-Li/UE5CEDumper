@@ -278,19 +278,41 @@ public partial class PointerPanelViewModel : ViewModelBase
     // Verified against a live UE3 run: without this the panel read "🔴 All AOB patterns failed" +
     // "⚠ AOB failed — found via not found" on all three pointers after a scan that never happened.
 
-    /// <summary>True when GObjects was found via fallback (not AOB).</summary>
-    public bool ShowGObjectsWarning => HasData && !IsVersionTooOld && GObjectsMethod != "aob";
+    /// <summary>
+    /// Did the NORMAL signature scan resolve this pointer, as opposed to a fallback or a
+    /// recovery path?
+    ///
+    /// <para>These predicates used to ask <c>method != "aob"</c>, which was the same question
+    /// only for as long as a successful scan could report nothing but <c>"aob"</c>. It cannot:
+    /// the signature tables also hold symbol exports and CallFollow entries, and those are the
+    /// STRONGEST results available (priority 0, tried first, immune to a recompile shuffling
+    /// bytes) — not a fallback and not a recovery. The DLL now labels them honestly, so the
+    /// test has to be a membership check rather than an equality one. Measured on Satisfactory
+    /// (UE 5.6), where GObjects, GNames, GWorld and GEngine ALL resolve by export: with the
+    /// old test every one of them would have raised a "found via fallback" warning and GWorld
+    /// would additionally have claimed to be "recovered".</para>
+    ///
+    /// <para>Recovery paths (<c>engine_recovery</c>, <c>instance_scan_recovery</c>) and
+    /// <c>not_found</c> are deliberately absent — they are the cases these predicates exist to
+    /// catch.</para>
+    /// </summary>
+    private static bool IsDirectScan(string? method) =>
+        method is "aob" or "symbol" or "symbol_call_follow" or "call_follow";
 
-    /// <summary>True when GNames was found via fallback (not AOB).</summary>
-    public bool ShowGNamesWarning => HasData && !IsVersionTooOld && GNamesMethod != "aob";
+    /// <summary>True when GObjects was found via fallback (not a direct scan hit).</summary>
+    public bool ShowGObjectsWarning => HasData && !IsVersionTooOld && !IsDirectScan(GObjectsMethod);
+
+    /// <summary>True when GNames was found via fallback (not a direct scan hit).</summary>
+    public bool ShowGNamesWarning => HasData && !IsVersionTooOld && !IsDirectScan(GNamesMethod);
 
     /// <summary>True when GWorld was not found at all.</summary>
     public bool ShowGWorldWarning => HasData && !IsVersionTooOld && GWorldMethod == "not_found";
 
-    /// <summary>True when GWorld was found via a recovery path (not direct AOB, and not missing) —
-    /// e.g. instance_scan_recovery / engine_recovery. Surfaces the method so a recovered GWorld
-    /// reads as such instead of looking like a normal AOB hit.</summary>
-    public bool ShowGWorldRecovered => HasData && GWorldMethod != "aob" && GWorldMethod != "not_found";
+    /// <summary>True when GWorld was found via a recovery path (not a direct scan hit, and not
+    /// missing) — e.g. instance_scan_recovery / engine_recovery. Surfaces the method so a
+    /// recovered GWorld reads as such instead of looking like a normal scan hit.</summary>
+    public bool ShowGWorldRecovered =>
+        HasData && GWorldMethod != "not_found" && !IsDirectScan(GWorldMethod);
 
     /// <summary>True when ALL GObjects AOB patterns failed (0 hits). Never on a refused engine,
     /// where 0 hits means 0 patterns TRIED.</summary>
