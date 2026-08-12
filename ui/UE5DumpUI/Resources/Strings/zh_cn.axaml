@@ -1,0 +1,1248 @@
+﻿<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <!-- Toolbar -->
+	<sys:String x:Key="str.Connect">连接</sys:String>
+	<sys:String x:Key="str.Disconnect">断开连接</sys:String>
+	<sys:String x:Key="str.Toolbar.AddressFormat">地址格式：</sys:String>
+	<sys:String x:Key="str.Toolbar.CollapsePointers">折叠指针节点</sys:String>
+	<sys:String x:Key="str.Toolbar.ArrayLimit">数组上限：</sys:String>
+	<sys:String x:Key="str.Toolbar.ArrayLimitWarn">⚠ 内存占用过高 — 可能导致程序崩溃</sys:String>
+	<sys:String x:Key="str.Toolbar.DropDownLimit">下拉框上限：</sys:String>
+	<sys:String x:Key="str.Toolbar.StringLength">字符串长度：</sys:String>
+	<sys:String x:Key="str.Toolbar.Fabricate">自动填充：</sys:String>
+	<sys:String x:Key="str.Toolbar.PreviewLimit">预览条数：</sys:String>
+	<sys:String x:Key="str.Toolbar.CsxDepth">解析深度：</sys:String>
+
+    <!-- Banners -->
+	<sys:String x:Key="str.Banner.GameThreadPaused">⏸ 游戏线程已暂停 — 游戏未执行帧循环（暂停菜单/切窗口/断点）。实时相机与函数调用功能会超时；内存扫描仍可正常运行。切回游戏窗口解除暂停即可恢复完整功能。</sys:String>
+
+    <!-- Tabs -->
+	<sys:String x:Key="str.Tab.ClassStruct">类结构</sys:String>
+	<sys:String x:Key="str.Tab.Pointers">系统指针</sys:String>
+	<sys:String x:Key="str.Tab.ProxyDeploy">代理部署</sys:String>
+	<sys:String x:Key="str.Tab.LiveWalker">实时结构查看器</sys:String>
+	<sys:String x:Key="str.Tab.InstanceFinder">实例查找</sys:String>
+	<sys:String x:Key="str.Tab.PropertySearch">属性搜索</sys:String>
+	<sys:String x:Key="str.Tab.InterestingFunctions">关键函数</sys:String>
+	<sys:String x:Key="str.Tab.InterestingProperties">关键属性</sys:String>
+	<sys:String x:Key="str.Tab.ValueSearch">数值搜索</sys:String>
+	<sys:String x:Key="str.Tab.Console">控制台</sys:String>
+	<sys:String x:Key="str.Tab.Teleport">传送</sys:String>
+	<sys:String x:Key="str.Tab.GameClassFilter">游戏类筛选</sys:String>
+	<sys:String x:Key="str.Tab.RelatedObjects">关联对象</sys:String>
+	<sys:String x:Key="str.Tab.DumpExplorer">导出文件浏览器</sys:String>
+	<sys:String x:Key="str.Tab.LiveFuncs">实时函数</sys:String>
+    <!-- Experimental tabs (hidden unless opted in via System-tab credit checkbox) -->
+	<sys:String x:Key="str.Tab.DetectStats">玩家数据探测</sys:String>
+	<sys:String x:Key="str.Tab.Snapshot">快照</sys:String>
+	<sys:String x:Key="str.Tab.SpcQuery">快照序列查询</sys:String>
+	<sys:String x:Key="str.Tab.ClassPivot">类数据透视</sys:String>
+
+    <!-- Detect Player Stats panel (experimental, P4) -->
+	<sys:String x:Key="str.Detect.Disclaimer">⚠ 仅供参考，准确率较低。所有探测结果均为程序估算值，不能作为准确依据。请在实时结构查看器/数值搜索中核对真实数值与内存地址后再使用。</sys:String>
+	<sys:String x:Key="str.Detect.Run">🔎 探测玩家数据</sys:String>
+	<sys:String x:Key="str.Detect.UseSnapshot">使用快照对比（先捕获快照 → 游戏内扣血/消耗 → 再次捕获）</sys:String>
+	<sys:String x:Key="str.Detect.ColConfirm">探测结果</sys:String>
+	<sys:String x:Key="str.Detect.ColCategory">分类</sys:String>
+	<sys:String x:Key="str.Detect.ColClass">所属类</sys:String>
+	<sys:String x:Key="str.Detect.ColProperty">属性名</sys:String>
+	<sys:String x:Key="str.Detect.ColType">类型</sys:String>
+	<sys:String x:Key="str.Detect.ColOffset">内存偏移</sys:String>
+	<sys:String x:Key="str.Detect.ColSignals">实时/变化标记</sys:String>
+	<sys:String x:Key="str.Detect.ColConfidence">可信度</sys:String>
+	<sys:String x:Key="str.Detect.ColChange">快照差值 Δ</sys:String>
+	<sys:String x:Key="str.Detect.CopyName">复制名称</sys:String>
+	<sys:String x:Key="str.Detect.FilterHint">按属性/类名/分类筛选…</sys:String>
+    <!-- Detect Stats tooltips -->
+	<sys:String x:Key="str.Tip.Detect.Run">自动筛选血量、蓝量、金币(HP/MP/Gold/…)等常见玩家属性，并读取实时数值进行核验，结果仅作参考，使用前务必核对。</sys:String>
+	<sys:String x:Key="str.Tip.Detect.UseSnapshot">对比两次快照，优先筛选数值下降的字段。操作流程：捕获快照 → 游戏内消耗资源/受到伤害 → 再次捕获快照后执行探测。至少需要2份可用快照。</sys:String>
+	<sys:String x:Key="str.Tip.Detect.Filter">对属性、类名、分类进行模糊检索，大小写不敏感。</sys:String>
+	<sys:String x:Key="str.Tip.Detect.GWorld">在GWorld中定位该类的实时实例，打开实时结构查看器，可复制CE字段脚本。</sys:String>
+	<sys:String x:Key="str.Tip.Detect.Finder">在实例查找器中查找该类所有实时对象。</sys:String>
+	<sys:String x:Key="str.Tip.Detect.Copy">将属性名称复制到剪贴板。</sys:String>
+
+    <!-- Dump Explorer panel — offline browser over a "Dump All" .jsonl file -->
+	<sys:String x:Key="str.Dump.Load">📂 加载jsonl导出文件</sys:String>
+	<sys:String x:Key="str.Dump.LoadLast">⤓ 上次导出文件</sys:String>
+	<sys:String x:Key="str.Dump.Recheck">🔄 重新读取实时数据</sys:String>
+	<sys:String x:Key="str.Dump.Cancel">取消</sys:String>
+	<sys:String x:Key="str.Dump.SearchHint">关键词检索 — 同时匹配类、属性、函数名称，空格代表且关系</sys:String>
+	<sys:String x:Key="str.Dump.MetaNote">ⓘ 列表展示的是类元数据，并非游戏实时实例，不存在GWorld内存路径。跳转打开对应类；实例检索可查找实时对象，再通过关联对象面板定位内存路径。</sys:String>
+	<sys:String x:Key="str.Dump.Cat.All">全部</sys:String>
+	<sys:String x:Key="str.Dump.Cat.Class">类</sys:String>
+	<sys:String x:Key="str.Dump.Cat.Property">属性</sys:String>
+	<sys:String x:Key="str.Dump.Cat.Function">函数</sys:String>
+	<sys:String x:Key="str.Dump.ColKind">类型分类</sys:String>
+	<sys:String x:Key="str.Dump.ColName">名称</sys:String>
+	<sys:String x:Key="str.Dump.ColOwner">所属类</sys:String>
+	<sys:String x:Key="str.Dump.ColType">类型/签名</sys:String>
+	<sys:String x:Key="str.Dump.ColOffset">偏移</sys:String>
+	<sys:String x:Key="str.Dump.ColPath">类完整路径</sys:String>
+	<sys:String x:Key="str.Dump.Jump">🡒 跳转查看</sys:String>
+	<sys:String x:Key="str.Dump.FindInstances">🔍 查找实例</sys:String>
+	<sys:String x:Key="str.Dump.CopyPath">复制类路径</sys:String>
+    <!-- Dump Explorer tooltips -->
+	<sys:String x:Key="str.Tip.Dump.Load">打开“全部导出”生成的jsonl文件，无需连接游戏即可检索所有类、属性、函数。</sys:String>
+	<sys:String x:Key="str.Tip.Dump.LoadLast">加载本次会话最近一次导出文件，无需打开文件选择框，未导出过则置灰。</sys:String>
+	<sys:String x:Key="str.Tip.Dump.Recheck">读取当前连接游戏的实时类信息，区分“当前游戏存在”与“不存在”两类数据，游戏重启后仍可识别，需要已连接并扫描游戏。</sys:String>
+	<sys:String x:Key="str.Tip.Dump.Category">筛选仅展示类/属性/函数，或展示全部。</sys:String>
+	<sys:String x:Key="str.Tip.Dump.Jump">在实时查看器打开该类对象。</sys:String>
+	<sys:String x:Key="str.Tip.Dump.FindInstances">在实例查找器打开该类实时对象，是跳转关联对象面板定位GWorld内存路径的入口。</sys:String>
+	<sys:String x:Key="str.Tip.Dump.CopyPath">将类完整路径复制至剪贴板。</sys:String>
+
+    <!-- Related Objects panel -->
+	<sys:String x:Key="str.Related.AddressHint">UObject/角色十六进制地址 — 或从其他面板传入</sys:String>
+	<sys:String x:Key="str.Related.Load">加载</sys:String>
+	<sys:String x:Key="str.Related.DetectTarget">🎯 自动检测目标角色</sys:String>
+	<sys:String x:Key="str.Related.CandidatesHeader">候选目标（匹配度从高到低，点击查看详情）：</sys:String>
+	<sys:String x:Key="str.Related.ColRelation">关联关系</sys:String>
+	<sys:String x:Key="str.Related.ColObject">对象</sys:String>
+	<sys:String x:Key="str.Related.ColField">字段</sys:String>
+	<sys:String x:Key="str.Related.ColAddress">地址</sys:String>
+	<sys:String x:Key="str.Related.ShowButton">🔗 查看关联对象</sys:String>
+	<sys:String x:Key="str.Related.IconButton">🔗</sys:String>
+	<sys:String x:Key="str.Tip.Related.Show">打开该对象的关联对象面板，展示组件、控制器与角色绑定、GAS属性集等从属关系。</sys:String>
+	<sys:String x:Key="str.Tip.Related.Load">加载当前对象的父类、外层对象、控制器/角色配对、自身所有子组件。</sys:String>
+	<sys:String x:Key="str.Tip.Related.DetectTarget">自动读取玩家控制器绑定的当前目标实体，无需手动填写类名。</sys:String>
+	<sys:String x:Key="str.Tip.Related.GWorld">在GWorld中查找最短指针路径，在实时查看器展示。</sys:String>
+	<sys:String x:Key="str.Tip.Related.GameEngine">从GameEngine根对象查找路径，可访问引擎、游戏实例、本地玩家等GWorld无法遍历的对象，但绝大多数世界实体请使用GWorld定位。</sys:String>
+	<sys:String x:Key="str.Tip.Related.Walk">在实时结构查看器逐字段查看该对象。</sys:String>
+	<sys:String x:Key="str.Tip.Related.Find">查找该类所有实时实例（实例查找器）。</sys:String>
+	<sys:String x:Key="str.Tip.Related.Copy">复制对象地址到剪贴板。</sys:String>
+
+    <!-- Value Search -->
+	<sys:String x:Key="str.VS.Banner">原生C++无反射字段无法被检索，仅能扫描UPROPERTY字段。如需完整内存扫描请使用Cheat Engine原生扫描。勾选下方原生C选项可读取原始内存字节。</sys:String>
+	<sys:String x:Key="str.VS.NativeBanner">已开启原生C扫描：额外读取对象内无反射原始内存块，初次扫描噪音较多，建议搭配“仅游戏类”“优先新实例”过滤，再使用增量扫描收敛结果。仅支持数字类型。</sys:String>
+	<sys:String x:Key="str.VS.DataType">数据类型：</sys:String>
+	<sys:String x:Key="str.VS.ScanType">扫描模式：</sys:String>
+	<sys:String x:Key="str.VS.Value">数值：</sys:String>
+	<sys:String x:Key="str.VS.Value2">至</sys:String>
+	<sys:String x:Key="str.VS.Rounding">取整模式：</sys:String>
+	<sys:String x:Key="str.Tip.VS.Rounding">浮点数转为整数时的处理规则：四舍五入（默认）、截断、向上取整。浮点原值不受影响，仅对比整数目标值时生效。</sys:String>
+    <!-- Rounding-mode label reused by the Snapshot + SPC panels (same picker; the
+         per-panel hint TextBlock carries the explanation, so no separate tooltip). -->
+	<sys:String x:Key="str.Snapshot.Rounding">取整模式：</sys:String>
+	<sys:String x:Key="str.Spc.Rounding">取整模式：</sys:String>
+	<sys:String x:Key="str.VS.GameOnly">仅游戏自定义类</sys:String>
+	<sys:String x:Key="str.VS.Parallel">多线程并行扫描</sys:String>
+	<sys:String x:Key="str.VS.BatchRead">批量读取内存</sys:String>
+	<sys:String x:Key="str.VS.Deep">深度遍历嵌套容器</sys:String>
+	<sys:String x:Key="str.Tip.VS.Deep">可选功能，默认关闭。会同时扫描结构体数组、结构体Map、多层TArray/TSet深层内部数值，例如SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[N]这种深层数据也能检索到。单对象扫描开销更大，浅层检索找不到目标时再开启。分组模式下每个数组元素会单独生成匹配条目，可在同一个对象内匹配多条数值条件。</sys:String>
+	<sys:String x:Key="str.VS.NativeC">原生C原始内存</sys:String>
+	<sys:String x:Key="str.Tip.VS.NativeC">可选功能，默认关闭。除UPROPERTY反射字段外，额外扫描对象头部到类大小之间无属性覆盖的原始内存区块，按指定宽度解析原始字节，可找到血量、蓝量等无反射原生C变量。仅支持数字类型，字符串/向量/布尔会被忽略。初次原始扫描干扰项极多，任意4字节匹配都会被列出，需要增量扫描不断缩小范围。开启后自动勾选「优先新实例」；同时开启深度遍历的情况下，还能扫描结构体数组内部无UPROPERTY原生字段，代价更高、噪音更大，建议搭配特殊数值多次筛选。</sys:String>
+	<sys:String x:Key="str.Tip.VS.NativeC.Group">分组模式专用选项，默认关闭。除反射字段外，将对象原始内存数值纳入分组匹配条件，多个数值只要在同一个对象不同偏移处存在即可匹配成功。仅处理对象顶层数据，不进入深层容器；单个对象最多保留64条原始匹配记录。独特数值筛选效果最好，0、1、100这类通用数值会产生大量干扰，仅支持数字字段。</sys:String>
+	<sys:String x:Key="str.VS.AutoSkipNoise">过滤引擎冗余对象</sys:String>
+	<sys:String x:Key="str.Tip.VS.AutoSkipNoise">可选前置过滤，默认关闭。扫描源头直接跳过UI控件、贴图、音效、粒子、动画实例等引擎内置类，扫描速度更快、结果列表更干净。和扫描后筛选类功能不同，本功能在检索前拦截数据。角色、组件、玩家控制器等游戏业务类会强制保留，角色坐标、GAS血量不会被过滤。快照面板共用这套过滤逻辑，仅首次全量扫描生效，修改后需重新扫描。</sys:String>
+	<sys:String x:Key="str.VS.NewestFirst">优先新生成实例</sys:String>
+	<sys:String x:Key="str.Tip.VS.NewestFirst">从最新创建的对象开始遍历，结果达到上限时优先保留新生成实体。适用场景：刚刷新怪物、战斗临时实体，这类对象索引很高，普通从旧到新扫描会被截断。不勾选适合开局创建永久角色（索引低不会被截断）。开启原生C时自动勾选，关闭原生C自动取消；仅反射扫描也可单独启用。</sys:String>
+	<sys:String x:Key="str.VS.CrossObject">跨从属组件（分组模式）</sys:String>
+	<sys:String x:Key="str.Tip.VS.CrossObject">分组模式可选，默认关闭。会读取角色自有组件、GAS属性集内的数值，实现「角色血量+背包金币」分属不同组件同时匹配的检索效果。仅追踪Outer链归属的子对象，依靠多条件同时匹配筛选，而非类名过滤。匹配条目会显示完整路径，点击可跳转对应子对象。</sys:String>
+	<sys:String x:Key="str.VS.MaxResults">最大条数：</sys:String>
+	<sys:String x:Key="str.Tip.VS.MaxResults">扫描全局匹配结果上限，统计所有对象、全部数组元素。达到上限扫描直接终止，状态栏会提示截断。提高上限或缩小检索条件查看完整数据。单个数组内所有索引都会遍历，仅长度超千万的异常数组会跳过做安全保护；扫描同时受超时限制（10~60秒，默认15秒）。</sys:String>
+	<sys:String x:Key="str.VS.Timeout">扫描超时：</sys:String>
+	<sys:String x:Key="str.VS.PerSlot">单对象匹配上限：</sys:String>
+	<sys:String x:Key="str.Tip.VS.Group.Matched">仅展示一组匹配示例，单个对象通常有多组匹配关系。优先选取同一结构体下的配对，开启筛选后会优先展示匹配字段。数值后(+35)代表该对象还有35个匹配字段未展示，选中行点击「全部字段」可查看完整列表。</sys:String>
+	<sys:String x:Key="str.VS.Group.AllFields">查看全部匹配字段</sys:String>
+	<!-- Snapshot Group / SPC Group show the same "(+N)" annotation from their own
+         offset lists, but have no live session and so no "All fields" button — this
+         tooltip must therefore explain the annotation WITHOUT pointing at a control
+         those panels do not have. -->
+	<sys:String x:Key="str.Tip.Group.MatchedOffline">
+		仅展示一组匹配样例，并非全部匹配关系。
+		单个对象通常能满足多条匹配规则，本列每种数值仅展示一条匹配记录，优先选取同一结构体下的字段。
+		数值后方"(+35)"代表该对象还有35个字段同样匹配此数值，只是未展示。展开行可查看每种数值的匹配数量；如需列出完整字段名，切换至数值搜索面板执行同组检索，可读取游戏实时对象完整数据。
+	</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.Group.AllFields">
+		列出当前对象中匹配该数值的所有字段名称，不局限表格展示的单条配对。再次点击折叠列表。
+		单行表格仅能展示一组配对，会造成部分匹配字段看似缺失。例如一次「变化+不变」扫描，第一条匹配为生命值，同时存在36条冻结整数匹配项，表格只会显示生命值配对，但两组匹配均真实有效。列表内每条字段都支持实时查看、复制地址、数据透视、GWorld定位等操作。
+	</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.PerSlotCap">
+		分组扫描专用参数，控制每个对象每种数值最多保留匹配字段数量，区间8-4096，默认256。
+		该设置不影响扫描速度。后续增减扫描只会读取此处保留的字段；读取顺序为父类字段优先，数值设置过小会隐藏对象自身字段，仅显示继承字段。
+		仅当日志提示截断匹配数据时，再调高此数值。
+	</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.Mode">切换单数值扫描 / 多条件分组扫描。单数值类似CE传统扫描；分组模式可同时匹配2-4个不同偏移的数值，精准定位目标角色实体。</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.Timeout">首次/分组扫描最大运行时长，超时自动终止并返回已匹配数据，状态栏会提示截断。范围10-90秒，默认25秒。40万以上海量游戏对象可延长时长；小型游戏缩短提升响应速度。仅首次/分组全扫描生效，增量扫描只读取已有结果，速度极快不受限制。</sys:String>
+
+	<sys:String x:Key="str.VS.FirstScan">首次全量扫描</sys:String>
+	<sys:String x:Key="str.VS.NextScan">增量筛选</sys:String>
+	<sys:String x:Key="str.VS.NewScan">新建扫描会话</sys:String>
+	<sys:String x:Key="str.VS.OpenLive">实时查看</sys:String>
+	<sys:String x:Key="str.VS.OpenInst">实例</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.OpenInst">跳转实例查找面板，自动填充当前匹配所属类并执行检索。</sys:String>
+
+	<sys:String x:Key="str.VS.CopyAddr">地址</sys:String>
+	<sys:String x:Key="str.VS.PivotThis">📊 数据透视</sys:String>
+	<sys:String x:Key="str.VS.LocateGWorld">🌍</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.LocateGWorld">GWorld定位：查找从GWorld到该数值所属对象最短指针路径，并在实时查看器打开。</sys:String>
+
+	<sys:String x:Key="str.VS.LocateGameEngine">⚙</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.LocateGameEngine">GameEngine定位：从引擎根对象查找最短指针路径，可访问GWorld无法遍历的引擎、游戏实例、本地玩家对象；绝大多数世界实体请使用GWorld定位。</sys:String>
+
+	<sys:String x:Key="str.VS.CaseSensitive">区分大小写</sys:String>
+	<sys:String x:Key="str.VS.Filter">筛选：</sys:String>
+	<sys:String x:Key="str.VS.FilterWatermark">全局筛选（不区分大小写，匹配所有列）…</sys:String>
+	<sys:String x:Key="str.VS.Sort">排序：</sys:String>
+	<sys:String x:Key="str.VS.SortDesc">降序</sys:String>
+	<sys:String x:Key="str.VS.LoadMore">加载更多</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.Sort">筛选与排序逻辑在DLL服务端执行，表格分页展示。点击加载更多获取下一页数据；点击列表表头切换升降序，下拉框同步更新排序规则。</sys:String>
+
+	<sys:String x:Key="str.VS.Cancel">终止扫描</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.Cancel">立即终止正在执行的扫描，界面停止等待；DLL会在设定超时后自动结束检索。</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.CaseSensitive">勾选后，字符串（FString/FName/FText）检索严格区分大小写，默认关闭兼容CE模糊匹配规则，仅对字符串类型生效。</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.Parallel">开启后首次扫描使用多线程并发遍历，速度大幅提升；关闭强制单线程读取内存，规避部分游戏反作弊拦截跨线程内存读取。仅首次全扫描支持并行，增量扫描始终单线程。</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.BatchRead">默认开启，对象固定宽度字段合并单次内存读取，减少IO开销、提升缓存命中率，加快扫描速度。读取失败或收益不足时DLL自动降级为单字段读取；字符串、数组、映射数据始终单独读取，仅首次扫描生效。</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.DataType">
+		选择要扫描的UE属性类型。
+		纯数字无字节：一次性扫描整型/浮点，排除1字节与布尔，避免海量微小数值干扰结果。
+		全数字：包含8位字节字段，适合血量这类单字节数值。
+		同时支持单数字、字符串、向量、旋转体；FTransform暂不支持检索。
+		可扫描指定类型的TArray数组，数组内每条元素独立匹配；长度超千万的数组会跳过防止程序崩溃。可查看「最大条数」提示了解全局匹配上限。
+	</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.FirstScan">遍历所有游戏对象对应类型的UPROPERTY字段（含数组元素），执行匹配生成初始结果池，供增量筛选使用。字符串支持包含/开头/结尾匹配，向量输入X,Y,Z格式检索。</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.NextScan">重读已有匹配项，按新条件过滤。增减/不变规则会对比上一轮扫描数值。</sys:String>
+
+	<sys:String x:Key="str.Tip.VS.NewScan">关闭当前扫描会话，清空所有结果，重新开始一轮全新检索。</sys:String>
+
+	<!-- Multiple values group scan (build 1276) -->
+	<sys:String x:Key="str.VS.Mode.Single">单数值模式</sys:String>
+	<sys:String x:Key="str.VS.Mode.Group">多条件分组模式</sys:String>
+	<sys:String x:Key="str.VS.Group.Hint">查找同时包含全部输入数值的游戏对象（例如力量、耐力、敏捷、智力在同一个属性对象中），数值输入顺序无影响，筛选精度远高于单数值检索，支持输入2~4个数值。</sys:String>
+	<sys:String x:Key="str.VS.Group.AddRow">+ 添加数值条件</sys:String>
+	<sys:String x:Key="str.VS.Group.RemoveRow">− 删除数值条件</sys:String>
+	<sys:String x:Key="str.VS.Group.FirstScan">分组全量扫描</sys:String>
+	<sys:String x:Key="str.VS.Group.NextScan">分组增量筛选</sys:String>
+	<sys:String x:Key="str.VS.Group.NewScan">新建分组扫描</sys:String>
+	<sys:String x:Key="str.VS.Group.FilterWatermark">筛选匹配对象：类/实例/字段/数值，空格代表且关系，示例："tickcount frozenint"…</sys:String>
+	<sys:String x:Key="str.Tip.VS.Group.Filter">
+		在服务端对全部结果进行过滤。**空格代表多条件同时满足**：每个关键词都要匹配对象内任意内容，但可对应不同字段。
+		同时该筛选可锁定指定配对关系：一次扫描可能生成数十组匹配，表格仅随机展示一组；输入两个字段名可强制该行展示二者配对，方便定位目标数据。
+		仅输入单个关键词时，会匹配类名、实例名、字段名、数值任意一项。
+	</sys:String>
+	<sys:String x:Key="str.Tip.VS.Group.FirstScan">遍历所有对象，筛选在不同数字字段偏移处同时存在所有输入数值的实体，数值默认匹配各类整型、浮点。使用分组增量扫描可进一步缩小范围并锁定对应字段偏移。</sys:String>
+	<sys:String x:Key="str.Tip.VS.Group.ScanType">单条数值匹配规则：全量扫描支持等于/大于/小于；增量扫描额外支持变化/无变化/上升/下降，该模式下无需填写目标数值，会对比上一轮扫描结果。</sys:String>
+
+	<!-- Object Tree -->
+	<sys:String x:Key="str.ObjectTree.Title">对象树</sys:String>
+	<sys:String x:Key="str.ObjectTree.Search">检索对象（空格代表多条件同时匹配）...</sys:String>
+	<sys:String x:Key="str.ObjectTree.Reload">重新加载</sys:String>
+	<sys:String x:Key="str.ObjectTree.Loading">加载中...</sys:String>
+	<sys:String x:Key="str.ObjectTree.CopyClassName">复制类名</sys:String>
+	<sys:String x:Key="str.ObjectTree.CopyObjectName">复制对象名</sys:String>
+	<sys:String x:Key="str.ObjectTree.CopyAddress">复制内存地址</sys:String>
+	<sys:String x:Key="str.ObjectTree.FindInstancesByType">按类查找实例</sys:String>
+	<sys:String x:Key="str.ObjectTree.FindInstancesByTypeAndName">按类+名称查找实例</sys:String>
+	<sys:String x:Key="str.ObjectTree.OpenInLiveWalker">在实时查看器打开</sys:String>
+	<sys:String x:Key="str.ObjectTree.ShowRelated">查看关联对象</sys:String>
+	<sys:String x:Key="str.ObjectTree.LocateInGWorld">在GWorld中定位</sys:String>
+	<sys:String x:Key="str.ObjectTree.LocateInGameEngine">在GameEngine中定位</sys:String>
+	<sys:String x:Key="str.ObjectTree.FilterHint">筛选（空格=且，例如 BP 角色）</sys:String>
+	<sys:String x:Key="str.ObjectTree.ClassFilter">类筛选：</sys:String>
+	<sys:String x:Key="str.ObjectTree.InstancesOnly">仅显示实例（隐藏反射元数据）</sys:String>
+	<sys:String x:Key="str.ObjectTree.Cancel">取消</sys:String>
+
+
+	<!-- Instance Finder -->
+	<sys:String x:Key="str.InstanceFinder.CopyAddress">复制地址</sys:String>
+	<sys:String x:Key="str.InstanceFinder.FindFunc">查找函数</sys:String>
+
+    <!-- Live Walker -->
+	<sys:String x:Key="str.LiveWalker.SearchHint">检索字段…</sys:String>
+	<sys:String x:Key="str.LiveWalker.MatchPrev">▲ 上一条匹配</sys:String>
+	<sys:String x:Key="str.LiveWalker.MatchNext">▼ 下一条匹配</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.MatchPrev">跳转到上一个匹配字段，到达头部自动循环至末尾</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.MatchNext">跳转到下一个匹配字段，到达末尾自动循环至头部</sys:String>
+	<sys:String x:Key="str.LiveWalker.GenerateCeAA">复制CE自动汇编脚本</sys:String>
+
+    <!-- Class Structure -->
+	<sys:String x:Key="str.ClassStruct.Name">名称</sys:String>
+	<sys:String x:Key="str.ClassStruct.Type">类型</sys:String>
+	<sys:String x:Key="str.ClassStruct.Offset">偏移</sys:String>
+	<sys:String x:Key="str.ClassStruct.Size">大小</sys:String>
+	<sys:String x:Key="str.ClassStruct.Super">父类</sys:String>
+	<sys:String x:Key="str.ClassStruct.PropsSize">属性总大小</sys:String>
+	<sys:String x:Key="str.ClassStruct.FindClassFunc">🔎 查找引用该类函数</sys:String>
+	<sys:String x:Key="str.Tip.ClassStruct.FindClassFunc">检索参数/返回值包含当前类的UFunction，含原生函数。</sys:String>
+	<sys:String x:Key="str.ClassStruct.NoClass">请选择对象以查看类结构</sys:String>
+	<sys:String x:Key="str.Xref.FindFunctions">查找使用此字段的函数</sys:String>
+	<sys:String x:Key="str.Xref.FindFuncsButton">查找函数</sys:String>
+	<sys:String x:Key="str.ClassStruct.FilterLabel">筛选：</sys:String>
+	<sys:String x:Key="str.ClassStruct.FilterHint">按名称或类型筛选字段</sys:String>
+
+    <!-- Live Walker -->
+	<sys:String x:Key="str.LiveWalker.StartWorld">从GWorld开始</sys:String>
+	<sys:String x:Key="str.LiveWalker.StartGameEngine">从GameEngine开始</sys:String>
+	<sys:String x:Key="str.LiveWalker.Back">后退</sys:String>
+	<sys:String x:Key="str.LiveWalker.Forward">前进</sys:String>
+	<sys:String x:Key="str.LiveWalker.Parent">上级 ↑</sys:String>
+	<sys:String x:Key="str.LiveWalker.FindRefs">查找引用</sys:String>
+	<sys:String x:Key="str.LiveWalker.Refresh">刷新</sys:String>
+	<sys:String x:Key="str.LiveWalker.AddressHint">地址（十六进制 / 程序名+偏移）</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.GWorldDepth">使用GWorld定位时向下遍历指针的最大层数（默认7），数值越大能找到深层对象，但检索速度越慢。</sys:String>
+	<sys:String x:Key="str.Toolbar.GWorldDepth">GWorld定位深度</sys:String>
+	<sys:String x:Key="str.Toolbar.GWorldDeep">深层容器遍历</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.GWorldDeep">GWorld深层定位开关，默认关闭，功能等同于数值搜索的深度遍历。开启后检索路径会进入结构体数组、映射内部的对象指针（例如Inventory[3].ItemActor），可以定位常规路径找不到的实体；也能把深层容器内的数值归属到所属对象而非检索失败。代价更高，每个数组元素都会读取内存。</sys:String>
+	<sys:String x:Key="str.Toolbar.DeepScanElemCap">深层容器遍历上限</sys:String>
+	<sys:String x:Key="str.Tip.Toolbar.DeepScanElemCap">实例反向检索的递归遍历单容器最大元素数，浅层查找无果时才会递归扫描。数值越高能读取下标更大的元素，但速度变慢，默认256。</sys:String>
+	<sys:String x:Key="str.LiveWalker.Go">跳转</sys:String>
+	<sys:String x:Key="str.LiveWalker.ExportCE">复制CE XML</sys:String>
+	<sys:String x:Key="str.LiveWalker.CancelExport">取消导出</sys:String>
+	<sys:String x:Key="str.LiveWalker.AobToggle">AOB锚定</sys:String>
+	<sys:String x:Key="str.LiveWalker.CollapseChain">折叠指针链</sys:String>
+	<sys:String x:Key="str.LiveWalker.FlattenGas">扁平化GAS属性</sys:String>
+	<sys:String x:Key="str.LiveWalker.FlattenLeafStructs">扁平化基础结构体</sys:String>
+	<sys:String x:Key="str.LiveWalker.FlattenLeafRecords">扁平化文本记录结构体</sys:String>
+	<sys:String x:Key="str.LiveWalker.RecordColors">记录配色设置…</sys:String>
+	<sys:String x:Key="str.LiveWalker.CollapseLeafPointers">折叠单值指针</sys:String>
+	<sys:String x:Key="str.LiveWalker.ExportOptions">导出选项</sys:String>
+	<sys:String x:Key="str.LiveWalker.DedupShared">共享对象去重</sys:String>
+	<sys:String x:Key="str.LiveWalker.ExcludeSysComponents">排除系统组件</sys:String>
+	<sys:String x:Key="str.LiveWalker.DescShowOffset">附加偏移</sys:String>
+	<sys:String x:Key="str.LiveWalker.DescShowType">附加类型</sys:String>
+	<sys:String x:Key="str.LiveWalker.ExportCsx">导出CSX</sys:String>
+	<sys:String x:Key="str.LiveWalker.ExportCsxPre77">CSX — CE7.7旧版</sys:String>
+	<sys:String x:Key="str.LiveWalker.ExportCsx77">CSX — CE7.7及新版</sys:String>
+	<sys:String x:Key="str.LiveWalker.Value">数值</sys:String>
+	<sys:String x:Key="str.LiveWalker.CopyAddress">复制地址</sys:String>
+	<sys:String x:Key="str.LiveWalker.CopyName">复制名称</sys:String>
+	<sys:String x:Key="str.LiveWalker.CopyClass">复制类名</sys:String>
+	<sys:String x:Key="str.LiveWalker.CeAAShort">AA</sys:String>
+	<sys:String x:Key="str.LiveWalker.PtrValue">[指针]</sys:String>
+	<sys:String x:Key="str.LiveWalker.CopyPtr">复制指针</sys:String>
+	<sys:String x:Key="str.LiveWalker.AutoRefresh">自动刷新</sys:String>
+	<sys:String x:Key="str.LiveWalker.HexFieldTip">跳转CE十六进制视图至当前字段（依赖AOBMaker插件）</sys:String>
+	<sys:String x:Key="str.LiveWalker.HexPtrTip">跳转指针目标CE十六进制视图（依赖AOBMaker插件）</sys:String>
+	<sys:String x:Key="str.LiveWalker.HexObjectTip">跳转当前对象CE十六进制视图（依赖AOBMaker插件）</sys:String>
+	<sys:String x:Key="str.LiveWalker.HexOuterTip">跳转外层对象CE十六进制视图（依赖AOBMaker插件）"</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CopyClass">将类名复制到剪贴板</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CopyOuterName">复制外层对象名称</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.CopyOuterClass">复制外层类名</sys:String>
+	<sys:String x:Key="str.LiveWalker.AddToCe">+CE</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.AddFieldToCe">将此字段以带名称的结构化记录添加至CE地址列表，需2026-06-07及以后版本AOBMaker插件才能跳转十六进制窗口。</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.AddPtrToCe">把指针目标作为8字节十六进制记录添加到CE（AOBMaker插件）</sys:String>
+	<sys:String x:Key="str.LiveWalker.PushCeField">批量添加CE字段(平铺)</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.PushCeField">多选字段批量生成CE结构化记录；如需分层指针链请使用复制CE XML功能。</sys:String>
+
+	<!-- Live Walker: Bookmarks -->
+    <sys:String x:Key="str.LiveWalker.BookmarkSave">&#x2605;</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.BookmarkSave">保存模式: 点击 &#x2605;, 再点击槽位存储当前对象与滚动位置，游戏独立存储书签。</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.BookmarkSaveActive">书签保存模式已激活，点击槽位完成保存，或者再次点击 &#x2605; 取消</sys:String>
+    <sys:String x:Key="str.LiveWalker.BookmarkClearOne">清空该书签</sys:String>
+    <sys:String x:Key="str.LiveWalker.BookmarkClearAll">&#x2715;</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.BookmarkClearAll">清除当前游戏所有书签并删除存储文件，右键单条可单独清空。</sys:String>
+
+    <!-- Instance Finder -->
+	<sys:String x:Key="str.InstanceFinder.ClassNameHint">类名（例如PlayerController）</sys:String>
+	<sys:String x:Key="str.InstanceFinder.ObjectNameHint">对象名（选填）</sys:String>
+	<sys:String x:Key="str.InstanceFinder.Search">检索</sys:String>
+	<sys:String x:Key="str.InstanceFinder.Address">地址</sys:String>
+	<sys:String x:Key="str.InstanceFinder.OpenInWalker">实时查看器打开</sys:String>
+	<sys:String x:Key="str.InstanceFinder.LocateGWorld">🌍 定位</sys:String>
+	<sys:String x:Key="str.InstanceFinder.LocateGWorldShort">🌍</sys:String>
+	<sys:String x:Key="str.InstanceFinder.LocateGameEngineShort">⚙</sys:String>
+	<sys:String x:Key="str.InstanceFinder.AddressHint">十六进制地址 / 模块+偏移</sys:String>
+	<sys:String x:Key="str.InstanceFinder.Lookup">地址反向检索</sys:String>
+	<sys:String x:Key="str.InstanceFinder.ExactMatch">精确匹配类名</sys:String>
+	<sys:String x:Key="str.InstanceFinder.NewestFirst">优先新实例</sys:String>
+	<sys:String x:Key="str.InstanceFinder.MaxResults">最大条数</sys:String>
+	<sys:String x:Key="str.InstanceFinder.KeywordHint">筛选（名称/类/地址）</sys:String>
+	<sys:String x:Key="str.InstanceFinder.ContainerMatches">匹配数组容器地址：</sys:String>
+
+    <!-- Pointer Panel -->
+	<sys:String x:Key="str.Pointers.GObjects">GObjects地址</sys:String>
+	<sys:String x:Key="str.Pointers.GNames">GNames地址</sys:String>
+	<sys:String x:Key="str.Pointers.GWorld">GWorld地址</sys:String>
+	<sys:String x:Key="str.Pointers.UEVersion">虚幻引擎版本</sys:String>
+	<sys:String x:Key="str.Pointers.TotalObjects">对象总数</sys:String>
+	<sys:String x:Key="str.Pointers.Copy">复制</sys:String>
+	<sys:String x:Key="str.Pointers.NotConnected">未连接游戏进程</sys:String>
+	<sys:String x:Key="str.Pointers.VersionTooOld">引擎版本过低，最低支持UE4.11，4.10及以下无FUObjectItem结构无法扫描</sys:String>
+    <!-- Separate from VersionTooOld on purpose: that message's remedy line ("set a UE version
+         override") is actively WRONG here. The override list has no value below UE 4.18, and no
+         value at any version would help, because the structures being looked for do not exist in
+         a pre-UE4 binary at all. Keeping two strings also keeps the 4.10 explanation truthful —
+         4.10 is still a live case, with two reference builds in the AOB corpus. -->
+	<sys:String x:Key="str.Pointers.EnginePreUE4">检测到虚幻3，无全局对象数组，扫描已跳过</sys:String>
+	<sys:String x:Key="str.Pointers.VersionWarning">⚠ 未自动识别引擎版本，推测值可能有误</sys:String>
+	<sys:String x:Key="str.Pointers.VersionDetectedBadge">✓ 自动识别</sys:String>
+	<sys:String x:Key="str.Pointers.VersionUserOverrideBadge">🔧 手动指定</sys:String>
+	<sys:String x:Key="str.Pointers.VersionUserOverrideTooltip">手动覆盖引擎版本，按游戏独立保存</sys:String>
+	<sys:String x:Key="str.Pointers.VersionLowConfidenceBadge">⚠ 识别可信度低</sys:String>
+	<sys:String x:Key="str.Pointers.VersionLowConfidenceText">通过简易特征匹配识别，导出数据异常请手动指定版本</sys:String>
+	<sys:String x:Key="str.Pointers.VersionOverrideLabel">版本覆盖：</sys:String>
+	<sys:String x:Key="str.Pointers.VersionOverrideTooltip">强制指定虚幻版本，自动恢复选择Auto</sys:String>
+	<sys:String x:Key="str.Pointers.InvokeTimeoutLabel">函数调用超时(毫秒)：</sys:String>
+	<sys:String x:Key="str.Pointers.InvokeTimeoutTooltip">蓝图函数调用等待时间，默认5000ms，UI组件调用建议调高至10~30秒，单游戏独立保存</sys:String>
+	<sys:String x:Key="str.Pointers.InvokeTimeoutOverrideBadge">自定义超时</sys:String>
+	<sys:String x:Key="str.Pointers.InvokeTimeoutOverrideTooltip">当前游戏使用自定义调用超时</sys:String>
+	<sys:String x:Key="str.Pointers.PublisherLabel">发行商：</sys:String>
+	<sys:String x:Key="str.Pointers.AobFailed">⚠ AOB特征码匹配失败，通过其他途径识别</sys:String>
+	<sys:String x:Key="str.Pointers.GWorldNotFound">未找到GWorld（非致命）</sys:String>
+	<sys:String x:Key="str.Pointers.SparseDelegates">稀疏委托存储</sys:String>
+	<sys:String x:Key="str.Pointers.SparseDelegatesOptional">UE4.23+可选功能，支持委托完整遍历</sys:String>
+	<sys:String x:Key="str.Pointers.SparseDelegatesNotFound">未匹配到特征码，委托完整遍历禁用</sys:String>
+	<sys:String x:Key="str.Pointers.GEngine">&amp;GEngine静态地址</sys:String>
+	<sys:String x:Key="str.Pointers.GEngineOptional">可选静态引擎槽，重启游戏地址稳定</sys:String>
+	<sys:String x:Key="str.Pointers.GEngineNotFound">未匹配GEngine特征码，扫描GObjects获取引擎对象（速度变慢）</sys:String>
+	<sys:String x:Key="str.Pointers.SparseDelegatesUnsupported">引擎低于4.23，无稀疏委托功能</sys:String>
+	<sys:String x:Key="str.Pointers.PatternIdTooltip">匹配的AOB特征编号</sys:String>
+	<sys:String x:Key="str.Pointers.AobAllFailed">🔴 全部特征码匹配失败</sys:String>
+	<sys:String x:Key="str.Pointers.ExtraScan">深度扫描</sys:String>
+	<sys:String x:Key="str.Pointers.ExtraScanHint">部分指针未识别，执行深度扫描（5~20秒）</sys:String>
+	<sys:String x:Key="str.Pointers.AobMakerHex">HEX跳转</sys:String>
+	<sys:String x:Key="str.Pointers.AobMakerHexTip">跳转CE十六进制窗口至该指针地址（AOBMaker插件）</sys:String>
+	<sys:String x:Key="str.Pointers.AobMakerAsm">反汇编</sys:String>
+	<sys:String x:Key="str.Pointers.AobMakerScanAsmTip">跳转CE反汇编窗口至特征匹配指令</sys:String>
+	<sys:String x:Key="str.Pointers.RegisterSymbol">注册CE符号</sys:String>
+	<sys:String x:Key="str.Pointers.RegisterSymbolTip">生成AA脚本在CE注册gworld_addr稳定符号</sys:String>
+	<sys:String x:Key="str.Pointers.RegisterGEngineSymbolTip">注册稳定GEngine槽符号，游戏重启地址不变</sys:String>
+	<sys:String x:Key="str.Pointers.TestExtraScan">测试深度扫描</sys:String>
+	<sys:String x:Key="str.Pointers.TestExtraHint">仅模拟扫描UI，不真实检索内存</sys:String>
+	<sys:String x:Key="str.Pointers.ClearGameCache">清空当前游戏缓存</sys:String>
+	<sys:String x:Key="str.Pointers.ResetAllCache">重置全部缓存</sys:String>
+	<sys:String x:Key="str.Pointers.CacheHint">缓存存储特征匹配结果，清空后重新全量扫描</sys:String>
+	<sys:String x:Key="str.Pointers.AobLabel">特征码：</sys:String>
+	<sys:String x:Key="str.Pointers.CopyScanAddr">复制扫描地址</sys:String>
+
+
+
+	<!-- 深度扫描状态文本 -->
+	<sys:String x:Key="str.Pointers.Scan.Starting">开始扫描...</sys:String>
+	<sys:String x:Key="str.Pointers.Scan.NothingToScan">无需扫描，全部指针已识别</sys:String>
+	<sys:String x:Key="str.Pointers.Scan.Applying">加载扫描结果...</sys:String>
+	<sys:String x:Key="str.Pointers.Scan.Applied">扫描完成，结果已加载</sys:String>
+	<sys:String x:Key="str.Pointers.Scan.NoResults">未识别额外指针</sys:String>
+	<sys:String x:Key="str.Pointers.Scan.CompleteNoResults">扫描结束，无新增指针</sys:String>
+	<sys:String x:Key="str.Pointers.Scan.Error">扫描出错：{0}</sys:String>
+	<!-- 测试扫描文本 -->
+	<sys:String x:Key="str.Pointers.TestScan.Starting">启动模拟扫描...</sys:String>
+	<sys:String x:Key="str.Pointers.TestScan.GObjects">扫描GObjects数据段...</sys:String>
+	<sys:String x:Key="str.Pointers.TestScan.GWorld">检索GWorld实例...</sys:String>
+	<sys:String x:Key="str.Pointers.TestScan.Complete">模拟扫描完成</sys:String>
+	<sys:String x:Key="str.Pointers.TestScan.Result">模拟扫描结束，无真实内存检索</sys:String>
+	<sys:String x:Key="str.Pointers.TestScan.Error">模拟扫描异常：{0}</sys:String>
+	<!-- 缓存操作文本 -->
+	<sys:String x:Key="str.Pointers.Cache.GameCleared">当前游戏缓存已清空，下次启动全量扫描</sys:String>
+	<sys:String x:Key="str.Pointers.Cache.GameNotFound">未找到该游戏缓存记录</sys:String>
+	<sys:String x:Key="str.Pointers.Cache.AllReset">全部缓存已重置，自动备份原文件</sys:String>
+	<sys:String x:Key="str.Pointers.Cache.ResetFailed">缓存重置失败，请查看日志</sys:String>
+	<sys:String x:Key="str.Pointers.Cache.Error">缓存操作错误：{0}</sys:String>
+	<!-- 系统诊断面板 -->
+	<sys:String x:Key="str.System.Header">诊断信息</sys:String>
+	<sys:String x:Key="str.System.UiBuild">UI编译版本</sys:String>
+	<sys:String x:Key="str.System.Dll">注入DLL版本</sys:String>
+	<sys:String x:Key="str.System.BuildMatch">✓ 版本匹配</sys:String>
+	<sys:String x:Key="str.System.BuildMismatch">⚠ DLL版本过旧，请关闭游戏后重新部署代理DLL</sys:String>
+	<sys:String x:Key="str.System.BuildUnknown">⚠ DLL无版本标记，判定为旧版</sys:String>
+	<sys:String x:Key="str.System.AobMakerStatus">AOBMaker插件状态</sys:String>
+	<sys:String x:Key="str.System.AobMakerConnected">● 已连接</sys:String>
+	<sys:String x:Key="str.System.AobMakerOffline">○ 未检测到，请检查CE插件安装</sys:String>
+	<!-- 顶部工具栏AOBMaker状态 -->
+	<sys:String x:Key="str.Toolbar.AobMakerLabel">AOBMaker插件</sys:String>
+	<sys:String x:Key="str.Toolbar.AobMakerConnected">已连接</sys:String>
+	<sys:String x:Key="str.Toolbar.AobMakerOffline">离线</sys:String>
+	<sys:String x:Key="str.Toolbar.AobMakerRefresh">⟳ 刷新状态</sys:String>
+	<sys:String x:Key="str.Tip.Toolbar.AobMakerRefresh">重新检测Cheat Engine是否加载AOBMaker插件，按钮与功能使用时会自动刷新。</sys:String>
+	<!-- 自检功能 -->
+	<sys:String x:Key="str.System.SelfTest.Button">运行自检</sys:String>
+	<sys:String x:Key="str.System.SelfTest.Hint">调用蓝图数学库静态函数验证钩子是否挂载正确虚表槽位</sys:String>
+	<sys:String x:Key="str.System.SelfTest.Running">检测蓝图辅助函数...</sys:String>
+	<sys:String x:Key="str.System.SelfTest.NoCandidate">未找到可测试蓝图函数库</sys:String>
+	<sys:String x:Key="str.System.SelfTest.Error">自检失败：{0}</sys:String>
+	<!-- 管道日志 -->
+	<sys:String x:Key="str.System.PipeLog.Header">UI-DLL通信日志</sys:String>
+	<sys:String x:Key="str.System.PipeLog.Hint">实时通信记录，最新置顶；列：时间/通道/收发/指令/ID，交互通道优先响应。</sys:String>
+	<sys:String x:Key="str.System.PipeLog.Pause">暂停日志</sys:String>
+	<sys:String x:Key="str.System.PipeLog.Clear">清空日志</sys:String>
+	<sys:String x:Key="str.System.PipeLog.Empty">暂无通信记录，请连接游戏后操作功能</sys:String>
+	<!-- 维护面板 -->
+	<sys:String x:Key="str.System.Maintenance.Header">维护工具</sys:String>
+	<!-- 性能诊断 -->
+	<sys:String x:Key="str.System.Diag.Header">调度性能诊断</sys:String>
+	<sys:String x:Key="str.System.Diag.Refresh">刷新</sys:String>
+	<sys:String x:Key="str.System.Diag.Reset">重置统计</sys:String>
+	<sys:String x:Key="str.System.Diag.Auto">自动刷新(5秒)</sys:String>
+	<sys:String x:Key="str.System.Diag.AutoTip">每5秒读取一次性能，自动切换面板时暂停，避免干扰数据。</sys:String>
+	<sys:String x:Key="str.System.Diag.RefreshTip">手动读取DLL调度耗时、内存、线程等进程信息，游戏进程数据。</sys:String>
+	<sys:String x:Key="str.System.Diag.ResetTip">清空统计时长与调度计数，重新开始统计。</sys:String>
+	<sys:String x:Key="str.System.Diag.Summary">共{0}次调度，总时长{1}秒，调度占用{2}%，GObjects总数{0:N0}</sys:String>
+	<sys:String x:Key="str.System.Diag.Process">游戏进程：工作集{0} / 私有内存{1} / CPU占用{2}% / {3}线程 / {4}句柄</sys:String>
+	<sys:String x:Key="str.System.Diag.GameThread">游戏线程钩子：{0} · {1} · {2} · {3:N0}次触发</sys:String>
+	<sys:String x:Key="str.System.Diag.LastFire">上次触发距今 {0:N0} 毫秒</sys:String>
+	<sys:String x:Key="str.System.Diag.NeverFired">从未触发</sys:String>
+	<sys:String x:Key="str.System.Diag.Responsive">响应正常</sys:String>
+	<sys:String x:Key="str.System.Diag.Stalled">线程阻塞</sys:String>
+	<sys:String x:Key="str.System.Diag.NotConnected">诊断需要已连接游戏DLL</sys:String>
+	<sys:String x:Key="str.System.Diag.Reset.Done">统计数据已重置</sys:String>
+	<sys:String x:Key="str.System.Diag.Error">读取诊断失败：{0}</sys:String>
+	<!-- 日志工具 -->
+	<sys:String x:Key="str.System.OpenLogFolder">打开日志文件夹</sys:String>
+	<sys:String x:Key="str.System.OpenLogFolderTip">打开程序本地日志目录 %LOCALAPPDATA%\UE5CEDumper\Logs</sys:String>
+	<sys:String x:Key="str.System.OpenLogFolder.Error">无法打开目录：{0}</sys:String>
+	<sys:String x:Key="str.System.CompressLogs">压缩日志文件</sys:String>
+	<sys:String x:Key="str.System.CompressLogsTip">NTFS LZX无损压缩日志，压缩比极高，不影响文本编辑器打开，跳过近期、小文件。</sys:String>
+	<sys:String x:Key="str.System.CompressLogs.Running">正在压缩日志...</sys:String>
+	<sys:String x:Key="str.System.CompressLogs.Result">已压缩{0}个文件，{1}MB → {2}MB，节省{3}MB，{4}个文件失败</sys:String>
+	<sys:String x:Key="str.System.CompressLogs.NothingToDo">无需压缩：{0}个已压缩，{1}个跳过</sys:String>
+	<sys:String x:Key="str.System.CompressLogs.Unsupported">当前磁盘非NTFS，不支持压缩</sys:String>
+	<sys:String x:Key="str.System.CompressLogs.Error">日志压缩失败：{0}</sys:String>
+	<sys:String x:Key="str.System.AutoCompressLogs">启动自动压缩7天前日志</sys:String>
+	<sys:String x:Key="str.System.AutoCompressLogsTip">程序启动后台自动压缩旧日志，不删除文件。</sys:String>
+	<sys:String x:Key="str.System.RemoveAllSnapshots">删除全部快照数据</sys:String>
+	<sys:String x:Key="str.System.RemoveAllSnapshotsTip">彻底删除所有游戏快照数据库文件，不可逆操作，使用中数据库跳过。</sys:String>
+	<sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmTitle">确认删除所有快照</sys:String>
+	<sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmMessage">确定永久删除全部游戏快照数据库文件？操作无法撤销。</sys:String>
+	<sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmYes">删除文件</sys:String>
+	<sys:String x:Key="str.System.RemoveAllSnapshots.None">未找到快照数据库</sys:String>
+	<sys:String x:Key="str.System.RemoveAllSnapshots.Result">已删除{0}个快照文件</sys:String>
+	<sys:String x:Key="str.System.RemoveAllSnapshots.ResultPartial">删除{0}个，{1}个正在使用无法删除</sys:String>
+	<!-- 底部版权 -->
+	<sys:String x:Key="str.Credit.AuthorPrefix">作者：bbfox @ </sys:String>
+	<sys:String x:Key="str.Credit.AuthorUrl">https://opencheattables.com</sys:String>
+	<sys:String x:Key="str.Credit.RepoPrefix">项目仓库：</sys:String>
+	<sys:String x:Key="str.Credit.RepoUrl">https://github.com/bbfox0703/UE5CEDumper</sys:String>
+	<sys:String x:Key="str.Credit.OpenInBrowserTip">使用默认浏览器打开链接</sys:String>
+	<!-- 实验性功能开关 -->
+	<sys:String x:Key="str.Experimental.EnableHint">启用高级实验功能</sys:String>
+	<!-- 快照面板 -->
+	<sys:String x:Key="str.Snapshot.Into">捕获所有数字UPROPERTY快照，原生C选项可抓取无反射原生血量等数值。</sys:String>
+	<sys:String x:Key="str.Snapshot.NativeC">原生C原始内存</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.NativeC">捕获对象无反射原生内存，生成 虚拟字段，可用于快照对比，捕获体积更大速度更慢。</sys:String>
+	<sys:String x:Key="str.Snapshot.CaptureHeader">捕获快照</sys:String>
+	<sys:String x:Key="str.Snapshot.CompareHeader">快照对比</sys:String>
+	<sys:String x:Key="str.Snapshot.NotConnected">连接游戏后方可捕获快照</sys:String>
+	<sys:String x:Key="str.Snapshot.Scope">捕获范围：</sys:String>
+	<sys:String x:Key="str.Snapshot.Family">数值类型：</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.Family">仅捕获整数 / 仅捕获浮点 / 全部数字，缩小快照体积。</sys:String>
+	<sys:String x:Key="str.Snapshot.MaxDataset">快照最大体积上限：</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.MaxDataset">到达上限自动停止捕获，防止巨型快照占用磁盘。</sys:String>
+	<sys:String x:Key="str.Snapshot.Estimate">预估快照大小</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.Estimate">抽样估算快照占用空间，无需完整捕获。</sys:String>
+	<sys:String x:Key="str.Snapshot.GameOnly">仅游戏类对象</sys:String>
+	<sys:String x:Key="str.Snapshot.AutoSkipNoise">自动过滤引擎冗余对象</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.AutoSkipNoise">捕获时直接跳过UI、贴图等引擎类，快照更小更快，角色相关类强制保留。</sys:String>
+	<sys:String x:Key="str.Snapshot.Label">快照标签：</sys:String>
+	<sys:String x:Key="str.Snapshot.LabelWatermark">留空默认时间戳</sys:String>
+	<sys:String x:Key="str.Snapshot.Capture">开始捕获</sys:String>
+	<sys:String x:Key="str.Snapshot.Cancel">取消捕获</sys:String>
+	<sys:String x:Key="str.Snapshot.Refresh">刷新快照列表</sys:String>
+	<sys:String x:Key="str.Snapshot.Delete">删除选中快照</sys:String>
+	<sys:String x:Key="str.Snapshot.DeleteAll">删除全部快照</sys:String>
+	<sys:String x:Key="str.Snapshot.DeleteAllTip">清空当前游戏所有快照数据库，不可恢复</sys:String>
+	<sys:String x:Key="str.Snapshot.OpenDbFolder">打开快照存储目录</sys:String>
+	<sys:String x:Key="str.Snapshot.OpenDbFolderTip">打开当前游戏快照数据库文件夹</sys:String>
+	<sys:String x:Key="str.Snapshot.Quota">单游戏存储配额：</sys:String>
+	<sys:String x:Key="str.Snapshot.QuotaHint">快照超出配额自动删除最早文件</sys:String>
+	<sys:String x:Key="str.Snapshot.Usage">已占用：</sys:String>
+	<sys:String x:Key="str.Snapshot.MinFreeDisk">磁盘最小剩余空间：</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.MinFreeDisk">捕获前校验磁盘剩余空间，不足禁止捕获。</sys:String>
+	<!-- 自动快照 -->
+	<sys:String x:Key="str.Snapshot.Auto.Header">自动快照</sys:String>
+	<sys:String x:Key="str.Snapshot.Auto.On">开启</sys:String>
+	<sys:String x:Key="str.Snapshot.Auto.Off">关闭</sys:String>
+	<sys:String x:Key="str.Snapshot.Auto.Interval">间隔(秒)：</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.Auto.Interval">两次捕获起始间隔最低60秒，长捕获会自动顺延。</sys:String>
+	<sys:String x:Key="str.Snapshot.Auto.Retention">保留规则：</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.Auto.Retention">KeepRecent保留最新；FixedCount固定条数后停止。</sys:String>
+	<sys:String x:Key="str.Snapshot.Auto.Count">保留条数：</sys:String>
+	<sys:String x:Key="str.Snapshot.Auto.AdjustQuota">自动扩容配额</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.Auto.AdjustQuota">配额不足自动上调上限。</sys:String>
+	<sys:String x:Key="str.Snapshot.Auto.Hint">后台定时捕获，需手动启停，重启不恢复。</sys:String>
+	<sys:String x:Key="str.Snapshot.Saved">已保存快照列表</sys:String>
+	<sys:String x:Key="str.Snapshot.Col.Size">预估大小</sys:String>
+	<sys:String x:Key="str.Snapshot.Col.Label">标签</sys:String>
+	<sys:String x:Key="str.Snapshot.Col.Captured">捕获时间(UTC)</sys:String>
+	<sys:String x:Key="str.Snapshot.Col.Objects">对象数量</sys:String>
+	<sys:String x:Key="str.Snapshot.Col.Fields">字段总数</sys:String>
+	<sys:String x:Key="str.Snapshot.Col.Scope">捕获范围</sys:String>
+	<sys:String x:Key="str.Snapshot.Col.Ue">引擎版本</sys:String>
+	<!-- 快照对比 -->
+	<sys:String x:Key="str.Snapshot.Diff.Old">旧快照：</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.New">新快照：</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.Run">执行对比</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.DeepNote">对比默认深度遍历容器</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.Diff.DeepNote">快照对比自动遍历数组嵌套元素，无需额外开关。</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.ClassFilter">类筛选：</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.PropFilter">属性筛选：</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.Dir">变化类型：</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.CopyAddr">复制地址</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.OpenWalker">实时查看</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.LocateGWorld">🌍</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.Diff.LocateGWorld">从GWorld定位至变化字段，仅本次游戏会话有效</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.LocateGameEngine">⚙</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.Diff.LocateGameEngine">从GameEngine根定位变化字段</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.ObjectFilter">对象筛选：</sys:String>
+	<sys:String x:Key="str.Snapshot.Global">全局筛选：</sys:String>
+	<sys:String x:Key="str.Snapshot.GlobalHint">匹配所有列...</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.OldRange">旧值区间：</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.NewRange">新值区间：</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.ApplyRange">应用区间</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.ResetRange">重置区间</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.Hint">快照对比依靠对象唯一标识匹配，建议同一次游戏会话快照对比</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.Col.Change">变化Δ</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.Col.Class">类</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.Col.Object">对象</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.Col.Field">字段</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.Col.Old">旧值</sys:String>
+	<sys:String x:Key="str.Snapshot.Diff.Col.New">新值</sys:String>
+	<!-- 快照多条件分组 -->
+	<sys:String x:Key="str.Snapshot.Group.ModeLabel">模式：</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.ModeDiff">快照对比</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.ModeGroup">多条件分组</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.Snapshot">快照：</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.Find">检索匹配对象</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.Clear">清空条件</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.AddRow">+添加数值条件</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.RemoveRow">−删除数值条件</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.Deep">深层嵌套容器匹配</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.Group.Deep">匹配数组、结构体内部数值，关闭仅匹配直接字段</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.ValueHint">数值</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.Value2Hint">上限数值</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.CompareWith">对比快照：</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.Group.CompareWith">选择旧快照可筛选数值增减变化</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.CompareClear">✕ 清除对比快照</sys:String>
+	<sys:String x:Key="str.Tip.Snapshot.Group.CompareClear">取消跨快照变化筛选</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.Hint">查找同时包含所有数值的对象，可单快照绝对值/双快照变化筛选</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.Col.Class">类</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.Col.Object">对象</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.Col.Matched">匹配数值</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.OpenWalker">实时查看</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.CopyAddr">复制地址</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.LocateGWorld">🌍</sys:String>
+	<sys:String x:Key="str.Snapshot.Group.LocateGameEngine">⚙</sys:String>
+	<!-- SPC序列查询 -->
+	<sys:String x:Key="str.Spc.Intro">按数值变化序列筛选字段，无需固定数值，支持跨游戏重启快照</sys:String>
+	<sys:String x:Key="str.Spc.Join">匹配规则：</sys:String>
+	<sys:String x:Key="str.Spc.JoinHint">严格（类+偏移精准匹配）/宽松（类+路径兼容重启）/仅同一会话</sys:String>
+	<sys:String x:Key="str.Spc.ClassFilter">类筛选：</sys:String>
+	<sys:String x:Key="str.Spc.PropFilter">属性筛选：</sys:String>
+	<sys:String x:Key="str.Spc.ResClass">结果类</sys:String>
+	<sys:String x:Key="str.Spc.ResField">结果字段</sys:String>
+	<sys:String x:Key="str.Spc.ResObject">对象</sys:String>
+	<sys:String x:Key="str.Spc.ResGlobal">全局筛选：</sys:String>
+	<sys:String x:Key="str.Spc.ResGlobalHint">筛选所有列（类/字段/对象名），空格为多条件与</sys:String>
+	<sys:String x:Key="str.Spc.SeqFirst">最早快照</sys:String>
+	<sys:String x:Key="str.Spc.SeqLast">最新快照</sys:String>
+	<sys:String x:Key="str.Spc.Run">执行查询</sys:String>
+	<sys:String x:Key="str.Spc.Refresh">刷新快照列表</sys:String>
+	<sys:String x:Key="str.Spc.OpenWalker">实时查看</sys:String>
+	<sys:String x:Key="str.Spc.LocateGWorld">🌍</sys:String>
+	<sys:String x:Key="str.Tip.Spc.LocateGWorld">在GWorld中定位该字段所属对象，跳转至实时查看器并自动选中此字段</sys:String>
+	<sys:String x:Key="str.Spc.LocateGameEngine">⚙</sys:String>
+	<sys:String x:Key="str.Tip.Spc.LocateGameEngine">从GameEngine根路径定位，适合引擎、游戏实例类对象，世界实体请使用GWorld定位</sys:String>
+	<sys:String x:Key="str.Spc.CopyAddr">复制地址</sys:String>
+	<sys:String x:Key="str.Spc.PickerHeader">快照序列选择器</sys:String>
+	<sys:String x:Key="str.Spc.BaselineHint">最左侧勾选快照为基准帧，仅后续快照设置对比规则生效</sys:String>
+	<sys:String x:Key="str.Spc.Col.Use">启用</sys:String>
+	<sys:String x:Key="str.Spc.Col.Label">快照标签</sys:String>
+	<sys:String x:Key="str.Spc.Col.Captured">捕获时间</sys:String>
+	<sys:String x:Key="str.Spc.Col.Session">游戏会话</sys:String>
+	<sys:String x:Key="str.Spc.Col.Predicate">对比规则</sys:String>
+	<sys:String x:Key="str.Spc.Col.ValueFilter">数值筛选</sys:String>
+	<sys:String x:Key="str.Spc.Col.Preview">匹配预览</sys:String>
+	<sys:String x:Key="str.Spc.ResClass">类</sys:String>
+	<sys:String x:Key="str.Spc.ResField">字段</sys:String>
+	<sys:String x:Key="str.Spc.ResObject">对象</sys:String>
+	<sys:String x:Key="str.Spc.ResGlobal">全局筛选</sys:String>
+	<sys:String x:Key="str.Spc.ResGlobalHint">匹配任意列关键词</sys:String>
+	<sys:String x:Key="str.Spc.SeqFirst">首帧快照</sys:String>
+	<sys:String x:Key="str.Spc.SeqLast">末帧快照</sys:String>
+	<sys:String x:Key="str.Spc.Run">运行查询</sys:String>
+	<sys:String x:Key="str.Spc.Refresh">刷新</sys:String>
+	<sys:String x:Key="str.Spc.OpenWalker">实时查看</sys:String>
+	<sys:String x:Key="str.Spc.LocateGWorld">🌍</sys:String>
+	<sys:String x:Key="str.Tip.Spc.LocateGWorld">从GWorld查找最短指针路径并定位字段</sys:String>
+	<sys:String x:Key="str.Spc.LocateGameEngine">⚙</sys:String>
+	<sys:String x:Key="str.Tip.Spc.LocateGameEngine">GameEngine根路径定位，仅引擎对象适用</sys:String>
+	<sys:String x:Key="str.Spc.CopyAddr">复制地址</sys:String>
+	<!-- SPC多值分组 -->
+	<sys:String x:Key="str.Spc.Group.ModeLabel">模式：</sys:String>
+	<sys:String x:Key="str.Spc.Group.ModeSingle">单字段序列</sys:String>
+	<sys:String x:Key="str.Spc.Group.ModeGroup">多值分组序列</sys:String>
+	<sys:String x:Key="str.Spc.Intro">同时匹配多个字段各自的数值变化曲线（血量+金币同时下降等场景），每条字段独立设置快照对比规则</sys:String>
+	<sys:String x:Key="str.Spc.Group.Snapshot">基准快照</sys:String>
+	<sys:String x:Key="str.Spc.Group.Find">检索匹配对象</sys:String>
+	<sys:String x:Key="str.Spc.Group.Clear">清空条件</sys:String>
+	<sys:String x:Key="str.Spc.Group.AddRow">+ 添加字段条件</sys:String>
+	<sys:String x:Key="str.Spc.Group.RemoveRow">− 删除字段条件</sys:String>
+	<sys:String x:Key="str.Spc.Group.Deep">嵌套容器深度匹配</sys:String>
+	<sys:String x:Key="str.Tip.Spc.Group.Deep">开启后匹配数组/结构体内部字段；关闭仅匹配对象一级直属字段</sys:String>
+	<sys:String x:Key="str.Spc.Group.ValueHint">目标数值</sys:String>
+	<sys:String x:Key="str.Spc.Group.Value2Hint">数值上限</sys:String>
+	<sys:String x:Key="str.Spc.Group.CompareWith">对比快照基准：</sys:String>
+	<sys:String x:Key="str.Tip.Spc.Group.CompareWith">选择更早快照作为基准，可筛选增减变化；留空仅单快照绝对值匹配</sys:String>
+	<sys:String x:Key="str.Spc.Group.CompareClear">✕ 清除基准快照</sys:String>
+	<sys:String x:Key="str.Tip.Spc.Group.CompareClear">取消跨快照变化对比，仅单快照匹配</sys:String>
+	<sys:String x:Key="str.Spc.Group.Hint">查找同时满足所有字段变化规则的游戏实体，每条字段可独立配置数值区间、快照变化逻辑</sys:String>
+	<sys:String x:Key="str.Spc.Group.Col.Class">所属类</sys:String>
+	<sys:String x:Key="str.Spc.Group.Col.Object">对象实例</sys:String>
+	<sys:String x:Key="str.Spc.Group.Col.Matched">匹配字段集合</sys:String>
+	<sys:String x:Key="str.Spc.Group.OpenWalker">实时查看</sys:String>
+	<sys:String x:Key="str.Spc.Group.CopyAddr">复制地址</sys:String>
+	<sys:String x:Key="str.Spc.Group.LocateGWorld">🌍</sys:String>
+	<sys:String x:Key="str.Spc.Group.LocateGameEngine">⚙</sys:String>
+	<!-- 噪声过滤面板 -->
+	<sys:String x:Key="str.Noise.PanelHeader">噪声类过滤</sys:String>
+	<sys:String x:Key="str.Noise.PanelHint">勾选需要隐藏的UI/动画冗余类，应用后结果列表自动过滤，仅当前游戏生效</sys:String>
+	<sys:String x:Key="str.Noise.Col.Pick">隐藏</sys:String>
+	<sys:String x:Key="str.Noise.Col.Class">类名</sys:String>
+	<sys:String x:Key="str.Noise.Col.Hits">匹配条数</sys:String>
+	<sys:String x:Key="str.Noise.Col.SampleProps">示例字段</sys:String>
+	<sys:String x:Key="str.Noise.Apply">应用过滤</sys:String>
+	<sys:String x:Key="str.Noise.ActiveHeader">当前屏蔽类列表：</sys:String>
+	<sys:String x:Key="str.Noise.ClearAll">清空全部过滤</sys:String>
+	<sys:String x:Key="str.Noise.Reset">取消勾选重置</sys:String>
+	<sys:String x:Key="str.Noise.RemoveTip">右键单行可移除单个屏蔽类</sys:String>
+	<!-- 全局类过滤 -->
+	<sys:String x:Key="str.ClassFilter.Button">类过滤器</sys:String>
+	<sys:String x:Key="str.Tip.ClassFilter">将UI、粒子、动画等噪声类隐藏，仅显示游戏逻辑类，仅界面隐藏不删除数据</sys:String>
+	<sys:String x:Key="str.ClassFilter.Hint">勾选类即可隐藏该行，取消勾选恢复显示</sys:String>
+	<sys:String x:Key="str.ClassFilter.Partial">⚠ 条数为截断后的部分数据，非完整统计</sys:String>
+	<sys:String x:Key="str.ClassFilter.Clear">清空过滤（显示全部）</sys:String>
+	<sys:String x:Key="str.ClassFilter.AutoDetect">自动勾选引擎噪声类</sys:String>
+	<sys:String x:Key="str.Tip.ClassFilter.AutoDetect">一键勾选UI、贴图、粒子等引擎内置类，玩家角色、组件类不会被选中</sys:String>
+	<!-- 类透视面板右键菜单 -->
+	<sys:String x:Key="str.Pivot.HideClass">隐藏此类结果</sys:String>
+	<sys:String x:Key="str.Pivot.HiddenHeader">已隐藏类：</sys:String>
+	<!-- 类透视主面板 -->
+	<sys:String x:Key="str.Pivot.Intro">按指定字段分组对象，支持实例/快照/数据表三种数据源，自动推荐分组关键字段，区分固定ID与动态实体</sys:String>
+	<sys:String x:Key="str.Pivot.SourceHeader">透视数据源</sys:String>
+	<sys:String x:Key="str.Pivot.Source">数据源：</sys:String>
+	<sys:String x:Key="str.Pivot.Snapshot">快照</sys:String>
+	<sys:String x:Key="str.Pivot.DataTable">数据表</sys:String>
+	<sys:String x:Key="str.Pivot.ArrayField">数组字段：</sys:String>
+	<sys:String x:Key="str.Pivot.RefreshDataTables">🔄 刷新数据表列表</sys:String>
+	<sys:String x:Key="str.Pivot.KeyRowName">行名作为分组键（数据表专用，无需配置）</sys:String>
+	<sys:String x:Key="str.Pivot.KeyInnerKey">内部ID作为分组键（数组专用，游戏重启稳定）</sys:String>
+	<sys:String x:Key="str.Pivot.ThisProperty">以此字段分组…</sys:String>
+	<sys:String x:Key="str.Pivot.ClassFilter">类筛选：</sys:String>
+	<sys:String x:Key="str.Pivot.ClassFilterHint">输入类名模糊筛选</sys:String>
+	<sys:String x:Key="str.Pivot.Run">执行透视</sys:String>
+	<sys:String x:Key="str.Pivot.OpenWalker">实时查看</sys:String>
+	<sys:String x:Key="str.Pivot.CopyAddr">复制地址</sys:String>
+	<sys:String x:Key="str.Pivot.LocateGWorld">🌍</sys:String>
+	<sys:String x:Key="str.Tip.Pivot.LocateGWorld">定位该分组下任意实例至GWorld路径</sys:String>
+	<sys:String x:Key="str.Pivot.LocateGameEngine">⚙</sys:String>
+	<sys:String x:Key="str.Tip.Pivot.LocateGameEngine">GameEngine根路径定位分组实体</sys:String>
+	<sys:String x:Key="str.Pivot.ResultFilterHint">筛选分组关键字段…</sys:String>
+	<sys:String x:Key="str.Pivot.GroupBy">分组依据：</sys:String>
+	<sys:String x:Key="str.Pivot.KeyField">关键字段</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Key">分组键值</sys:String>
+	<sys:String x:Key="str.Pivot.Col.KeyTip">复合分组可多选字段，组合为唯一分组标识</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Project">投影字段</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Field">字段名</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Type">字段类型</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Distinct">唯一值数量</sys:String>
+	<sys:String x:Key="str.Pivot.Col.Insts">实例总数</sys:String>
+	<sys:String x:Key="str.Pivot.Col.KeyScore">匹配评分</sys:String>
+	<sys:String x:Key="str.Pivot.Res.Count">实例数量</sys:String>
+	<sys:String x:Key="str.Pivot.Res.Key">分组键</sys:String>
+	<sys:String x:Key="str.Pivot.Res.Values">投影字段数值</sys:String>
+	<!-- 自动探测目标面板 -->
+	<sys:String x:Key="str.Pivot.Discover.Header">🔍 自动探测变化目标</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Intro">捕获操作前后快照，程序自动识别发生数值变动的血量/金币等属性，按匹配分数排序推荐透视分组</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Pick">勾选快照（旧→新）：</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Run">执行探测</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Use">选用该分组</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Limits">
+		使用说明：
+		• 至少捕获2张快照（操作前/操作后）
+		• 间隔过短仅少量变化会无法区分噪音
+		• 仅数字属性参与探测，字符串/向量不纳入
+		• 游戏重启后的对象无法跨会话匹配
+	</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Change">数值变化量</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Dir">增减方向</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Cat">分类</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Shape">变化特征</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Seq">变化序列示例</sys:String>
+	<sys:String x:Key="str.Pivot.Discover.Col.Score">匹配分数</sys:String>
+	<!-- 关键属性查找 -->
+	<sys:String x:Key="str.IP.Load">加载属性列表</sys:String>
+	<sys:String x:Key="str.IP.GameOnly">仅游戏自定义类</sys:String>
+	<sys:String x:Key="str.IP.FilterHint">按类/属性名筛选</sys:String>
+	<sys:String x:Key="str.IP.UnusualOnly">仅非常规对象</sys:String>
+	<sys:String x:Key="str.IP.ShowAll">显示低匹配项</sys:String>
+	<sys:String x:Key="str.IP.ClearFilters">清空筛选</sys:String>
+	<sys:String x:Key="str.IP.OpenInst">实例查找</sys:String>
+	<sys:String x:Key="str.IP.OpenLive">实时查看</sys:String>
+	<sys:String x:Key="str.IP.LocateGWorld">🌍</sys:String>
+	<sys:String x:Key="str.IP.LocateGameEngine">⚙</sys:String>
+	<sys:String x:Key="str.IP.CopyName">复制名称</sys:String>
+	<sys:String x:Key="str.Tip.IP.Load">遍历所有UFunction与UProperty，按关键词打分筛选血量、金币等常用属性</sys:String>
+	<sys:String x:Key="str.Tip.IP.GameOnly">过滤引擎内置类，仅展示游戏业务类</sys:String>
+	<sys:String x:Key="str.Tip.IP.Filter">名称模糊检索，大小写无关</sys:String>
+	<sys:String x:Key="str.Tip.IP.UnusualOnly">仅显示HUD、本地玩家等非常规存储属性，过滤角色身上普通字段</sys:String>
+	<sys:String x:Key="str.Tip.IP.ShowAll">关闭则隐藏分数过低的无关字段</sys:String>
+	<sys:String x:Key="str.Tip.IP.ClearFilters">重置所有筛选条件</sys:String>
+	<sys:String x:Key="str.Tip.IP.OpenInst">跳转实例查找器，自动填充当前类名检索</sys:String>
+	<sys:String x:Key="str.Tip.IP.OpenLive">打开该类任意实时实例至实时查看器</sys:String>
+	<sys:String x:Key="str.Tip.IP.LocateGWorld">GWorld路径定位</sys:String>
+	<sys:String x:Key="str.Tip.IP.LocateGameEngine">GameEngine路径定位</sys:String>
+	<sys:String x:Key="str.Tip.IP.CopyName">复制属性/类名到剪贴板</sys:String>
+	<sys:String x:Key="str.IP.GenerateCT">📦 生成CE表</sys:String>
+	<sys:String x:Key="str.Tip.IP.GenerateCT">多选属性批量生成Cheat Engine内存记录CT文件</sys:String>
+	<sys:String x:Key="str.IP.BatchProps">⤋ 批量读取字段</sys:String>
+	<sys:String x:Key="str.Tip.IP.BatchProps">批量读取选中函数读写的所有字段，耗时较长</sys:String>
+	<sys:String x:Key="str.Common.BatchFuncs">⤋ 批量查找函数</sys:String>
+	<sys:String x:Key="str.Tip.Common.BatchFindFunc">批量检索使用该类/属性的所有UFunction</sys:String>
+	<sys:String x:Key="str.Common.FuncsCol">关联函数数量</sys:String>
+	<sys:String x:Key="str.Tip.Common.BatchFuncs">扫描所有函数引用，适合查找功能入口</sys:String>
+	<!-- 关键函数面板 -->
+	<sys:String x:Key="str.IF.Load">加载函数列表</sys:String>
+	<sys:String x:Key="str.IF.GameOnly">仅游戏类函数</sys:String>
+	<sys:String x:Key="str.IF.FilterHint">按函数/类名检索</sys:String>
+	<sys:String x:Key="str.IF.GameplayActions">交互动作筛选</sys:String>
+	<sys:String x:Key="str.IF.CallableOnly">仅蓝图可执行函数</sys:String>
+	<sys:String x:Key="str.IF.ClearFilters">清空筛选</sys:String>
+	<sys:String x:Key="str.IF.OpenInst">实例</sys:String>
+	<sys:String x:Key="str.IF.Props">关联属性</sys:String>
+	<sys:String x:Key="str.IF.OpenLive">实时查看</sys:String>
+	<sys:String x:Key="str.IF.LocateGWorld">🌍</sys:String>
+	<sys:String x:Key="str.IF.LocateGameEngine">⚙</sys:String>
+	<sys:String x:Key="str.IF.CopyName">复制名称</sys:String>
+	<sys:String x:Key="str.Tip.IF.Load">扫描全部UFunction，按交互关键词打分排序</sys:String>
+	<sys:String x:Key="str.Tip.IF.GameOnly">排除引擎内置函数，仅游戏业务函数</sys:String>
+	<sys:String x:Key="str.Tip.IF.Filter">模糊检索函数/类名，大小写不敏感</sys:String>
+	<sys:String x:Key="str.Tip.IF.GameplayActions">开启后增加冲刺、交互、购买等动作关键词打分</sys:String>
+	<sys:String x:Key="str.Tip.IF.CallableOnly">仅显示BlueprintCallable/Exec可调用函数，过滤原生内部函数</sys:String>
+	<sys:String x:Key="str.Tip.IF.ClearFilters">重置所有筛选条件</sys:String>
+	<sys:String x:Key="str.Tip.IF.OpenInst">跳转实例查找器检索此类实例</sys:String>
+	<sys:String x:Key="str.Tip.IF.Props">读取该函数读写的全部属性字段</sys:String>
+	<sys:String x:Key="str.Tip.IF.OpenLive">打开此类实时对象查看</sys:String>
+	<sys:String x:Key="str.Tip.IF.LocateGWorld">GWorld路径定位实例</sys:String>
+	<sys:String x:Key="str.Tip.IF.LocateGameEngine">GameEngine路径定位</sys:String>
+	<sys:String x:Key="str.Tip.IF.CopyName">复制函数名到剪贴板</sys:String>
+	<sys:String x:Key="str.IF.GenerateCT">📦 生成CE表</sys:String>
+	<sys:String x:Key="str.Tip.IF.GenerateCT">批量生成可调用CE脚本记录</sys:String>
+	<sys:String x:Key="str.IF.BatchProps">⤋ 批量字段检索</sys:String>
+	<!-- 实时函数追踪 -->
+	<sys:String x:Key="str.LF.Start">● 开始录制</sys:String>
+	<sys:String x:Key="str.LF.Stop">■ 停止录制</sys:String>
+	<sys:String x:Key="str.LF.Refresh">刷新列表</sys:String>
+	<sys:String x:Key="str.LF.Clear">清空记录</sys:String>
+	<sys:String x:Key="str.LF.FilterHint">函数/类名筛选</sys:String>
+	<sys:String x:Key="str.LF.OpenLive">实时查看</sys:String>
+	<sys:String x:Key="str.LF.CopyName">复制名称</sys:String>
+	<sys:String x:Key="str.LF.SetBaseline">⚑ 设置基准</sys:String>
+	<sys:String x:Key="str.LF.Diff">对比基准</sys:String>
+	<sys:String x:Key="str.LF.NewOnly">仅新增调用</sys:String>
+	<sys:String x:Key="str.LF.ClearBaseline">清除基准</sys:String>
+	<sys:String x:Key="str.LF.HideWidgets">隐藏UI函数</sys:String>
+	<sys:String x:Key="str.LF.HideEvents">隐藏委托事件</sys:String>
+	<sys:String x:Key="str.LF.PeriodicOnly">仅周期函数</sys:String>
+	<sys:String x:Key="str.LF.EarliestFirst">按调用先后排序</sys:String>
+	<sys:String x:Key="str.Tip.LF.Start">挂载游戏线程钩子，记录所有执行的UFunction调用</sys:String>
+	<sys:String x:Key="str.LF.Stop">停止录制并展示调用统计</sys:String>
+	<sys:String x:Key="str.LF.Refresh">手动刷新当前调用列表</sys:String>
+	<sys:String x:Key="str.LF.Clear">清空全部调用记录</sys:String>
+	<sys:String x:Key="str.LF.FilterHint">关键词模糊筛选函数/类</sys:String>
+	<sys:String x:Key="str.LF.OpenLive">打开函数所属类实例</sys:String>
+	<sys:String x:Key="str.LF.CopyName">复制函数名</sys:String>
+	<sys:String x:Key="str.LF.SetBaseline">保存当前记录为基准，区分前后动作</sys:String>
+	<sys:String x:Key="str.LF.Diff">只展示与基准有差异的调用</sys:String>
+	<sys:String x:Key="str.LF.NewOnly">仅显示基准后新增函数调用</sys:String>
+	<sys:String x:Key="str.LF.ClearBaseline">删除保存的基准记录</sys:String>
+	<sys:String x:Key="str.LF.HideWidgets">过滤UI组件相关函数</sys:String>
+	<sys:String x:Key="str.LF.HideEvents">过滤委托、事件回调函数</sys:String>
+	<sys:String x:Key="str.LF.Periodic">仅保留Tick、定时器等周期执行函数</sys:String>
+	<sys:String x:Key="str.LF.EarliestFirst">按首次调用时间升序排列</sys:String>
+	<!-- 控制台指令面板 -->
+	<sys:String x:Key="str.Con.Load">加载控制台指令</sys:String>
+	<sys:String x:Key="str.Con.GameOnly">仅游戏指令</sys:String>
+	<sys:String x:Key="str.Con.FilterHint">指令名筛选</sys:String>
+	<sys:String x:Key="str.Con.ClearFilter">清空筛选</sys:String>
+	<sys:String x:Key="str.Con.CommandHint">输入指令执行（无需斜杠）</sys:String>
+	<sys:String x:Key="str.Con.Run">执行</sys:String>
+	<sys:String x:Key="str.Con.RunSelected">执行选中指令</sys:String>
+	<sys:String x:Key="str.Con.RunRow">执行此行</sys:String>
+	<sys:String x:Key="str.Con.OpenLive">实时查看</sys:String>
+	<sys:String x:Key="str.Con.CopyAaScript">复制AA脚本</sys:String>
+	<sys:String x:Key="str.Con.HistoryHeader">执行历史</sys:String>
+	<sys:String x:Key="str.Tip.Con.Load">扫描所有Exec可执行蓝图/原生函数，列出控制台指令</sys:String>
+	<sys:String x:Key="str.Tip.Con.GameOnly">关闭会显示引擎内置指令，开启仅游戏自定义指令</sys:String>
+	<sys:String x:Key="str.Tip.Con.Filter">模糊检索指令名称</sys:String>
+	<sys:String x:Key="str.Tip.Con.ClearFilter">清空搜索关键词</sys:String>
+	<sys:String x:Key="str.Tip.Con.CommandHint">直接输入指令，自动忽略开头/</sys:String>
+	<sys:String x:Key="str.Tip.Con.Run">执行输入框内指令</sys:String>
+	<sys:String x:Key="str.Tip.Con.RunSelected">执行列表选中指令</sys:String>
+	<sys:String x:Key="str.Tip.Con.RunRow">右键/按钮执行当前行指令</sys:String>
+	<sys:String x:Key="str.Tip.Con.OpenLive">打开指令所属类实例</sys:String>
+	<sys:String x:Key="str.Tip.Con.CopyAaScript">生成可在CE使用的自动汇编调用脚本</sys:String>
+	<!-- 调试相机子面板 -->
+	<sys:String x:Key="str.Con.DbgCam.Label">调试相机</sys:String>
+	<sys:String x:Key="str.Con.Dbg.ForceOn">强制开启</sys:String>
+	<sys:String x:Key="str.Con.Dbg.ForceOff">强制关闭</sys:String>
+	<sys:String x:Key="str.Con.Dbg.Refresh">↻ 刷新状态</sys:String>
+	<sys:String x:Key="str.Con.Dbg.CopyCe">复制CE脚本</sys:String>
+	<sys:String x:Key="str.Tip.Con.DbgCam.State">读取当前调试相机开启状态</sys:String>
+	<sys:String x:Key="str.Tip.Con.Dbg.ForceOn">稳定开启自由飞行调试相机</sys:String>
+	<sys:String x:Key="str.Tip.Con.Dbg.ForceOff">关闭并切回玩家视角</sys:String>
+	<sys:String x:Key="str.Tip.Con.Dbg.Refresh">重新读取相机状态</sys:String>
+	<sys:String x:Key="str.Tip.Con.Dbg.CopyCe">生成一键开关CE内存脚本</sys:String>
+	<!-- 传送面板 -->
+	<sys:String x:Key="str.TP.PoseHeader">当前坐标姿态</sys:String>
+	<sys:String x:Key="str.TP.Refresh">刷新姿态</sys:String>
+	<sys:String x:Key="str.TP.Auto">自动刷新(0.5秒)</sys:String>
+	<sys:String x:Key="str.TP.Loc">坐标 X/Y/Z：</sys:String>
+	<sys:String x:Key="str.TP.Rot">旋转 俯仰/偏航/翻滚：</sys:String>
+	<sys:String x:Key="str.TP.Map">当前地图：</sys:String>
+	<sys:String x:Key="str.TP.Pawn">操控角色：</sys:String>
+	<sys:String x:Key="str.TP.Locate">🌍 定位角色</sys:String>
+	<sys:String x:Key="str.TP.LocateGameEngine">⚙ 引擎定位</sys:String>
+	<sys:String x:Key="str.TP.LocatePos">🌍 定位坐标</sys:String>
+	<sys:String x:Key="str.TP.LocateVel">🌍 定位速度</sys:String>
+	<sys:String x:Key="str.TP.LocateAccel">🌍 定位加速度</sys:String>
+	<sys:String x:Key="str.TP.LocateSpeed">🌍 移动速度</sys:String>
+	<sys:String x:Key="str.TP.LocateCamLoc">🌍 相机坐标</sys:String>
+	<sys:String x:Key="str.TP.LocateCamFov">🌍 相机视野</sys:String>
+	<sys:String x:Key="str.TP.LocateRot">🌍 角色旋转</sys:String>
+	<sys:String x:Key="str.TP.LocateCamRot">🌍 相机旋转</sys:String>
+	<sys:String x:Key="str.TP.Velocity">移动速度 X/Y/Z：</sys:String>
+	<sys:String x:Key="str.TP.Speed">速率：</sys:String>
+	<sys:String x:Key="str.TP.Accel">加速度 X/Y/Z：</sys:String>
+	<sys:String x:Key="str.TP.MarkersHeader">传送标记点</sys:String>
+	<sys:String x:Key="str.TP.Save">保存标记</sys:String>
+	<sys:String x:Key="str.TP.Recall">传送到标记</sys:String>
+	<sys:String x:Key="str.TP.Force">强制跨图传送</sys:String>
+	<sys:String x:Key="str.TP.Clear">清空标记</sys:String>
+	<sys:String x:Key="str.TP.CursorHeader">鼠标光标传送(2.5D俯视角)</sys:String>
+	<sys:String x:Key="str.TP.ToCursor">传送到鼠标位置</sys:String>
+	<sys:String x:Key="str.TP.ZOffset">高度偏移：</sys:String>
+	<sys:String x:Key="str.TP.Channel">碰撞通道：</sys:String>
+	<sys:String x:Key="str.TP.FallbackCenter">无光标时使用屏幕中心</sys:String>
+	<sys:String x:Key="str.TP.CursorHotkey">全局光标传送快捷键</sys:String>
+	<sys:String x:Key="str.TP.BugItGoHeader">BugIt坐标互操作</sys:String>
+	<sys:String x:Key="str.TP.CopyBugItGo">复制BugItGo指令</sys:String>
+	<sys:String x:Key="str.TP.RunBugItGo">执行坐标指令</sys:String>
+	<sys:String x:Key="str.TP.BugHint">粘贴格式：X Y Z 或 BugItGo X,Y,Z</sys:String>
+	<sys:String x:Key="str.TP.LastHeader">上一次传送位置</sys:String>
+	<sys:String x:Key="str.TP.LastHint">自动记录传送前坐标，可一键撤销</sys:String>
+	<sys:String x:Key="str.TP.RecallLast">撤销上次传送</sys:String>
+	<sys:String x:Key="str.TP.HkHeader">快捷键设置</sys:String>
+	<sys:String x:Key="str.TP.HkHint">设置标记、传送、相机全局热键，游戏聚焦时生效</sys:String>
+	<sys:String x:Key="str.TP.HkClear">清除快捷键</sys:String>
+	<!-- 快照库坐标功能 -->
+	<sys:String x:Key="str.TP.LibHint">按游戏独立存储坐标标签，重启游戏不丢失</sys:String>
+	<sys:String x:Key="str.TP.LibSaveCurrent">＋保存当前坐标</sys:String>
+	<sys:String x:Key="str.TP.LibAddFields">＋从输入框新增</sys:String>
+	<sys:String x:Key="str.TP.LibDuplicate">复制条目</sys:String>
+	<sys:String x:Key="str.TP.LibDelete">删除</sys:String>
+	<sys:String x:Key="str.TP.LibClearAll">清空全部库</sys:String>
+	<sys:String x:Key="str.TP.LibFilter">筛选标签/地图：</sys:String>
+	<sys:String x:Key="str.TP.LibGroup">分组：</sys:String>
+	<sys:String x:Key="str.TP.LibCurrentMapOnly">仅当前地图条目</sys:String>
+	<sys:String x:Key="str.TP.LibGo">传送到此坐标</sys:String>
+	<sys:String x:Key="str.TP.LibForceGo">强制跨图传送</sys:String>
+	<sys:String x:Key="str.TP.LibToFields">填入坐标框</sys:String>
+	<sys:String x:Key="str.TP.LibEditLabel">标签名：</sys:String>
+	<sys:String x:Key="str.TP.LibEditGroup">分组名：</sys:String>
+	<sys:String x:Key="str.TP.LibApplyEdit">保存修改</sys:String>
+	<sys:String x:Key="str.TP.LibUpdateCoords">更新为当前坐标</sys:String>
+	<sys:String x:Key="str.TP.LibExportCsv">导出CSV坐标表</sys:String>
+	<sys:String x:Key="str.TP.LibExportTemplate">导出模板CSV</sys:String>
+	<sys:String x:Key="str.TP.LibImportCsv">导入CSV</sys:String>
+	<sys:String x:Key="str.TP.LibImportReplace">覆盖现有条目</sys:String>
+	<sys:String x:Key="str.TP.LibImportApply">执行导入</sys:String>
+	<sys:String x:Key="str.TP.LibExportLua">导出CE Lua脚本</sys:String>
+	<sys:String x:Key="str.TP.LibSaveLua">保存Lua文件</sys:String>
+	<sys:String x:Key="str.TP.LibImportLua">粘贴Lua脚本导入</sys:String>
+	<sys:String x:Key="str.TP.LibImportLuaFile">从Lua文件导入</sys:String>
+	<sys:String x:Key="str.TP.LibZTol">Z轴安全偏移：</sys:String>
+	<!-- 调试飞行相机 -->
+	<sys:String x:Key="str.TP.DcHeader">自由飞行相机</sys:String>
+	<sys:String x:Key="str.TP.DcState">状态：</sys:String>
+	<sys:String x:Key="str.TP.DcOn">开启自由视角</sys:String>
+	<sys:String x:Key="str.TP.DcOff">关闭，切回玩家视角</sys:String>
+	<sys:String x:Key="str.TP.DcRefresh">↻ 刷新状态</sys:String>
+	<sys:String x:Key="str.TP.DcCopyCe">复制CE开关脚本</sys:String>
+	<!-- 无敌模式 -->
+	<sys:String x:Key="str.TP.GmHeader">无敌模式</sys:String>
+	<sys:String x:Key="str.TP.GmState">状态：</sys:String>
+	<sys:String x:Key="str.TP.GmOn">开启无敌</sys:String>
+	<sys:String x:Key="str.TP.GmOff">关闭无敌</sys:String>
+	<sys:String x:Key="str.TP.GmRefresh">刷新状态</sys:String>
+	<sys:String x:Key="str.TP.GmCopyScript">复制CE脚本</sys:String>
+	<!-- 隐身/探测屏蔽 -->
+	<sys:String x:Key="str.TP.StHeader">隐蔽值锁定</sys:String>
+	<sys:String x:Key="str.TP.StState">状态：</sys:String>
+	<sys:String x:Key="str.TP.StDetect">自动探测隐蔽字段</sys:String>
+	<sys:String x:Key="str.TP.StHold">锁定隐蔽值为0</sys:String>
+	<sys:String x:Key="str.TP.StReset">解除锁定</sys:String>
+	<!-- 前台锁定 -->
+	<sys:String x:Key="str.TP.FgHeader">游戏前台锁定</sys:String>
+	<sys:String x:Key="str.TP.FgState">状态：</sys:String>
+	<sys:String x:Key="str.TP.FgOn">后台不暂停游戏</sys:String>
+	<sys:String x:Key="str.TP.FgOff">切后台自动暂停</sys:String>
+	<sys:String x:Key="str.TP.FgRefresh">刷新状态</sys:String>
+	<sys:String x:Key="str.TP.FgCopyScript">复制CE开关脚本</sys:String>
+	<!-- 移动速度 -->
+	<sys:String x:Key="str.TP.MsHeader">移动速度倍率</sys:String>
+	<sys:String x:Key="str.TP.MsState">状态：</sys:String>
+	<sys:String x:Key="str.TP.MsApply">应用倍率</sys:String>
+	<sys:String x:Key="str.TP.MsReset">恢复默认速度</sys:String>
+	<sys:String x:Key="str.TP.MsRefresh">刷新当前速度</sys:String>
+	<sys:String x:Key="str.TP.MsLocate">定位移动组件</sys:String>
+	<!-- 重力设置 -->
+	<sys:String x:Key="str.TP.GdHeader">重力方向与倍率</sys:String>
+	<sys:String x:Key="str.TP.GdState">状态：</sys:String>
+	<sys:String x:Key="str.TP.GdApply">应用重力参数</sys:String>
+	<sys:String x:Key="str.TP.GdReset">恢复默认重力</sys:String>
+	<sys:String x:Key="str.TP.GdRefresh">刷新重力参数</sys:String>
+	<sys:String x:Key="str.TP.GdLocate">定位重力字段</sys:String>
+	<!-- 超级跳跃 -->
+	<sys:String x:Key="str.TP.SjHeader">超级跳跃倍率</sys:String>
+	<sys:String x:Key="str.TP.SjState">状态：</sys:String>
+	<sys:String x:Key="str.TP.SjOn">开启高跳</sys:String>
+	<sys:String x:Key="str.TP.SjOff">关闭，恢复原跳跃高度</sys:String>
+	<sys:String x:Key="str.TP.SjReset">重置倍率至100%</sys:String>
+	<sys:String x:Key="str.TP.SjRefresh">刷新跳跃参数</sys:String>
+	<sys:String x:Key="str.TP.SjLocate">定位跳跃高度字段</sys:String>
+	<sys:String x:Key="str.TP.SjHotkeyHint">设置全局超级跳跃快捷键</sys:String>
+	<!-- 飞行模式 -->
+	<sys:String x:Key="str.TP.FlyHeader">无重力飞行</sys:String>
+	<sys:String x:Key="str.TP.FlyState">状态：</sys:String>
+	<sys:String x:Key="str.TP.FlyPreset">按键预设：</sys:String>
+	<sys:String x:Key="str.TP.FlyNoclip">穿墙模式</sys:String>
+	<sys:String x:Key="str.TP.FlyOn">开启飞行</sys:String>
+	<sys:String x:Key="str.TP.FlyOff">关闭飞行</sys:String>
+	<sys:String x:Key="str.TP.FlyRefresh">刷新状态</sys:String>
+	<sys:String x:Key="str.TP.FlyHotkeyHint">设置飞行切换全局热键</sys:String>
+	<!-- 透视物体 -->
+	<sys:String x:Key="str.TP.SeeThroughHeader">穿墙透视</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughState">状态：</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughOn">开启透视</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughOff">关闭透视</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughRefresh">刷新</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughPierce">透视层数：</sys:String>
+	<sys:String x:Key="str.TP.SeeThroughAddCe">添加CE开关记录</sys:String>
+	<!-- 独立CE训练器导出 -->
+	<sys:String x:Key="str.TP.TrainerHeader">独立无DLL训练器导出</sys:String>
+	<sys:String x:Key="str.TP.TrainerExport">导出独立CT训练器</sys:String>
+	<sys:String x:Key="str.Tip.TrainerExport">生成无需注入DLL的纯CE脚本训练器，包含传送、无敌等功能</sys:String>
+	<!-- 代理部署面板 -->
+	<sys:String x:Key="str.ProxyDeploy.ProxyType">代理DLL文件名：</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Type.Version">version.dll</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Type.Dinput8">dinput8.dll</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Type.Dxgi">dxgi.dll</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Type.Winmm">winmm.dll</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Scan">扫描Steam游戏</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.RouteOrder">
+		部署方案说明：
+		①部署代理DLL（最优，游戏自动加载）
+		②注入运行中游戏（临时，重启失效）
+		③Cheat Engine内置辅助脚本
+		④独立CT表
+	</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Inject">注入到正在运行的游戏…</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Refresh">刷新游戏列表</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Deploy">部署代理</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Undeploy">卸载代理</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.UpdateAll">批量更新全部代理</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Force">强制覆盖文件</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.SelectAll">全选游戏</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.UnselectAll">清空选择</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.InvertSel">反选</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.SourceDll">源DLL路径：</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColName">游戏名称</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColPath">游戏二进制目录</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColStatus">部署状态</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColSuggested">推荐代理文件名</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColVersion">DLL版本</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ColError">部署错误信息</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.SuggestToggle">自动推荐代理类型</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Source">扫描源：</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Source.Steam">Steam库</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Source.Drives">全盘扫描</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ScanDrives">扫描磁盘</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.RefreshDrives">刷新磁盘列表</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.CancelScan">停止扫描</sys:String>
+	<!-- 残留代理清理 -->
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Header">残留代理清理</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Intro">卸载游戏后残留的代理DLL，扫描并删除，不会删除第三方MOD代理</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Scan">扫描残留文件</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Report">导出清理报告…</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.Delete">删除选中({0})</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.DeleteTip">移至回收站，空文件夹一并删除</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.OpenFolder">打开游戏目录</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.FileOnly">仅删除DLL，保留文件夹</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmTitle">确认删除残留代理？</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.Orphans.ConfirmLead">选中DLL将移入回收站，文件夹空时同步删除，可从回收站恢复</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ConfirmFilesHeader">待删除文件列表</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ConfirmDirsHeader">待删除空目录</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ConfirmWhy">残留判定依据</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ConfirmKeptNote">保留不删除：{0}</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ConfirmYes">确认删除</sys:String>
+	<sys:String x:Key="str.ProxyDeploy.ConfirmNo">取消</sys:String>
+	<!-- 导出菜单 -->
+	<sys:String x:Key="str.Toolbar.Options">⚙ 全局选项</sys:String>
+	<sys:String x:Key="str.Toolbar.Export">导出功能</sys:String>
+	<sys:String x:Key="str.Export.SymbolsX64dbg">x64dbg符号文件</sys:String>
+	<sys:String x:Key="str.Export.SymbolsGhidra">Ghidra符号文本</sys:String>
+	<sys:String x:Key="str.Export.SymbolsIda">IDA自动脚本</sys:String>
+	<sys:String x:Key="str.Export.SdkHeader">C++头文件</sys:String>
+	<sys:String x:Key="str.Export.Usmap">USMAP反射文件</sys:String>
+	<sys:String x:Key="str.Export.DumpAll">完整元数据JSONL导出</sys:String>
+	<sys:String x:Key="str.Tip.Export.DumpAll">导出游戏全部类、属性、函数，用于外部脚本分析，体积较大</sys:String>
+	<sys:String x:Key="str.LiveWalker.ExportHeader">导出头文件</sys:String>
+
+	<!-- 主窗口顶部工具栏 提示 -->
+	<sys:String x:Key="str.Tip.Connect">通过命名管道连接注入的DLL</sys:String>
+	<sys:String x:Key="str.Tip.Disconnect">断开与DLL管道服务端的连接</sys:String>
+	<sys:String x:Key="str.Tip.StartScan">触发代理DLL模式下的延迟全局扫描</sys:String>
+	<sys:String x:Key="str.Tip.AddressFormat">内存地址展示格式：绝对地址 / 模块相对偏移</sys:String>
+	<sys:String x:Key="str.Tip.CollapsePointers">导出CE XML时折叠多层指针链节点</sys:String>
+	<sys:String x:Key="str.Tip.ArrayLimit">单行读取数组最大元素数量（2的幂次）</sys:String>
+	<sys:String x:Key="str.Tip.DropDownLimit">CE下拉列表最大条目数（2的幂次）</sys:String>
+	<sys:String x:Key="str.Tip.StringLength">CE字符串字段展示字符长度（2的幂，范围16-4096），仅作用于复制CE脚本功能。数值足够大不会截断短字符串（CE以空终止符截断），预留空间适配游戏运行中变长字符串。</sys:String>
+	<sys:String x:Key="str.Tip.Fabricate">仅复制单字段CE脚本生效：0=关闭。设置数值(2~4096)后，选中顶层数组会自动填充空占位条目，依照元素布局补齐空指针与超出当前长度的索引。仅填充选中数组，不会递归填充内部嵌套数组；仅支持TArray，Map/Set为稀疏结构无法填充。超出游戏当前数组长度的条目会读取尾后内存（无崩溃风险）。数值大于256慎用，会生成超大CE表格，造成CE卡顿或触发表格条目上限。</sys:String>
+	<sys:String x:Key="str.Tip.PreviewLimit">数值列展示的结构体子字段数量（0=关闭预览）</sys:String>
+	<sys:String x:Key="str.Tip.CsxDepth">指针递归解析深度（0=平铺无层级），CSX导出、CE脚本导出均生效。0~4常规，5~6深层遍历，层级越高导出文件体积指数级增长，UWorld深度6会生成数MB的XML文件。</sys:String>
+	<sys:String x:Key="str.Tip.Toolbar.Options">导出格式全局设置：指针折叠、数组/下拉/预览上限、递归深度，会话内永久生效</sys:String>
+	<sys:String x:Key="str.Tip.Export">多种格式导出游戏对象内存结构</sys:String>
+	<sys:String x:Key="str.Tip.Tools">独立工具集，无需连接游戏DLL即可使用（辅助脚本导出、注入功能等）</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InjectCeBootstrap">部署方案第三种：为当前打开的CE表格添加一次性注入记录。频繁使用CE推荐自动启动脚本替代。对应四类方案：①代理DLL部署、②运行时注入、③本条临时注入、④独立CT表。会直接在当前表格添加启用/禁用注入记录，一键加载DLL并启动管道通信，无需先打开独立CT文件。勾选后自动轮询DLL就绪状态，固定15秒等待改为实时检测，失败会弹出明确报错。依赖AOBMaker插件，无插件则复制脚本至剪贴手动粘贴。</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InstallCeAutorun">将ue5_autorun.lua写入CE自动启动目录，CE打开任意表格都会内置ue5_inject()、ue5_shutdown()函数，主菜单新增快捷入口。唯一无需代理DLL、独立CT、AOB插件的方案，重度CE用户首选。检测到运行中的CE直接写入；未运行则选择保存路径，重启CE生效。迁移程序后需重新安装，脚本内会固化DLL完整路径。</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InjectCeHelperLua">一键注入核心调用脚本ue5_invoke_helper.lua至当前CE表格，已有文件会覆盖。依赖AOBMaker插件，未安装会降级提示手动导出。</sys:String>
+	<sys:String x:Key="str.Tip.Tools.ExportCeHelperLua">导出ue5_invoke_helper.lua文件，可放到CT表同级目录，通过CE菜单添加文件。所有固化AA脚本均依赖此脚本，每张CT仅需配置一次。</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InjectFreezeHelperLua">一键注入冻结字段辅助脚本至当前CE表格，属性搜索冻结功能依赖，可与调用辅助脚本共存。</sys:String>
+
+
+		<!-- 对象树提示 -->
+		<sys:String x:Key="str.Tip.ObjectTree.Reload">重新扫描全部游戏对象</sys:String>
+		<sys:String x:Key="str.Tip.ObjectTree.Cancel">终止加载扫描</sys:String>
+		<sys:String x:Key="str.Tip.ObjectTree.Search">关键词检索对象，空格为与条件</sys:String>
+		<sys:String x:Key="str.Tip.ObjectTree.ClassFilter">按类过滤对象列表</sys:String>
+		<sys:String x:Key="str.Tip.Collapse">收起对象树，扩大右侧面板</sys:String>
+		<sys:String x:Key="str.Tip.Expand">展开对象树</sys:String>
+		<sys:String x:Key="str.Tip.ObjectTree.TextFilter">列表快速文本过滤</sys:String>
+		<sys:String x:Key="str.Tip.ObjectTree.InstancesOnly">仅显示游戏实体，隐藏反射类模板</sys:String>
+		<!-- 实例查找面板提示 -->
+		<sys:String x:Key="str.Tip.InstanceFinder.ClassName">要检索的类名，默认模糊匹配；勾选精确匹配则完整名称一致才命中。可与对象名称组合（逻辑与），也可清空类名仅按对象名检索。</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.AddressField">反向检索地址，支持十六进制、模块+偏移格式，程序会查找该地址所属UObject或最近容器对象。</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.Search">根据类名/对象名检索实例，至少填写一项条件才可执行</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.ObjectName">可选，要求对象名称包含指定文本（大小写不敏感），与类名同时生效为且关系；清空类名可仅按名称检索。过滤逻辑在游戏进程内执行，不会遗漏被其他对象包裹的实例，但列表有最大条数限制，提示截断时请缩小筛选条件。</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.ExactMatch">仅类名开启完整精确匹配，不再模糊检索</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.NewestFirst">从最新创建的实例开始遍历（内部索引值最大），能抓到刚生成的怪物等实体，避免结果上限截断新对象；关闭则优先最早生成的实例（蓝图默认模板等）。可点击索引列表头切换排序。</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.MaxResults">单次返回实例最大行数，区间100~50000。游戏端会完整遍历所有对象，仅限制前端展示条数；出现截断提示时调高数值，数值越大数据传输与渲染越慢。</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.Keyword">对已加载结果做本地临时过滤，空格分隔关键词为且关系，匹配类名/对象名/地址。仅客户端筛选，不会突破最大条数限制；如需找回被截断实例，需在类过滤器屏蔽无用类重新检索，或调高最大条数。</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.Lookup">根据输入地址反向查找所属游戏对象</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.CopyAddr">复制当前实例内存地址至剪贴板</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.OpenWalker">在实时结构查看器打开该实例</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.LocateGWorld">GWorld定位：查找从GWorld到该实例最短指针路径，跳转实时查看器并停在父对象层级</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.LocateGWorldContainer">容器GWorld定位：查找GWorld到该数组容器的路径，自动展开容器并定位到目标元素旁</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngine">GameEngine定位：从引擎根对象查找最短指针路径，可访问GWorld无法遍历的引擎层对象；大世界实体请使用GWorld定位。</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngineContainer">容器引擎定位：从GameEngine根定位容器所属对象，自动展开容器定位目标元素；引擎专属对象适用，世界实体优先GWorld定位。</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.ExportCE">导出该实例完整指针链为CE内存记录XML</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.CopyFieldAddr">复制字段绝对内存地址</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.A">生成CE自动汇编AOB脚本</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.CopyName">复制对象名称到剪贴板</sys:String>
+		<sys:String x:Key="str.Tip.InstanceFinder.FindFunc">检索所有入参/返回值为此类的UFunction，包含原生C++函数（区别于单字段字节码交叉引用）</sys:String>
+
+		<!-- 属性搜索面板提示 -->
+		<sys:String x:Key="str.Tip.PropertySearch.Query">按属性名模糊检索（大小写不敏感），例如 生命值(Health)、魔力(Mana)、金币(Gold)，可搭配类型筛选缩小范围，回车或点击检索执行。</sys:String>
+		<sys:String x:Key="str.Tip.PropertySearch.Search">遍历所有类检索属性，名称或类型至少填写一项，多类型使用英文逗号分隔。</sys:String>
+		<sys:String x:Key="str.Tip.PropertySearch.TypeFilter">限定FProperty属性类型，输入字符筛选下拉建议（输入opt匹配OptionalProperty），多类型逗号分隔为或关系。</sys:String>
+		<sys:String x:Key="str.Tip.PropertySearch.ResultFilter">本地过滤当前检索结果，匹配类名/属性/类型/父类/预览字段，无需与DLL通信。</sys:String>
+		<sys:String x:Key="str.Tip.PropertySearch.GameOnly">仅显示游戏自定义类，过滤引擎内置属性</sys:String>
+		<sys:String x:Key="str.Tip.PropertySearch.Deep">递归检索嵌套结构体、结构体数组（TArray/TSet/TMap）内部字段，可检索存档结构体深层属性；开启后检索速度变慢，匹配项会显示完整层级路径。关闭仅检索对象一级直属字段。</sys:String>
+		<sys:String x:Key="str.Tip.PropertySearch.FindInstances">跳转实例查找面板，自动填充当前类名并检索全部实时实例</sys:String>
+		<sys:String x:Key="str.Tip.PropertySearch.CopyOffset">复制该属性内存偏移至剪贴板</sys:String>
+
+		<!-- 类筛选提示 -->
+		<sys:String x:Key="str.Tip.GameClassFilter.Load">加载全部游戏类列表</sys:String>
+		<sys:String x:Key="str.Tip.GameClass.GameOnly">仅显示业务游戏类</sys:String>
+		<sys:String x:Key="str.Tip.GameClass.Filter">按父类/包名过滤</sys:String>
+		<sys:String x:Key="str.Tip.GameClass.Clear">清空筛选条件</sys:String>
+		<sys:String x:Key="str.Tip.GameClass.FindInstances">查找该类全部实例</sys:String>
+		<sys:String x:Key="str.Tip.GameClass.WalkClass">打开类结构面板查看字段布局</sys:String>
+		<sys:String x:Key="str.Tip.GameClass.FindFunc">查找参数/返回值包含此类的函数</sys:String>
+		<!-- 实时查看器：函数面板 -->
+		<sys:String x:Key="str.LiveWalker.Functions">函数列表</sys:String>
+		<sys:String x:Key="str.LiveWalker.FuncGenScript">INV</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.FuncGenScript">INV：生成独立CE自动汇编Lua脚本并发送至Cheat Engine（未安装AOBMaker则复制到剪贴板）。通过DLL管道读取游戏实例与目标UFunction，直接调用ProcessEvent，无需额外辅助文件。带输入参数的函数会弹出CE参数输入窗口，返回值默认不展示；在CE Lua控制台设置UE5_DEBUG=1，或修改脚本DEBUG开关，即可打印解析后的返回值并保持Lua窗口。</sys:String>
+		<sys:String x:Key="str.LiveWalker.FuncPipeInvoke">PIPE</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.FuncPipeInvoke">PIPE：在本软件内直接调用该函数，经由DLL管道执行ProcessEvent，无需依赖Cheat Engine。弹窗填写参数后执行，可直接在界面查看解析后的返回值。适合即时测试；如需分发可复用脚本请使用INV或固化AA功能。</sys:String>
+		<sys:String x:Key="str.LiveWalker.FuncCopyBaked">固化AA</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.FuncCopyBaked">固化AA：生成参数预填充的CE自动汇编脚本，生成时填入的数值直接写死，启用内存记录就会一次性执行，运行时无需弹窗。体积约为INV脚本的1/5，便于分享。要求CT表嵌入ue5_invoke_helper.lua（可通过工具-导出CE辅助Lua获取）。弹窗勾选“校验返回值”可对比调用前后内存，或设置UE5_DEBUG=1打印返回数据。</sys:String>
+
+		<sys:String x:Key="str.LiveWalker.GuessWhat">自动猜测字段</sys:String>
+
+		<!-- 实时查看器 提示文本 -->
+		<sys:String x:Key="str.Tip.LiveWalker.StartWorld">跳转至GWorld并展示顶层游戏对象</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.StartGameEngine">以GameEngine（引擎根对象）作为浏览起点，可逐层查看游戏实例、视口、世界。依靠反射成员定位，而非类名，无法生成AOB锚定脚本，仅支持固定地址记录。</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.Back">返回上一个浏览对象，恢复之前选中行与滚动位置。快捷键：Alt+左箭头、鼠标侧键4、浏览器后退键（仅当前标签激活时生效）。</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.Forward">前进至后退前的对象，恢复选中项与滚动位置。快捷键：Alt+右箭头、鼠标侧键5、浏览器前进键。前进会重新读取游戏内存；若对象已释放/复用，会清空选中并提示。浏览新对象时清空前进历史，逻辑和浏览器一致。</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.Refresh">从内存重新读取当前对象所有字段</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.FindRefs">查找所有持有该对象指针的UObject（真正逻辑所有者，Outer/父级仅代表命名层级包结构）</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.AddressInput">输入跳转地址，支持纯十六进制（0x7FF… / 7FF…）、CE模块偏移格式 Game.exe+1A2B3C，带引号格式"Game.exe"+1A2B也可自动去除引号，支持带空格模块名，输入回车或点击跳转。</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.Go">跳转到输入的内存地址</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.FieldInst">在实例查找器打开该字段对应类，自动填充类名并检索所有实例</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.ExportCE">将完整指针链复制为CE内存记录XML到剪贴板</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.ExportCEField">仅导出选中字段为CE XML，Ctrl/Shift多选批量导出</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.CancelExport">终止正在执行的导出（复制CE脚本/导出CSX），剪贴板与文件不会生成内容</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.AobToggle">启用AOB特征码锚定GWorld，不用固定地址，游戏重启后记录仍有效</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.ExportOptions">CE导出设置：内存记录描述格式、偏移/类型后缀开关、AOB锚定、指针链折叠、原生字段猜测选项</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.DescShowOffset">CE记录名称末尾追加十六进制字段偏移，例如 AbilitySystemComponent (7E0)；关闭则只显示字段名</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.DescShowType">CE记录末尾追加类/结构体类型，例如 AbilitySystemComponent (LSAbilitySystem)；折叠指针链时不会附加类型，关闭仅显示名称</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.DedupShared">去重共享对象：同一个实体被多处引用时仅完整展开一次，后续仅显示(共享)指针。避免遍历世界等高密度对象时导出数据爆炸、内存溢出；关闭则每条引用完整展开，深度过高文件极大。</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.ExcludeSysComponents">默认开启，遍历导出时跳过UI、贴图、粒子、动画等引擎系统类，只保留游戏业务数据。手动选中字段不会过滤，仅自动遍历子对象生效。Actor/角色/控制器等游戏实体永远保留；数组元素不做过滤。过滤时底部提示隐藏系统字段数量；关闭则导出全部字段。</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.CollapseChain">多层GWorld指针链合并为单条CE多级指针记录，仅保留基址、合并路径与目标字段，仅作用于完整/单字段导出功能</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.FlattenGas">扁平化GAS属性结构体，HP/MP这类属性原本会拆分为父节点+BaseValue/CurrentValue子项；开启后合并为同级条目 生命值 ▸ 基础值，层级更少更易编辑。仅对GameplayAttributeData生效，其他结构体保持嵌套。关闭恢复分组结构。</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.FlattenLeafStruct">扁平化所有基础原生结构体，是GAS扁平化的扩展。仅由数字、布尔、枚举构成的结构体（坐标、旋转、数值区间）会拆分为同级条目；结构体内部包含对象、字符串、数组时保持嵌套。关闭恢复分组结构。</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.FlattenLeafRecords">扁平化带名字符串的存储结构体，在基础结构体扁平化之上支持FName/FString文本字段。存档类结构体可全部平铺展示，数组内每条记录独立展开；包含对象/文本容器的结构体不扁平化。关闭恢复分组结构。</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.RecordColors">记录配色设置面板，数组每条记录奇偶行区分颜色，CE导出后易区分条目；支持自定义十六进制色值或重置默认配色，设置自动保存。</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.CollapseLeafPointers">单值指针折叠：指针目标仅单个数字/名字/字符串时直接合并为 指针 ▸ 数值 单条记录，不生成文件夹；目标存在多个字段则保留分组。关闭恢复嵌套文件夹结构。</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.ExportCsx">导出CE结构体解析脚本(.csx)，可选择对应CE版本格式</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.ExportCsxPre77">兼容CE7.7旧版格式：位域布尔整体存为字节，描述标注比特位，无独立位切换控件</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.ExportCsx77">CE7.7及以上新版：原生二进制位域，CE内可直接开关比特</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.ExportHeader">导出C++结构体头文件(.h)</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.CeAA">生成CE自动汇编脚本，以GWorld为根的记录支持重启稳定锚定；非GWorld路径仅固定地址，重启失效</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.GuessWhat">自动填充未知内存间隙，猜测指针、数字等基础数据类型</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.CopyFieldAddr">复制当前字段绝对内存地址</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.CopyFieldName">复制字段名称到剪贴板</sys:String>
+		<sys:String x:Key="str.Tip.LiveWalker.Search">按名称检索高亮字段，检索记录最多保存8条，切换对象清空，切换标签页保留检索词</sys:String>
+
+		<!-- 系统指针面板 提示 -->
+		<sys:String x:Key="str.Tip.Pointers.Copy">复制地址到剪贴板</sys:String>
+		<sys:String x:Key="str.Tip.Pointers.CopyScan">复制AOB特征码匹配地址</sys:String>
+		<sys:String x:Key="str.Tip.Pointers.ExtraScan">执行深度兜底扫描，尝试读取未识别全局指针</sys:String>
+		<sys:String x:Key="str.Tip.Pointers.TestExtraScan">模拟扫描界面，仅开发调试使用，不读取真实内存</sys:String>
+		<sys:String x:Key="str.Tip.Pointers.ClearGameCache">清空当前游戏缓存特征码，下次完整扫描全部模式</sys:String>
+		<sys:String x:Key="str.Tip.Pointers.ResetAllCache">全部缓存文件重命名备份，重新生成扫描缓存</sys:String>
+
+		<!-- 代理部署面板 提示 -->
+		<sys:String x:Key="str.Tip.ProxyDeploy.Scan">扫描Steam库内虚幻游戏</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.Inject">方案2：游戏已运行时临时注入DLL，无需部署代理，重启失效。通过远程线程注入UE5Dumper，仅单机离线可用，反作弊可能拦截。需要管理员权限会弹出UAC授权弹窗。</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.Refresh">刷新游戏部署状态列表</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.Deploy">方案1（推荐）：部署代理DLL，游戏启动自动加载，重启永久生效，无需CE。将选中代理写入勾选游戏目录</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.Undeploy">卸载本工具所有代理文件，其他MOD/工具的dll不会删除。仅清理当前工具部署的文件</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.UpdateAll">批量更新所有已部署游戏的代理至最新版本</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.Force">强制覆盖现有同版本或第三方同名文件</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.Type.Version">劫持version.dll，兼容性最广，几乎所有Windows程序都会加载</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.Type.Dinput8">劫持dinput8.dll，version冲突时备选方案</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.Type.Dxgi">劫持dxgi.dll，适用于D3D11/12虚幻游戏，绝大多数UE程序导入该库</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.Type.Winmm">劫持winmm.dll，dxgi被ReShade占用时备用通用插槽，全部虚幻游戏均可加载</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.SuggestToggle">显示推荐代理列，记录你上次部署的类型；从未部署默认version.dll，仅参考不自动修改你的选择</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.Source">Steam：仅扫描Steam游戏；全盘：扫描本地磁盘所有虚幻游戏（Epic/手动安装等）</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.ScanDrives">扫描选中磁盘分区，单硬盘顺序扫描，多硬盘并行，跳过系统目录与Steam库</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.RefreshDrives">重新读取本机可用磁盘列表</sys:String>
+		<sys:String x:Key="str.Tip.ProxyDeploy.CancelScan">终止正在执行的全盘扫描</sys:String>
+	</ResourceDictionary>
