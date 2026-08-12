@@ -37,7 +37,7 @@
 | 組別 | 剩幾項 | 內容 |
 |---|---|---|
 | ① 可從 log 取得 | 6 ⬜ + 1 🟡 | B4、B29（log 半）、B18、B19、B10、B28 反向確認、B8 🟡 |
-| ② 一定要人工操作 | 6 ⬜ + 1 🔴 | B2、B29（人工半）、B25、B26、B5（主動半）、`.CT` registry fallback；~~B16~~ ✅、**B13/B41 🔴 驗出缺陷已修，端到端仍 ⬜** |
+| ② 一定要人工操作 | 5 ⬜ + 1 🔴 | B29（人工半）、B25、B26、B5（主動半）、`.CT` registry fallback；~~B16~~ ✅、~~B2~~ ✅、**B13/B41 🔴 驗出缺陷已修，端到端仍 ⬜** |
 | ③ DumperTest 樣本 | **0** | ~~Shipping 包的畫面心跳~~ ✅ **根本不用重 cook** |
 | ④ Vendor 更新 | **0** | ~~Z1 zydis~~ ✅ |
 
@@ -63,7 +63,7 @@
 >    DLL 還沒 flush（`offsets-0.log` 之後從 6,048 長到 7,885 bytes）。
 >    先確認指令有送出去（`grep find_property_xrefs ui-pipe-0.log`），再從空結果下任何結論。
 
-其中屬於 audit #4 的 `- ⬜` 條目是 **11 項**（與英文正本的計數一致）。
+其中屬於 audit #4 的 `- ⬜` 條目是 **10 項**（與英文正本的計數一致）。
 
 > **B4 的分類要看清楚：修正早就 ship 了（build 2592），⬜ 的是「驗證」。**
 > 程式碼已核對過：`Tot.h:75-76` 的獨立旗標 `t_cancelImmune` + `MarkCancelImmune()`、
@@ -379,26 +379,6 @@ Snapshot capture 本來就包在 `DiagnosticsProbe` 裡，**不需要新增任�
 
 # ② 一定要人工操作
 
-## ✅ B16 —— 座標表格五個沒作用的排序欄位
-**build 2610** · **已於 2026-08-12 驗證通過（AOT build 2794 + DumperTest）**
-
-> 十個狀態全中，**但 Group / Map 這一半沒測到** —— `+ From fields` 讓 Group 全空、Map 全同，
-> 沒有順序可以觀察。要補的人：在列編輯器把 Group 設成不同值再點一次。
-> 完整證據見 [todo.md](todo.md)。下面的步驟保留給重測用。
-
-> ⚠ **必須在 publish（AOT / trimmed）的 build 上檢查** —— 整個缺陷就是被 trim 掉的 reflection
-> metadata，所以單純 `dotnet run` 或非 trimmed build **不會重現**。
-> 用 `dist\UE5DumpUI.exe`，並先確認它是 `-Mode Publish` 出來的那一份。
-
-**執行步驟**
-1. 跑 `dist\UE5DumpUI.exe`
-2. Teleport → Coordinate Library，準備**至少 3 列**資料（隨便存三個座標）
-3. 依序點 **X**、**Y**、**Z**、**Yaw**、**Dist** 五個欄位標題，每個點兩次（升冪／降冪）
-
-- **PASS** = 五個都會重新排序，而且點第二次會反向。
-- **FAIL** = 標題的箭頭動了，但列沒有動。
-- **同時確認沒有回歸**：Label / Group / Map 本來就是好的，現在也必須還是好的。
-
 ## ⬜ B26 —— 重複的 GameEngine record 不再互相破壞
 **build 2621** · 力氣 **小**
 
@@ -532,113 +512,19 @@ Snapshot capture 本來就包在 `DiagnosticsProbe` 裡，**不需要新增任�
   而且掃描**照樣跑下去**（tier 3 → low confidence → gate 不會武裝）。
 - **FAIL** = 一個能正常運作的遊戲卻出現 `SKIPPING the scan`。
 
-## ⬜ B2 —— Symbol-export 的 GWorld 不再宣稱自己有 AOB
-**build 2581** · 力氣 **看有沒有那款遊戲**
-
-**前置條件**：需要一款 GWorld 真的是透過 **symbol export** 解出來的遊戲 ——
-**Satisfactory**（`?GWorld@@3VUWorldProxy@@A`，見 [test-games.md](test-games.md)）。
-一般 RIP-pattern 的遊戲沒什麼好檢查的 —— 那裡的行為跟以前一樣，這正是重點。
-
-**執行步驟**
-1. 注入 Satisfactory，等掃描完成
-2. 去 CE-export 或 Standalone-Trainer，看 **AOB 切換鈕**
-3. 匯出一份表格，看裡面的位址
-
-- **PASS** = 切換鈕是**灰的**（不提供 AOB），而且匯出表格裡的位址透過非 AOB 路徑正常解析。
-- **FAIL** = 切換鈕可以按，而且匯出表格裡每一個位址都顯示 `??`。
-
------
-
-# ③ DumperTest 自建樣本
+# ③ DumperTest 自建樣本 —— **全部結清**
 
 > 來源是 2026-08-05 自建的 UE 5.4 `DumperTest` 樣本
 > （`tools/ue-sample/`，打包在 `D:\UE_Analyze_Data\For Testing\DumperTest\`）。
 > **D1**（GNames 解到 `EOSSDK-Win64-Shipping.dll`）、**D2**（群組掃描那一列的顯示）、
-> **D3**（`FUObjectItem` stride 被偵測成一半）三項都已 ✅ 修復並驗證，整條刪除。
-> 只剩樣本自己的一個問題。
+> **D3**（`FUObjectItem` stride 被偵測成一半）已於 2026-08-05/06 修復並驗證；
+> 最後一項 **Shipping 包的畫面心跳**於 **2026-08-12** 驗證通過 —— 而且**不用重 cook**。
+> 全部經過見 [todo.md](todo.md)。
 
-## ✅ 樣本 Shipping 包的畫面心跳看不到
-**build 2719** · **已於 2026-08-12 驗證通過 —— 而且完全不用重 cook**
+# ④ Vendor 更新帶來的 —— **全部結清**
 
-> ⚠ **下面「卡住 —— 這台機器不能編 UE」的判斷是錯的，保留下來當教訓。**
-> 磁碟上 `For Testing\DumperTest\Shipping\` 那包建於 2026-08-05 20:15，
-> 比 HUD 的 commit `b3d8593`（20:10:50）**晚五分鐘** —— 它一直都帶著 `ADumperTestHUD`。
-> 直接啟動就看到五行，`TickCount` 在 14.2 秒內 +15，
-> 而且 F32÷10.25、F64÷0.25、RawDouble÷0.5 三條路徑都獨立算出同樣的 15 跳。
-> **接受「環境做不到」之前，先比對產物 mtime 和那個 commit。** 完整表格見 [todo.md](todo.md)。
->
-> 另外一個會浪費一個 session 的細節：**`-ExecCmds="t.MaxFPS 30"` 在 Shipping 包會被靜默忽略**
-> （`Exec.h:13`：Shipping 走 `UE_ALLOW_EXEC_COMMANDS_IN_SHIPPING`），要壓 FPS 得用 Development 包。
-
-`UEngine::AddOnScreenDebugMessage` 在 UE 5.4 是**整個函式本體**被
-`#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)` 包起來（`UnrealEngine.cpp:11397`），
-**沒有任何 flag 能救回來**。已改用 `ADumperTestHUD`
-（`AHUD::DrawHUD` → `DrawText`，從 **Tick** 呼叫 `ClientSetHUD` 安裝，
-不走 1 Hz timer，也不靠 GameMode asset）。**程式碼寫好了，但沒有 build 過。**
-
-**執行步驟**（需要一台能編 UE 5.4 的機器）
-1. 重新 cook + 重新打包 `tools/ue-sample/` 的 **Shipping** 設定
-2. 執行，**不要**帶 `-DumperTestNoHud` 命令列參數
-3. 看畫面
-
-- **PASS** = 三行文字出現在 Shipping 包的畫面上，而且 `TickCount` 會往上跳。
-- **FAIL** = 還是空白 —— 現在這代表 **HUD 安裝失敗**（先確認命令列沒有 `-DumperTestNoHud`），
-  而不是「本來就看不到」。
-
-> ⚠ **Shipping 畫面空白不能證明樣本有問題。** 要驗樣本本身，用 **Development** 包，
-> 或直接在 Live Walker 讀 `TickCount` @ `0x518`。
-> 另外 `UE_LOG(..., Warning, ...)` 在 Shipping 也不會留下來
-> （`Build.h:328` 的 `NO_LOGGING`；`LogMacros.h:146-158` 只留 Fatal），
-> 所以 `[DumperTest] ADumperTestActor ready at 0x…` 只有 Development 印得出來。
-
------
-
-# ④ Vendor 更新帶來的
-
-## ✅ Z1 —— zydis `a95bb71`：Path-2 原生反組譯還解得出 `[this+off]`
-**2026-08-05 bump** · **已於 2026-08-12 驗證通過（DumperTest Development，DLL 2794）**
-
-> 八次 Path-2 分析，`instrs` 8–33，其中一個 **9 instrs 的函式解出 `1 mapped props`**，
-> 全資料夾**零 decode error**。`instrs` 比 v5 的 17–65 低，但解出來的正是最短那個，
-> 所以是 stock template 的 getter 短、不是 decoder 提早放棄。
->
-> ⚠ **不要太早去 grep log。** 第一次點完 20 秒就查，結果是空的，差點被記成失敗 ——
-> DLL 還沒 flush（`offsets-0.log` 之後從 6,048 長到 7,885 bytes）。
-> **先 `grep find_property_xrefs ui-pipe-0.log` 確認指令有送出去**，
-> 再從空的結果下任何結論。完整數字見 [todo.md](todo.md)。
-
-zydis 從 `85d7518` 升到 `a95bb71`（"Decoder patch for variable-position decoder-tree filters" #638）
-是 decoder 修正**加上整份 decoder table 重新生成** —— +34.9k / −45.7k 行。這正是當初 v4→v5
-被判定「值得做一次 in-game 檢查」的同一種形狀，理由也一樣：**離線測試解的是我們自己寫的位元組，
-而 table 重生會改變「任意遊戲程式碼」怎麼被解碼**。
-
-**離線證據已經涵蓋的部分**（所以這一項不是重做）：5 個 `Test_Denken_*` 把真實 x64 序列餵進
-Zydis 解碼且全過，含 `Test_Denken_ExcludesStackAndZeroDisp`（正是 v5 遷移動到的
-`disp.size == 0` 那條）。81 + 996 全綠，DLL 建置乾淨。
-**沒涵蓋的部分**：真實 UE 執行檔的編譯器輸出。
-
-**執行步驟**
-1. 注入**任何**一款 UE 遊戲（不挑）
-2. 跑一次 Path-2 property xref —— Interesting Funcs 挑一個原生 getter/setter，
-   或按 Property Search 的 xref 按鈕
-3. `grep -E "AnalyzeNativeFunctionProps|FindPropertyXrefs" offsets-0.log`
-
-```
-AnalyzeNativeFunctionProps: 0x… exec=0x… -> N mapped props (U unmapped, I instrs, C calls)
-FindPropertyXrefs: N xrefs (scanned … functions, … with script, …ms)
-```
-
-- **PASS** = `I instrs` 是合理的函式長度（v5 基準是每個函式 **17–65**），
-  至少有些函式的 `N mapped props` 非零，而且**沒有 decode error**。
-- **FAIL** = `instrs` 塌到接近 0（decoder 提早放棄），
-  或原本 v5 有數字的函式現在全部 `-> 0 mapped props`。
-- **不算 FAIL**：結果大多是空的是 Path 2 的**本質**，不是回歸 —— 只有原生的常數
-  `[this+off]` getter 才映射得到，純 script 的屬性根本沒有機器碼。v5 那次驗證也是同一個結論。
-
-*比較基準：2026-06-23 的 v5 smoke test（SEED + TQ2，皆 UE5）—— 每函式 17–65 instrs、
-1–5 個 `[this+off]` access、很多 `→ 1 mapped props`、TQ2 `2 xrefs`、零 decode error。*
-
------
+> **Z1**（zydis `a95bb71` 之後 Path-2 仍解得出 `[this+off]`）於 **2026-08-12** 驗證通過。
+> 下次 vendor bump 時這一組會再長出項目；現在是空的。
 
 # 已經不是「驗證」項目了
 

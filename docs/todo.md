@@ -2443,14 +2443,42 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
 
 #### ② Manual-only
 
-- ⬜ **Symbol-export GWorld no longer claims to have an AOB** (build 2581, audit #4 B2). The gate is
-  unit-tested against the shipped pattern tables, but needs a game whose GWorld actually resolves
-  through a symbol export — **Satisfactory** (`?GWorld@@3VUWorldProxy@@A`, see
-  [test-games.md](test-games.md)). **To test:** scan, then look at the CE-export / Standalone-Trainer
-  AOB toggle. PASS = the toggle is greyed out (no AOB offered) and the exported table's addresses
-  resolve normally through the non-AOB path. FAIL = the toggle is enabled and every address in the
-  exported table shows `??`. Nothing to check on a normal RIP-pattern game — the toggle behaves as
-  before there, which is the point.
+- ✅ **Symbol-export GWorld no longer claims to have an AOB** (build 2581, audit #4 B2) —
+  **VERIFIED 2026-08-12 on Satisfactory** (UE 5.6, 137,391 objects, DLL build 2798). Both halves.
+
+  The precondition held live: `scan-0.log` shows
+  `TrySymbolExport: Found '?GWorld@@3VUWorldProxy@@A' in module 'FactoryGameSteam-Engine-Win64-Shipping.dll'`
+  → `GWLD_EXP … [WINNER]`. GObjects (`GOBJ_EXP`), GNames (`GNAM_EXP_TOSTR`) and GEngine (`GENG_EXP`)
+  resolve the same way — this build is modular, so **all four** exercise the gate at once.
+
+  | half | evidence |
+  |---|---|
+  | toggle greyed | `get_pointers` returns `gworld_aob: ""` → `IsAobSymbolAvailable=false` → `CanUseAobSymbol=false` → `IsEnabled` binding at [`LiveWalkerPanel.axaml:231`](../ui/UE5DumpUI/Views/LiveWalkerPanel.axaml:231). **Observed on screen**: the *AOB* item in Live Walker → Options renders dim while every sibling is white. |
+  | export resolves | *Copy CE XML* on `GWorld → PersistentLevel`: 160,036 chars, **zero `??`**, **zero AOB markers** (`AOBScanModuleUE` / `aobscan` / the mangled name / `UE_GWorld`), root `<Address>1E4542EAEA0</Address>` literal with `+30` child offsets. |
+
+  The mechanism is [`IsCeReplayableAob`](../dll/src/Himmel.h) suppressing the triple for
+  `SymbolExport` / `SymbolCallFollow` / `CallFollow`, whose comment already cited this item.
+
+  > ### 🔴 Found en route, and it was NOT cosmetic — fixed in build 2798
+  >
+  > The same payload reported `gworld_method: "aob"` next to `gworld_pattern_id: "GWLD_EXP"` and an
+  > empty AOB triple: three fields disagreeing. [`Genau.cpp`](../dll/src/Genau.cpp) hardcoded
+  > `"aob"` at all five sites whenever the scan returned non-zero, so every symbol-export and
+  > CallFollow win was mislabelled, and `FindAll: Complete` printed `(aob)` for all four.
+  >
+  > **The trap:** the obvious fix — report the true mechanism — regresses the UI on its own.
+  > `PointerPanelViewModel` asked `method != "aob"` to mean *"found via fallback"*, and
+  > `ShowGWorldRecovered` asked it to mean *"found via a recovery path"*. Relabelling alone would
+  > have raised a spurious **"found via fallback"** warning on all four pointers on Satisfactory
+  > **and** badged its GWorld as **"recovered"** when nothing recovered anything. A symbol export is
+  > the *strongest* result the scanner produces (priority 0, tried first, survives a recompile), not
+  > a fallback.
+  >
+  > So both sides moved: the DLL reports `symbol` / `symbol_call_follow` / `call_follow` / `aob`
+  > (`ScanMethodName`), and the panel asks a membership question (`IsDirectScan`) instead of an
+  > equality one. 8 tests, including recovery paths still badging and an unknown future value
+  > failing loud rather than silent. Measured before/after on the same game: all four went
+  > `aob` → `symbol` / `symbol_call_follow`, with the AOB triple still empty.
 
 - ⬜ **CE-plugin double-inject guard — the third-party-wrapper case** (build 2577, audit #4 B29).
   Ownership is now decided by PE ProductName, not file name. **Verified on real files here** (our 5
