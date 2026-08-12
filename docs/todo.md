@@ -2526,10 +2526,58 @@ errors. See [[project-vendor-zydis-ue58-status]] in memory.*
   must still read as present, and any "fix" keyed off the item count would refuse every clean
   machine.
 
-  ⬜ **Still unproven end to end:** nobody has yet planted a leftover proxy on a bin-less volume and
-  watched the *row* carry the refusal wording. The 6 lines of glue between the registry read and the
-  pure policy are the only untested seam — the policy has 18 tests and the registry plumbing was
-  confirmed against three real volumes — but the UI string has not been seen on screen.
+  ### ⬜ HANDOVER — the end-to-end half, set up and part-way through (2026-08-12)
+
+  Nobody has yet watched a *row* carry the refusal wording. **Pick this up here; the rig is built.**
+
+  **On disk right now** (recreate if the volume was reclaimed):
+
+  ```
+  T:  10 GB iSCSI scratch volume, Fixed, NukeOnDelete=1, $RECYCLE.BIN folder still present
+      T:\FakeGameT\Engine\Binaries\Win64\                      (empty — Tier 1 marker)
+      T:\FakeGameT\FakeGameT\Binaries\Win64\FakeGameT-Win64-Shipping.exe   (real 75.8 MB UE exe)
+  D:  same shape under D:\_b13_control\FakeGameD\  — control, bin ENABLED
+  ```
+
+  The iSCSI target is `iqn.2011-08.com.asustor:as1204t-4477f9.target009`; it needs a **wired**
+  connection (it dropped mid-session over Wi-Fi) and `Connect-IscsiTarget` needs elevation.
+
+  **The blocker, and what is already ruled out.** Proxy Deploy → *Scan Drives* with T: ticked
+  reports `Generic scan found 8 UE game(s) across 2 drive(s)` — T: **is** being walked, but the
+  fake game is not detected, so there is nothing to deploy to, so the deploy log never names a T:
+  folder, so `Find leftovers` never gets a candidate there (`SteamShapeScan` structurally cannot
+  reach a non-Steam volume). Ruled out by measurement, in this order:
+
+  | hypothesis | result |
+  |---|---|
+  | T: never scanned | ❌ log says 2 drives; the picker lists and ticks it |
+  | the dummy exe was not a real PE | ❌ replaced with a real 75.8 MB `*-Win64-Shipping.exe`, count unchanged |
+  | missing `Engine\Binaries\Win64` (Tier 1 in `LooksLikeUeGameRoot`) | ❌ created it, count unchanged (still 8) |
+
+  **The next measurement, and it is a fork — do this first.** Drop a
+  `T:\FakeGameT\FakeGameT\Content\Paks\dummy.pak` and rescan:
+
+  * **it appears** → Tier 1 was not matching after all; the fault is in
+    [`LooksLikeUeGameRoot`](../ui/UE5DumpUI/Services/ProxyDeployService.cs) or in `ScanGameFolder`
+    rejecting a folder Tier 1 accepted.
+  * **it still does not** → `WalkDrive` never reaches `T:\FakeGameT` at all; look at `MaxWalkDepth`,
+    the reparse-point skip, and `IsExcludedBySteam`.
+
+  Then: deploy `version.dll` to it (that is what writes the `view-*.log` line the leftover scan
+  reads), delete the fake exe so the "game" is gone, and run **Find leftovers**.
+
+  **⚠ Predicted result, from code reading and NOT yet measured — this is the thing to confirm.**
+  The row will probably **not appear at all**, rather than appearing refused: the no-recycler path
+  returns `OrphanVerdict.NotOnFixedDrive`, and
+  [`ProxyDeployService.cs:1360`](../ui/UE5DumpUI/Services/ProxyDeployService.cs:1360) keeps only
+  `Deletable`/`FileOnly`, so the carefully-worded refusal is computed and dropped. That contradicts
+  the filter's own comment ("*or that hold something of ours and are blocked for a reason worth
+  telling the user about*") and it means B13/B41's PASS criterion is unobservable as shipped. The
+  **delete** path does refuse correctly (`:1493`), so this is a "you never find out the leftover is
+  there" defect, not a "your files get destroyed" one. Two smaller things to fix alongside it: the
+  recycler check runs **before** `probe(leaf)`, so it would refuse folders holding nothing of ours;
+  and after the fix the second half of the test still has to run — **re-enable T:'s bin, rescan, and
+  the same row must become actionable**, or the probe is just refusing everything.
 
 - ⬜ **The pre-4.11 refusal no longer fires on one PE field** (build 2621, B25). Provoke it with the
   UE-version override, or with any game whose PE ProductVersion reports a 4.0–4.10 major/minor.
