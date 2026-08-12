@@ -1522,122 +1522,129 @@
 	<sys:String x:Key="str.Tip.TP.CursorRefresh">读取当前光标显示状态；无玩家控制器则显示未知。</sys:String>
 	
 	<!-- Interesting Properties Finder (B' / Unusual Location) -->
-	<sys:String x:Key="str.IP.Load">Load</sys:String>
-	<sys:String x:Key="str.IP.GameOnly">Game Only</sys:String>
-	<sys:String x:Key="str.IP.FilterHint">Filter by name (property or class)...</sys:String>
-	<sys:String x:Key="str.IP.UnusualOnly">⚠ Unusual Only</sys:String>
-	<sys:String x:Key="str.IP.ShowAll">Show All (incl. low-score)</sys:String>
-	<sys:String x:Key="str.IP.ClearFilters">Clear</sys:String>
-	<sys:String x:Key="str.IP.OpenInst">inst</sys:String>
-	<sys:String x:Key="str.IP.OpenLive">Live</sys:String>
+	<sys:String x:Key="str.IP.Load">开始检索</sys:String>
+	<sys:String x:Key="str.IP.GameOnly">仅游戏自定义类</sys:String>
+	<sys:String x:Key="str.IP.FilterHint">按属性名/类名筛选...</sys:String>
+	<sys:String x:Key="str.IP.UnusualOnly">⚠ 仅非常规位置</sys:String>
+	<sys:String x:Key="str.IP.ShowAll">显示全部（含低分条目）</sys:String>
+	<sys:String x:Key="str.IP.ClearFilters">重置筛选</sys:String>
+	<sys:String x:Key="str.IP.OpenInst">实例</sys:String>
+	<sys:String x:Key="str.IP.OpenLive">实时内存</sys:String>
 	<sys:String x:Key="str.IP.LocateGWorld">🌍</sys:String>
 	<sys:String x:Key="str.IP.LocateGameEngine">⚙</sys:String>
-	<sys:String x:Key="str.IP.CopyName">Name</sys:String>
-	<sys:String x:Key="str.Tip.IP.Load">Fan-out search across the seed keyword list (HP/Damage/Gold/Speed/etc.) and score the results client-side. Highlights properties in non-canonical locations (LocalPlayer / HUD / GameViewportClient) — the kind of cheat-relevant fields a CE user would miss looking only in Character/Pawn.</sys:String>
-	<sys:String x:Key="str.Tip.IP.GameOnly">Skip /Script/Engine, /Script/CoreUObject, etc. Recommended on — game-specific properties are the cheat-table targets.</sys:String>
-	<sys:String x:Key="str.Tip.IP.Filter">Substring match against property name OR class name (case-insensitive). e.g. "Health" or "PlayerState".</sys:String>
-	<sys:String x:Key="str.Tip.IP.ClearFilters">Clear the name filter, category, and the Unusual-only / Show-all toggles (reset to defaults).</sys:String>
-	<sys:String x:Key="str.Tip.IP.OpenInst">Open this row's class in the Instance Finder tab — pre-fills the class name and runs the search to list its live instances.</sys:String>
-	<sys:String x:Key="str.Tip.IP.Category">Filter by category. Stats / Combat / Resources / Movement / Utility / Other.</sys:String>
-	<sys:String x:Key="str.Tip.IP.UnusualOnly">Show only properties whose owning class is in the Unusual Location list (LocalPlayer / GameViewportClient / HUD / CheatManager) — properties developers placed outside the conventional Character/Pawn/PlayerState containers.</sys:String>
-	<sys:String x:Key="str.Tip.IP.ShowAll">When off, hide rows below the InterestingThreshold (currently 4). When on, show every property regardless of score.</sys:String>
-	<sys:String x:Key="str.Tip.IP.OpenLive">Open this property's owning class in Live Walker (live instance lookup), or fall back to Class Struct if no live instance exists.</sys:String>
-	<sys:String x:Key="str.Tip.IP.LocateGWorld">Locate in GWorld: find a live instance of this property's class, then show the shortest pointer path from GWorld down to it in Live Walker (stops at the parent that points to it). Disabled until GWorld is resolved.</sys:String>
-	<sys:String x:Key="str.Tip.IP.LocateGameEngine">Locate in GameEngine: find a live instance of this property's class, then show the shortest pointer path from the live UGameEngine down to it in Live Walker (stops at the parent that points to it). Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
-	<sys:String x:Key="str.Tip.IP.CopyName">Copy this property's name to the clipboard.</sys:String>
-	<sys:String x:Key="str.IP.GenerateCT">📦 Generate CT</sys:String>
-	<sys:String x:Key="str.Tip.IP.GenerateCT">Generate one .CT file containing freeze entries for every selected row. Use Ctrl/Shift+click in the grid to multi-select first. Each entry uses ue5_freeze_helper.lua — embed it in the resulting CT via Tools → Inject Freeze Helper, or open the CT in CE and edit CFG.value before enabling. Struct / array / non-scalar rows are skipped.</sys:String>
-
+	<sys:String x:Key="str.IP.CopyName">复制名称</sys:String>
+	<sys:String x:Key="str.Tip.IP.Load">基于预设关键词库（生命值、伤害、金币、移速等）批量遍历检索，客户端算法对结果打分标记；专门高亮存放于非常规容器的属性（LocalPlayer、HUD、游戏视口客户端），这类数据是CE使用者只查找角色/玩家状态类时极易遗漏的作弊相关字段。</sys:String>
+	<sys:String x:Key="str.Tip.IP.GameOnly">过滤引擎内置模块（/Script/Engine、/Script/CoreUObject等）；建议勾选，游戏专属属性才是制作修改表的目标。</sys:String>
+	<sys:String x:Key="str.Tip.IP.Filter">模糊匹配属性名称或所属类名，大小写不敏感；示例：Health、PlayerState均可检索。</sys:String>
+	<sys:String x:Key="str.Tip.IP.ClearFilters">清空文本检索框、分类筛选、非常规/显示全部开关，恢复初始默认状态。</sys:String>
+	<sys:String x:Key="str.Tip.IP.OpenInst">跳转至实例查找标签页，自动填充当前行所属类名并检索运行实例列表。</sys:String>
+	<sys:String x:Key="str.Tip.IP.Category">属性分类筛选：属性数值、战斗、资源、移动、杂项、其他。</sys:String>
+	<sys:String x:Key="str.Tip.IP.UnusualOnly">仅展示归属非常规容器的属性：本地玩家、视口客户端、HUD、调试管理器；开发者没有放在角色、Pawn、PlayerState标准容器内的数据。</sys:String>
+	<sys:String x:Key="str.Tip.IP.ShowAll">关闭时：隐藏低于分值阈值（默认4分）的低相关条目；开启后：无论评分高低，全部检索结果都展示。</sys:String>
+	<sys:String x:Key="str.Tip.IP.OpenLive">在实时内存浏览器打开该属性所属类；若无运行实例，则跳转类结构体查看布局。</sys:String>
+	<sys:String x:Key="str.Tip.IP.LocateGWorld">从GWorld全局对象追溯最短指针链定位该实例，在实时浏览器展示完整路径；未解析出GWorld前按钮禁用。</sys:String>
+	<sys:String x:Key="str.Tip.IP.LocateGameEngine">从UGameEngine引擎根对象追溯指针路径，可访问GWorld无法覆盖的引擎层对象；绝大多数场景实体优先使用GWorld定位。</sys:String>
+	<sys:String x:Key="str.Tip.IP.CopyName">将当前属性名称复制到剪贴板。</sys:String>
+	<sys:String x:Key="str.IP.GenerateCT">📦 生成CE修改表</sys:String>
+	<sys:String x:Key="str.Tip.IP.GenerateCT">将勾选的多条属性批量生成带锁定功能的.CT文件；按住Ctrl/Shift多选条目生效。脚本依赖ue5_freeze_helper.lua：可通过工具菜单注入锁定辅助脚本，或用CE打开CT后自行修改锁定数值；结构体、数组、非基础数值类型会自动跳过不生成。</sys:String>
+	
 	<!-- Proxy DLL / Deferred Scan -->
-	<sys:String x:Key="str.Toolbar.StartScan">Start Scan</sys:String>
+	<sys:String x:Key="str.Toolbar.StartScan">启动后台扫描</sys:String>
 
 	<!-- Errors -->
 
 	<!-- Tooltips: MainWindow toolbar -->
-	<sys:String x:Key="str.Tip.Connect">Connect to injected DLL via named pipe</sys:String>
-	<sys:String x:Key="str.Tip.Disconnect">Disconnect from DLL pipe server</sys:String>
-	<sys:String x:Key="str.Tip.StartScan">Trigger deferred scan (proxy DLL mode)</sys:String>
-	<sys:String x:Key="str.Tip.AddressFormat">Address display format (absolute / module-relative)</sys:String>
-	<sys:String x:Key="str.Tip.CollapsePointers">Collapse pointer chain nodes in CE XML export</sys:String>
-	<sys:String x:Key="str.Tip.ArrayLimit">Max array elements to read inline (2^N)</sys:String>
-	<sys:String x:Key="str.Tip.DropDownLimit">Max CE DropDownList entries (2^N)</sys:String>
-	<sys:String x:Key="str.Tip.StringLength">CE String field display length in characters (2^N; 16-4096). Applies to Copy CE XML / Copy CE Field. A generous value never truncates a shorter live string (CE stops at the null terminator) — it reserves room for strings that grow between saves.</sys:String>
-	<sys:String x:Key="str.Tip.Fabricate">Copy CE Field only: 0 = Off. When set (2^N = 2..4096), the SELECTED top-level TArray is padded to this many element rows — null pointers and indices beyond the live Num are fabricated using a resolved element's field layout, so the CE table already has slots for items a later save/ship will hold. Only the selected array is padded, never nested arrays inside its elements. TArray only (Map/Set are sparse and never fabricated). Rows past the current Num read past-the-end memory (harmless) until the game grows the array. Values above 256 (use at your own risk) can produce very large tables that slow Cheat Engine or hit the export entry cap.</sys:String>
-	<sys:String x:Key="str.Tip.PreviewLimit">Struct sub-fields shown in Value column (0 = no preview)</sys:String>
-	<sys:String x:Key="str.Tip.CsxDepth">Pointer drill-down depth (0 = flat). Applies to both CSX export and CE XML / CE Field copy. 0-4 normal; 5-6 deep — output size grows exponentially per level (depth 6 on UWorld can produce multi-MB CE XML).</sys:String>
-	<sys:String x:Key="str.Tip.Toolbar.Options">Export-shape settings: pointer-node collapse, array/dropdown/preview limits, drill depth. Set once per session.</sys:String>
-	<sys:String x:Key="str.Tip.Export">Export object data in various formats</sys:String>
-	<sys:String x:Key="str.Tip.Tools">Tools that don't depend on a live DLL connection (helper file export/inject, etc.)</sys:String>
-	<sys:String x:Key="str.Tip.Tools.InjectCeBootstrap">Route ③ of 4 — a one-off record for the table you have open. If you work in Cheat Engine a lot, prefer Tools ▸ Install CE autorun Helper instead: that gives EVERY table an ue5_inject() permanently. (① is deploying a proxy DLL from the Proxy Deploy tab; ② is injecting into a running game; ④ is the standalone dist\UE5CEDumper.CT.) Adds an [ENABLE]/[DISABLE] record that injects UE5Dumper.dll and starts the pipe server, straight into the CE table you already have open — so you never have to load the standalone .CT first (Cheat Engine holds one table at a time). Tick the record to inject; it polls the DLL for readiness instead of sleeping a fixed 15s, and reports a real error on failure. The standalone .CT is still shipped for developer use. Needs the AOBMaker CE Plugin; without it the record is copied to the clipboard as CE XML to paste in.</sys:String>
-	<sys:String x:Key="str.Tip.Tools.InstallCeAutorun">Writes ue5_autorun.lua into &lt;CheatEngine&gt;\autorun\, which CE runs at start-up — so ue5_inject() and ue5_shutdown() then exist in EVERY table, permanently, and a "UE5CEDumper: Inject DLL" entry appears in CE's main menu. This is the only route that needs neither the standalone .CT nor the AOBMaker plugin, so it is the best option when you work in Cheat Engine a lot. Installs straight into a running Cheat Engine when one is found; otherwise you choose where to save. Takes effect the NEXT time Cheat Engine starts. Re-run this after moving UE5DumpUI — the DLL path is baked into the file.</sys:String>
-	<sys:String x:Key="str.Tip.Tools.InjectCeHelperLua">One-click: send ue5_invoke_helper.lua straight into the currently open CE table via the AOBMaker plugin. Replaces existing copy if present. Skips the manual save-to-disk + Table -&gt; Add File... dance. Requires the AOBMaker CE Plugin to be loaded (open Cheat Engine first); falls back gracefully if unavailable.</sys:String>
-	<sys:String x:Key="str.Tip.Tools.ExportCeHelperLua">Save ue5_invoke_helper.lua to a file you can drop next to your .CT and add via Cheat Engine's Table -&gt; Add File... menu. Required by every "Copy AA Script (Baked)" output -- one-time setup per cheat table.</sys:String>
-	<sys:String x:Key="str.Tip.Tools.InjectFreezeHelperLua">One-click: send ue5_freeze_helper.lua into the currently open CE table via the AOBMaker plugin. Required once per .CT by every Property Search "Freeze" script. Coexists with ue5_invoke_helper.lua.</sys:String>
-	<sys:String x:Key="str.Tip.Tools.ExportFreezeHelperLua">Save ue5_freeze_helper.lua to a file you can drop next to your .CT and add via Cheat Engine's Table -&gt; Add File... menu. Manual fallback when AOBMaker plugin is unavailable.</sys:String>
-
+	<sys:String x:Key="str.Tip.Connect">通过命名管道与注入的DLL建立通信连接</sys:String>
+	<sys:String x:Key="str.Tip.Disconnect">断开与DLL管道服务端的连接</sys:String>
+	<sys:String x:Key="str.Tip.StartScan">触发代理DLL模式下的延迟遍历扫描</sys:String>
+	<sys:String x:Key="str.Tip.AddressFormat">地址展示格式：绝对地址 / 模块偏移地址</sys:String>
+	<sys:String x:Key="str.Tip.CollapsePointers">导出CE XML时压缩折叠多层指针链节点</sys:String>
+	<sys:String x:Key="str.Tip.ArrayLimit">单行读取数组最大元素数量（2的N次方）</sys:String>
+	<sys:String x:Key="str.Tip.DropDownLimit">CE下拉列表最大条目数（2的N次方）</sys:String>
+	<sys:String x:Key="str.Tip.StringLength">CE字符串字段最大显示字符长度（2的N次方，区间16~4096）；作用于复制CE字段、导出XML。长度预留充足不会截断短字符串（CE以空字符判定结尾），适配游戏运行中动态变长的字符串。</sys:String>
+	<sys:String x:Key="str.Tip.Fabricate">仅复制CE字段时生效：0=关闭。设置数值(2~4096，2的幂次)后，选中的顶层TArray数组会自动填充空占位行；依据数组元素布局生成空指针条目，提前预留游戏后续新增数据的插槽。仅作用于选中的一级数组，不会递归填充内部嵌套数组；仅支持TArray，Map/Set稀疏容器不适用。超出当前数组长度的条目会读取边界外内存（无安全风险）；数值超过256需谨慎，会造成CE表格体积臃肿、加载卡顿甚至超出导出上限。</sys:String>
+	<sys:String x:Key="str.Tip.PreviewLimit">数值列展开展示结构体子字段数量（0=关闭预览）</sys:String>
+	<sys:String x:Key="str.Tip.CsxDepth">指针递归解析深度（0=平铺不展开）；适用于CSX导出、CE XML复制；0~4为常规深度，5~6为深层递归，层级越高导出体积呈指数暴涨，UWorld深度6会生成数MB的XML文件。</sys:String>
+	<sys:String x:Key="str.Tip.Toolbar.Options">导出全局配置：指针折叠、数组/下拉/预览上限、指针解析深度；单次打开软件永久生效。</sys:String>
+	<sys:String x:Key="str.Tip.Export">多种格式导出游戏对象内存数据</sys:String>
+	<sys:String x:Key="str.Tip.Tools">无需DLL在线连接的辅助工具：脚本导出注入、工具配置等</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InjectCeBootstrap">
+		四种注入方案第③种：为当前打开的CE修改表一键添加注入记录。长期使用CE推荐方案②：工具菜单安装CE开机自动加载脚本，所有修改表永久拥有注入函数。
+		①：代理DLL部署页安装；②：直接注入运行中游戏；④：独立UE5CEDumper.CT修改表。
+		一键添加启用/禁用条目，自动注入UE5Dumper并启动管道通信；不会固定等待15秒，实时检测DLL就绪状态，失败弹出具体报错。依赖AOBMaker插件；无插件则将XML复制至剪贴板手动粘贴。独立CT文件依旧保留供开发者调试使用。
+	</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InstallCeAutorun">
+		将ue5_autorun.lua写入CE开机目录，CE启动自动加载；此后所有修改表内置ue5_inject()、ue5_shutdown()函数，CE主菜单新增注入入口。
+		唯一无需独立CT与AOBMaker插件的方案，重度CE使用者首选。检测到CE正在运行直接安装；未运行则手动选择目录。挪动工具程序后需要重新安装，脚本内固化了DLL路径；重启CE生效。
+	</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InjectCeHelperLua">一键推送ue5_invoke_helper.lua至当前CE表格，存在旧文件直接覆盖；免去手动导出文件再添加至表格的步骤。需要预先打开CE并加载AOBMaker插件；无插件自动降级适配。</sys:String>
+	<sys:String x:Key="str.Tip.Tools.ExportCeHelperLua">导出ue5_invoke_helper.lua本地文件，放置于CT同目录，通过CE菜单添加至表格；所有预制汇编调用脚本均依赖该文件，每张修改表仅需配置一次。</sys:String>
+	<sys:String x:Key="str.Tip.Tools.InjectFreezeHelperLua">一键推送ue5_freeze_helper.lua锁定脚本至CE表格；属性检索批量锁定功能必备，可与调用辅助脚本共存。</sys:String>
+	<sys:String x:Key="str.Tip.Tools.ExportFreezeHelperLua">导出锁定脚本本地文件，AOBMaker不可用时手动添加至CE表格备用。</sys:String>
+	
 	<!-- Tooltips: Object Tree -->
-	<sys:String x:Key="str.Tip.ObjectTree.Reload">Reload all objects from game process</sys:String>
-	<sys:String x:Key="str.Tip.ObjectTree.Cancel">Cancel current loading operation</sys:String>
-	<sys:String x:Key="str.Tip.ObjectTree.Search">Search objects by name or class</sys:String>
-	<sys:String x:Key="str.Tip.ObjectTree.SearchField">Type a keyword and press Enter or the magnifier to search every object in the game server-side. Multiple space-separated terms are ANDed, each matching the object name OR class name. Respects the "Instances only" toggle. Results are capped (you'll be told if more exist — narrow, or Reload + use the bottom filter for the whole pool uncapped). Leave it empty and press the magnifier (or Reload) to list all objects again. Recent searches are suggested as you type.</sys:String>
-	<sys:String x:Key="str.Tip.ObjectTree.ClassFilter">Filter by class type</sys:String>
-	<sys:String x:Key="str.Tip.ObjectTree.Collapse">Collapse the Object Tree to give the right-hand panels the full window width</sys:String>
-	<sys:String x:Key="str.Tip.ObjectTree.Expand">Show the Object Tree</sys:String>
-	<sys:String x:Key="str.Tip.ObjectTree.TextFilter">Filter the loaded objects by text. Separate multiple terms with spaces — every term must match (AND), each against Name, Class, or Address. Example: "BP_ char" keeps objects matching both BP_ and char. Leave the Search box empty + press the magnifier (or Reload) to list all again.</sys:String>
-	<sys:String x:Key="str.Tip.ObjectTree.InstancesOnly">Hide the reflection/type layer (UClass, UFunction, UScriptStruct, UEnum, UPackage, and UE4 property descriptors) so only live gameplay instances remain. Applies to BOTH the top Search (server-side) and the bottom text filter, over the ENTIRE loaded pool — not just the visible page. Reload + the bottom filter scans the whole pool uncapped; the top Search is faster but caps its results.</sys:String>
-
+	<sys:String x:Key="str.Tip.ObjectTree.Reload">重新从游戏进程读取全部UObject对象</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.Cancel">终止当前加载读取任务</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.Search">按名称/类名检索游戏内对象</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.SearchField">输入关键词回车或点击放大镜检索服务端全部对象；空格分隔多个关键词为与逻辑，同时匹配名称或类名。受结果上限限制，条目过多会提示精简关键词；清空内容检索则重载全部对象。输入时自动联想历史检索记录。</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.ClassFilter">依据父类类型筛选对象</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.Collapse">收起左侧对象树，右侧面板铺满窗口宽度</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.Expand">展开显示左侧对象树列表</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.TextFilter">本地二次文本筛选；空格分隔多关键词全部命中才显示，匹配名称、类名、内存地址。清空检索框重载恢复全量列表。</sys:String>
+	<sys:String x:Key="str.Tip.ObjectTree.InstancesOnly">隐藏反射元数据（UClass、UFunction、结构体、枚举、资源包等），仅保留游戏运行实体实例；同时作用于顶部服务端检索与底部本地筛选。重载+底部筛选可无上限遍历全量对象；顶部检索速度更快但有数量封顶。</sys:String>
+	
 	<!-- Tooltips: Instance Finder -->
-	<sys:String x:Key="str.Tip.InstanceFinder.ClassName">Class name to search for (substring by default, e.g. "Character"). Tick Exact match for a whole-name match. Combine with the Object name box (AND), or leave this empty to search by object name alone.</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.AddressField">An address to reverse-look-up — hex (0x7FF…) or module.exe+offset. Finds the UObject that contains it (or the nearest one / the container it lives in).</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.Search">Search for instances by class name and/or object name (at least one is required)</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.ObjectName">Optional: also require the object's NAME to contain this text (case-insensitive). Combined with the class name as AND. Leave the class box empty to search by object name alone. Filtering runs in the game (across every object) so you won't miss matches hidden behind unrelated objects — but the result list is still capped; if you see "⚠ capped" in the status, narrow the search.</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.ExactMatch">Match class name exactly (no substring). Applies to the class box only.</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.NewestFirst">Scan from the newest (highest InternalIndex) end → catches just-spawned instances (e.g. an enemy that just appeared) and avoids the result cap truncating the newest. Off = oldest first (class-default object / template / earliest instances — good for finding a Blueprint's defaults). Tip: click the Index column to re-sort either way.</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.MaxResults">Maximum rows returned (100–50000). The game-side scan is always exhaustive; this only caps the returned list. Raise it if you see "⚠ capped". Larger values are slower to transfer + filter.</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.Keyword">Temporary filter over the rows already returned — whitespace-separated terms are ANDed across Name / Class / Address (e.g. "BP_ char"). Instant + client-side: it does NOT reach past the result cap. To recover an instance hidden past the cap, exclude noise classes in the class-filter (⚑) — that re-runs the scan in the game — or raise Max.</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.Lookup">Lookup UObject at the specified address</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.CopyAddr">Copy instance address to clipboard</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.OpenWalker">Open this instance in Live Walker</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this instance and show it in Live Walker (stops at the parent that points to it)</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.LocateGWorldContainer">Locate in GWorld: find the shortest pointer path from GWorld down to this container's owning object, then drill into the element so you land next to the value</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngine">Locate in GameEngine: find the shortest pointer path from the live UGameEngine down to this instance and show it in Live Walker (stops at the parent that points to it). Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngineContainer">Locate in GameEngine: find the shortest pointer path from the live UGameEngine down to this container's owning object, then drill into the element so you land next to the value. Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.ExportCE">Export instance as CE XML pointer chain</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.CopyFieldAddr">Copy field absolute address</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.AA">Generate CE Auto Assembler script</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.CopyName">Copy the object name to clipboard</sys:String>
-	<sys:String x:Key="str.Tip.InstanceFinder.FindFunc">Find UFunctions that take this instance's class as a parameter or return value (reflection scan — includes native functions, unlike the per-field bytecode xref)</sys:String>
-
+	<sys:String x:Key="str.Tip.InstanceFinder.ClassName">待检索类名称：默认模糊匹配（例如Character）；勾选精确匹配则完整字符一致才命中。可搭配对象名称联合检索，二选一填写即可检索。</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.AddressField">地址反向解析：十六进制绝对地址 / 模块+偏移格式；查找该地址归属的UObject容器。</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.Search">依据类名、对象名称检索运行实例，至少填写一项条件</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.ObjectName">可选附加条件：对象名称模糊匹配，大小写无关；与类名条件为交集逻辑；类名留空则仅检索对象名。检索逻辑运行于游戏进程内部，不会遗漏深层实例；结果存在数量上限，状态栏提示封顶时请缩小检索范围。</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.ExactMatch">类名开启完整字符精确匹配，关闭为模糊包含匹配</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.NewestFirst">从最新创建实例开始遍历（InternalIndex数值最大），优先抓取刚生成的敌人、道具，规避数量上限截断最新条目；关闭则从最早实例排序（蓝图默认模板、初始实体）。也可点击列表表头Index手动切换排序。</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.MaxResults">单次返回最大条目数：100~50000；游戏内部遍历是完整全量，该数值仅限制回传列表大小。出现封顶提示时调高数值；数值越大传输与本地筛选耗时越长。</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.Keyword">检索结果本地二次过滤；空格分隔关键词为与逻辑，匹配名称、类名、地址，即时生效不会突破数量上限。想要获取上限外条目：缩小类名范围重新检索，或者调高最大返回数。</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.Lookup">输入地址查询对应的UObject对象详情</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.CopyAddr">复制实例内存绝对地址至剪贴板</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.OpenWalker">在实时内存浏览器打开该实例</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.LocateGWorld">从GWorld追溯最短指针链，在实时浏览器展示完整路径</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.LocateGWorldContainer">GWorld追溯容器归属对象，展开直达数组/容器内部元素</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngine">从UGameEngine引擎根对象追溯指针路径，可访问GWorld无法覆盖的引擎层对象；场景实体优先选用GWorld定位</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngineContainer">UGameEngine追溯容器上级，直达容器内数据元素</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.ExportCE">将实例指针链导出为CE XML格式</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.CopyFieldAddr">复制字段偏移绝对地址</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.AA">生成CE汇编调用脚本</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.CopyName">复制对象名称至剪贴板</sys:String>
+	<sys:String x:Key="str.Tip.InstanceFinder.FindFunc">检索所有以该类为入参/返回值的UFunction函数；完整反射扫描包含原生C++函数，区别于仅字节码交叉引用检索</sys:String>
+	
 	<!-- Tooltips: Property Search -->
-	<sys:String x:Key="str.Tip.PropertySearch.Query">Property name to search for (substring, case-insensitive), e.g. Health, Mana, Gold. Combine with the Type filter to narrow further. Press Enter or Search to run.</sys:String>
-	<sys:String x:Key="str.Tip.PropertySearch.Search">Search across all classes. Either Name or Type must be set; comma-separate multiple types.</sys:String>
-	<sys:String x:Key="str.Tip.PropertySearch.TypeFilter">Restrict by FProperty type. Type a few characters to filter the suggestion dropdown (e.g. 'opt' → OptionalProperty). Comma-separated for OR.</sys:String>
-	<sys:String x:Key="str.Tip.PropertySearch.ResultFilter">Filter the current result list locally (case-insensitive substring across Class / Property / Type / Super / Preview). No DLL roundtrip.</sys:String>
-	<sys:String x:Key="str.Tip.PropertySearch.GameOnly">Show only game-specific classes (exclude engine)</sys:String>
-	<sys:String x:Key="str.Tip.PropertySearch.Deep">Also descend into nested struct members and struct-typed container elements (TArray/TSet/TMap of structs), so a field buried inside a struct/array (e.g. SaveSlotList[].MsTuneData.GP) becomes findable by name. Slower; matches show a dotted path and an owning class. Off = fast direct-field search only.</sys:String>
-	<sys:String x:Key="str.Tip.PropertySearch.FindInstances">Find in Instance Finder: switch to the Instance Finder tab, fill in this row's class name, and run the search to list all live instances of it.</sys:String>
-	<sys:String x:Key="str.Tip.PropertySearch.CopyOffset">Copy property offset to clipboard</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.Query">检索属性名称：模糊匹配大小写不敏感，示例：Health、Mana、Gold；搭配类型筛选缩小范围，回车执行检索</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.Search">全类遍历检索属性；名称或类型至少填写一项，多类型用英文逗号分隔</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.TypeFilter">限定FProperty属性类型；输入字符快速筛选下拉列表，多类型逗号分隔为或逻辑</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.ResultFilter">检索结果本地二次筛选，匹配类名、属性名、类型、父类、预览内容，无需和DLL通信</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.GameOnly">仅展示游戏自定义类，排除引擎官方内置类</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.Deep">递归遍历嵌套结构体、数组内部成员（结构体TArray/TSet/TMap），可以检索深埋多层的数据；检索速度变慢，结果会标注完整层级路径。关闭仅检索顶层直属属性，速度更快。</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.FindInstances">跳转实例查找器，自动填充当前类名检索所有运行实例</sys:String>
+	<sys:String x:Key="str.Tip.PropertySearch.CopyOffset">复制属性内存偏移值至剪贴板</sys:String>
 
 	<!-- Tooltips: Game Class Filter -->
-	<sys:String x:Key="str.Tip.GameClassFilter.Load">Load class list from game process</sys:String>
-	<sys:String x:Key="str.Tip.GameClassFilter.GameOnly">Show only game-specific classes (exclude engine)</sys:String>
-	<sys:String x:Key="str.Tip.GameClassFilter.SuperFilter">Filter by super/parent class</sys:String>
-	<sys:String x:Key="str.Tip.GameClassFilter.PackageFilter">Filter by UE package name</sys:String>
-	<sys:String x:Key="str.Tip.GameClassFilter.Clear">Clear all filters</sys:String>
-	<sys:String x:Key="str.Tip.GameClassFilter.FindInstances">Find live instances of this class</sys:String>
-	<sys:String x:Key="str.Tip.GameClassFilter.WalkClass">Open class in the Class Struct tab to inspect its full property layout and offsets</sys:String>
-	<sys:String x:Key="str.Tip.GameClassFilter.FindFunc">Find UFunctions that take this class as a parameter or return value (reflection scan — includes native functions, unlike the per-field bytecode xref)</sys:String>
-
+	<sys:String x:Key="str.Tip.GameClassFilter.Load">读取游戏进程全部类列表</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.GameOnly">仅显示游戏项目自定义类，过滤引擎内置类</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.SuperFilter">按照父类/基类筛选</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.PackageFilter">依据UE资源包名称筛选</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.Clear">清空全部筛选条件</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.FindInstances">检索该类所有运行实体实例</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.WalkClass">打开类结构体面板，完整查看属性布局、内存偏移</sys:String>
+	<sys:String x:Key="str.Tip.GameClassFilter.FindFunc">检索入参/返回值包含此类的全部UFunction，包含原生C++底层函数</sys:String>
+	
 	<!-- Live Walker: Functions -->
-	<sys:String x:Key="str.LiveWalker.Functions">Functions</sys:String>
+	<sys:String x:Key="str.LiveWalker.Functions">函数调用</sys:String>
 	<sys:String x:Key="str.LiveWalker.FuncGenScript">INV</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.FuncGenScript">INV = generate a self-contained CE AA (Auto-Assembler) Lua script for this UFunction and push it to CE (or clipboard if AOBMaker is off). It resolves a live instance + the UFunction through the DLL mailbox and calls ProcessEvent — no helper file needed. Functions with input params pop a CE form so you type values at runtime. The return value is written into the mailbox params buffer; it is NOT shown by default. Set UE5_DEBUG=1 in CE's Lua console (or edit the script's DEBUG line) to make it print the decoded return value and keep the Lua Engine window open.</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FuncGenScript">INV：生成独立CE汇编+Lua调用脚本，推送至CE（无AOBMaker则复制剪贴板）；依托DLL管道解析实例地址、调用ProcessEvent引擎函数，无需提前加载辅助脚本。带参数函数会弹出输入框填写运行参数；返回值存入管道缓冲区默认不展示；CE控制台输入UE5_DEBUG=1，或修改脚本DEBUG开关，即可打印解析后的返回值并保留Lua窗口。</sys:String>
 	<sys:String x:Key="str.LiveWalker.FuncPipeInvoke">PIPE</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.FuncPipeInvoke">PIPE = invoke this function right now, in-app, over the pipe (the DLL runs ProcessEvent in-process, bypassing CE). Opens a dialog to fill params, FIRE, and read the DECODED return value inline (this is where you SEE the result). Use this to test a call; use INV / AA(Baked) to ship a reusable CE script.</sys:String>
-	<sys:String x:Key="str.LiveWalker.FuncCopyBaked">AA(Baked)</sys:String>
-	<sys:String x:Key="str.Tip.LiveWalker.FuncCopyBaked">AA(Baked) = &quot;baked&quot; CE AA (Auto-Assembler) script: the param values you enter are inlined at generation time, so enabling the memory-record fires the call once with those fixed values — no runtime form. ~5x smaller than INV and redistributable. Requires ue5_invoke_helper.lua embedded in your .CT via Table -&gt; Add File... (Tools -&gt; Export CE Helper Lua File... to obtain it). Tick &quot;Verify return value&quot; in the dialog for a full before/after dump, or set UE5_DEBUG=1 to print the decoded return value.</sys:String>
-
-	<sys:String x:Key="str.LiveWalker.GuessWhat">Guess?</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FuncPipeInvoke">PIPE：软件内直接通过管道调用函数，由注入DLL执行ProcessEvent；弹出参数填写窗口，执行后直接展示解析完毕的返回结果，用于调试测试函数效果；需要分发固化脚本选用INV/固化AA模式。</sys:String>
+	<sys:String x:Key="str.LiveWalker.FuncCopyBaked">AA(固化版)</sys:String>
+	<sys:String x:Key="str.Tip.LiveWalker.FuncCopyBaked">AA(固化版)：参数数值生成时直接写入脚本，勾选启用后固定参数仅调用一次；体积约为INV脚本1/5，方便分享分发。必须提前将ue5_invoke_helper.lua添加进CE表格。弹窗勾选校验返回值可对比调用前后内存快照；开启UE5_DEBUG=1打印返回数据。</sys:String>
+	
+	<sys:String x:Key="str.LiveWalker.GuessWhat">智能识别?</sys:String>
 
 	<!-- Tooltips: Live Walker -->
 	<sys:String x:Key="str.Tip.LiveWalker.StartWorld">Navigate to GWorld and list top-level objects</sys:String>
