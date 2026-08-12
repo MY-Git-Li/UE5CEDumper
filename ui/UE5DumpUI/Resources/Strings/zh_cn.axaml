@@ -533,7 +533,7 @@
     <sys:String x:Key="str.Credit.OpenInBrowserTip">Open in default browser</sys:String>
 
     <!-- Experimental features gate (System-tab credit checkbox) -->
-    <sys:String x:Key="str.Experimental.EnableHint">Enable advanced experimental features</sys:String>
+    <sys:String x:Key="str.Experimental.EnableHint">启用高阶实验性功能</sys:String>
 
     <!-- Snapshot tab (experimental — Phase A) -->
     <sys:String x:Key="str.Snapshot.Intro">捕获指定范围内所有对象的数字UPROPERTY字段并持久化保存为快照。快照可用于序列查询、类数据透视功能。开启原生C选项可一并捕获无反射原生内存数值。</sys:String>
